@@ -1,0 +1,201 @@
+{
+ "dokument": "a_versicherungsschein",
+ "pii": [
+  {
+   "id": "a-01",
+   "text": "Max Mustermann",
+   "kategorie": "namen",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "a-02",
+   "text": "Lena Mustermann",
+   "kategorie": "namen",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "a-03",
+   "text": "Finn Mustermann",
+   "kategorie": "namen",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "a-04",
+   "text": "Schulz",
+   "kategorie": "namen",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Geburtsname 'geb. Schulz'"
+  },
+  {
+   "id": "a-05",
+   "text": "Lange Straße 7",
+   "kategorie": "strasse",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "zweiteiliger Straßenname"
+  },
+  {
+   "id": "a-06",
+   "text": "51429 Bergisch Gladbach",
+   "kategorie": "plzort",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "zweiteiliger Ortsname"
+  },
+  {
+   "id": "a-07",
+   "text": "02.09.1983",
+   "kategorie": "geburt",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Geburtsdatum in Tabellenspalte (Kopfzeile oben, Wert unten)"
+  },
+  {
+   "id": "a-08",
+   "text": "14.03.1979",
+   "kategorie": "geburt",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Geburtsdatum als Schlüssel-Wert in einer Zeile"
+  },
+  {
+   "id": "a-09",
+   "text": "LV-2024-887766",
+   "kategorie": "vertrag",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Versicherungsschein-Nr., auch in Kopfzeile jeder Seite"
+  },
+  {
+   "id": "a-10",
+   "text": "4711-0815",
+   "kategorie": "vertrag",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Kunden-Nr. in Kopfzeile jeder Seite"
+  },
+  {
+   "id": "a-11",
+   "text": "DE89 3704 0044 0532 0130 00",
+   "kategorie": "iban",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "a-12",
+   "text": "M-2024-00123",
+   "kategorie": "vertrag",
+   "seite": 2,
+   "erwartung": "nicht vorgesehen",
+   "bemerkung": "Mandatsreferenz (Etikett nicht im Muster)"
+  },
+  {
+   "id": "a-13",
+   "text": "02204 / 91 23 45",
+   "kategorie": "telefon",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": "Festnetz mit ' / ' und Zifferngruppen"
+  },
+  {
+   "id": "a-14",
+   "text": "0171 2345678",
+   "kategorie": "telefon",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "a-15",
+   "text": "max.mustermann@example.de",
+   "kategorie": "email",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "a-16",
+   "text": "Sabine Krüger",
+   "kategorie": "namen",
+   "seite": 3,
+   "erwartung": "schwärzen",
+   "bemerkung": "Sachbearbeiterin (Fremdname, kein Whitelist-Eintrag)"
+  },
+  {
+   "id": "a-17",
+   "text": "Mustermann",
+   "kategorie": "namen",
+   "seite": 3,
+   "erwartung": "schwärzen",
+   "bemerkung": "Nachname allein in der Anrede"
+  }
+ ],
+ "erhalten_soll": [
+  {
+   "text": "01.10.2024",
+   "seite": 1,
+   "bem": "Versicherungsbeginn"
+  },
+  {
+   "text": "01.10.2049",
+   "seite": 1,
+   "bem": "Ablauf"
+  },
+  {
+   "text": "250.000,00 EUR",
+   "seite": 1,
+   "bem": "Versicherungssumme"
+  },
+  {
+   "text": "89,50 EUR",
+   "seite": 1,
+   "bem": "Monatsbeitrag"
+  },
+  {
+   "text": "RLV Komfort 2024",
+   "seite": 1,
+   "bem": "Tarif"
+  },
+  {
+   "text": "langfristig",
+   "seite": 3,
+   "bem": "Fließtext"
+  },
+  {
+   "text": "verlangen",
+   "seite": 2,
+   "bem": "Fließtext"
+  },
+  {
+   "text": "Ausfertigungsdatum: 24.09.2024",
+   "seite": 1
+  },
+  {
+   "text": "0800 123 4567",
+   "seite": 3,
+   "bem": "Service-Hotline (keine PII)"
+  },
+  {
+   "text": "Kirchplatz 2",
+   "seite": 2,
+   "bem": "Vermittleradresse (eigene Daten des Nutzers, Whitelist leer)"
+  }
+ ],
+ "metadaten": {
+  "title": "Versicherungsschein LV-2024-887766 Max Mustermann",
+  "author": "Sabine Krüger",
+  "subject": "... Lange Straße 7, 51429 Bergisch Gladbach"
+ },
+ "lesezeichen": [
+  "Versicherungsschein Max Mustermann",
+  "SEPA-Mandat DE89 3704 0044 0532 0130 00"
+ ]
+}

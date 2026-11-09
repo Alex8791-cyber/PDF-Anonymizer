@@ -1,0 +1,161 @@
+{
+ "dokument": "d_antrag_formular",
+ "pii": [
+  {
+   "id": "d-01",
+   "text": "Esposito",
+   "kategorie": "namen",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld 'name'"
+  },
+  {
+   "id": "d-02",
+   "text": "Giovanni",
+   "kategorie": "namen",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld 'vorname'"
+  },
+  {
+   "id": "d-03",
+   "text": "30.07.1988",
+   "kategorie": "geburt",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld neben statischem Etikett 'Geburtsdatum:'"
+  },
+  {
+   "id": "d-04",
+   "text": "Hauptstraße 12a",
+   "kategorie": "strasse",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld"
+  },
+  {
+   "id": "d-05",
+   "text": "90402 Nürnberg",
+   "kategorie": "plzort",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld"
+  },
+  {
+   "id": "d-06",
+   "text": "0911 2345678",
+   "kategorie": "telefon",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld"
+  },
+  {
+   "id": "d-07",
+   "text": "g.esposito@web.de",
+   "kategorie": "email",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld"
+  },
+  {
+   "id": "d-08",
+   "text": "Esposito Bau GmbH",
+   "kategorie": "arbeitgeber",
+   "seite": 1,
+   "erwartung": "nicht vorgesehen",
+   "bemerkung": "Arbeitgeber im Formularfeld"
+  },
+  {
+   "id": "d-09",
+   "text": "DE12 5001 0517 0648 4898 90",
+   "kategorie": "iban",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld"
+  },
+  {
+   "id": "d-10",
+   "text": "86095742719",
+   "kategorie": "steuerid",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld, gültige Prüfziffer"
+  },
+  {
+   "id": "d-11",
+   "text": "Chiara Esposito",
+   "kategorie": "namen",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld Ehepartnerin"
+  },
+  {
+   "id": "d-12",
+   "text": "02.12.1990",
+   "kategorie": "geburt",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld 'geb. 02.12.1990'"
+  },
+  {
+   "id": "d-13",
+   "text": "55-887-2210",
+   "kategorie": "vertrag",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld 'Vertrags-Nr.' des Vorversicherers"
+  },
+  {
+   "id": "d-14",
+   "text": "Erlanger Straße 44",
+   "kategorie": "strasse",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld Bemerkungen, zweiteiliger Straßenname"
+  },
+  {
+   "id": "d-15",
+   "text": "Giovanni Esposito",
+   "kategorie": "namen",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": "Formularfeld Unterschrift"
+  },
+  {
+   "id": "d-16",
+   "text": "A-2025-33917",
+   "kategorie": "vertrag",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Antragsnummer im statischen Text"
+  }
+ ],
+ "erhalten_soll": [
+  {
+   "text": "01.07.2025",
+   "seite": 1,
+   "bem": "Versicherungsbeginn"
+  },
+  {
+   "text": "78,20 EUR",
+   "seite": 1
+  },
+  {
+   "text": "Privat Komfort",
+   "seite": 1
+  },
+  {
+   "text": "10 Mio. EUR",
+   "seite": 1
+  },
+  {
+   "text": "Vermittler-Nr. 00412",
+   "seite": 1
+  },
+  {
+   "text": "Beratungsprotokoll",
+   "seite": 2
+  }
+ ],
+ "formular": "AcroForm mit 15 Textfeldern + 3 Checkboxen, nicht geflattet"
+}
