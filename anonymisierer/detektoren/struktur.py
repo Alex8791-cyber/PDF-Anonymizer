@@ -960,11 +960,13 @@ def namen_spanne(text: str, pos: int, grenze: int, komma: bool = True, max_woert
 _ORT_RE = re.compile(
     r"(?:(?:Bad|St\.|Sankt|Neu|Alt|Groß|Klein|Hansestadt|Lutherstadt)[ ])?"
     r"[A-ZÄÖÜ][\wäöüß'’]+(?:-[A-ZÄÖÜ]?[\wäöüß'’]+)*"
-    r"(?:[ ](?:am|an der|an dem|im|in der|ob der|bei|a\.[ ]?d\.|v\.[ ]?d\.|i\.[ ]?d\.|i\.|b\.|an)[ ][A-ZÄÖÜ][\wäöüß'’.\-]+"
+    r"(?:[ ](?:am|an der|an dem|im|in der|ob der|bei|a\.[ ]?d\.|v\.[ ]?d\.|i\.[ ]?d\.|i\.|b\.|an)"
+    r"[ ][A-ZÄÖÜ][\wäöüß'’.\-]+"
     r"(?:[ ][A-ZÄÖÜ][\wäöüß'’.\-]+)?)?"
     r"(?:[ ]?\([A-ZÄÖÜ][\wäöüß'’ .\-]+\))?"
     r"|[A-ZÄÖÜ]{2,}(?:[ \-][A-ZÄÖÜ]{2,}){0,2}")
-_HAUSNUMMER_RE = re.compile(r"\d{1,4}(?:[ ]?[a-zA-Z](?![\wäöüß]))?(?:[ ]?[-/][ ]?\d{1,4}(?:[ ]?[a-zA-Z](?![\wäöüß]))?)?")
+_HAUSNUMMER_RE = re.compile(r"\d{1,4}(?:[ ]?[a-zA-Z](?![\wäöüß]))?"
+                            r"(?:[ ]?[-/][ ]?\d{1,4}(?:[ ]?[a-zA-Z](?![\wäöüß]))?)?")
 _STRASSE_FREI_RE = re.compile(
     r"(?:[A-ZÄÖÜ][\wäöüß'’.\-]*|(?:am|an|auf|im|in|zum|zur|unter|hinter|vor|bei|der|die|das|den|dem|des|von)"
     r"(?=[ ]))(?:[ ](?:[A-ZÄÖÜ][\wäöüß'’.\-]*|am|an|auf|im|in|zum|zur|der|die|das|den|dem|des|von|vom|"
@@ -1030,7 +1032,8 @@ def strasse_spanne(text: str, pos: int, grenze: int):
 
 
 # Ortszusatz ohne Leerzeichen hinter dem Ortsnamen: "Weiden i.d.OPf.", "Lauf a.d.Pegnitz", "Freiburg i. Br."
-ORTSZUSATZ_RE = re.compile(r"[ ](?:[a-zäöü]{1,3}\.[ ]?){1,3}[A-ZÄÖÜ][\wäöüß]*\.?|[ ]?\((?:[A-ZÄÖÜ][\wäöüß.]*[ ]?){1,3}\)")
+ORTSZUSATZ_RE = re.compile(r"[ ](?:[a-zäöü]{1,3}\.[ ]?){1,3}[A-ZÄÖÜ][\wäöüß]*\.?"
+                           r"|[ ]?\((?:[A-ZÄÖÜ][\wäöüß.]*[ ]?){1,3}\)")
 
 
 def ort_verlaengern(text: str, ende: int, grenze: int) -> int:
@@ -1243,7 +1246,7 @@ def _adress_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
             k = i + len(text[i:e]) - len(text[i:e].lstrip())
             return [Wert(k, k + len(text[i:e].strip()), "strasse")]
         m = re.match(r"[A-ZÄÖÜ][\wäöüß'’.\-]*(?:[ ][A-Za-zÄÖÜäöüß][\wäöüß'’.\-]*){0,4}", text[i:e])
-        if m and not text[i:i + m.end()].casefold() in NEUTRALE_KOEPFE:
+        if m and text[i:i + m.end()].casefold() not in NEUTRALE_KOEPFE:
             ende = i + m.end()
             n = re.match(r"[ ]?" + _HAUSNUMMER_RE.pattern, text[ende:e])
             if n:
@@ -1252,7 +1255,8 @@ def _adress_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
     return []
 
 
-_ORT_DATUM_VORN_RE = re.compile(r"[ \t]*[A-ZÄÖÜ][^,\n\t]{1,40},[ \t]*(?:den[ \t]+)?\d{1,2}\.[ ]?(?:\d{1,2}\.|[A-ZÄÖÜa-zäöü]{3,9}\.?)"
+_ORT_DATUM_VORN_RE = re.compile(r"[ \t]*[A-ZÄÖÜ][^,\n\t]{1,40},[ \t]*(?:den[ \t]+)?"
+                                r"\d{1,2}\.[ ]?(?:\d{1,2}\.|[A-ZÄÖÜa-zäöü]{3,9}\.?)"
                                 r"[ ]?(?:19|20)?\d{2}[ \t]*,?[ \t]*")
 _ORG_ROLLEN_RE = re.compile(r"(?i)^(?:arbeitgeber|auftraggeber|gläubiger|glaubiger|firma|name ?/ ?firma|"
                             r"firma ?/ ?name|absender|empfänger|zahlungsempfänger|aussteller|verwalter|"

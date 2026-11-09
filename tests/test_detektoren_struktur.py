@@ -97,7 +97,8 @@ def test_kennung_spanne(text, erwartet):
     assert sp and text[sp[0]:sp[1]] == erwartet
 
 
-@pytest.mark.parametrize("text", ["01.03.2019", "1.340,70 EUR", "2025", "fehlen uns noch", "§ 38 VVG", "19 %", "EUR 12"])
+@pytest.mark.parametrize("text", ["01.03.2019", "1.340,70 EUR", "2025", "fehlen uns noch", "§ 38 VVG", "19 %",
+                                  "EUR 12"])
 def test_kennung_spanne_gegenproben(text):
     assert st.kennung_spanne(text, 0, len(text)) is None
 
@@ -303,7 +304,8 @@ def test_tabelle_spalte_ohne_etikett_nur_mit_personenspalte(tmp_path):
         zeilen += [(72, y, name), (230, y, nr), (380, y, "238,02")]
         ohne += [(72, y, "Haus&Heim Komfort"), (230, y, nr), (380, y, "238,02")]
     dok = _modell(_pdf(tmp_path / "mit.pdf", [zeilen]))
-    assert {"LV-2014-697971", "KV/35/5276751", "HR454253977", "2012860414"} <= _texte(dok, "struktur.tabelle", "vertrag")
+    erwartet = {"LV-2014-697971", "KV/35/5276751", "HR454253977", "2012860414"}
+    assert erwartet <= _texte(dok, "struktur.tabelle", "vertrag")
     dok = _modell(_pdf(tmp_path / "ohne.pdf", [ohne]))
     assert _texte(dok, "struktur.tabelle", "vertrag") == set()
 
@@ -459,7 +461,8 @@ def test_adressblock_kunde(tmp_path):
 
 
 def test_adressblock_ohne_strassenwort_und_zeile_mit_trennern(tmp_path):
-    inhalt = [(340, 40, "Erzsébet Kovács", 8), (340, 50, "Alt-Moabit 63", 8), (340, 60, "61348 Bad Homburg v. d. Höhe", 8),
+    inhalt = [(340, 40, "Erzsébet Kovács", 8), (340, 50, "Alt-Moabit 63", 8),
+              (340, 60, "61348 Bad Homburg v. d. Höhe", 8),
               (340, 70, "Tel. +49 6172 733983", 8),
               (71, 140, "Erzsébet Kovács · Alt-Moabit 63 · 61348 Bad Homburg v. d. Höhe", 7),
               (71, 186, "Alpenland Krankenversicherung a.G.", 10), (71, 198, "Kundenservice", 10),
@@ -496,7 +499,8 @@ def test_anrede_und_gruss():
     assert not namen & {"Kundenservice", "Schwarzwald Lebensversicherung AG", "Schwarzwald"}
 
 
-@pytest.mark.parametrize("text", ["Sehr geehrte Damen und Herren,", "Hallo zusammen,", "Liebe Kolleginnen und Kollegen,"])
+@pytest.mark.parametrize("text", ["Sehr geehrte Damen und Herren,", "Hallo zusammen,",
+                                  "Liebe Kolleginnen und Kollegen,"])
 def test_anrede_ohne_namen(text):
     assert _text(text, "struktur.anrede_gruss") == []
 
@@ -606,7 +610,8 @@ def test_anrede_im_fliesstext(text, name):
     assert ("namen", name) in _text(text, "struktur.anrede_gruss")
 
 
-@pytest.mark.parametrize("text", ["Frau Doktor hat angerufen.", "Sehr geehrter Herr Müller, Max Müller ist versichert."])
+@pytest.mark.parametrize("text", ["Frau Doktor hat angerufen.",
+                                  "Sehr geehrter Herr Müller, Max Müller ist versichert."])
 def test_anrede_im_fliesstext_gegenproben(text):
     namen = {w for _, w in _text(text, "struktur.anrede_gruss")}
     assert "Doktor" not in namen and "Müller, Max Müller" not in namen

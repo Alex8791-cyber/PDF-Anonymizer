@@ -22,9 +22,9 @@ from __future__ import annotations
 import re
 
 from . import Treffer, detektor
-from .struktur import (ALLE_KATEGORIEN, PII_ARTEN, etiketten, ist_kennungsform, kennung_spanne, lage, namen_spanne,
+from .struktur import (etiketten, ist_kennungsform, kennung_spanne, lage, namen_spanne,
                        ort_spanne, plz_ort_spannen, ueberlappung)
-from .struktur_adresse import _ANREDE_ZEILE_RE, firmen_beleg, firmenkontext
+from .struktur_adresse import firmen_beleg, firmenkontext
 
 # ----------------------------------------------------------------------
 # Anrede und Gruß
@@ -33,7 +33,8 @@ _ANREDE_RE = re.compile(
     r"(?i:sehr[ ]+geehrte[rs]?|hochverehrte[r]?|liebe[rs]?|hallo|guten[ ]+(?:tag|morgen|abend)|moin|servus|"
     r"grüß[ ]+gott|dear|hi)[ ,]+(?:(?:Frau|Herrn?|Fr\.|Hr\.)[ ]+)?")
 _GRUSS_RE = re.compile(
-    r"^[ \t]*(?:mit[ ]+(?:freundlichen|freundlichem|besten|herzlichen|lieben|kollegialen|vielen)[ ]+gr(?:ü|ue)(?:ß|ss)(?:en|e)?"
+    r"^[ \t]*(?:mit[ ]+(?:freundlichen|freundlichem|besten|herzlichen|lieben|kollegialen|vielen)[ ]+"
+    r"gr(?:ü|ue)(?:ß|ss)(?:en|e)?"
     r"|(?:freundliche|viele|beste|herzliche|liebe|schöne|sonnige|kollegiale)[ ]+gr(?:ü|ue)(?:ß|ss)e"
     r"|hochachtungsvoll|mfg|lg|vg|gruß|grüße|best[ ]+regards|kind[ ]+regards|regards|cordialement"
     r"|mit[ ]+freundlichem[ ]+gruß|freundlichst)[ ]*[,.!]?[ \t]*$", re.IGNORECASE)
@@ -264,6 +265,9 @@ _ORT_DATUM_RE = re.compile(
 QUELLE_ORT = "struktur.ort_datum"
 
 
+_SITZ_RE = re.compile(r"(?i)sitz(?:[ ]der[ ]gesellschaft)?[ ]*:?[ ]*([A-ZÄÖÜ][\wäöüß.\- ]{1,40}?)(?=[ ]*[·,|;\t]|$)")
+
+
 def firmen_orte(dok) -> set:
     """Orte (Vergleichsform), die zu einer Organisation des Dokuments gehören: PLZ + Ort in
     Firmenzeilen, "Sitz: <Ort>"."""
@@ -276,8 +280,7 @@ def firmen_orte(dok) -> set:
         fk = firmenkontext(seite)
         for z in seite.zeilen:
             zt = text[z.start:z.ende]
-            for m in re.finditer(r"(?i)sitz(?:[ ]der[ ]gesellschaft)?[ ]*:?[ ]*([A-ZÄÖÜ][\wäöüß.\- ]{1,40}?)(?=[ ]*[·,|;\t]|$)",
-                                 zt):
+            for m in _SITZ_RE.finditer(zt):
                 orte.add(_ortsform(m.group(1)))
             if not re.search(r"\d{4,5}", zt):
                 continue
@@ -316,8 +319,8 @@ def ort_datum(dok, kontext):
                     continue
                 if firma is None:
                     firma = firmen_orte(dok)
-                if _ortsform(ort) in firma or any(_ortsform(ort).startswith(f + " ") or f.startswith(_ortsform(ort) + " ")
-                                                  for f in firma):
+                form = _ortsform(ort)
+                if form in firma or any(form.startswith(f + " ") or f.startswith(form + " ") for f in firma):
                     continue
                 treffer.append(Treffer(dok.global_(nr, sp[0]), dok.global_(nr, sp[1]), "plzort", QUELLE_ORT, 0.6))
     return treffer

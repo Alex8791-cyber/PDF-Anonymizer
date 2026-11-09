@@ -350,7 +350,8 @@ def _wert_fuer_spalte(text: str, s: int, e: int, sp: Spalte) -> list:
 # ----------------------------------------------------------------------
 # Werte je Spaltenart
 # ----------------------------------------------------------------------
-_EINRICHTUNG_RE = re.compile(r"(?i)(?:krankenhaus|klinik|klinikum|kliniken|hospital|spital|stift|kirche|schule|apotheke|"
+_EINRICHTUNG_RE = re.compile(r"(?i)(?:krankenhaus|klinik|klinikum|kliniken|hospital|spital|stift|kirche|schule|"
+                             r"apotheke|"
                              r"heim|zentrum|institut|universität|hochschule|kita|kindergarten|sanatorium|reha|"
                              r"(?<![\w])st\.|(?<![\w])sankt(?![\w]))")
 _LAUFNUMMER_RE = re.compile(r"[ \t]*(?:\d{1,4}[.)]?|[-–•*])[ \t]+")
@@ -477,7 +478,7 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
             text = dok.seiten[nr].text
             for a, b, kat, gruppe in _wert_fuer_spalte(text, s, e, sp):
                 roh.append((nr, a, b, kat, gruppe, reihe))
-        if not arten & PII_ARTEN and not ("vertragsdaten" in arten):
+        if not arten & PII_ARTEN and "vertragsdaten" not in arten:
             # Spalte ohne Personen-Etikett ("Nr.", unbekannter Kopf): Kennungsform in >= 3 Werten
             if hat_person:
                 kandidaten = []
