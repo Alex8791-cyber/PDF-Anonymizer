@@ -191,7 +191,7 @@ def test_readme_markdown_struktur():
     tabellen = re.findall(r"^\|.*\|\r?\n^\|[-| ]+\|$", text, re.MULTILINE)
     assert len(tabellen) >= 2, "Erkennungstabelle und Problemloesungstabelle erwartet"
     md = pytest.importorskip("markdown_it")
-    tokens = md.MarkdownIt("gfm-like").parse(text)
+    tokens = md.MarkdownIt("gfm-like", {"linkify": False}).parse(text)  # linkify braucht ein Zusatzpaket
     typen = {t.type for t in tokens}
     assert "heading_open" in typen and "table_open" in typen and "bullet_list_open" in typen
 
