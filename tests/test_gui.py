@@ -1402,6 +1402,9 @@ def test_ohne_freigabe_pflicht_sind_ausgaben_fertig(app, umgebung, monkeypatch, 
 # Kundenliste
 # ----------------------------------------------------------------------
 def test_kundenliste_importieren_anzeigen_uebergeben_entfernen(app, umgebung, monkeypatch, dialoge):
+    """Mit der Attrappe der Kundenliste (eine Engine ohne Abgleich): die Oberfläche sagt ehrlich, dass der Abgleich
+    noch nicht aktiv ist. Die echte Kundenliste prüft test_echte_kundenliste_importieren_und_bei_der_analyse_nutzen."""
+    monkeypatch.setattr(gui, "Kundenliste", attrappen.Kundenliste)
     tmp = umgebung["tmp"]
     csv_datei = tmp / "kunden.csv"
     csv_datei.write_text("Name;Geburtsdatum;IBAN\nMax Mustermann;02.09.1983;DE89370400440532013000\n"
@@ -1464,6 +1467,156 @@ def test_kundenliste_spaltenzuordnung_bei_unbekannten_kopfzeilen(app, umgebung, 
     assert dialog.zuordnung() == {"kundennummer": 0}
     dialog.bestaetigen()
     assert app.kundenliste.anzahl_kunden == 3
+
+
+def _ausgabe_text(app, pdf: Path) -> str:
+    with fitz.open(app.ausgaben[pdf]["pfad"]) as doc:
+        return "\n".join(s.get_text() for s in doc)
+
+
+def test_echte_kundenliste_importieren_und_bei_der_analyse_nutzen(app, umgebung, dialoge):
+    """Echte Kundenliste (anonymisierer.kundenliste): CSV mit ';' in Windows-1252 importieren – kein Hinweis „noch
+    nicht aktiv“, gespeichert ohne Klartext; die folgende Analyse (echte Engine) findet Kundennummer und IBAN des
+    Kunden über den Detektor „kundenliste“. Die Kundennummer steht ohne Etikett im Text: kein Muster findet sie."""
+    from anonymisierer.kundenliste import Kundenliste as EchteKundenliste
+    assert gui.Kundenliste is EchteKundenliste
+    tmp = umgebung["tmp"]
+    csv_datei = tmp / "Kundenbestand.csv"
+    csv_datei.write_bytes(("Kundennummer;Name;Vorname;Geburtsdatum;IBAN\n"
+                           "KD-77812;Müller-Lüdenscheidt;Jürgen;14.03.1961;DE12 5001 0517 0648 4898 90\n"
+                           "KD-77813;Weiß;Bärbel;01.01.1970;\n").encode("cp1252"))
+    app.kundenliste_importieren(csv_datei)
+    assert app.spalten_dialog is None and isinstance(app.kundenliste, EchteKundenliste)
+    assert app.kundenliste.anzahl_kunden == 2
+    etikett = app.kunden_label.cget("text")
+    assert etikett == "2 Kunden geladen – gespeichert ohne Klartext" and "noch nicht" not in etikett
+    art, titel, text = dialoge.liste[-1]
+    assert titel == "Kundenliste importiert" and "noch nicht" not in text and "nicht umkehrbare Prüfwerte" in text
+    import json
+    import re
+    roh = dateien.kundenliste_pfad().read_text(encoding="utf-8")
+    assert not [k for k in ("Müller", "Jürgen", "Weiß", "Lüdenscheidt", "Bärbel") if k in roh]
+    # nur Prüfwerte (32 Hex-Zeichen, aus Zufallssalz – Ziffernfolgen darin sind Zufall, kein Klartext); auch
+    # außerhalb davon keine Nummern, Daten oder IBAN-Teile
+    gespeichert = json.loads(roh)
+    werte = [w for kunde in gespeichert["kunden"] for liste in kunde.values() for w in liste]
+    assert len(gespeichert["kunden"]) == 2 and werte and all(re.fullmatch(r"[0-9a-f]{32}", w) for w in werte)
+    rest = json.dumps({k: v for k, v in gespeichert.items() if k not in ("kunden", "salz")}, ensure_ascii=False)
+    assert not [k for k in ("77812", "77813", "DE12", "1961", "1970", "14.03") if k in rest]
+    assert set(gespeichert["salz"]) == {"art", "wert"}
+
+    pdf = pdf_schreiben(tmp / "Notiz.pdf", "Gesprächsnotiz\nRückruf zu KD-77812 erbeten.\n"
+                                           "Überweisung auf DE12500105170648489890.\n")
+    app.kategorie_vars["namen"].set(False)              # kein Sprachmodell nötig
+    analysiere(app, [pdf])
+    assert "noch nicht" not in app.protokoll_text()
+    funde = {f["kategorie"]: f for f in app.analyse_ergebnisse[pdf]["funde"]}
+    assert funde["vertrag"]["text"] == "KD-77812" and "kundenliste" in funde["vertrag"]["quellen"]
+    assert not [q for q in funde["vertrag"]["quellen"] if q.startswith("muster.")], "nur der Kundenabgleich"
+    assert "kundenliste" in funde["iban"]["quellen"]
+    starte_lauf(app, app.schwaerzen, timeout=120)
+    rest = _ausgabe_text(app, pdf)
+    assert "77812" not in rest and "DE1250" not in rest.replace(" ", "")
+
+
+# ----------------------------------------------------------------------
+# Gesundheitsdaten (Schutzstufen der echten Engine): abgewählt angeboten, Meldung, Anhaken, „Maximal“
+# ----------------------------------------------------------------------
+ARZTBERICHT = ("Arztbericht\nDiagnose: Lumboischialgie links (M54.4)\nMedikation: Ibuprofen 600 mg bei Bedarf\n"
+               "IBAN DE89 3704 0044 0532 0130 00\n")
+
+
+def test_gesundheitsdaten_mit_echter_engine_abgewaehlt_angeboten(app, umgebung, dialoge):
+    """„hoch“: Diagnose und Medikament stehen NICHT angehakt (⚑, Hinweis) in der Fundliste, die Meldung
+    GESUNDHEITSDATEN steht in einfachem Deutsch im Protokoll und im Abschlussdialog; eine angehakte Diagnose wird
+    geschwärzt, das nicht angehakte Medikament bleibt lesbar. „Maximal“: angehakt und geschwärzt, keine
+    Meldung."""
+    tmp = umgebung["tmp"]
+    pdf = pdf_schreiben(tmp / "Arztbericht.pdf", ARZTBERICHT)
+    app.kategorie_vars["namen"].set(False)              # kein Sprachmodell nötig; Grundstufe bleibt „hoch“
+    assert app.basis_profil == "hoch"
+    analysiere(app, [pdf])
+    ergebnis = app.analyse_ergebnisse[pdf]
+    assert ergebnis["profil"] == "hoch" and "GESUNDHEITSDATEN" in gui.meldungs_codes(ergebnis)
+    zeilen = {app.baum.item(k, "values")[1]: k for k in app.baum.get_children(str(pdf))}
+    dia, med = zeilen["Lumboischialgie links (M54.4)"], zeilen["Ibuprofen 600 mg bei Bedarf"]
+    for k in (dia, med):
+        assert app._zustand(k) == "aus" and app.baum.item(k, "values")[0].startswith("⚑ ")
+    assert app._zustand(zeilen["DE89 3704 0044 0532 0130 00"]) == "an" and app._zustand(str(pdf)) == "teil"
+    meldung = next(m["text"] for m in ergebnis["meldungen"] if m["code"] == "GESUNDHEITSDATEN")
+    assert meldung.startswith("Das Dokument enthält Gesundheitsdaten")
+    assert f"ℹ Arztbericht.pdf: {meldung}" in app.protokoll_text()
+    art, titel, text = dialoge.liste[-1]
+    assert (art, titel) == ("warning", "Analyse abgeschlossen")
+    assert "Gesundheitsdaten (Art. 9 DSGVO) erkannt" in text and "NICHT angehakt" in text and "anhaken" in text
+    assert "„Maximal“ schwärzt sie" not in text and "• Arztbericht.pdf" in text
+    app.baum.selection_set(dia)
+    app.root.update()
+    assert "Hinweis: Gesundheitsdaten (Art. 9 DSGVO) – angeboten, nicht angehakt" in app.status_label.cget("text")
+
+    app._umschalten(dia)                                 # Diagnose anhaken
+    assert app._zustand(dia) == "an" and app._zustand(med) == "aus"
+    starte_lauf(app, app.schwaerzen, timeout=120)
+    aus = _ausgabe_text(app, pdf)
+    assert "Lumboischialgie" not in aus and "[DIAGNOSE]" in aus and "DE89" not in aus
+    assert "Ibuprofen 600 mg" in aus                     # nicht angehakt: bleibt lesbar
+
+    app.profil_knoepfe["maximal"].invoke()
+    app.kategorie_vars["namen"].set(False)
+    assert app.basis_profil == "maximal"
+    starte_lauf(app, app.analysieren)
+    ergebnis = app.analyse_ergebnisse[pdf]
+    assert ergebnis["profil"] == "maximal" and "GESUNDHEITSDATEN" not in gui.meldungs_codes(ergebnis)
+    kinder = app.baum.get_children(str(pdf))
+    assert kinder and all(app._zustand(k) == "an" for k in kinder)
+    assert not any(app.baum.item(k, "values")[0].startswith("⚑") for k in kinder)
+    starte_lauf(app, app.schwaerzen, timeout=120)
+    aus = _ausgabe_text(app, pdf)
+    assert "Lumboischialgie" not in aus and "Ibuprofen" not in aus and "[MEDIKAMENT]" in aus
+
+
+def test_vorschau_klick_trifft_die_innere_stelle(app, umgebung, dialoge):
+    """Echte Engine: der IMMER-Begriff „Meier“ liegt in der abgewählt angebotenen Diagnose „… bei Herrn
+    Meier“ (zwei überlappende Stellen). Ein Klick auf „Meier“ in der Vorschau schaltet den Namen, nicht die
+    Diagnose."""
+    tmp = umgebung["tmp"]
+    pdf = pdf_schreiben(tmp / "Bericht.pdf", "Diagnose: Diabetes mellitus Typ 2 bei Herrn Meier\n"
+                                             "IBAN DE89 3704 0044 0532 0130 00\n")
+    app.kategorie_vars["namen"].set(False)
+    app.immer_feld.insert("1.0", "Meier")
+    analysiere(app, [pdf])
+    funde = app.analyse_ergebnisse[pdf]["funde"]
+    dia = next(i for i, f in enumerate(funde) if f["kategorie"] == "diagnose")
+    meier = next(i for i, f in enumerate(funde) if f["kategorie"] == "begriff")
+    assert app.fund_zustand(pdf, dia) == "aus" and app.fund_zustand(pdf, meier) == "an"
+    fenster = app.vorschau_oeffnen(pdf)
+    pumpe(app.root, timeout=0.3)
+    rect = next(r for r, i, _ in fenster.fund_stellen() if i == meier)
+    punkt = fitz.Point((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2)
+    assert fenster.treffer_an(punkt)[:2] == ("stelle", meier)
+    fenster.klick(punkt)
+    assert app.fund_zustand(pdf, meier) == "aus" and app.fund_zustand(pdf, dia) == "aus"
+    fenster.klick(punkt)
+    assert app.fund_zustand(pdf, meier) == "an" and app.fund_zustand(pdf, dia) == "aus"
+    starte_lauf(app, app.schwaerzen, timeout=120)
+    aus = _ausgabe_text(app, pdf)
+    assert "Meier" not in aus and "Diabetes mellitus Typ 2" in aus    # Name weg, Diagnose bleibt lesbar
+
+
+def test_schutzstufen_beschreibungen_kommen_aus_muster_profile(app):
+    """Die Beschreibungen der Schutzstufen stammen aus muster.PROFILE und passen zum Verhalten: wo Gesundheitsdaten
+    nur angeboten werden, sagt die Beschreibung, dass man sie anhaken kann."""
+    from anonymisierer import muster
+    assert gui.PROFILE is muster.PROFILE
+    for name in ("ausgewogen", "hoch", "maximal"):
+        app.profil_knoepfe[name].invoke()
+        text = app.profil_beschreibung.cget("text")
+        assert text == muster.PROFILE[name]["beschreibung"] and "nur gemeldet" not in text
+        if muster.hinweis_kategorien(name, app._aktive_kategorien()):
+            assert "Gesundheitsdaten" in text and "angehakt" in text, (name, text)
+        else:
+            assert app.kategorie_vars["diagnose"].get() and "Diagnosen, Medikamente" in text, (name, text)
+    assert "nicht angehakt in der Fundliste angeboten" in gui.GRENZEN_TEXT
 
 
 # ----------------------------------------------------------------------

@@ -116,8 +116,8 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
         kasten = ("Nur je nach Schutzstufe erkannt: Diagnosen, Beruf, Arbeitgeber. Nicht erkannt werden: "
                   "Unterschriften, Handschrift, Freitext; Text in Bildern nur unsicher (OCR).")
         grenzen_kopf = "NICHT oder nur teilweise erkannt werden:\n"
-        grenzen_umfang = ("  • Diagnosen, Krankheiten, Medikamente: nur bekannte Begriffe, geschwärzt erst in der "
-                          "Schutzstufe „Maximal“ (sonst als Hinweis gemeldet)\n"
+        grenzen_umfang = ("  • Diagnosen, Krankheiten, Medikamente: nur bekannte Begriffe, angehakt erst in der "
+                          "Schutzstufe „Maximal“ (sonst gemeldet und nicht angehakt in der Fundliste angeboten)\n"
                           "  • Beruf, Arbeitgeber: nur mit Etikett oder Personenbezug (ab Schutzstufe „Hoch“); "
                           "Einkommen und Familienstand nicht\n")
     else:
@@ -2015,7 +2015,7 @@ class AnonymisiererApp:
         self._einstellung_geaendert()
         self._dialog("info", "Kundenliste importiert",
                      f"{anzahl} Kunden geladen – gespeichert ohne Klartext.\n\nDas Programm merkt sich nur "
-                     f"verschlüsselte Prüfwerte, keine Namen oder Nummern. Die CSV-Datei wurde nicht verändert und "
+                     f"nicht umkehrbare Prüfwerte, keine Namen oder Nummern. Die CSV-Datei wurde nicht verändert und "
                      f"kann gelöscht werden, wenn sie sonst nicht gebraucht wird.{hinweis}")
 
     def _spalten_zuordnen(self, pfad: Path):
@@ -2407,11 +2407,14 @@ class AnonymisiererApp:
             zeilen.append("")
             zeilen.append("Nicht analysierbar:")
             zeilen += [f"  • {self._anzeigename(p)}: {f}" for p, f in mit_fehler[:10]]
-        if gesundheit and self.basis_profil != "maximal":
+        if gesundheit:
+            # die Engine meldet GESUNDHEITSDATEN nur, wenn sie Funde abgewählt anbietet (Hinweis-Kategorien der
+            # Schutzstufe) – in „Maximal“ sind sie angehakt und es gibt keine Meldung
             art = "warning"
             zeilen.append("")
-            zeilen.append("Gesundheitsdaten (Art. 9 DSGVO) erkannt – sie bleiben in dieser Schutzstufe lesbar; "
-                          "„Maximal“ schwärzt sie:")
+            zeilen.append("Gesundheitsdaten (Art. 9 DSGVO) erkannt – sie stehen in der Fundliste, sind aber NICHT "
+                          "angehakt und bleiben deshalb lesbar. Zum Schwärzen bitte anhaken (⚑ in der Spalte "
+                          "Kategorie) oder die Schutzstufe „Maximal“ wählen:")
             zeilen += [f"  • {self._anzeigename(p)}" for p in gesundheit[:10]]
         if self.warnungen_anzahl and gesamt:
             art = "warning"

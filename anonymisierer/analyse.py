@@ -3,19 +3,25 @@
 Ablauf:
   1. Seitenmodell bauen (seitenmodell.dokument_vorbereiten + dokument_aufbauen; Scans per OCR) –
      dasselbe Modell benutzen Schwärzung und Selbstkontrolle.
-  2. Alle passenden Detektoren laufen lassen (detektoren.alle_treffer) -> Treffer mit Offsets.
+  2. Alle passenden Detektoren laufen lassen (detektoren.alle_treffer) -> Treffer mit Offsets. Dazu laufen
+     die Hinweis-Kategorien der Schutzstufe (muster.hinweis_kategorien: Gesundheitsdaten in „hoch“ und
+     „ausgewogen“, sofern nicht selbst angehakt) – ihre Funde werden nur angeboten (alle Stellen abgewählt).
   3. NIE-Liste: Ganzphrasen-Vorkommen sind Schutzhüllen – Treffer darin entfallen (auch Bruchstücke wie
-     eine "Telefonnummer" mitten in der freigegebenen eigenen IBAN).
+     eine "Telefonnummer" mitten in der freigegebenen eigenen IBAN). Einträge mit Ziffern (IBAN, Nummern)
+     gelten auch mit anderem Leerraum ("DE89 3704 …" gibt "DE893704…" frei und umgekehrt).
   4. Weitergabe: jeder Treffertext an ALLEN Ganzwort-Stellen des Dokuments (Vergleichsmodus je Kategorie;
      bei Namen alle Schreibweisen), dazu Namensbestandteile (Vor-, Nach-, Doppelnamensteile).
   5. Überlappende Stellen zusammenführen: die umfassende Stelle gewinnt (Bruchstücke gehen in ihr auf);
      bei gleicher Spanne entscheidet die Kategorie-Priorität (IMMER-Begriff > Kennungen > Namen >
-     Adresse > Rest); teilweise Überlappung -> Vereinigung, Kategorie nach Priorität.
-  6. Funde bilden (Format v2: id, stellen, quellen, sicherheit; alte Schlüssel bleiben) mit festen
-     Pseudonymen je Person.
+     Adresse > Rest); teilweise Überlappung -> Vereinigung, Kategorie nach Priorität. Stellen der
+     Hinweis-Kategorien werden getrennt zusammengeführt: sie schlucken nie eine andere Stelle (ein Name in
+     „Diabetes bei Herrn Meier“ bleibt angehakt) und entfallen, wo eine andere Stelle sie ganz überdeckt.
+  6. Funde bilden (Format v2: id, stellen, quellen, sicherheit, hinweis; alte Schlüssel bleiben) mit festen
+     Pseudonymen je Person. Hinweise: Gesundheitsdaten (abgewählt angeboten), Prüfziffer ungültig
+     (Quelle "….lesefehler", muster.quellen_hinweis), nur als Namensbestandteil erkannt.
 
-Öffentlich: analysiere_pdf, analysiere_text, weitergabe_anwenden, LaufWissen, ANZEIGE_BEGRIFF,
-PLATZHALTER_BEGRIFF.
+Öffentlich: analysiere_pdf, analysiere_text, weitergabe_anwenden, LaufWissen, hinweis_kategorien, ANZEIGE_BEGRIFF,
+PLATZHALTER_BEGRIFF, HINWEIS_GESUNDHEIT.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
     import fitz
 
 from . import detektoren
+from . import muster as _muster
 from . import ocr as _ocr
 from .detektoren import Kontext
 from .muster import KATEGORIE_PRIORITAET, KATEGORIEN
@@ -132,16 +139,92 @@ def _melde(meldungen, liste, art, code, text, seite=None):
         meldungen.append({"art": art, "code": code, "text": text, "seite": seite})
 
 
+# ----------------------------------------------------------------------
+# Hinweis-Kategorien der Schutzstufe (Gesundheitsdaten in „hoch“/„ausgewogen“) und Fund-Hinweise
+# ----------------------------------------------------------------------
+HINWEIS_GESUNDHEIT = "Gesundheitsdaten (Art. 9 DSGVO) – angeboten, nicht angehakt"
+HINWEIS_ANGEBOTEN = "angeboten, nicht angehakt"
+HINWEIS_BESTANDTEIL = "nur als Namensbestandteil erkannt"
+HINWEIS_WEITERGABE = "aus einem anderen Dokument dieses Laufs übernommen"
+_GESUNDHEIT_ANZEIGE = {"diagnose": "Diagnosen", "medikament": "Medikamente"}
+
+
+def hinweis_kategorien(profil, aktive) -> set:
+    """Kategorien, die in dieser Schutzstufe erkannt, aber nur abgewählt angeboten werden (muster.hinweis_kategorien:
+    Gesundheitsdaten in „hoch“/„ausgewogen“, ohne die selbst angehakten). Leer, wenn muster sie nicht kennt."""
+    funktion = getattr(_muster, "hinweis_kategorien", None)
+    if funktion is None:
+        return set()
+    try:
+        return set(funktion(profil, set(aktive or ())))
+    except Exception:  # unbekanntes Profilformat: nichts nur anbieten (alles Erkannte bleibt wie angehakt)
+        return set()
+
+
+def _ist_gesundheit(kategorie: str) -> bool:
+    return kategorie in getattr(_muster, "GESUNDHEIT", _GESUNDHEIT_ANZEIGE)
+
+
+def _angebots_hinweis(kategorie: str) -> str:
+    """Hinweis eines nur angebotenen Funds (alle Stellen abgewählt)."""
+    return HINWEIS_GESUNDHEIT if _ist_gesundheit(kategorie) else f"{_anzeige(kategorie)} – {HINWEIS_ANGEBOTEN}"
+
+
+def _gesundheit_meldungstext(kategorien) -> str:
+    arten = [_GESUNDHEIT_ANZEIGE.get(k, _anzeige(k)) for k in sorted(kategorien, key=_rang)]
+    welche = f" ({', '.join(dict.fromkeys(arten))})" if arten else ""
+    return (f"Das Dokument enthält Gesundheitsdaten{welche}. Sie stehen in der Fundliste, sind aber nicht "
+            f"angehakt und bleiben deshalb lesbar. Zum Schwärzen bitte anhaken – oder die Schutzstufe "
+            f"„Maximal“ wählen.")
+
+
+def _hinweise_verbinden(*hinweise) -> str | None:
+    """Mehrere Fund-Hinweise zu einem Text ("; "), ohne Wiederholungen; None, wenn keiner da ist."""
+    teile: list = []
+    for h in hinweise:
+        for t in str(h or "").split("; "):
+            t = t.strip()
+            if t and t not in teile:
+                teile.append(t)
+    return "; ".join(teile) or None
+
+
+def _quellen_hinweise(quellen) -> list:
+    """Hinweise zu den Quellen eines Funds ("muster.iban.lesefehler" -> "Prüfziffer ungültig (Lesefehler?)")."""
+    funktion = getattr(_muster, "quellen_hinweis", None)
+    if funktion is None:
+        return []
+    return [h for h in (funktion(q) for q in sorted(quellen or ())) if h]
+
+
+def _geerbte_hinweise(fund: dict) -> list:
+    """Hinweise eines Funds, die mit seinem Text in ein anderes Dokument wandern („Prüfziffer ungültig …“)."""
+    texte = set(getattr(_muster, "QUELLEN_HINWEISE", {}).values())
+    return [h for h in str(fund.get("hinweis") or "").split("; ") if h in texte]
+
+
+def _alle_abgewaehlt(fund: dict) -> bool:
+    stellen = fund.get("stellen") or []
+    return bool(stellen) and not any(st.get("an", True) for st in stellen)
+
+
 class LaufWissen:
     """Dokumentübergreifendes Wissen eines Laufs (für Detektoren und weitergabe_anwenden):
-    bekannte Personen (Name -> Pseudonym) und Kennungen der bisher analysierten Dokumente."""
+    bekannte Personen (Name -> Pseudonym) und Kennungen der bisher analysierten Dokumente. Nur angebotene Funde
+    der Hinweis-Kategorien (Gesundheitsdaten in „hoch“) werden nicht übernommen – sie dürfen in anderen
+    Dokumenten nicht als angehakte Kennung wiederkehren."""
 
     def __init__(self):
         self.personen: dict = {}       # Namensschlüssel -> Pseudonym
         self.kennungen: dict = {}      # (Kategorie, Schlüssel) -> Text
 
     def aufnehmen(self, ergebnis: dict):
-        for f in (ergebnis or {}).get("funde", []):
+        ergebnis = ergebnis or {}
+        nur_hinweis = hinweis_kategorien(ergebnis.get("profil"), ergebnis.get("aktive") or ()) \
+            if "aktive" in ergebnis else set()
+        for f in ergebnis.get("funde", []):
+            if f["kategorie"] in nur_hinweis:
+                continue
             modus = modus_fuer(f["kategorie"])
             schluessel = fund_schluessel(f["text"], modus)
             if f["kategorie"] == "namen":
@@ -153,20 +236,40 @@ class LaufWissen:
 # ----------------------------------------------------------------------
 # NIE-Liste als Schutzhüllen
 # ----------------------------------------------------------------------
+def _ohne_leerraum_stellen(text: str, eintrag: str) -> list:
+    """Vorkommen eines Eintrags mit Ziffern, bei denen nur der Leerraum abweicht (Gutachten EQ-19: NIE
+    "DE89 3704 0044 0532 0130 00" = "DE89370400440532013000", "123 4567" = "1234567"). Ganzwort wie
+    ganzwort_stellen: davor und danach kein Buchstabe/keine Ziffer – "123" passt nicht in "41234" oder "1234"."""
+    kompakt = "".join(eintrag.split())
+    if sum(1 for c in kompakt if c.isalnum()) < 3:
+        return []
+    muster = r"\s*".join(re.escape(c) for c in kompakt)
+    if kompakt[0].isalnum():
+        muster = r"(?<![^\W_])" + muster
+    if kompakt[-1].isalnum():
+        muster += r"(?![^\W_])"
+    return [(m.start(), m.end()) for m in re.finditer(muster, text, re.IGNORECASE)]
+
+
 class _NieHuellen:
     """NIE-schwärzen-Liste: Ganzwort-/Ganzphrasen-Vorkommen (Mindestlänge 3, Groß-/Kleinschreibung egal,
-    Einträge mit Ziffern trennzeichen-flexibel wie Kennungen). Jede Stelle, die ganz in einem Vorkommen
-    liegt, bleibt stehen – auch Bruchstücke anderer Kategorien (Gutachten KQ-03/KQ-04)."""
+    Einträge mit Ziffern trennzeichen-flexibel wie Kennungen und unabhängig vom Leerraum: Gutachten EQ-19).
+    Jede Stelle, die ganz in einem Vorkommen liegt, bleibt stehen – auch Bruchstücke anderer Kategorien
+    (Gutachten KQ-03/KQ-04); ein Vorkommen innerhalb einer längeren Nummer gibt diese nicht frei."""
 
     def __init__(self, dok, eintraege):
         huellen = []
+        text = dok if isinstance(dok, str) else dok.text
         for e in eintraege or []:
             n = _normalisiert(str(e or "")).strip(".,;:")
             if len(n) < 3:
                 continue
-            modus = "kennung" if any(c.isdigit() for c in n) else "begriff"
-            huellen.extend(ganzwort_stellen(dok, n, modus))
-        huellen.sort()
+            if any(c.isdigit() for c in n):
+                huellen.extend(ganzwort_stellen(dok, n, "kennung"))
+                huellen.extend(_ohne_leerraum_stellen(text, n))
+            else:
+                huellen.extend(ganzwort_stellen(dok, n, "begriff"))
+        huellen = sorted(set(huellen))
         self.anfaenge = [h[0] for h in huellen]
         self.huellen = huellen
         laufendes = []
@@ -469,14 +572,15 @@ class _Kandidat(NamedTuple):
 
 
 def _fund_bauen(dok, schluessel, kategorie, stellen_global, quellen, sicherheit, anzeige, ersatz, hinweis,
-                ausgelassen=()):
+                ausgelassen=(), an=True):
     """Fund v2. `ausgelassen`: (start, ende, grund) bewusst nicht geschwärzter Vorkommen desselben Texts
     (NIE-Liste, mehrdeutig am Satzanfang, fremdes Bindestrich-Wort) – sie erscheinen als abgewählte Stellen
-    (an: False, grund), damit Vorschau und Selbstkontrolle sie kennen und die Nutzerin sie anhaken kann."""
+    (an: False, grund), damit Vorschau und Selbstkontrolle sie kennen und die Nutzerin sie anhaken kann.
+    an=False: ein nur angebotener Fund (Hinweis-Kategorie der Schutzstufe) – alle Stellen abgewählt."""
     stellen = []
     for s, e in stellen_global:
         for nr, ls, le in dok.lokal(s, e):
-            stellen.append({"seite": nr, "start": ls, "ende": le, "an": True,
+            stellen.append({"seite": nr, "start": ls, "ende": le, "an": bool(an),
                             "text": dok.seiten[nr].text[ls:le]})
     s0, e0 = stellen_global[0]
     erste = stellen[0] if stellen else None
@@ -501,11 +605,18 @@ GRUND_KOMPOSITUM = "Teil eines fremden Bindestrich-Worts"
 
 
 def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch", kundenliste=None,
-                         lauf=None, hinweise=None, warnungen=None, meldungen=None) -> list:
-    """Kern der Analyse auf einem Seitenmodell. Liefert die Funde (Format v2)."""
+                         lauf=None, hinweise=None, warnungen=None, meldungen=None, angebote=True) -> list:
+    """Kern der Analyse auf einem Seitenmodell. Liefert die Funde (Format v2).
+
+    Hinweis-Kategorien der Schutzstufe (Gesundheitsdaten in „hoch“/„ausgewogen“, sofern nicht selbst angehakt)
+    werden mit erkannt, ihre Funde aber nur angeboten: alle Stellen an: False, Hinweis HINWEIS_GESUNDHEIT und
+    eine Meldung GESUNDHEITSDATEN je Dokument. In „maximal“ sind sie aktiv und werden normal geschwärzt.
+    angebote=False (reine Text-Schnittstelle ohne Schutzstufe): nur die aktiven Kategorien, nichts angeboten."""
     hinweise = [] if hinweise is None else hinweise
     text = dok.text
-    kontext = Kontext(aktive, profil, whitelist, immer_schwaerzen, wissen=_wissen_modul(),
+    aktive = set(aktive)
+    nur_hinweis = hinweis_kategorien(profil, aktive) if angebote else set()
+    kontext = Kontext(aktive | nur_hinweis, profil, whitelist, immer_schwaerzen, wissen=_wissen_modul(),
                       kundenliste=kundenliste, lauf=lauf)
     fehler: list = []
     treffer = detektoren.alle_treffer(dok, kontext, fehler)
@@ -516,12 +627,19 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
     # 1) NIE-Liste: Treffer in einer Schutzhülle entfallen (IMMER-Begriffe nicht)
     nie = _NieHuellen(dok, whitelist)
     behalten = []
-    freigegeben: dict = {}
+    frei_spannen = set()
     for t in treffer:
         if t.kategorie != "begriff" and nie.umhuellt(t.start, t.ende):
-            freigegeben.setdefault(_normalisiert(text[t.start:t.ende]), None)
+            frei_spannen.add((t.start, t.ende))
             continue
         behalten.append(t)
+    freigegeben: dict = {}
+    weitestes = -1
+    for s, e in sorted(frei_spannen, key=lambda x: (x[0], -x[1])):
+        if e <= weitestes:
+            continue                  # Bruchstück einer freigegebenen Nummer: nicht eigens melden
+        weitestes = e
+        freigegeben.setdefault(_normalisiert(text[s:e]), None)
     for t in freigegeben:
         _melde(meldungen, hinweise, "hinweis", "NIE_FREIGABE", f"Durch NIE-Liste freigegeben: {t}")
 
@@ -621,46 +739,33 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
                     continue
                 kandidaten.append(_Kandidat(s, e, "namen", ("namen", tkey), "bestandteil", 0.5, 2))
 
-    # 4) Überlappende Stellen zusammenführen
-    kandidaten.sort(key=lambda k: (k.start, -k.ende))
-    stellen = []          # (start, ende, schluessel, kategorie, quellen, sicherheit, arten)
-    gruppe, ende = [], -1
-
-    def abschliessen(gruppe):
-        u_s = min(k.start for k in gruppe)
-        u_e = max(k.ende for k in gruppe)
-        sieger = max(gruppe, key=lambda k: (k.start == u_s and k.ende == u_e, -_rang(k.kategorie),
-                                           k.ende - k.start, k.art == 0, k.sicherheit))
-        stellen.append((u_s, u_e, sieger.schluessel, sieger.kategorie, {k.quelle for k in gruppe},
-                        max(k.sicherheit for k in gruppe), {k.art for k in gruppe if k.schluessel == sieger.schluessel}))
-    for k in kandidaten:
-        if gruppe and k.start < ende:
-            gruppe.append(k)
-            ende = max(ende, k.ende)
-        else:
-            if gruppe:
-                abschliessen(gruppe)
-            gruppe, ende = [k], k.ende
-    if gruppe:
-        abschliessen(gruppe)
+    # 4) Überlappende Stellen zusammenführen – die Hinweis-Kategorien getrennt (siehe Moduldokumentation)
+    stellen = _zusammenfuehren([k for k in kandidaten if k.kategorie not in nur_hinweis])
+    belegte = sorted((s, e) for s, e, *_ in stellen)         # Stellen, die angehakt geschwärzt werden
+    anfaenge = [b[0] for b in belegte]
+    max_ende, m = [], -1
+    for _, e1 in belegte:
+        m = max(m, e1)
+        max_ende.append(m)
+    if nur_hinweis:
+        for st in _zusammenfuehren([k for k in kandidaten if k.kategorie in nur_hinweis]):
+            i = bisect_right(anfaenge, st[0])
+            if i and belegte[i - 1][1] >= st[1]:
+                continue                  # ganz in einer angehakten Stelle: wird ohnehin geschwärzt
+            stellen.append(st)
 
     # 5) Funde
     je_fund: dict = {}
-    for s, e, schl, kategorie, quellen, sicherheit, arten in stellen:
+    for s, e, schl, kategorie, quellen, sicherheit, arten, eigene in stellen:
         eintrag = je_fund.setdefault(schl, {"stellen": [], "quellen": set(), "sicherheit": 0.0, "arten": set(),
-                                            "kategorie": kategorie})
+                                            "kategorie": kategorie, "eigene": set()})
         eintrag["stellen"].append((s, e))
         eintrag["quellen"] |= quellen
         eintrag["sicherheit"] = max(eintrag["sicherheit"], sicherheit)
         eintrag["arten"] |= arten
+        eintrag["eigene"] |= eigene
     aus_je_fund: dict = {}
     if ausgelassen:
-        belegte = sorted((s, e) for s, e, *_ in stellen)
-        anfaenge = [b[0] for b in belegte]
-        max_ende, m = [], -1
-        for _, e1 in belegte:
-            m = max(m, e1)
-            max_ende.append(m)
         gesehen_aus = set()
         for s, e, schl, grund in sorted(ausgelassen, key=lambda a: (a[0], a[1])):
             if schl not in je_fund or (s, e) in gesehen_aus:
@@ -674,6 +779,7 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
     namens_ersatz = personen.pseudonyme(
         [schl[1] for schl, eintrag in sorted(je_fund.items(), key=lambda x: x[1]["stellen"][0])
          if eintrag["kategorie"] == "namen"])
+    angeboten = set()                       # Kategorien nur angebotener Funde (Hinweis-Kategorien)
     for schl, eintrag in je_fund.items():
         kategorie = eintrag["kategorie"]
         hinweis = None
@@ -682,34 +788,79 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
             anzeige = ANZEIGE_BESTANDTEIL if nur_bestandteil else ANZEIGE_NAME
             ersatz = namens_ersatz[schl[1]]
             if nur_bestandteil:
-                hinweis = "nur als Namensbestandteil erkannt"
+                hinweis = HINWEIS_BESTANDTEIL
         else:
             anzeige = _anzeige(kategorie)
             ersatz = _platzhalter(kategorie)
+        nur_angeboten = kategorie in nur_hinweis
+        if nur_angeboten:
+            angeboten.add(kategorie)
+        hinweis = _hinweise_verbinden(_angebots_hinweis(kategorie) if nur_angeboten else None, hinweis,
+                                      *_quellen_hinweise(eintrag["eigene"]))
         funde.append(_fund_bauen(dok, schl, kategorie, sorted(eintrag["stellen"]), eintrag["quellen"],
-                                 eintrag["sicherheit"], anzeige, ersatz, hinweis, aus_je_fund.get(schl, ())))
+                                 eintrag["sicherheit"], anzeige, ersatz, hinweis, aus_je_fund.get(schl, ()),
+                                 an=not nur_angeboten))
 
-    def erste_an(f):
-        st = next((st for st in f["stellen"] if st.get("an", True)), None)
+    def erste_stelle(f):
+        """Erste angehakte Stelle; bei nur angebotenen Funden die erste Stelle überhaupt (Dokumentreihenfolge)."""
+        st = next((st for st in f["stellen"] if st.get("an", True)), None) or next(iter(f["stellen"]), None)
         return (st["seite"], st["start"]) if st else (0, 0)
-    funde.sort(key=erste_an)
+    funde.sort(key=erste_stelle)
     for i, f in enumerate(funde, 1):
         f["id"] = f"f{i}"
+    gesundheit = {k for k in angeboten if _ist_gesundheit(k)}
+    if gesundheit:
+        _melde(meldungen, hinweise, "hinweis", "GESUNDHEITSDATEN", _gesundheit_meldungstext(gesundheit))
     return funde
 
 
-def _analysiere(text: str, aktive: set, whitelist: list, immer_schwaerzen: list) -> tuple:
+def _zusammenfuehren(kandidaten: list) -> list:
+    """Überlappende Kandidaten zu Stellen zusammenführen: die umfassende Stelle gewinnt, bei gleicher Spanne die
+    Kategorie-Priorität. Liefert (start, ende, schluessel, kategorie, quellen, sicherheit, arten, eigene_quellen);
+    eigene_quellen sind die Quellen der Kandidaten des Siegers (für Hinweise wie „Prüfziffer ungültig“ – ein
+    unterlegenes Telefon-Bruchstück soll der IBAN keinen Hinweis vererben)."""
+    stellen = []
+    gruppe, ende = [], -1
+
+    def abschliessen(gruppe):
+        u_s = min(k.start for k in gruppe)
+        u_e = max(k.ende for k in gruppe)
+        sieger = max(gruppe, key=lambda k: (k.start == u_s and k.ende == u_e, -_rang(k.kategorie),
+                                           k.ende - k.start, k.art == 0, k.sicherheit))
+        eigene = [k for k in gruppe if k.schluessel == sieger.schluessel]
+        stellen.append((u_s, u_e, sieger.schluessel, sieger.kategorie, {k.quelle for k in gruppe},
+                        max(k.sicherheit for k in gruppe), {k.art for k in eigene}, {k.quelle for k in eigene}))
+    for k in sorted(kandidaten, key=lambda k: (k.start, -k.ende)):
+        if gruppe and k.start < ende:
+            gruppe.append(k)
+            ende = max(ende, k.ende)
+        else:
+            if gruppe:
+                abschliessen(gruppe)
+            gruppe, ende = [k], k.ende
+    if gruppe:
+        abschliessen(gruppe)
+    return stellen
+
+
+def _analysiere(text: str, aktive: set, whitelist: list, immer_schwaerzen: list, profil: str | None = None,
+                meldungen: list | None = None) -> tuple:
     """Analyse eines reinen Texts. Liefert (funde, hinweise) (für Tests und Werkzeuge)."""
     hinweise: list = []
     dok = dokument_aus_text(text)
-    funde = _analysiere_dokument(dok, set(aktive), whitelist, immer_schwaerzen, hinweise=hinweise)
+    funde = _analysiere_dokument(dok, set(aktive), whitelist, immer_schwaerzen, profil=profil or "hoch",
+                                 hinweise=hinweise, meldungen=meldungen, angebote=profil is not None)
     return funde, hinweise
 
 
-def analysiere_text(text: str, aktive: set[str], whitelist: list[str], immer_schwaerzen: list[str]) -> list[dict]:
+def analysiere_text(text: str, aktive: set[str], whitelist: list[str], immer_schwaerzen: list[str],
+                    profil: str | None = None) -> list[dict]:
     """Durchsucht einen Text nach allen aktivierten Kategorien. Liefert Funde (seiten bleibt leer,
-    stellen beziehen sich auf die eine Seite des Textmodells)."""
-    funde, _ = _analysiere(text, set(aktive), whitelist, immer_schwaerzen)
+    stellen beziehen sich auf die eine Seite des Textmodells).
+
+    Ohne `profil` (bisherige Schnittstelle) nur die aktivierten Kategorien; mit Schutzstufe ("hoch" …) wie
+    analysiere_pdf, also zusätzlich die nur angebotenen Funde ihrer Hinweis-Kategorien (alle Stellen abgewählt)."""
+    funde, _ = _analysiere(text, set(aktive), whitelist, immer_schwaerzen, profil=profil)
     return funde
 
 
@@ -887,16 +1038,30 @@ def _naechstes_pseudonym(funde) -> str:
     return _pseudonym(i)
 
 
+def _nur_angeboten(ergebnis: dict) -> set:
+    """Hinweis-Kategorien eines Analyse-Ergebnisses (aus seiner Schutzstufe und seinen Kategorien)."""
+    if "aktive" not in ergebnis:
+        return set()
+    return hinweis_kategorien(ergebnis.get("profil"), ergebnis.get("aktive") or ())
+
+
 def weitergabe_anwenden(ergebnisse: list) -> int:
     """Lauf-übergreifend: Namen und Kennungen aus allen Ergebnissen in allen anderen Dokumenten suchen
     (ganzwort_stellen auf deren Modell) und als neue Stellen/Funde ergänzen (quelle "weitergabe").
-    Rückgabe: Anzahl neuer Stellen."""
+
+    Vorhandene Stellen bleiben unverändert (auch abgewählte: NIE-Liste, Satzanfang, Entscheidung der Nutzerin).
+    Neue Stellen sind abgewählt, wenn ihre Kategorie im Ziel nur angeboten wird (Hinweis-Kategorie der
+    Schutzstufe) oder der vorhandene Fund im Ziel ganz abgewählt ist – eine Weitergabe hakt nie etwas an, das
+    die Nutzerin abgewählt hat. Nur angebotene Stellen (Gesundheitsdaten) blockieren keine neue Stelle: ein
+    Name in „Diabetes bei Herrn Meier“ wird trotzdem ergänzt. Rückgabe: Anzahl neuer Stellen."""
     gueltig = [e for e in ergebnisse or [] if e and e.get("modell") is not None and not e.get("fehler")]
     neu_gesamt = 0
     for ziel in gueltig:
         dok = ziel["modell"]
         nie = _NieHuellen(dok, ziel.get("nie") or [])
-        belegt = _belegte_stellen(ziel["funde"])
+        nur_hinweis = _nur_angeboten(ziel)
+        belegt = _belegte_stellen([f for f in ziel["funde"] if f["kategorie"] not in nur_hinweis])
+        belegt_angebot = _belegte_stellen([f for f in ziel["funde"] if f["kategorie"] in nur_hinweis])
         vorhandene = {(f["kategorie"], fund_schluessel(f["text"], modus_fuer(f["kategorie"]))): f
                       for f in ziel["funde"]}
         for quelle in gueltig:
@@ -909,6 +1074,11 @@ def weitergabe_anwenden(ergebnisse: list) -> int:
                     continue
                 if fund.get("anzeige") == ANZEIGE_BESTANDTEIL:
                     continue          # Bestandteile nur mit ihrer Person (Mehrdeutigkeit)
+                schl = (kategorie, fund_schluessel(fund["text"], modus))
+                ziel_fund = vorhandene.get(schl)
+                angebot = kategorie in nur_hinweis
+                an = not angebot and not (ziel_fund is not None and _alle_abgewaehlt(ziel_fund))
+                ziel_belegt = belegt_angebot if angebot else belegt
                 texte = list(dict.fromkeys([fund["text"]] + [st.get("text") or "" for st in fund.get("stellen", [])
                                                              if st.get("an", True)]))
                 neue = []
@@ -919,17 +1089,15 @@ def weitergabe_anwenden(ergebnisse: list) -> int:
                         if nie.umhuellt(s, e):
                             continue
                         for nr, ls, le in dok.lokal(s, e):
-                            if _ueberlappt(belegt, nr, ls, le):
+                            if _ueberlappt(ziel_belegt, nr, ls, le):
                                 continue
-                            neue.append({"seite": nr, "start": ls, "ende": le, "an": True,
+                            neue.append({"seite": nr, "start": ls, "ende": le, "an": an,
                                          "text": dok.seiten[nr].text[ls:le]})
-                            belegt.setdefault(nr, []).append((ls, le))
-                            belegt[nr].sort()
+                            ziel_belegt.setdefault(nr, []).append((ls, le))
+                            ziel_belegt[nr].sort()
                 if not neue:
                     continue
                 neue.sort(key=lambda st: (st["seite"], st["start"]))
-                schl = (kategorie, fund_schluessel(fund["text"], modus))
-                ziel_fund = vorhandene.get(schl)
                 if ziel_fund is None:
                     ersatz = fund.get("ersatz") or _platzhalter(kategorie)
                     if kategorie == "namen":
@@ -941,7 +1109,8 @@ def weitergabe_anwenden(ergebnisse: list) -> int:
                                  "ersatz": ersatz, "seiten": [], "anzahl": 0,
                                  "kontext": _kontext_text(dok.text, g, g + len(erste["text"])),
                                  "stellen": [], "quellen": ["weitergabe"], "sicherheit": fund.get("sicherheit", 0.5),
-                                 "hinweis": "aus einem anderen Dokument dieses Laufs übernommen"}
+                                 "hinweis": _hinweise_verbinden(_angebots_hinweis(kategorie) if angebot else None,
+                                                                *_geerbte_hinweise(fund), HINWEIS_WEITERGABE)}
                     ziel["funde"].append(ziel_fund)
                     vorhandene[schl] = ziel_fund
                 elif "weitergabe" not in ziel_fund.get("quellen", []):
