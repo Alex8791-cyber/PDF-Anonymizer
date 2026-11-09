@@ -8,20 +8,24 @@ Ablauf:
      „ausgewogen“, sofern nicht selbst angehakt) – ihre Funde werden nur angeboten (alle Stellen abgewählt).
   3. NIE-Liste: Ganzphrasen-Vorkommen sind Schutzhüllen – Treffer darin entfallen (auch Bruchstücke wie
      eine "Telefonnummer" mitten in der freigegebenen eigenen IBAN). Einträge mit Ziffern (IBAN, Nummern)
-     gelten auch mit anderem Leerraum ("DE89 3704 …" gibt "DE893704…" frei und umgekehrt).
+     gelten auch mit anderem Leerraum ("DE89 3704 …" gibt "DE893704…" frei und umgekehrt). Namens-Treffer, die
+     ganz aus Diagnosen/Medikamenten der Wissensbasis bestehen („Distale Radiusfraktur“), entfallen.
   4. Weitergabe: jeder Treffertext an ALLEN Ganzwort-Stellen des Dokuments (Vergleichsmodus je Kategorie;
      bei Namen alle Schreibweisen), dazu Namensbestandteile (Vor-, Nach-, Doppelnamensteile).
   5. Überlappende Stellen zusammenführen: die umfassende Stelle gewinnt (Bruchstücke gehen in ihr auf);
      bei gleicher Spanne entscheidet die Kategorie-Priorität (IMMER-Begriff > Kennungen > Namen >
      Adresse > Rest); teilweise Überlappung -> Vereinigung, Kategorie nach Priorität. Stellen der
-     Hinweis-Kategorien werden getrennt zusammengeführt: sie schlucken nie eine andere Stelle (ein Name in
-     „Diabetes bei Herrn Meier“ bleibt angehakt) und entfallen, wo eine andere Stelle sie ganz überdeckt.
+     Gesundheitskategorien (angeboten oder angehakt) und der übrigen Hinweis-Kategorien werden getrennt
+     zusammengeführt: sie schlucken nie eine andere Stelle (ein Name in „Diabetes bei Herrn Meier“ behält seine
+     eigene, angehakte Stelle – auch in „maximal“, wo die Nutzerin die Diagnose abwählen kann, damit sie lesbar
+     bleibt) und entfallen, wo eine andere Stelle sie ganz überdeckt.
   6. Funde bilden (Format v2: id, stellen, quellen, sicherheit, hinweis; alte Schlüssel bleiben) mit festen
-     Pseudonymen je Person. Hinweise: Gesundheitsdaten (abgewählt angeboten), Prüfziffer ungültig
+     Pseudonymen je Person. Hinweise: Gesundheitsdaten (abgewählt angeboten; „möglicherweise“, wenn nur
+     allgemeine Fachbegriffe ohne Personenbezug erkannt sind – Quelle "….vermutet"), Prüfziffer ungültig
      (Quelle "….lesefehler", muster.quellen_hinweis), nur als Namensbestandteil erkannt.
 
-Öffentlich: analysiere_pdf, analysiere_text, weitergabe_anwenden, LaufWissen, hinweis_kategorien, ANZEIGE_BEGRIFF,
-PLATZHALTER_BEGRIFF, HINWEIS_GESUNDHEIT.
+Öffentlich: analysiere_pdf, analysiere_text, weitergabe_anwenden, LaufWissen, hinweis_kategorien,
+gesundheit_nur_vermutet, ANZEIGE_BEGRIFF, PLATZHALTER_BEGRIFF, HINWEIS_GESUNDHEIT, HINWEIS_GESUNDHEIT_VERMUTET.
 """
 
 from __future__ import annotations
@@ -143,10 +147,18 @@ def _melde(meldungen, liste, art, code, text, seite=None):
 # Hinweis-Kategorien der Schutzstufe (Gesundheitsdaten in „hoch“/„ausgewogen“) und Fund-Hinweise
 # ----------------------------------------------------------------------
 HINWEIS_GESUNDHEIT = "Gesundheitsdaten (Art. 9 DSGVO) – angeboten, nicht angehakt"
+HINWEIS_GESUNDHEIT_VERMUTET = ("möglicherweise Gesundheitsdaten (Art. 9 DSGVO): nur ein Fachbegriff, ohne Etikett "
+                               "„Diagnose:“, ICD-Code oder Bezug zu einer Person – angeboten, nicht angehakt")
 HINWEIS_ANGEBOTEN = "angeboten, nicht angehakt"
 HINWEIS_BESTANDTEIL = "nur als Namensbestandteil erkannt"
 HINWEIS_WEITERGABE = "aus einem anderen Dokument dieses Laufs übernommen"
 _GESUNDHEIT_ANZEIGE = {"diagnose": "Diagnosen", "medikament": "Medikamente"}
+_VERMUTET = ".vermutet"                 # Quellen-Endung der Detektoren: nur vermutet (wissen.gesundheit.vermutet)
+_NEUTRALE_QUELLEN = {"weitergabe"}     # Weitergabe im Dokument: erbt die Art der übrigen Quellen
+# Angehakte Funde dieser Kategorien zeigen eine Person im Dokument: dann sind auch allgemeine Fachbegriffe
+# („Physiotherapie“ in einer Leistungsabrechnung) vermutlich Angaben über sie – die Meldung ist sicher. Anschrift,
+# Telefon, IBAN, Nummern zählen nicht (auch Versicherer und Tarifblätter tragen sie).
+_PERSONEN_KATEGORIEN = {"namen", "geburt", "svnr", "kvnr", "steuerid", "ausweis", "kindergeld"}
 
 
 def hinweis_kategorien(profil, aktive) -> set:
@@ -161,21 +173,71 @@ def hinweis_kategorien(profil, aktive) -> set:
         return set()
 
 
+def _gesundheit_kategorien() -> set:
+    return set(getattr(_muster, "GESUNDHEIT", _GESUNDHEIT_ANZEIGE))
+
+
 def _ist_gesundheit(kategorie: str) -> bool:
-    return kategorie in getattr(_muster, "GESUNDHEIT", _GESUNDHEIT_ANZEIGE)
+    return kategorie in _gesundheit_kategorien()
 
 
-def _angebots_hinweis(kategorie: str) -> str:
+def _nur_vermutet(quellen) -> bool:
+    """Beruht eine Stelle/ein Fund nur auf vermuteten Treffern (Quellen-Endung „.vermutet“, dazu höchstens die
+    Weitergabe im Dokument)? Dann sind es z. B. nur Leistungsbegriffe einer Tarifübersicht („Physiotherapie“)."""
+    eigene = set(quellen or ()) - _NEUTRALE_QUELLEN
+    return bool(eigene) and all(q.endswith(_VERMUTET) for q in eigene)
+
+
+def _angebots_hinweis(kategorie: str, vermutet: bool = False) -> str:
     """Hinweis eines nur angebotenen Funds (alle Stellen abgewählt)."""
-    return HINWEIS_GESUNDHEIT if _ist_gesundheit(kategorie) else f"{_anzeige(kategorie)} – {HINWEIS_ANGEBOTEN}"
+    if _ist_gesundheit(kategorie):
+        return HINWEIS_GESUNDHEIT_VERMUTET if vermutet else HINWEIS_GESUNDHEIT
+    return f"{_anzeige(kategorie)} – {HINWEIS_ANGEBOTEN}"
 
 
-def _gesundheit_meldungstext(kategorien) -> str:
+def gesundheit_nur_vermutet(fund: dict) -> bool:
+    """Für die Oberfläche: ist ein Fund eine nur vermutete, angebotene Gesundheitsangabe (allgemeiner Fachbegriff
+    ohne Etikett, ICD-Code, Dosierung oder Personenbezug – z. B. „Physiotherapie“ in einer Tarifübersicht)?"""
+    return HINWEIS_GESUNDHEIT_VERMUTET in str(fund.get("hinweis") or "").split("; ")
+
+
+def _gesundheit_meldungstext(kategorien, beispiel: str | None = None) -> str:
+    """Meldung GESUNDHEITSDATEN. `beispiel`: Text eines nur vermuteten Funds, wenn ALLE angebotenen Gesundheitsfunde
+    nur vermutet sind – dann vorsichtiger („möglicherweise“)."""
     arten = [_GESUNDHEIT_ANZEIGE.get(k, _anzeige(k)) for k in sorted(kategorien, key=_rang)]
     welche = f" ({', '.join(dict.fromkeys(arten))})" if arten else ""
-    return (f"Das Dokument enthält Gesundheitsdaten{welche}. Sie stehen in der Fundliste, sind aber nicht "
-            f"angehakt und bleiben deshalb lesbar. Zum Schwärzen bitte anhaken – oder die Schutzstufe "
-            f"„Maximal“ wählen.")
+    if beispiel is None:
+        return (f"Das Dokument enthält Gesundheitsdaten{welche}. Gesundheitsdaten sind nach Art. 9 DSGVO besonders "
+                f"geschützt. Sie stehen in der Fundliste, sind aber nicht angehakt und bleiben deshalb lesbar. Zum "
+                f"Schwärzen bitte anhaken – oder die Schutzstufe „Maximal“ wählen.")
+    kurz = _normalisiert(beispiel)
+    kurz = kurz if len(kurz) <= 40 else kurz[:39] + "…"
+    return (f"Das Dokument enthält möglicherweise Gesundheitsdaten{welche}: erkannt wurden nur Fachbegriffe wie "
+            f"„{kurz}“ – ohne Etikett wie „Diagnose:“, ohne ICD-Code und ohne erkennbaren Bezug zu einer Person "
+            f"(in Tarif- und Leistungsübersichten sind das meist nur Leistungen). Gesundheitsdaten sind nach Art. 9 "
+            f"DSGVO besonders geschützt. Sie stehen in der Fundliste, sind aber nicht angehakt und bleiben lesbar. "
+            f"Sind es Angaben über eine Person, bitte anhaken – oder die Schutzstufe „Maximal“ wählen.")
+
+
+_ANREDE_DAVOR_RE = re.compile(r"(?<![\wäöüß])(?:Herrn?|Frau|Hr\.|Fr\.|Dr\.|Prof\.)[ \t]+$")
+_WORT_RE = re.compile(r"[^\W\d_][\w'’\-]*")
+
+
+def _gesundheitsbegriff_als_name(wissen, text: str, t) -> bool:
+    """Ein Namens-Treffer, der ganz aus Diagnosen/Medikamenten der Wissensbasis besteht („Distale Radiusfraktur“ als
+    Tabellenzelle), ist ein Fehltreffer – sonst schwärzte er einen Teil einer abgewählten, also lesbar gewollten
+    Diagnose als [PERSON …]. Ausnahmen: Kundenliste, bekannter Vor-/Nachname („Krebs“) und Anrede davor."""
+    if t.kategorie != "namen" or t.quelle == "kundenliste" or wissen is None:
+        return False
+    wort = text[t.start:t.ende]
+    try:
+        if not any(wissen.index(liste).deckt_ab(wort) for liste in ("diagnosen", "medikamente")):
+            return False
+        if any(wissen.ist_vorname(w) or wissen.ist_nachname(w) for w in _WORT_RE.findall(wort)):
+            return False
+    except Exception:  # ältere Wissensbasis ohne diese Funktionen: Treffer behalten
+        return False
+    return not _ANREDE_DAVOR_RE.search(text[max(0, t.start - 20):t.start])
 
 
 def _hinweise_verbinden(*hinweise) -> str | None:
@@ -610,7 +672,10 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
 
     Hinweis-Kategorien der Schutzstufe (Gesundheitsdaten in „hoch“/„ausgewogen“, sofern nicht selbst angehakt)
     werden mit erkannt, ihre Funde aber nur angeboten: alle Stellen an: False, Hinweis HINWEIS_GESUNDHEIT und
-    eine Meldung GESUNDHEITSDATEN je Dokument. In „maximal“ sind sie aktiv und werden normal geschwärzt.
+    eine Meldung GESUNDHEITSDATEN je Dokument – vorsichtiger („möglicherweise“, HINWEIS_GESUNDHEIT_VERMUTET), wenn
+    alle nur auf allgemeinen Fachbegriffen beruhen und das Dokument keine Person nennt (Tarifübersicht). In
+    „maximal“ sind sie aktiv und werden normal geschwärzt – getrennt zusammengeführt, damit ein Name darin seine
+    eigene Stelle behält.
     angebote=False (reine Text-Schnittstelle ohne Schutzstufe): nur die aktiven Kategorien, nichts angeboten."""
     hinweise = [] if hinweise is None else hinweise
     text = dok.text
@@ -624,13 +689,16 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
         _melde(meldungen, warnungen, "warnung", "ERKENNUNG_FEHLER",
                f"{f} – diese Regel hat nichts erkannt, Ergebnis bitte besonders sorgfältig prüfen!")
 
-    # 1) NIE-Liste: Treffer in einer Schutzhülle entfallen (IMMER-Begriffe nicht)
+    # 1) NIE-Liste: Treffer in einer Schutzhülle entfallen (IMMER-Begriffe nicht); Namens-Treffer, die nur aus
+    #    Diagnosen/Medikamenten bestehen, sind Fehltreffer (_gesundheitsbegriff_als_name)
     nie = _NieHuellen(dok, whitelist)
     behalten = []
     frei_spannen = set()
     for t in treffer:
         if t.kategorie != "begriff" and nie.umhuellt(t.start, t.ende):
             frei_spannen.add((t.start, t.ende))
+            continue
+        if _gesundheitsbegriff_als_name(kontext.wissen, text, t):
             continue
         behalten.append(t)
     freigegeben: dict = {}
@@ -739,16 +807,19 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
                     continue
                 kandidaten.append(_Kandidat(s, e, "namen", ("namen", tkey), "bestandteil", 0.5, 2))
 
-    # 4) Überlappende Stellen zusammenführen – die Hinweis-Kategorien getrennt (siehe Moduldokumentation)
-    stellen = _zusammenfuehren([k for k in kandidaten if k.kategorie not in nur_hinweis])
+    # 4) Überlappende Stellen zusammenführen – Gesundheits- und Hinweis-Kategorien getrennt (siehe
+    #    Moduldokumentation): auch eine angehakte Diagnose („maximal“) schluckt keinen Namen, sonst bliebe er nach
+    #    dem Abwählen der Diagnose ohne eigene Stelle und ohne Warnung lesbar
+    getrennt = nur_hinweis | (aktive & _gesundheit_kategorien())
+    stellen = _zusammenfuehren([k for k in kandidaten if k.kategorie not in getrennt])
     belegte = sorted((s, e) for s, e, *_ in stellen)         # Stellen, die angehakt geschwärzt werden
     anfaenge = [b[0] for b in belegte]
     max_ende, m = [], -1
     for _, e1 in belegte:
         m = max(m, e1)
         max_ende.append(m)
-    if nur_hinweis:
-        for st in _zusammenfuehren([k for k in kandidaten if k.kategorie in nur_hinweis]):
+    if getrennt:
+        for st in _zusammenfuehren([k for k in kandidaten if k.kategorie in getrennt]):
             i = bisect_right(anfaenge, st[0])
             if i and belegte[i - 1][1] >= st[1]:
                 continue                  # ganz in einer angehakten Stelle: wird ohnehin geschwärzt
@@ -780,6 +851,9 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
         [schl[1] for schl, eintrag in sorted(je_fund.items(), key=lambda x: x[1]["stellen"][0])
          if eintrag["kategorie"] == "namen"])
     angeboten = set()                       # Kategorien nur angebotener Funde (Hinweis-Kategorien)
+    sicher_angeboten = False                # mindestens ein angebotener Gesundheitsfund, der nicht nur vermutet ist
+    vermutet_beispiel = None                # (Start, Text) des ersten nur vermuteten angebotenen Gesundheitsfunds
+    vermutete = []                          # diese Funde (Hinweis HINWEIS_GESUNDHEIT_VERMUTET)
     for schl, eintrag in je_fund.items():
         kategorie = eintrag["kategorie"]
         hinweis = None
@@ -793,13 +867,29 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
             anzeige = _anzeige(kategorie)
             ersatz = _platzhalter(kategorie)
         nur_angeboten = kategorie in nur_hinweis
+        vermutet = nur_angeboten and _ist_gesundheit(kategorie) and _nur_vermutet(eintrag["eigene"])
         if nur_angeboten:
             angeboten.add(kategorie)
-        hinweis = _hinweise_verbinden(_angebots_hinweis(kategorie) if nur_angeboten else None, hinweis,
+            if _ist_gesundheit(kategorie) and not vermutet:
+                sicher_angeboten = True
+            elif vermutet:
+                s0, e0 = min(eintrag["stellen"])
+                if vermutet_beispiel is None or s0 < vermutet_beispiel[0]:
+                    vermutet_beispiel = (s0, text[s0:e0])
+        hinweis = _hinweise_verbinden(_angebots_hinweis(kategorie, vermutet) if nur_angeboten else None, hinweis,
                                       *_quellen_hinweise(eintrag["eigene"]))
         funde.append(_fund_bauen(dok, schl, kategorie, sorted(eintrag["stellen"]), eintrag["quellen"],
                                  eintrag["sicherheit"], anzeige, ersatz, hinweis, aus_je_fund.get(schl, ()),
                                  an=not nur_angeboten))
+        if vermutet:
+            vermutete.append(funde[-1])
+    if vermutete and any(f["kategorie"] in _PERSONEN_KATEGORIEN and any(st["an"] for st in f["stellen"])
+                         for f in funde):
+        # Personenbezug im Dokument: die Fachbegriffe gelten als sichere Gesundheitsdaten (Hinweis und Meldung)
+        for f in vermutete:
+            f["hinweis"] = _hinweise_verbinden(*(HINWEIS_GESUNDHEIT if h == HINWEIS_GESUNDHEIT_VERMUTET else h
+                                                 for h in f["hinweis"].split("; ")))
+        sicher_angeboten = True
 
     def erste_stelle(f):
         """Erste angehakte Stelle; bei nur angebotenen Funden die erste Stelle überhaupt (Dokumentreihenfolge)."""
@@ -810,7 +900,8 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
         f["id"] = f"f{i}"
     gesundheit = {k for k in angeboten if _ist_gesundheit(k)}
     if gesundheit:
-        _melde(meldungen, hinweise, "hinweis", "GESUNDHEITSDATEN", _gesundheit_meldungstext(gesundheit))
+        beispiel = None if sicher_angeboten or vermutet_beispiel is None else vermutet_beispiel[1]
+        _melde(meldungen, hinweise, "hinweis", "GESUNDHEITSDATEN", _gesundheit_meldungstext(gesundheit, beispiel))
     return funde
 
 
@@ -1052,16 +1143,18 @@ def weitergabe_anwenden(ergebnisse: list) -> int:
     Vorhandene Stellen bleiben unverändert (auch abgewählte: NIE-Liste, Satzanfang, Entscheidung der Nutzerin).
     Neue Stellen sind abgewählt, wenn ihre Kategorie im Ziel nur angeboten wird (Hinweis-Kategorie der
     Schutzstufe) oder der vorhandene Fund im Ziel ganz abgewählt ist – eine Weitergabe hakt nie etwas an, das
-    die Nutzerin abgewählt hat. Nur angebotene Stellen (Gesundheitsdaten) blockieren keine neue Stelle: ein
-    Name in „Diabetes bei Herrn Meier“ wird trotzdem ergänzt. Rückgabe: Anzahl neuer Stellen."""
+    die Nutzerin abgewählt hat. Stellen der Gesundheitskategorien (angeboten oder angehakt) und der übrigen
+    Hinweis-Kategorien blockieren keine neue Stelle: ein Name in „Diabetes bei Herrn Meier“ wird trotzdem ergänzt
+    (wie in der Analyse, Schritt 5). Rückgabe: Anzahl neuer Stellen."""
     gueltig = [e for e in ergebnisse or [] if e and e.get("modell") is not None and not e.get("fehler")]
     neu_gesamt = 0
     for ziel in gueltig:
         dok = ziel["modell"]
         nie = _NieHuellen(dok, ziel.get("nie") or [])
         nur_hinweis = _nur_angeboten(ziel)
-        belegt = _belegte_stellen([f for f in ziel["funde"] if f["kategorie"] not in nur_hinweis])
-        belegt_angebot = _belegte_stellen([f for f in ziel["funde"] if f["kategorie"] in nur_hinweis])
+        getrennt = nur_hinweis | _gesundheit_kategorien()
+        belegt = _belegte_stellen([f for f in ziel["funde"] if f["kategorie"] not in getrennt])
+        belegt_angebot = _belegte_stellen([f for f in ziel["funde"] if f["kategorie"] in getrennt])
         vorhandene = {(f["kategorie"], fund_schluessel(f["text"], modus_fuer(f["kategorie"]))): f
                       for f in ziel["funde"]}
         for quelle in gueltig:
@@ -1078,7 +1171,7 @@ def weitergabe_anwenden(ergebnisse: list) -> int:
                 ziel_fund = vorhandene.get(schl)
                 angebot = kategorie in nur_hinweis
                 an = not angebot and not (ziel_fund is not None and _alle_abgewaehlt(ziel_fund))
-                ziel_belegt = belegt_angebot if angebot else belegt
+                ziel_belegt = belegt_angebot if kategorie in getrennt else belegt
                 texte = list(dict.fromkeys([fund["text"]] + [st.get("text") or "" for st in fund.get("stellen", [])
                                                              if st.get("an", True)]))
                 neue = []

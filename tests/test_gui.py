@@ -1527,10 +1527,10 @@ ARZTBERICHT = ("Arztbericht\nDiagnose: Lumboischialgie links (M54.4)\nMedikation
 
 
 def test_gesundheitsdaten_mit_echter_engine_abgewaehlt_angeboten(app, umgebung, dialoge):
-    """„hoch“: Diagnose und Medikament stehen NICHT angehakt (⚑, Hinweis) in der Fundliste, die Meldung
-    GESUNDHEITSDATEN steht in einfachem Deutsch im Protokoll und im Abschlussdialog; eine angehakte Diagnose wird
-    geschwärzt, das nicht angehakte Medikament bleibt lesbar. „Maximal“: angehakt und geschwärzt, keine
-    Meldung."""
+    """„hoch“: Diagnose und Medikament stehen NICHT angehakt (⚕ – eigenes Zeichen der angebotenen Gesundheitsdaten,
+    Hinweis) in der Fundliste, die Meldung GESUNDHEITSDATEN steht in einfachem Deutsch im Protokoll und im
+    Abschlussdialog; eine angehakte Diagnose wird geschwärzt, das nicht angehakte Medikament bleibt lesbar. „Maximal“:
+    angehakt und geschwärzt, keine Meldung, kein Zeichen."""
     tmp = umgebung["tmp"]
     pdf = pdf_schreiben(tmp / "Arztbericht.pdf", ARZTBERICHT)
     app.kategorie_vars["namen"].set(False)              # kein Sprachmodell nötig; Grundstufe bleibt „hoch“
@@ -1541,7 +1541,7 @@ def test_gesundheitsdaten_mit_echter_engine_abgewaehlt_angeboten(app, umgebung, 
     zeilen = {app.baum.item(k, "values")[1]: k for k in app.baum.get_children(str(pdf))}
     dia, med = zeilen["Lumboischialgie links (M54.4)"], zeilen["Ibuprofen 600 mg bei Bedarf"]
     for k in (dia, med):
-        assert app._zustand(k) == "aus" and app.baum.item(k, "values")[0].startswith("⚑ ")
+        assert app._zustand(k) == "aus" and app.baum.item(k, "values")[0].startswith("⚕ ")
     assert app._zustand(zeilen["DE89 3704 0044 0532 0130 00"]) == "an" and app._zustand(str(pdf)) == "teil"
     meldung = next(m["text"] for m in ergebnis["meldungen"] if m["code"] == "GESUNDHEITSDATEN")
     assert meldung.startswith("Das Dokument enthält Gesundheitsdaten")
@@ -1569,7 +1569,7 @@ def test_gesundheitsdaten_mit_echter_engine_abgewaehlt_angeboten(app, umgebung, 
     assert ergebnis["profil"] == "maximal" and "GESUNDHEITSDATEN" not in gui.meldungs_codes(ergebnis)
     kinder = app.baum.get_children(str(pdf))
     assert kinder and all(app._zustand(k) == "an" for k in kinder)
-    assert not any(app.baum.item(k, "values")[0].startswith("⚑") for k in kinder)
+    assert not any(app.baum.item(k, "values")[0].startswith(("⚑", "⚕")) for k in kinder)
     starte_lauf(app, app.schwaerzen, timeout=120)
     aus = _ausgabe_text(app, pdf)
     assert "Lumboischialgie" not in aus and "Ibuprofen" not in aus and "[MEDIKAMENT]" in aus
@@ -1742,3 +1742,225 @@ def test_kompletter_ablauf_mit_echter_engine(app, umgebung, dialoge):
     zuordnung = (tmp / "echt" / "anonymisiert" / "_zuordnung.txt").read_text(encoding="utf-8")
     assert zuordnung.startswith("anonym_01.pdf  <-  Vertrag.pdf") and "PRUEFEN" not in zuordnung
     assert app.ausgaben[pdf]["status"] == "fertig"
+
+
+# ----------------------------------------------------------------------
+# Review „Integration Wissen“: Schutzstufe beim Abwählen, Zeichen der Gesundheitsdaten, nur angebotene Funde,
+# Gliederung des Abschlussdialogs
+# ----------------------------------------------------------------------
+def _alle_widgets(widget):
+    yield widget
+    for kind in widget.winfo_children():
+        yield from _alle_widgets(kind)
+
+
+def _kategorie_knopf(app, schluessel) -> tk.Checkbutton:
+    """Der Checkbutton einer Kategorie – für echte Klicks per invoke() statt var.set()."""
+    name = str(app.kategorie_vars[schluessel])
+    for w in _alle_widgets(app.root):
+        if isinstance(w, tk.Checkbutton) and str(w.cget("variable")) == name:
+            return w
+    raise AssertionError(f"kein Checkbutton für {schluessel}")
+
+
+def _ohne_sprachmodell(monkeypatch):
+    """Echte Engine mit Namen, aber ohne spaCy-Modell (die Regeln von wissen.namen laufen weiter)."""
+    from anonymisierer import analyse as analyse_modul
+    from anonymisierer import namen as namen_modul
+    monkeypatch.setattr(namen_modul, "finde_personen", lambda text: [])
+    monkeypatch.setattr(analyse_modul, "lade_ner", lambda: object())
+
+
+def test_maximal_ohne_gesundheitsdaten_bleibt_maximal(app, umgebung, monkeypatch, dialoge):
+    """Befund: „Maximal“, dann Diagnosen UND Medikamente abgewählt – die Auswahl war gleich der von „Hoch“, die
+    Oberfläche sprang auf „Hoch“ und analysierte (und speicherte) ohne die Regeln von „Maximal“ (alle Geburtsdaten,
+    unbekannte Eigennamen). Jetzt bleibt die Grundstufe „Maximal“ (Benutzerdefiniert) – auch für die Menge von
+    „Ausgewogen“ und nach dem Neustart; nur auf eine mindestens so strenge Stufe springt die Auswahl von selbst."""
+    from anonymisierer import muster
+    app.profil_knoepfe["maximal"].invoke()
+    assert app.profil_var.get() == "maximal" and app.basis_profil == "maximal"
+    _kategorie_knopf(app, "diagnose").invoke()
+    assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "maximal"
+    _kategorie_knopf(app, "medikament").invoke()
+    assert app._aktive_kategorien() == app.profil_kategorien("hoch")        # dieselbe Menge wie „Hoch“
+    assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "maximal"
+    text = app.profil_beschreibung.cget("text")
+    assert "„Maximal“" in text and "Gesundheitsdaten werden gemeldet und abgewählt angeboten" in text, text
+
+    aufrufe, schwaerz = [], []
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse_neu({"a.pdf": [FUND_TEL]}, aufrufe=aufrufe))
+    monkeypatch.setattr(gui, "schwaerze_pdf", fake_schwaerzung_neu(schwaerz))
+    analysiere(app, [pdf_schreiben(umgebung["tmp"] / "a.pdf")])
+    starte_lauf(app, app.schwaerzen)
+    assert aufrufe[-1]["profil"] == "maximal" and schwaerz[-1]["profil"] == "maximal"
+    assert aufrufe[-1]["aktive"] == set(muster.PROFILE["maximal"]["aktive"]) - muster.GESUNDHEIT
+    assert "Schutzstufe Maximal" in app.protokoll_text()
+
+    # gespeichert und nach einem Neustart wieder so (hier: Einstellungen erneut anwenden)
+    gespeichert = app._einstellungen_sammeln()
+    assert (gespeichert["profil"], gespeichert["basis_profil"]) == ("benutzerdefiniert", "maximal")
+    app.profil_knoepfe["hoch"].invoke()
+    app.einstellungen = gespeichert
+    app._einstellungen_anwenden()
+    assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "maximal"
+    assert not app.kategorie_vars["diagnose"].get() and not app.kategorie_vars["medikament"].get()
+
+    # beide wieder angehakt -> wieder „Maximal“
+    _kategorie_knopf(app, "diagnose").invoke()
+    _kategorie_knopf(app, "medikament").invoke()
+    assert app.profil_var.get() == "maximal" and app.basis_profil == "maximal"
+    # „Maximal“ bis auf die Menge von „Ausgewogen“ abgewählt: bleibt „Maximal“ (Benutzerdefiniert)
+    for schluessel in ("beruf", "arbeitgeber", "international", "ort", "diagnose", "medikament"):
+        _kategorie_knopf(app, schluessel).invoke()
+    assert app._aktive_kategorien() == app.profil_kategorien("ausgewogen")
+    assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "maximal"
+    # auch „Hoch“ springt beim Abwählen nicht auf das schwächere „Ausgewogen“ …
+    app.profil_knoepfe["hoch"].invoke()
+    for schluessel in ("beruf", "arbeitgeber", "international", "ort"):
+        _kategorie_knopf(app, schluessel).invoke()
+    assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "hoch"
+    # … nach oben aber weiter: „Hoch“ + Diagnosen + Medikamente = „Maximal“
+    app.profil_knoepfe["hoch"].invoke()
+    _kategorie_knopf(app, "diagnose").invoke()
+    _kategorie_knopf(app, "medikament").invoke()
+    assert app.profil_var.get() == "maximal" and app.basis_profil == "maximal"
+
+
+def test_maximal_ohne_gesundheitsdaten_mit_echter_engine(app, umgebung, monkeypatch, dialoge):
+    """Wie oben mit der echten Engine: „Maximal“ ohne Diagnosen und Medikamente findet weiter alle plausiblen
+    Geburtsdaten (Regel nur in „Maximal“) und bietet die Diagnose abgewählt an (⚕, Meldung)."""
+    _ohne_sprachmodell(monkeypatch)
+    pdf = pdf_schreiben(umgebung["tmp"] / "Antrag.pdf", "Mitversicherte Personen\nEhefrau 14.07.1958\n"
+                                                        "Sohn 03.11.2009\nDiagnose: Lumboischialgie links (M54.4)\n")
+    app.profil_knoepfe["maximal"].invoke()
+    _kategorie_knopf(app, "diagnose").invoke()
+    _kategorie_knopf(app, "medikament").invoke()
+    analysiere(app, [pdf])
+    ergebnis = app.analyse_ergebnisse[pdf]
+    assert ergebnis["profil"] == "maximal"
+    funde = ergebnis["funde"]
+    geburt = {f["text"] for f in funde if f["kategorie"] == "geburt"}
+    assert {"14.07.1958", "03.11.2009"} <= geburt, funde
+    dia = next(i for i, f in enumerate(funde) if f["kategorie"] == "diagnose")
+    assert app.fund_zustand(pdf, dia) == "aus"
+    assert app.baum.item(f"{pdf}::{dia}", "values")[0].startswith("⚕ ")
+    assert "GESUNDHEITSDATEN" in gui.meldungs_codes(ergebnis)
+
+
+def test_abschlussdialog_nennt_kein_zeichen_angehakter_zeilen(app, umgebung, monkeypatch, dialoge):
+    """Befund: der Dialog nannte „⚑ in der Spalte Kategorie“ als Erkennungszeichen der Gesundheitsdaten – ⚑ steht
+    aber auch an ANGEHAKTEN Kennungen (Weitergabe aus einem anderen Dokument, Prüfziffer ungültig). Wer jedes ⚑
+    anklickte, hakte sie ab, und sie blieben lesbar. Jetzt tragen angebotene Gesundheitsdaten ein eigenes Zeichen
+    (⚕), und der Dialog nennt nur Zeichen, die an keiner angehakten Zeile stehen. Wer der Anweisung folgt, schwärzt
+    die Gesundheitsdaten – und alle Kennungen bleiben geschwärzt."""
+    tmp = umgebung["tmp"]
+    antrag = pdf_schreiben(tmp / "Antrag_BU.pdf", "Antrag Berufsunfähigkeitsversicherung\n"
+                                                  "Versicherungsschein-Nr.: BU-2025-448811\n")
+    bericht = pdf_schreiben(tmp / "Arztbericht_BU.pdf", "Ärztlicher Befundbericht\nBezug: BU-2025-448811\n"
+                                                        "Konto DE89 3704 0044 0532 0130 01\n"
+                                                        "Diagnose: Lumboischialgie links (M54.4)\n"
+                                                        "Medikation: Ibuprofen 600 mg bei Bedarf\n")
+    app.kategorie_vars["namen"].set(False)              # kein Sprachmodell nötig; Grundstufe bleibt „hoch“
+    analysiere(app, [antrag, bericht])
+    zeilen = {app.baum.item(k, "values")[1]: k for k in app.baum.get_children(str(bericht))}
+    vertrag, iban = zeilen["BU-2025-448811"], zeilen["DE89 3704 0044 0532 0130 01"]
+    dia, med = zeilen["Lumboischialgie links (M54.4)"], zeilen["Ibuprofen 600 mg bei Bedarf"]
+    art, titel, text = dialoge.liste[-1]
+    assert (art, titel) == ("warning", "Analyse abgeschlossen") and "Gesundheitsdaten (Art. 9 DSGVO) erkannt" in text
+    kinder = [k for d in app.baum.get_children("") for k in app.baum.get_children(d)]
+    angehakt_zeichen = {app.baum.item(k, "values")[0][:1] for k in kinder if app._zustand(k) == "an"}
+    genannt = {z for z in ("⚑", "⚕") if z in text}
+    assert genannt and not genannt & angehakt_zeichen, (genannt, angehakt_zeichen, text)
+    for k in (vertrag, iban):                           # angehakte Kennungen mit Hinweis: ⚑
+        assert app._zustand(k) == "an" and app.baum.item(k, "values")[0].startswith("⚑ ")
+    for k in (dia, med):                                # angebotene Gesundheitsdaten: ⚕ (im Dialog genannt)
+        assert app._zustand(k) == "aus" and app.baum.item(k, "values")[0].startswith("⚕ ")
+    assert genannt == {"⚕"} and gui.MARKE_GESUNDHEIT == "⚕ " and gui.MARKE_HINWEIS == "⚑ "
+
+    # die Anweisung befolgen: jede Zeile mit dem genannten Zeichen anklicken
+    for k in kinder:
+        if app.baum.item(k, "values")[0].startswith("⚕"):
+            app._umschalten(k)
+    assert [app._zustand(k) for k in (vertrag, iban, dia, med)] == ["an", "an", "an", "an"]
+    starte_lauf(app, app.schwaerzen, timeout=120)
+    aus = _ausgabe_text(app, bericht)
+    assert not [w for w in ("448811", "DE89", "Lumboischialgie", "Ibuprofen") if w in aus.replace(" ", "")], aus
+
+
+TARIFUEBERSICHT = ("Tarifvergleich private Krankenversicherung (Vollversicherung)\n"
+                   "Tarif A: Ambulant 100 %, Psychotherapie bis 30 Sitzungen je Jahr, Heilpraktiker 80 %.\n"
+                   "Tarif B: Ambulant 90 %, Physiotherapie und Logopädie 80 %, Sehhilfen bis 250 EUR.\n"
+                   "Stationär: Zweibettzimmer und Chefarzt in beiden Tarifen.\n"
+                   "Zahn: Zahnbehandlung 100 %, Zahnersatz 75 % (Tarif A) bzw. 60 % (Tarif B).\n"
+                   "Beitrag Tarif A: 512,40 EUR, Tarif B: 448,90 EUR monatlich.\n")
+
+
+def test_tarifuebersicht_ohne_personendaten_keine_falsche_warnung(app, umgebung, dialoge):
+    """Befund: eine Tarifübersicht ohne Personendaten brachte in „Hoch“ den Warndialog „Gesundheitsdaten (Art. 9
+    DSGVO) erkannt“ und die Statuszeile „… dann schwärzen“ bei gesperrtem Knopf. Jetzt zählen Statuszeile und Dialog
+    die angehakten Funde: „Keine Personendaten zum Schwärzen – nur mögliche Gesundheitsangaben angeboten“, vorsichtig
+    formuliert („Möglicherweise Gesundheitsdaten“, mit den Begriffen), als Information statt Warnung."""
+    pdf = pdf_schreiben(umgebung["tmp"] / "KV_Tarifuebersicht.pdf", TARIFUEBERSICHT)
+    app.kategorie_vars["namen"].set(False)
+    analysiere(app, [pdf])
+    ergebnis = app.analyse_ergebnisse[pdf]
+    kinder = app.baum.get_children(str(pdf))
+    assert kinder and all(app._zustand(k) == "aus" for k in kinder)
+    assert "GESUNDHEITSDATEN" in gui.meldungs_codes(ergebnis)
+    status = app.status_label.cget("text")
+    assert status.startswith("Keine Personendaten zum Schwärzen – nur mögliche Gesundheitsangaben angeboten "
+                             "(nicht angehakt)") and "dann schwärzen" not in status, status
+    assert str(app.start_knopf.cget("state")) == "disabled"
+    art, titel, text = dialoge.liste[-1]
+    assert (art, titel) == ("info", "Analyse abgeschlossen")
+    assert text.startswith("Keine Personendaten zum Schwärzen erkannt") and "Möglicherweise Gesundheitsdaten" in text
+    assert "„Psychotherapie“" in text and "• KV_Tarifuebersicht.pdf" in text, text
+    assert "Gesundheitsdaten (Art. 9 DSGVO) erkannt" not in text and "⚑" not in text
+    assert all(app.baum.item(k, "values")[0].startswith("⚕ ") for k in kinder)
+    protokoll = app.protokoll_text()
+    assert "möglicherweise Gesundheitsdaten" in protokoll and "keine Personendaten zum Schwärzen" in protokoll
+    assert app.warnungen_anzahl == 0
+    # wer eine Angabe doch schwärzen will, hakt sie an – dann geht der Knopf an
+    app._umschalten(kinder[0])
+    assert str(app.start_knopf.cget("state")) == "normal"
+
+
+def _dialog_bloecke(text: str) -> list[list[str]]:
+    return [block.split("\n") for block in text.split("\n\n")]
+
+
+def test_abschlussdialog_warnungen_bilden_einen_eigenen_block(app, umgebung, monkeypatch, dialoge):
+    """Befund: die Überschrift der Warnungen stand oben, ihre Punkte aber unter dem letzten Block (Gesundheitsdaten
+    bzw. „Nicht analysierbar“) – die OCR-Warnung wirkte wie ein Teil davon. Jetzt ist jeder Block Überschrift plus
+    eigene Punkte, durch Leerzeilen getrennt."""
+    tmp = umgebung["tmp"]
+    pdfs = [pdf_schreiben(tmp / n) for n in ("arzt.pdf", "scan.pdf", "kaputt.pdf")]
+    ocr_warnung = "1 Seite(n) per OCR gelesen. OCR kann sich verlesen — Ergebnis bitte besonders sorgfältig prüfen!"
+    gesundheit = {"art": "hinweis", "code": "GESUNDHEITSDATEN", "text": "Das Dokument enthält Gesundheitsdaten.",
+                  "seite": None}
+    ocr = {"art": "warnung", "code": "OCR_GELESEN", "text": ocr_warnung, "seite": None}
+    attrappe = fake_analyse_neu({"arzt.pdf": [FUND_TEL], "scan.pdf": [FUND_MAIL]},
+                                warnungen_je_datei={"scan.pdf": [ocr_warnung]},
+                                meldungen_je_datei={"arzt.pdf": [gesundheit], "scan.pdf": [ocr], "kaputt.pdf": []})
+
+    def mit_fehler(pdf_pfad, *args, **kwargs):
+        ergebnis = attrappe(pdf_pfad, *args, **kwargs)
+        if pdf_pfad.name == "kaputt.pdf":
+            ergebnis.update(fehler="Passwortgeschützt — übersprungen.", funde=[])
+        return ergebnis
+    monkeypatch.setattr(gui, "analysiere_pdf", mit_fehler)
+    analysiere(app, pdfs)
+    art, titel, text = dialoge.liste[-1]
+    assert (art, titel) == ("warning", "Analyse abgeschlossen")
+    bloecke = _dialog_bloecke(text)
+    kopf = {b[0].split(" ")[0]: b for b in bloecke}
+    warnungen = bloecke[0]
+    assert warnungen[0].startswith("Die Analyse hat 2 Fund(e) ergeben und 2 Warnung(en)/Fehler gemeldet")
+    assert warnungen[1:] == [f"  • scan.pdf: {ocr_warnung}"], bloecke
+    assert kopf["Nicht"][1:] == ["  • kaputt.pdf: Passwortgeschützt — übersprungen."], bloecke
+    gesundheit_block = kopf["Gesundheitsdaten"]
+    assert gesundheit_block[0].startswith("Gesundheitsdaten (Art. 9 DSGVO) erkannt")
+    assert gesundheit_block[1:] == ["  • arzt.pdf"], bloecke
+    # jeder Punkt gehört zu der Überschrift seines Blocks
+    for block in bloecke:
+        assert not block[0].startswith("  •") and all(z.startswith("  •") for z in block[1:]), block

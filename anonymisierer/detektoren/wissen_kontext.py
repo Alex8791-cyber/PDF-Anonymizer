@@ -4,6 +4,9 @@
                        Gesundheitskontext (Diagnose:, leidet an, Medikation:, ICD-Code, Dosierung)
                        -> Kategorien "diagnose", "medikament". In „maximal“ geschwärzt; in „hoch“ erkennt die
                        Analyse sie als Hinweis (muster.hinweis_kategorien) und bietet sie abgewählt an.
+                       Stützt sich ein Treffer nur auf allgemeine Wörter (Therapie, ambulant, Krankenhaus, Reha …),
+                       die genauso in Tarif- und Leistungsübersichten stehen, ist er nur vermutet: Quelle
+                       "wissen.gesundheit.vermutet", Sicherheit 0.5 (erkannt wird er trotzdem).
     wissen.beruf       Beruf hinter einem Etikett (Beruf:, ausgeübte Tätigkeit:) oder im Satz (arbeitet als,
                        ist … von Beruf) -> "beruf"
     org.arbeitgeber    Organisation hinter "Arbeitgeber:" oder im Satz (beschäftigt bei, arbeitet … bei der …)
@@ -72,6 +75,17 @@ _GESUNDHEIT_PROSA_RE = re.compile(
     r"symptom|arbeitsunfähig|krankgeschrieben|operiert|operation|eingenommen|verordnet|medikation|einnahme|"
     r"stationär|ambulant|klinik|krankenhaus|reha(?:bilitation)?|gesundheitsfrage|attest|arztbrief|facharzt|"
     r"hausarzt|ärztlich)")
+# Wörter mit Bezug zu einer Person oder einem Krankheitsgeschehen (Teilmenge von _GESUNDHEIT_PROSA_RE) und eine
+# Anrede mit Namen („Herr Meier“). Die übrigen Kontextwörter (Therapie, Behandlung, ambulant, stationär, Klinik,
+# Krankenhaus, Reha, Operation, Erkrankung …) stehen genauso in Tarif- und Leistungsübersichten
+# („Psychotherapie 30 Sitzungen, ambulant 100 %“).
+_GESUNDHEIT_PERSON_RE = re.compile(
+    r"(?i:leidet|litt|leiden|erkrankt|diagnose|diagnostiziert|befund|patient(?:in)?|behandelt|anamnese|"
+    r"zustand[ \t]+nach|z\.[ \t]?n\.|v\.[ \t]?a\.|verdacht[ \t]+auf|vorerkrankung|beschwerden|symptom|"
+    r"arbeitsunfähig|krankgeschrieben|operiert|eingenommen|verordnet|medikation|einnahme|attest|arztbrief)"
+    r"|(?<![\wäöüß])(?:Herrn?|Frau)[ \t]+[A-ZÄÖÜ]")
+QUELLE_GESUNDHEIT = "wissen.gesundheit"
+QUELLE_GESUNDHEIT_VERMUTET = "wissen.gesundheit.vermutet"   # nur allgemeine Fachbegriffe, kein Personenbezug
 _DOSIS_RE = re.compile(
     r"(?:[ \t]*-?(?:Spray|Tabletten?|Tbl\.?|Kapseln?|Kps\.?|Tropfen|Salbe|Creme|Gel|Retard|retard|forte|"
     r"comp\.?|Inhalat(?:or|ion)|Injektion|Pen|Pflaster|Saft|Lösung|Zäpfchen))?"
@@ -84,24 +98,50 @@ _KOERPER_RE = re.compile(
     r"|(?:Größe|Körpergröße)[ \t]*:?[ \t]*\d{3}[ \t]?cm|(?:Gewicht|Körpergewicht)[ \t]*:?[ \t]*\d{2,3}(?:[.,]\d)?[ \t]?kg"
     r"|BMI[ \t]*:?[ \t]*\d{2}(?:[.,]\d{1,2})?)(?![\w])")
 _DIAGNOSE_LINKS_RE = re.compile(f"(?:[{_GROSS}{_KLEIN}][{_KLEIN}]+(?:e|en|er|es|em)[ \t]+)$")
+# Wörter, die wie ein Adjektiv enden, aber keins sind („wie Krebs“, „eine Depression“, „keine Allergie“): die Angabe
+# wird nicht um sie nach links erweitert
+_KEIN_DIAGNOSE_ADJEKTIV = {
+    "wie", "die", "eine", "einer", "einem", "einen", "eines", "keine", "keiner", "keinem", "keinen", "keines",
+    "seine", "seiner", "seinem", "seinen", "seines", "ihre", "ihrer", "ihrem", "ihren", "ihres", "meine", "meiner",
+    "unsere", "unserer", "unserem", "unseren", "diese", "dieser", "diesem", "diesen", "dieses", "jede", "jeder",
+    "jedem", "jeden", "jedes", "alle", "allen", "allem", "aller", "beide", "beiden", "andere", "anderen", "anderer",
+    "einige", "einigen", "mehrere", "mehreren", "viele", "vielen", "welche", "welcher", "solche", "solcher",
+    "oder", "aber", "unter", "über", "hinter", "wegen", "gegen", "sowie", "ohne", "habe", "hatte", "wurde",
+    "werde", "leider", "wieder", "immer", "außer", "ferner", "früher", "später", "weiter", "bitte", "sehe"}
+# Erweiterung nach rechts: Seite, Verlauf, Typ/Grad/Stadium, „mit/bei/des … + bis zu zwei Wörter“ (das zweite nur
+# großgeschrieben: „bei Herrn Meier“, „des rechten Kniegelenks“ – nicht „nach Unfall bis“, „nach Unfall 2“)
 _DIAGNOSE_RECHTS_RE = re.compile(
     r"(?:,?[ \t]+(?:links|rechts|beidseits|beidseitig|bds\.|li\.|re\.|chronisch|akut|rezidivierend|"
     r"mittelgradig|leichtgradig|schwer|leicht|primär|sekundär|paroxysmal|persistierend|"
     r"Typ[ \t]+(?:\d|I{1,3}|IV|V)[a-b]?|Grad[ \t]+(?:\d|I{1,3}|IV|V)|Stadium[ \t]+\w+|"
-    r"(?:mit|ohne|bei|durch|des|der|nach)[ \t]+[\wäöüÄÖÜß\-]+(?:[ \t]+[\wäöüÄÖÜß\-]+)?|"
+    r"(?:mit|ohne|bei|durch|des|der|nach)[ \t]+[\wäöüÄÖÜß\-]+(?:[ \t]+[A-ZÄÖÜ][\wäöüÄÖÜß\-]*)?|"
     r"[A-Z]\d(?:/[A-Z]?\d)?|[\wäöüÄÖÜß]+-[\wäöüÄÖÜß\-]+))*"
     r"(?:[ \t]*\((?:[A-TV-Z]\d{2}(?:\.\d{1,2})?[A-Z!*+]?(?:[ \t]?[GVZALRB])*)\))?")
 
 
-def _gesundheitskontext(text: str, s: int, e: int, etikett_bereiche) -> bool:
+def _gesundheitskontext_art(text: str, s: int, e: int, etikett_bereiche) -> str | None:
+    """Gesundheitskontext einer Stelle: "sicher" (hinter einem Gesundheits-Etikett, ICD-Code in der Zeile oder ein
+    Wort mit Bezug zu einer Person/einem Krankheitsgeschehen vor oder hinter der Stelle – „leidet an“, „Patientin“,
+    „diagnostiziert“ …), "vermutet" (nur allgemeine Wörter wie Therapie, ambulant, Krankenhaus, Reha – auch im
+    Begriff selbst; so stehen sie auch in Tarif- und Leistungsübersichten) oder None (kein Gesundheitskontext).
+    Erkannt wird in beiden Fällen (dieselbe Schranke wie bisher), "vermutet" ändert nur Quelle und Wortlaut."""
     if any(a <= s < b for a, b in etikett_bereiche):
-        return True
+        return "sicher"
     a, b = _zeilen_grenzen(text, s)
     zeile = text[a:b]
     if _ICD_RE.search(zeile) and re.search(r"\([A-TV-Z]\d{2}", zeile):
-        return True
+        return "sicher"
     fenster = text[max(0, s - 140):min(len(text), e + 100)]
-    return bool(_GESUNDHEIT_PROSA_RE.search(fenster))
+    if not _GESUNDHEIT_PROSA_RE.search(fenster):
+        return None                              # Schranke wie bisher: ohne Kontextwort nichts erkannt
+    davor, danach = text[max(0, s - 140):s], text[e:min(len(text), e + 100)]
+    if _GESUNDHEIT_PERSON_RE.search(davor) or _GESUNDHEIT_PERSON_RE.search(danach):
+        return "sicher"
+    return "vermutet"
+
+
+def _gesundheitskontext(text: str, s: int, e: int, etikett_bereiche) -> bool:
+    return _gesundheitskontext_art(text, s, e, etikett_bereiche) is not None
 
 
 def _etikett_bereiche(text: str) -> list:
@@ -141,9 +181,9 @@ def _icd_stellen(text: str, etikett_bereiche) -> list:
     return aus
 
 
-def diagnosen_stellen(text: str) -> list:
-    """Diagnosen (Wissensbasis) mit Gesundheitskontext, auf die ganze Angabe erweitert ("Generalisierte
-    Angststörung (F41.1)", "Lumboischialgie links (M54.4)"), ICD-10-Codes und Körpermaße."""
+def _diagnosen_mit_art(text: str) -> list:
+    """Wie diagnosen_stellen, je Stelle mit Art: [(start, ende, sicher)] – sicher = Etikett, ICD-Code, Körpermaß
+    oder Personenbezug; sonst nur vermutet (siehe _gesundheitskontext_art)."""
     if not text:
         return []
     bereiche = _etikett_bereiche(text)
@@ -155,11 +195,12 @@ def diagnosen_stellen(text: str) -> list:
         in_etikett = any(x <= v.start < y for x, y in bereiche)
         if kurz and not (in_etikett or icd_folgt):
             continue
-        if not kurz and not (in_etikett or icd_folgt or _gesundheitskontext(text, v.start, v.ende, bereiche)):
+        art = "sicher" if in_etikett or icd_folgt else _gesundheitskontext_art(text, v.start, v.ende, bereiche)
+        if art is None:
             continue
         s, e = v.start, v.ende
         links = _DIAGNOSE_LINKS_RE.search(text[a:s])
-        if links:
+        if links and links.group(0).strip().casefold() not in _KEIN_DIAGNOSE_ADJEKTIV:
             s = a + links.start()
         rechts = _DIAGNOSE_RECHTS_RE.match(text, e)
         if rechts and rechts.end() <= b:
@@ -170,15 +211,22 @@ def diagnosen_stellen(text: str) -> list:
             schluss = text.find(")", v.ende + icd_folgt.start(), b)
             if schluss > 0:
                 e = schluss + 1
-        aus.append((s, e))
-    aus.extend(_icd_stellen(text, bereiche))
+        aus.append((s, e, art == "sicher"))
+    aus.extend((s, e, True) for s, e in _icd_stellen(text, bereiche))
     for m in _KOERPER_RE.finditer(text):
-        aus.append((m.start(), m.end()))
-    return _vereinigen(aus)
+        aus.append((m.start(), m.end(), True))
+    return _vereinigen_mit_art(aus)
 
 
-def medikamente_stellen(text: str) -> list:
-    """Medikamente (Wissensbasis) mit Dosierung oder im Medikationskontext ("Ibuprofen 600 mg bei Bedarf")."""
+def diagnosen_stellen(text: str) -> list:
+    """Diagnosen (Wissensbasis) mit Gesundheitskontext, auf die ganze Angabe erweitert ("Generalisierte
+    Angststörung (F41.1)", "Lumboischialgie links (M54.4)"), ICD-10-Codes und Körpermaße."""
+    return [(s, e) for s, e, _ in _diagnosen_mit_art(text)]
+
+
+def _medikamente_mit_art(text: str) -> list:
+    """Wie medikamente_stellen, je Stelle mit Art: [(start, ende, sicher)] – sicher = Dosierung, Etikett oder
+    Personenbezug; sonst nur vermutet."""
     if not text:
         return []
     bereiche = _etikett_bereiche(text)
@@ -189,13 +237,21 @@ def medikamente_stellen(text: str) -> list:
         dosis = _DOSIS_RE.match(text, v.ende)
         mit_dosis = dosis is not None and dosis.end() > v.ende and re.search(r"\d|Bedarf|täglich|Spray",
                                                                               dosis.group(0))
-        if not (mit_dosis or any(x <= v.start < y for x, y in bereiche)
-                or _gesundheitskontext(text, v.start, v.ende, bereiche)):
-            continue
+        if mit_dosis or any(x <= v.start < y for x, y in bereiche):
+            art = "sicher"
+        else:
+            art = _gesundheitskontext_art(text, v.start, v.ende, bereiche)
+            if art is None:
+                continue
         e = dosis.end() if dosis is not None else v.ende
         s, e = _rstrip_stelle(text, v.start, e)
-        aus.append((s, e))
-    return _vereinigen(aus)
+        aus.append((s, e, art == "sicher"))
+    return _vereinigen_mit_art(aus)
+
+
+def medikamente_stellen(text: str) -> list:
+    """Medikamente (Wissensbasis) mit Dosierung oder im Medikationskontext ("Ibuprofen 600 mg bei Bedarf")."""
+    return [(s, e) for s, e, _ in _medikamente_mit_art(text)]
 
 
 def _vereinigen(stellen: list) -> list:
@@ -208,12 +264,28 @@ def _vereinigen(stellen: list) -> list:
     return aus
 
 
+def _vereinigen_mit_art(stellen: list) -> list:
+    """Wie _vereinigen für (start, ende, sicher): eine vereinigte Stelle ist sicher, wenn ein Teil es ist."""
+    aus = []
+    for s, e, sicher in sorted(stellen):
+        if aus and s < aus[-1][1]:
+            aus[-1] = (aus[-1][0], max(aus[-1][1], e), aus[-1][2] or sicher)
+        else:
+            aus.append((s, e, sicher))
+    return aus
+
+
 @detektor("wissen.gesundheit", {"diagnose", "medikament"}, ALLE_PROFILE)
 def gesundheit(dok, kontext):
-    """Gesundheitsdaten (Art. 9 DSGVO): Diagnosen, ICD-10, Körpermaße -> diagnose; Medikamente -> medikament."""
+    """Gesundheitsdaten (Art. 9 DSGVO): Diagnosen, ICD-10, Körpermaße -> diagnose; Medikamente -> medikament.
+    Nur vermutete Treffer (allgemeine Fachbegriffe ohne Etikett, ICD-Code, Dosierung oder Personenbezug) tragen die
+    Quelle QUELLE_GESUNDHEIT_VERMUTET und Sicherheit 0.5 – die Analyse formuliert ihren Hinweis vorsichtiger."""
     text = dok.text
-    treffer = [Treffer(s, e, "diagnose", "wissen.gesundheit", 0.7) for s, e in diagnosen_stellen(text)]
-    treffer += [Treffer(s, e, "medikament", "wissen.gesundheit", 0.7) for s, e in medikamente_stellen(text)]
+    treffer = []
+    for kategorie, stellen in (("diagnose", _diagnosen_mit_art(text)), ("medikament", _medikamente_mit_art(text))):
+        for s, e, sicher in stellen:
+            treffer.append(Treffer(s, e, kategorie, QUELLE_GESUNDHEIT if sicher else QUELLE_GESUNDHEIT_VERMUTET,
+                                   0.7 if sicher else 0.5))
     return treffer
 
 

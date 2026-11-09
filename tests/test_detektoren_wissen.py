@@ -289,3 +289,51 @@ def test_generator_merkmal_sonderzeichen_windows(tmp_path):
     assert {" "} <= set(text) and set(text) & {"­", "‐", "‑"}
     betroffen = [e for e in w["eintraege"] if "Sonderzeichen" in e.get("bemerkung", "")]
     assert betroffen and all(Gefaltet(e["text"]).kette for e in betroffen)
+
+
+# ---------------------------------------------------------------------- Review „Integration Wissen“
+@pytest.mark.parametrize("text, erwartet", [
+    ("Diagnose: Diabetes mellitus Typ 2 bei Herrn Meier", ["Meier"]),
+    ("Befund: Morbus Crohn bei Frau Schulz", ["Schulz"]),
+    ("Patient: Hans Meier leidet an Morbus Bechterew Grad II", ["Hans", "Meier"]),
+    ("Zeuge: Herr Xyzzab Qwonk, Medikation: Metformin 1000 mg", ["Xyzzab", "Qwonk"]),
+    ("Frau Merve Koç, leidet an Obstruktives Schlafapnoe-Syndrom (G47.31).", ["Merve", "Koç"]),
+    ("Merve Karaca, leidet an Koronare Herzkrankheit, Ein-Gefäß-Erkrankung (I25.11). Die Patientin/der Patient",
+     ["Karaca"]),
+    ("Patient: Diagnose Diabetes mellitus Typ 2 bei Xyzzab", ["Xyzzab"]),   # nach „bei“: Name
+])
+def test_unbekannte_eigennamen_nicht_in_diagnosen(text, erwartet):
+    """„maximal“: Wörter einer Diagnose/eines Medikaments („Morbus Crohn“, „Diabetes mellitus Typ 2“, „Obstruktives
+    Schlafapnoe-Syndrom“, „Ein-Gefäß-Erkrankung (I25.11)“) und Bezeichnungen mit Nummer („Grad II“) sind keine
+    unbekannten Eigennamen – sonst stünde in einer abgewählten, also lesbaren Diagnose „Diabetes mellitus [PERSON B]
+    2“. Nach „bei“ oder einer Anrede bleibt ein Wort darin ein Name."""
+    assert [text[t.start:t.ende] for t in wn.unbekannte_eigennamen(text)] == erwartet
+
+
+def test_gesundheit_vermutet_nur_bei_allgemeinen_fachbegriffen():
+    """Erkennung unverändert, aber Treffer, die sich nur auf allgemeine Wörter stützen (Tarif-/Leistungsbegriffe:
+    Therapie, ambulant, Krankenhaus, Reha …), tragen die Quelle „wissen.gesundheit.vermutet“ (Sicherheit 0.5);
+    Etikett, ICD-Code, Dosierung, Körpermaß oder Bezug zu einer Person -> „wissen.gesundheit“ (0.7)."""
+    def treffer(text):
+        dok = dokument_aus_text(text)
+        return {(dok.text[t.start:t.ende], t.quelle, t.sicherheit) for t in alle_treffer(
+            dok, Kontext(muster.PROFILE["maximal"]["aktive"], "maximal")) if t.kategorie in muster.GESUNDHEIT}
+    assert treffer("Tarif A: Ambulant 100 %, Psychotherapie bis 30 Sitzungen.") == {
+        ("Psychotherapie", "wissen.gesundheit.vermutet", 0.5)}
+    assert treffer("Leistung bei schweren Erkrankungen wie Krebs, Herzinfarkt und Schlaganfall.") == {
+        ("Krebs", "wissen.gesundheit.vermutet", 0.5), ("Herzinfarkt", "wissen.gesundheit.vermutet", 0.5),
+        ("Schlaganfall", "wissen.gesundheit.vermutet", 0.5)}
+    assert treffer("Die Patientin ist seit 2019 in Psychotherapie.") == {("Psychotherapie", "wissen.gesundheit", 0.7)}
+    assert treffer("Seit der Chemotherapie kann Herr Meier nicht arbeiten.") == {
+        ("Chemotherapie", "wissen.gesundheit", 0.7)}
+    assert treffer("Medikation:\n· Bisoprolol 2,5 mg 1-0-0\nDiagnose: Lumboischialgie links (M54.4)") == {
+        ("Bisoprolol 2,5 mg 1-0-0", "wissen.gesundheit", 0.7),
+        ("Lumboischialgie links (M54.4)", "wissen.gesundheit", 0.7)}
+    assert treffer("Ibuprofen bei Rückenschmerzen nach Krankenhausaufenthalt") == {
+        ("Ibuprofen", "wissen.gesundheit.vermutet", 0.5),
+        ("Rückenschmerzen nach Krankenhausaufenthalt", "wissen.gesundheit.vermutet", 0.5)}
+    # die Schranke bleibt: eine Anrede allein ist kein Gesundheitskontext (nur die Art eines Treffers hängt an ihr)
+    assert treffer("Herr Meier hat Diabetes.") == set()
+    # die Stellen selbst sind dieselben wie die der Text-Schnittstelle
+    text = "Leistung bei schweren Erkrankungen wie Krebs, Herzinfarkt und Schlaganfall."
+    assert _texte(wk.diagnosen_stellen, text) == ["Krebs", "Herzinfarkt", "Schlaganfall"]
