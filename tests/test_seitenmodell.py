@@ -506,3 +506,35 @@ def test_ausgabe_vorschau_mit_verdacht(tmp_path):
     v = [Verdacht(0, 0, 4, "Text", "Test", [fitz.Rect(50, 60, 80, 72)]), Verdacht(1, 0, 1, "x", "andere Seite", [])]
     aus = vorschau.ausgabe_vorschau(pdf, v, 0, 1.0)
     assert aus["bild"][:4] == b"\x89PNG" and len(aus["verdacht"]) == 1 and aus["verdacht"][0]["grund"] == "Test"
+
+
+# ----------------------------------------------------------------------
+# Blocksatz mit einzeln gesetzten Wörtern vs. Tabellenzeile (Entwicklungs-Benchmark 015_zweispaltig:
+# "Konto DE83 2540 …" zerfiel in Zellen, die IBAN wurde nicht mehr erkannt)
+# ----------------------------------------------------------------------
+def _woerter_setzen(seite, y, woerter, x0=50, fontsize=10, luecken=None):
+    """Jedes Wort einzeln setzen (wie Blocksatz-Generatoren); luecken in pt (Standard: 0,83 em)."""
+    x = x0
+    for i, w in enumerate(woerter):
+        seite.insert_text((x, y), w, fontsize=fontsize)
+        x += fitz.get_text_length(w, fontsize=fontsize)
+        x += (luecken[i] if luecken else 0.83 * fontsize) if i < len(woerter) - 1 else 0
+
+
+def test_blocksatz_mit_einzeln_gesetzten_woertern_bleibt_fliesstext(tmp_path):
+    doc = fitz.open()
+    seite = doc.new_page()
+    _woerter_setzen(seite, 100, "dem Konto DE89 3704 0044 0532 0130 00 belastet.".split())
+    _woerter_setzen(seite, 140, ["Name", "Geburtsdatum", "Betrag"], luecken=[60, 15])      # Tabelle
+    pdf = tmp_path / "blocksatz.pdf"
+    doc.save(pdf)
+    doc.close()
+    with fitz.open(pdf) as d:
+        info = sm.dokument_vorbereiten(d)
+        dok = sm.dokument_aufbauen(info["dokument"], pdf, vorbereitung=info)
+    zeilen = dok.text.split("\n")
+    assert "dem Konto DE89 3704 0044 0532 0130 00 belastet." in zeilen, zeilen
+    assert "Name" + sm.SPALTENTRENNER + "Geburtsdatum" + sm.SPALTENTRENNER + "Betrag" in zeilen, zeilen
+    from anonymisierer.analyse import analysiere_pdf
+    e = analysiere_pdf(pdf, {"iban"}, [], [])
+    assert [f["text"] for f in e["funde"]] == ["DE89 3704 0044 0532 0130 00"]

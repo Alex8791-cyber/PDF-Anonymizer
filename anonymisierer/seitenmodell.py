@@ -842,32 +842,54 @@ def _textzeilen(seite, textpage=None) -> list:
 
 def _zeilen_vereinen(zeilen: list) -> list:
     """Aufeinanderfolgende MuPDF-Zeilen desselben Blocks auf derselben Grundlinie (Tabellenzellen,
-    'Etikett    Wert') zu einer Zeile verbinden – mit Spaltentrenner bei breiter Lücke."""
+    'Etikett    Wert', einzeln gesetzte Wörter) zu einer Zeile verbinden – mit Spaltentrenner bei breiter
+    Lücke. Gleichmäßige Lücken zwischen mindestens drei Stücken sind Blocksatz (Wortabstände, keine
+    Spalten): dort steht ein Leerzeichen, sonst würde "Konto DE83 2540 …" in Zellen zerfallen."""
     if not ZEILEN_VEREINEN:
         return zeilen
-    aus = []
-    v_box = v_grund = v_groesse = None        # Werte der letzten Zeile in aus (einmal berechnet)
+    # 1) Gruppen: [(zeile, box, grundlinie, groesse), ...]; verglichen wird mit der ersten Grundlinie und
+    #    dem rechten Rand der bisherigen Gruppe
+    gruppen = []
+    rechts = None
     for z in zeilen:
         z_box = z.box()
-        z_grund, z_groesse = z.grundlinie(), z.groesse()
-        if aus and v_box is not None and z_box is not None:
-            v = aus[-1]
-            if (v.block == z.block and v.horizontal and z.horizontal and v.quelle == z.quelle == "text"
-                    and v.feld is None and z.feld is None):
-                groesse = max(v_groesse, z_groesse, 1.0)
-                if abs(v_grund - z_grund) <= 0.25 * groesse and z_box.x0 >= v_box.x1 - 1.0:
-                    luecke = z_box.x0 - v_box.x1
-                    if luecke > 0.6 * groesse:
-                        v.inhalt.append(SPALTENTRENNER)
-                    elif luecke > 0.15 * groesse:
-                        v.inhalt.append(" ")
-                    v.inhalt.extend(z.inhalt)
-                    v_box = _rect(min(v_box.x0, z_box.x0), min(v_box.y0, z_box.y0),
-                                  max(v_box.x1, z_box.x1), max(v_box.y1, z_box.y1))
-                    v_groesse = max(v_groesse, z_groesse)
+        eintrag = (z, z_box, z.grundlinie(), z.groesse())
+        if gruppen and z_box is not None and rechts is not None:
+            gruppe = gruppen[-1]
+            v, _, v_grund, _ = gruppe[0]
+            letzte = gruppe[-1][0]
+            if (v.block == z.block and letzte.horizontal and z.horizontal
+                    and letzte.quelle == z.quelle == "text" and letzte.feld is None and z.feld is None):
+                groesse = max(max(e[3] for e in gruppe), eintrag[3], 1.0)
+                if abs(v_grund - eintrag[2]) <= 0.25 * groesse and z_box.x0 >= rechts - 1.0:
+                    gruppe.append(eintrag)
+                    rechts = max(rechts, z_box.x1)
                     continue
-        aus.append(z)
-        v_box, v_grund, v_groesse = z_box, z_grund, z_groesse
+        gruppen.append([eintrag])
+        rechts = z_box.x1 if z_box is not None else None
+    # 2) Trenner je Lücke
+    aus = []
+    for gruppe in gruppen:
+        erste = gruppe[0][0]
+        aus.append(erste)
+        if len(gruppe) == 1:
+            continue
+        groesse = max(max(e[3] for e in gruppe), 1.0)
+        luecken = []
+        rechts = gruppe[0][1].x1
+        for _, box, _, _ in gruppe[1:]:
+            luecken.append(box.x0 - rechts)
+            rechts = max(rechts, box.x1)
+        blocksatz = (len(luecken) >= 2 and min(luecken) > 0.15 * groesse and max(luecken) <= 2.0 * groesse
+                     and max(luecken) <= 1.5 * min(luecken) + 0.05 * groesse)
+        for (z, _, _, _), luecke in zip(gruppe[1:], luecken):
+            if blocksatz:
+                erste.inhalt.append(" ")
+            elif luecke > 0.6 * groesse:
+                erste.inhalt.append(SPALTENTRENNER)
+            elif luecke > 0.15 * groesse:
+                erste.inhalt.append(" ")
+            erste.inhalt.extend(z.inhalt)
     return aus
 
 

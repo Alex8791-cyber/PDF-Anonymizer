@@ -911,3 +911,41 @@ def test_zellen_namen_gegenprobe_der_ki():
     assert ok is not None
     assert namen_ <= ok, namen_ - ok
     assert not (woerter & ok), woerter & ok
+
+
+def test_muster_ueberspannen_keine_spaltentrenner():
+    """Entwicklungs-Benchmark 010_bestandsliste: "78050 Villingen-Schwenningen | Kfz | Spreewald" wurde ein
+    PLZ/Ort-Fund und schwärzte Sparte und Versicherer (Über-Schwärzung 6 % -> 17 %)."""
+    zeile = "1 Hahn, Annika\t\t14.03.1961\t\t78050 Villingen-Schwenningen\t\tKfz\t\tSpreewald\t\t2520868691"
+    funde = analysiere_text(zeile, {"plzort"}, [], [])
+    assert [f["text"] for f in funde] == ["78050 Villingen-Schwenningen"]
+    tabelle = "PLZ\t\tOrt\n53285\t\tBonn"
+    assert any(f["text"].split() == ["53285", "Bonn"] for f in analysiere_text(tabelle, {"plzort"}, [], []))
+
+
+def test_etikett_und_wert_in_nachbarzellen():
+    """Entwicklungs-Benchmark 015/029_zweispaltig: "Vertragsnummer | LV/86/0439377" in einer Zeile galt dem
+    Muster als Spaltenkopf (Tabulator ohne Doppelpunkt) – die zeilenweise Lesart findet den Wert."""
+    funde = analysiere_text("Vertragsnummer\t\tLV/86/0439377\nBeginn 01.01.2020", {"vertrag"}, [], [])
+    assert "LV/86/0439377" in {f["text"] for f in funde}
+    # Spaltenkopf bleibt Spaltenkopf: Wert aus der Folgezeile
+    kopf = "Vertragsnummer\t\tBeginn\t\tAblauf\nLV-2018-933486\t\t01.10.2018\t\t01.10.2034"
+    assert "LV-2018-933486" in {f["text"] for f in analysiere_text(kopf, {"vertrag"}, [], [])}
+
+
+def test_tabellenzelle_nachname_komma_vorname(monkeypatch):
+    """Bestandsliste: "Hahn, Annika" – die KI übersieht Nachnamen, die auch Wörter sind; ist der Vorname als
+    Person bekannt, wird die ganze Zelle eine Person (sonst bliebe "Hahn" stehen)."""
+    monkeypatch.setattr(na, "lade_ner", lambda: None)
+    monkeypatch.setattr(na, "finde_personen", _kurzzeilen_ki({"Annika hat angerufen.": ["Annika"],
+                                                               "Annika": ["Annika"]}))
+    text = ("Annika hat angerufen.\n"
+            "Nr. Kunde (Name, Vorname)\t\tgeb.\t\tOrt\n"
+            "1 Hahn, Annika\t\t14.03.1961\t\tBerlin\n"
+            "2 van den Berg, Annika\t\t07.03.1968\t\tLauf\n"
+            "3 Berlin, Hamburg\t\t01.01.1970\t\tKöln\n")
+    funde = {f["text"]: f for f in analysiere_text(text, {"namen"}, [], [])}
+    assert "Hahn, Annika" in funde and "van den Berg, Annika" in funde
+    assert not any("Hamburg" in t or "Berlin" in t for t in funde)
+    stellen = {text[s["start"]:s["ende"]] for f in funde.values() for s in f["stellen"]}
+    assert "Hahn, Annika" in stellen

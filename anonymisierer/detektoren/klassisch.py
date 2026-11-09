@@ -43,6 +43,35 @@ def _funktion(schluessel):
     return None
 
 
+def _zeilenweise(dok) -> str | None:
+    """Der Dokumenttext mit jeder Tabellenzelle auf einer eigenen Zeile (Spaltentrenner -> Zeilenumbruch) –
+    so, wie die Muster ihn vor dem Seitenmodell sahen; None ohne Spaltentrenner. Einmal je Dokument."""
+    text = dok.text
+    if SPALTENTRENNER not in text:
+        return None
+    zwischen = getattr(dok, "_klassisch_zeilenweise", None)
+    if zwischen is None or zwischen[0] is not text:
+        zwischen = (text, text.replace(SPALTENTRENNER, "\n"))
+        try:
+            dok._klassisch_zeilenweise = zwischen
+        except AttributeError:
+            pass
+    return zwischen[1]
+
+
+def _muster_texte(funktion, dok) -> list:
+    """Fundtexte eines Musters. Die Muster stammen aus der Zeit vor dem Seitenmodell (Tabellenzellen auf
+    eigenen Zeilen) und lassen Leerraum zwischen Wörtern zu – über einen Spaltentrenner hinweg würden sie
+    Nachbarzellen verschlucken ("78050 Villingen-Schwenningen | Kfz | Spreewald") oder ein Etikett mit Wert
+    für einen Spaltenkopf halten ("Vertragsnummer | LV/86/0439377"). Deshalb: Treffer im Dokumenttext, die
+    keinen Spaltentrenner überspannen, plus die Treffer der zeilenweisen Lesart."""
+    roh = [x for x in funktion(dok.text) if x and SPALTENTRENNER not in x]
+    zeilenweise = _zeilenweise(dok)
+    if zeilenweise is not None:
+        roh += list(funktion(zeilenweise))
+    return [t for t in dict.fromkeys(x.strip() for x in roh if x and x.strip()) if len(t) >= 2]
+
+
 def _muster_detektor(schluessel: str):
     quelle = f"muster.{schluessel}"
 
@@ -52,7 +81,7 @@ def _muster_detektor(schluessel: str):
             return []
         modus = modus_fuer(schluessel)
         sicherheit = SICHERHEIT.get(schluessel, 0.7)
-        texte = [t for t in dict.fromkeys(x.strip() for x in funktion(dok.text) if x and x.strip()) if len(t) >= 2]
+        texte = _muster_texte(funktion, dok)
         treffer = []
         pruefen = _PLAUSIBEL.get(schluessel)
         for stellen in _vorkommen(dok, texte, modus).values():
@@ -185,7 +214,72 @@ def _zellen_kandidaten(text: str, kandidaten: list) -> list:
         bestaetigt = _zellen_namen_bestaetigen({k["text"] for k in aus})
         if bestaetigt is not None:
             aus = [k for k in aus if k["text"] in bestaetigt]
+    aus += _komma_zellen(text, zellen, kandidaten + aus)
     return aus
+
+
+# Zelle "Nachname, Vorname" (Bestandslisten, Teilnehmerlisten), davor höchstens eine laufende Nummer
+_KOMMA_ZELLE_RE = re.compile(
+    r"(?:\d{1,4}\.?[ ]+)?"
+    r"((?:(?:von|van|de|der|den|di|da|del|della|du|le|la|ter|ten|zu|zum|zur|vom)[ ]+)*"
+    r"[^\W\d_][\w'’\-]*(?:[ \-][^\W\d_][\w'’\-]*)?)"
+    r",[ ]+([^\W\d_][\w'’\-]*(?:[ \-][^\W\d_][\w'’\-]*)?)")
+
+
+_PARTIKEL_KLEIN = frozenset({"von", "van", "de", "der", "den", "di", "da", "del", "della", "du", "le", "la", "ter",
+                             "ten", "zu", "zum", "zur", "vom"})
+
+
+def _nachname_gross(nachname: str) -> bool:
+    """Der Nachname (ohne vorangestellte Partikel wie "von", "van den") beginnt mit einem Großbuchstaben."""
+    kern = next((w for w in nachname.split() if w not in _PARTIKEL_KLEIN), "")
+    return kern[:1].isupper()
+
+
+def _komma_zellen(text: str, zellen: str, kandidaten: list) -> list:
+    """Zellen der Form "Nachname, Vorname" als ganze Person, wenn der Vorname als Person gilt: schon erkannt
+    oder von der KI im neutralen Satz bestätigt. Die KI übersieht sonst Nachnamen, die auch Wörter sind
+    ("Hahn, Annika", "Weber, Jonas"), und schwärzt nur den Vornamen."""
+    paare = []
+    pos = 0
+    for zeile in zellen.split("\n"):
+        inhalt = zeile.strip()
+        if inhalt and "," in inhalt and len(inhalt) <= 60:
+            m = _KOMMA_ZELLE_RE.fullmatch(inhalt)
+            if m and _nachname_gross(m.group(1)) and m.group(2)[0].isupper():
+                anfang = pos + zeile.index(inhalt)
+                paare.append((anfang + m.start(1), anfang + m.end(2), m.group(2)))
+        pos += len(zeile) + 1
+    if not paare:
+        return []
+    bekannt = {" ".join(str(k.get("text", "")).split()).casefold() for k in kandidaten}
+    offen = {v for _, _, v in paare if v.casefold() not in bekannt and v.casefold() not in _ZELLEN_KEINE_NAMEN}
+    personen = _zellen_personen_bestaetigen(offen) if offen else set()
+    aus = []
+    for s, e, vorname in paare:
+        if vorname.casefold() in _ZELLEN_KEINE_NAMEN:
+            continue
+        if vorname.casefold() in bekannt or vorname in personen:
+            voll = text[s:e]
+            aus.append({"text": voll, "start": s, "ende": e, "gruppe": voll, "quelle": "ner.zelle"})
+    return aus
+
+
+def _zellen_personen_bestaetigen(texte: set) -> set:
+    """Nur die Personen-Probe (ohne Wortart-Rückfall, der auch Orte als Eigennamen durchließe)."""
+    nlp = namen.lade_ner()
+    if nlp is None:
+        return set()
+    ok = set()
+    texte = sorted(texte)
+    try:
+        vorn = len(_VORLAGE_PERSON.split("{}")[0])
+        for t, d in zip(texte, nlp.pipe([_VORLAGE_PERSON.format(t) for t in texte], batch_size=64)):
+            if any(e.label_ == "PER" and e.start_char < vorn + len(t) and e.end_char > vorn for e in d.ents):
+                ok.add(t)
+    except Exception:
+        return set()
+    return ok
 
 
 _VORLAGE_PERSON = "Ich habe heute mit {} gesprochen."
