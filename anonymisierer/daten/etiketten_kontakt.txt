@@ -1,0 +1,86 @@
+# Feldbezeichner für Kontaktdaten (Telefon, Mobil, Fax, E-Mail, Messenger, Profile).
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+beA
+Cell
+De-Mail
+Durchwahl
+DW
+E-Mail
+E-mail address
+E-Mail-Adr.
+E-Mail-Adresse
+E-Post
+Email
+erreichbar unter
+Erreichbarkeit
+Facebook
+Fax
+Fax number
+Fax-Nr.
+Faxnummer
+Festnetz
+Festnetznummer
+Handy
+Handy-Nr.
+Handynummer
+Homepage
+Instagram
+Internet
+Kommunikationsdaten
+Kontakt
+Kontaktangaben
+Kontaktdaten
+LinkedIn
+Mail
+Mail-Adresse
+Mailadresse
+Mailanschrift
+Messenger
+Mob.
+Mobil
+Mobil-Nr.
+Mobile
+Mobilfunk
+Mobilfunknummer
+Mobilnummer
+Mobiltelefon
+Phone
+Rückruf unter
+Rückrufnummer
+Ruf-Nr.
+Rufnummer
+Skype
+tagsüber erreichbar
+Tel
+Tel.
+Tel. dienstlich
+Tel. geschäftlich
+Tel. privat
+Tel. tagsüber
+Tel.-Nr.
+Tel.-Nummer
+Tel.Nr.
+Telefax
+Telefax-Nr.
+Telefon
+Telefon (privat)
+Telefon dienstlich
+Telefon geschäftlich
+Telefon privat
+Telefon tagsüber
+Telefon-Nr.
+telefonisch erreichbar unter
+Telefonnr.
+Telefonnummer
+Telegram
+TelNr.
+Threema
+TikTok
+Twitter
+Web
+Webseite
+Website
+WhatsApp
+Xing

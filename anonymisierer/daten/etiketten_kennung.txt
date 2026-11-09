@@ -1,0 +1,587 @@
+# Feldbezeichner, hinter denen eine KENNUNG steht (Vertrags-, Kunden-, Schadennummer,
+# Aktenzeichen, Steuer-, Renten-, Versicherten-, Ausweis-, Fahrzeugnummern …).
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+Abrechnungs Nr.
+Abrechnungs-Nr.
+Abrechnungs-Nummer
+Abrechnungsnr.
+Abrechnungsnummer
+Agentur Nr.
+Agentur-Nr.
+Agentur-Nummer
+Agenturnr.
+Agenturnummer
+AHV-Nr.
+AHV-Nummer
+AHVN13
+Akt.-Z.
+Akten Nr.
+Akten-Nr.
+Akten-Nummer
+Akten-Zeichen
+Aktennr.
+Aktennummer
+Aktenzeichen
+amtl. Kennzeichen
+amtl. Kz.
+amtliches Kennzeichen
+Angebots Nr.
+Angebots-Nr.
+Angebots-Nummer
+Angebotsnr.
+Angebotsnummer
+Antrags Nr.
+Antrags-Nr.
+Antrags-Nummer
+Antragsnr.
+Antragsnummer
+Auftrags Nr.
+Auftrags-ID
+Auftrags-Nr.
+Auftrags-Nummer
+Auftragsnr.
+Auftragsnummer
+Ausweis Nr.
+Ausweis-Nr
+Ausweis-Nr.
+Ausweis-Nummer
+Ausweisnr.
+Ausweisnummer
+Az
+Az.
+Az. der Polizei
+Bankverbindung
+Bauspar-Nr.
+Bausparnummer
+Bausparvertrags Nr.
+Bausparvertrags-Nr.
+Bausparvertrags-Nummer
+Bausparvertragsnr.
+Bausparvertragsnummer
+Bearbeitungs Nr.
+Bearbeitungs-Nr.
+Bearbeitungs-Nummer
+Bearbeitungsnr.
+Bearbeitungsnummer
+Beihilfe Nr.
+Beihilfe-Nr
+Beihilfe-Nr.
+Beihilfe-Nummer
+Beihilfenr.
+Beihilfenummer
+Beleg Nr.
+Beleg-ID
+Beleg-Nr.
+Beleg-Nummer
+Belegnr.
+Belegnummer
+Bescheinigungs Nr.
+Bescheinigungs-Nr
+Bescheinigungs-Nr.
+Bescheinigungs-Nummer
+Bescheinigungsnr.
+Bescheinigungsnummer
+Bestell Nr.
+Bestell-Nr.
+Bestell-Nummer
+Bestellnr.
+Bestellnummer
+Betriebs Nr.
+Betriebs-Nr.
+Betriebs-Nummer
+Betriebsnr.
+Betriebsnummer
+Buchungs Nr.
+Buchungs-Nr.
+Buchungs-Nummer
+Buchungscode
+Buchungsnr.
+Buchungsnummer
+Buchungszeichen
+Darlehens Nr.
+Darlehens-Nr.
+Darlehens-Nummer
+Darlehenskonto
+Darlehensnr.
+Darlehensnummer
+Depot Nr.
+Depot-ID
+Depot-Nr.
+Depot-Nummer
+Depotnr.
+Depotnummer
+Dienstnummer
+eGK-Nummer
+Fahrgestell Nr.
+Fahrgestell-Nr
+Fahrgestell-Nr.
+Fahrgestell-Nummer
+Fahrgestellnr.
+Fahrgestellnummer
+Fahrzeug-Identifizierungsnummer
+Fahrzeug-Identnummer
+Fahrzeugident-Nr.
+Fahrzeugidentifikationsnummer
+Fahrzeugidentifizierungsnummer
+Fahrzeugkennzeichen
+Fall Nr.
+Fall-ID
+Fall-Nr
+Fall-Nr.
+Fall-Nummer
+Fallnr.
+Fallnummer
+FIN
+FIN-Nr.
+Finanzierungs Nr.
+Finanzierungs-Nr.
+Finanzierungs-Nummer
+Finanzierungsnr.
+Finanzierungsnummer
+Forderungs Nr.
+Forderungs-Nr.
+Forderungs-Nummer
+Forderungsnr.
+Forderungsnummer
+Führerschein Nr.
+Führerschein-Nr
+Führerschein-Nr.
+Führerschein-Nummer
+Führerscheinnr.
+Führerscheinnummer
+Geräte Nr.
+Geräte-Nr.
+Geräte-Nummer
+Gerätenr.
+Gerätenummer
+Geschäfts Nr.
+Geschäfts-Nr
+Geschäfts-Nr.
+Geschäfts-Nummer
+Geschäftsnr.
+Geschäftsnummer
+Geschäftszeichen
+Gläubiger-ID
+Gläubiger-ID-Nr.
+Gläubiger-Identifikationsnummer
+Gläubiger-Identnummer
+Gläubigeridentifikationsnummer
+Gutachten Nr.
+Gutachten-ID
+Gutachten-Nr.
+Gutachten-Nummer
+Gutachtennr.
+Gutachtennummer
+GZ
+Gz.
+IBAN
+Id-Nr.
+Identifikationsnummer
+IdNr
+IdNr.
+IHK-Registrierungsnummer
+Ihr Aktenzeichen
+Ihr Az.
+Ihr Zeichen
+Ihre Ref.
+Ihre Referenz
+Ihre Zeichen
+IMEI
+Karten Nr.
+Karten-Nr.
+Karten-Nummer
+Kartennr.
+Kartennummer
+Kartennummer der eGK
+Kassenzeichen
+Kd-Nr.
+Kd.-Nr.
+Kd.Nr.
+KdNr
+KdNr.
+Kennz.
+Kennzeichen
+Kfz-Kennzeichen
+Kfz-Kz.
+Kfz-Zeichen
+KG-Nummer
+Kindergeld Nr.
+Kindergeld-Nr
+Kindergeld-Nr.
+Kindergeld-Nummer
+Kindergeldnr.
+Kindergeldnummer
+Konto Nr.
+Konto-Nr.
+Konto-Nummer
+Kontonr.
+Kontonummer
+Kontoverbindung
+Krankenversicherten Nr.
+Krankenversicherten-Nr.
+Krankenversicherten-Nummer
+Krankenversichertennr.
+Krankenversichertennummer
+Krankenversicherungs Nr.
+Krankenversicherungs-Nr.
+Krankenversicherungs-Nummer
+Krankenversicherungsnr.
+Krankenversicherungsnummer
+Kredit Nr.
+Kredit-Nr.
+Kredit-Nummer
+Kreditkarten Nr.
+Kreditkarten-Nr
+Kreditkarten-Nr.
+Kreditkarten-Nummer
+Kreditkartennr.
+Kreditkartennummer
+Kreditnr.
+Kreditnummer
+Kto-Nr.
+Kto.
+Kto.-Nr.
+Kunde Nr.
+Kunden Nr.
+Kunden-ID
+Kunden-Kennung
+Kunden-Nr.
+Kunden-Nummer
+Kunden-Referenz
+Kundenkennung
+Kundenkonto
+Kundenkontonummer
+Kundennr
+Kundennr.
+Kundennummer
+Kundenreferenz
+KV-Nr
+KV-Nr.
+KV-Nummer
+KVNR
+Leasingvertrags Nr.
+Leasingvertrags-Nr.
+Leasingvertrags-Nummer
+Leasingvertragsnr.
+Leasingvertragsnummer
+Leistungs-Nr.
+Leistungsfall Nr.
+Leistungsfall-Nr
+Leistungsfall-Nr.
+Leistungsfall-Nummer
+Leistungsfallnr.
+Leistungsfallnummer
+Leistungsnummer
+Makler Nr.
+Makler-Nr.
+Makler-Nummer
+Maklernr.
+Maklernummer
+Mandats-ID
+Mandats-Ref.
+Mandats-Referenz
+Mandatsref.
+Mandatsreferenz
+Mandatsreferenznummer
+Marktlokations-ID
+Matr.-Nr.
+Matrikel Nr.
+Matrikel-Nr.
+Matrikel-Nummer
+Matrikelnr.
+Matrikelnummer
+Messlokations-ID
+Mieter Nr.
+Mieter-Nr
+Mieter-Nr.
+Mieter-Nummer
+Mieternr.
+Mieternummer
+Mitarbeiter Nr.
+Mitarbeiter-ID
+Mitarbeiter-Nr.
+Mitarbeiter-Nummer
+Mitarbeiternr.
+Mitarbeiternummer
+Mitgl.-Nr.
+Mitglieds Nr.
+Mitglieds-Nr.
+Mitglieds-Nummer
+Mitgliedsnr
+Mitgliedsnr.
+Mitgliedsnummer
+Objekt Nr.
+Objekt-Nr.
+Objekt-Nummer
+Objektnr.
+Objektnummer
+Pass Nr.
+Pass-Nr
+Pass-Nr.
+Pass-Nummer
+Passnr.
+Passnummer
+Pat.-ID
+Pat.-Nr.
+Patienten Nr.
+Patienten-ID
+Patienten-Nr.
+Patienten-Nummer
+Patientennr.
+Patientennummer
+Pers.-Nr.
+Personal Nr.
+Personal-ID
+Personal-Nr.
+Personal-Nummer
+Personalausweis Nr.
+Personalausweis-Nr
+Personalausweis-Nr.
+Personalausweis-Nummer
+Personalausweisnr.
+Personalausweisnummer
+Personalnr.
+Personalnummer
+Personenkennziffer
+PNr.
+Police
+Police-Nr.
+Policen Nr.
+Policen-Nr.
+Policen-Nummer
+Policennr.
+Policennummer
+polizeiliches Kennzeichen
+Polizze
+Polizze Nr.
+Polizzen Nr.
+Polizzen-Nr
+Polizzen-Nr.
+Polizzen-Nummer
+Polizzennr.
+Polizzennummer
+Re.-Nr.
+Rechn.-Nr.
+Rechnung Nr.
+Rechnungs Nr.
+Rechnungs-ID
+Rechnungs-Nr.
+Rechnungs-Nummer
+Rechnungsnr.
+Rechnungsnummer
+Ref.
+Ref. Nr.
+Ref.-Nr.
+Referenz
+Referenz Nr.
+Referenz-ID
+Referenz-Nr.
+Referenz-Nummer
+Referenznr.
+Referenznummer
+Reg.-Nr.
+Registernummer
+Registrierungsnummer
+Reisepass Nr.
+Reisepass-Nr.
+Reisepass-Nummer
+Reisepassnr.
+Reisepassnummer
+Renten Nr.
+Renten-Nr.
+Renten-Nummer
+Renten-Zeichen
+Rentennr.
+Rentennummer
+Rentenversicherungs Nr.
+Rentenversicherungs-Nr
+Rentenversicherungs-Nr.
+Rentenversicherungs-Nummer
+Rentenversicherungsnr.
+Rentenversicherungsnummer
+Rentenzeichen
+Reservierungsnummer
+RG-Nr.
+Rg.-Nr.
+RV-Nr.
+RV-Nummer
+RVNR
+Sch.-Nr.
+Schaden Nr.
+Schaden-ID
+Schaden-Nr
+Schaden-Nr.
+Schaden-Nummer
+Schadenaktenzeichen
+Schadenfall Nr.
+Schadenfall-Nr.
+Schadenfall-Nummer
+Schadenfallnr.
+Schadenfallnummer
+Schadennr.
+Schadennummer
+Schadens Nr.
+Schadens-Nr.
+Schadens-Nummer
+Schadensnr.
+Schadensnummer
+Serien Nr.
+Serien-Nr.
+Serien-Nummer
+Seriennr.
+Seriennummer
+SIM-Kartennummer
+Sozialversicherungs Nr.
+Sozialversicherungs-Nr
+Sozialversicherungs-Nr.
+Sozialversicherungs-Nummer
+Sozialversicherungsnr.
+Sozialversicherungsnummer
+St-Nr.
+St.-Nr.
+St.Nr.
+Steuer Nr.
+Steuer-ID
+Steuer-Identifikationsnummer
+Steuer-IdNr.
+Steuer-Nr.
+Steuer-Nummer
+Steueridentifikationsnummer
+Steuerliche Identifikationsnummer
+Steuerliche IdNr.
+Steuernr.
+Steuernummer
+StNr.
+SV-Nr
+SV-Nr.
+SV-Nummer
+SVNR
+Tagebuch Nr.
+Tagebuch-Nr
+Tagebuch-Nr.
+Tagebuch-Nummer
+Tagebuchnr.
+Tagebuchnummer
+Tax ID
+Tgb.-Nr.
+Ticket Nr.
+Ticket-ID
+Ticket-Nr.
+Ticket-Nummer
+Ticketnr.
+Ticketnummer
+TIN
+Transaktions Nr.
+Transaktions-Nr.
+Transaktions-Nummer
+Transaktionsnr.
+Transaktionsnummer
+Umsatzsteuer-Identifikationsnummer
+Unfall Nr.
+Unfall-Nr.
+Unfall-Nummer
+Unfallnr.
+Unfallnummer
+Unser Aktenzeichen
+Unser Az.
+Unser Zeichen
+Unsere Ref.
+Unsere Referenz
+Unsere Zeichen
+USt-ID
+USt-ID-Nr.
+USt-IdNr.
+USt.-IdNr.
+UStIdNr
+Verfahrens Nr.
+Verfahrens-Nr.
+Verfahrens-Nummer
+Verfahrensnr.
+Verfahrensnummer
+Vermittler Nr.
+Vermittler-Nr.
+Vermittler-Nummer
+Vermittlernr.
+Vermittlernummer
+Vermittlerregister-Nr.
+Vermittlerregisternummer
+Vers-Nr.
+Vers.-Nr.
+Vers.-Schein-Nr.
+Vers.Nr.
+Versicherten Nr.
+Versicherten-ID
+Versicherten-Nr.
+Versicherten-Nummer
+Versichertenkarte
+Versichertennr.
+Versichertennummer
+Versicherungs Nr.
+Versicherungs-Nr
+Versicherungs-Nr.
+Versicherungs-Nummer
+Versicherungsnr.
+Versicherungsnummer
+Versicherungsschein
+Versicherungsschein Nr.
+Versicherungsschein-Nr
+Versicherungsschein-Nr.
+Versicherungsschein-Nummer
+Versicherungsscheinnr.
+Versicherungsscheinnummer
+Versorgungs Nr.
+Versorgungs-Nr
+Versorgungs-Nr.
+Versorgungs-Nummer
+Versorgungsnr.
+Versorgungsnummer
+Vertr.-Nr.
+Vertrag
+Vertrag Nr.
+Vertrags Nr.
+Vertrags-ID
+Vertrags-Nr
+Vertrags-Nr.
+Vertrags-Nummer
+Vertragskennung
+Vertragskonto
+Vertragskontonummer
+Vertragsnr
+Vertragsnr.
+Vertragsnummer
+Verwendungszweck
+VIN
+VN-Nr.
+Vorgang
+Vorgang Nr.
+Vorgangs Nr.
+Vorgangs-ID
+Vorgangs-Nr.
+Vorgangs-Nummer
+Vorgangskennung
+Vorgangsnr.
+Vorgangsnummer
+VS-Nr
+VS-Nr.
+VS-Nummer
+VSNR
+VSNr.
+W-IdNr.
+Wirtschafts-Identifikationsnummer
+Wohnungsnummer
+Zähler Nr.
+Zähler-Nr.
+Zähler-Nummer
+Zählernr.
+Zählernummer
+Zählpunkt
+Zählpunktbezeichnung
+Zahlungsreferenz
+Zertifikatsnummer
+Zulage-Nr.
+Zulagen-Nr.
+Zulagennummer
+Zulagenr.
+Zulagenummer

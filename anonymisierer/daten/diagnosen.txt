@@ -1,0 +1,2020 @@
+# Medizinische Diagnosen, Krankheits- und Zustandsbezeichnungen, Verletzungen und Eingriffe,
+# die den Gesundheitszustand verraten (Gesundheitsdaten nach Art. 9 DSGVO).
+# ICD-10-Schlüssel erkennt der Code per Muster, nicht diese Liste.
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+abhängige Persönlichkeitsstörung
+Ablation
+Abort
+Abrasio
+Absence-Epilepsie
+Abszess
+Abtreibung
+Achillessehnennaht
+Achillessehnenriss
+Achillessehnenruptur
+Achillodynie
+Acne vulgaris
+Adenomyose
+Adenotomie
+ADHS
+Adipositas
+Adipositas permagna
+adjuvante Chemotherapie
+ADS
+Agoraphobie
+AHB
+AIDS
+Akne
+Akromegalie
+aktinische Keratose
+Akupunktur
+akute Belastungsreaktion
+akute Bronchitis
+akute Herzinsuffizienz
+akute lymphatische Leukämie
+akute myeloische Leukämie
+akute Pankreatitis
+akute Psychose
+akuter Myokardinfarkt
+akuter Schub
+akutes Koronarsyndrom
+akutes Nierenversagen
+Albträume
+Aligner
+Alkoholabhängigkeit
+Alkoholentzugssyndrom
+alkoholische Fettleber
+Alkoholismus
+Alkoholkrankheit
+Alkoholmissbrauch
+Alkoholvergiftung
+Allergie
+Allergien
+Allergietest
+allergische Reaktion
+allergische Rhinitis
+allergischer Schock
+allergisches Asthma
+Alopecia areata
+Alopezie
+altersbedingte Makuladegeneration
+Altersdepression
+Altersschwerhörigkeit
+Alterssichtigkeit
+Alzheimer
+Alzheimer-Demenz
+Alzheimer-Krankheit
+Amalgamfüllung
+Amblyopie
+ambulant erworbene Pneumonie
+ambulante Operation
+ambulante Psychotherapie
+ambulante Rehabilitation
+Amenorrhoe
+AML
+Amniozentese
+Amphetaminabhängigkeit
+Amputation
+amyotrophe Lateralsklerose
+Analabszess
+Analfissur
+Analfistel
+Analkarzinom
+analytische Psychotherapie
+Anämie
+anaphylaktischer Schock
+Anaphylaxie
+Aneurysma
+angeborene Hüftdysplasie
+angeborener Herzfehler
+Angina pectoris
+Angina tonsillaris
+Angioödem
+ängstlich-vermeidende Persönlichkeitsstörung
+Angststörung
+Angstzustände
+anhaltende somatoforme Schmerzstörung
+Ankylose
+Anorexia nervosa
+Anorexie
+Anpassungsstörung
+Anschlussheilbehandlung
+Anschlussrehabilitation
+antihormonelle Therapie
+Antihormontherapie
+Antikoagulation
+Antikörpertherapie
+antisoziale Persönlichkeitsstörung
+Aortenaneurysma
+Aortendissektion
+Aortenklappeninsuffizienz
+Aortenklappenstenose
+Aortenstenose
+aortokoronarer Bypass
+apallisches Syndrom
+Apoplex
+Appendektomie
+Appendizitis
+Arbeitsunfähigkeitsbescheinigung
+Armamputation
+Armprothese
+Armvenenthrombose
+arterielle Hypertonie
+Arteriitis temporalis
+Arteriosklerose
+Arthritis
+Arthrodese
+Arthrose
+Arthroskopie
+Arzneimittelallergie
+Arzneimittelunverträglichkeit
+Asperger-Syndrom
+Asthma
+Asthma bronchiale
+Astigmatismus
+Atembeschwerden
+Atemnot
+Atherom
+Atherosklerose
+atopische Dermatitis
+AU-Bescheinigung
+auffälliges Muttermal
+Aufmerksamkeitsdefizit-Hyperaktivitätsstörung
+Aufmerksamkeitsdefizitsyndrom
+Augenhöhlenbruch
+Augeninnendruck
+Augenlaser-Operation
+Augenlaserung
+Augenschaden
+Augenverletzung
+Ausschabung
+Außenbandriss
+Außenbandruptur
+Außenknöchelfraktur
+Außenmeniskusriss
+Autismus
+Autismus-Spektrum-Störung
+Autoimmunhepatitis
+AV-Block
+axiale Spondyloarthritis
+bakterielle Vaginose
+Ballondilatation
+Bandage
+Bänderdehnung
+Bänderriss
+Bänderzerrung
+Bandscheibendegeneration
+Bandscheibenoperation
+Bandscheibenprothese
+Bandscheibenprotrusion
+Bandscheibenschaden
+Bandscheibenvorfall
+Bandscheibenvorfälle
+Bandscheibenvorwölbung
+bariatrische Operation
+Barrett-Ösophagus
+Basaliom
+Basalzellkarzinom
+Basedow-Krankheit
+Bauchaortenaneurysma
+Bauchschmerzen
+Bauchspeicheldrüsenentzündung
+Bauchspeicheldrüsenkrebs
+Bauchtrauma
+Bauchwandhernie
+Beatmung
+Beatmungsgerät
+Beckenbruch
+Beckenfraktur
+Begleiterkrankung
+Behandlungsfehler
+Beinamputation
+Beinprothese
+Beinvenenthrombose
+Belastungs-EKG
+Belastungsasthma
+Belastungsinkontinenz
+Belastungsstörung
+Bell-Lähmung
+BEM
+benigne Prostatahyperplasie
+Benzodiazepinabhängigkeit
+Beschleunigungsverletzung der Halswirbelsäule
+Beschneidung
+Bestrahlung
+betriebliches Eingliederungsmanagement
+bettlägerig
+Bettlägerigkeit
+Bettnässen
+Bewegungseinschränkung
+Bienengiftallergie
+Bienenstich
+Bindehautentzündung
+Binge-Eating-Störung
+Biologika-Therapie
+Biopsie
+bipolare affektive Störung
+bipolare Störung
+Bisswunde
+Bizepssehnenruptur
+Blasenentzündung
+Blasenkatheter
+Blasenkrebs
+Blasenspiegelung
+blind
+Blinddarmentzündung
+Blinddarmoperation
+Blindheit
+Blutarmut
+Blutdruckwerte
+Bluterguss
+Bluterkrankheit
+Blutfettwerte
+Blutgruppe
+Bluthochdruck
+Blutschwamm
+Bluttransfusion
+Blutverdünnung
+Blutvergiftung
+Blutverlust
+Blutzuckermessgerät
+Blutzuckermessung
+Blutzuckerwerte
+Borderline-Persönlichkeitsstörung
+Borderline-Störung
+Borkenflechte
+Borreliose
+bösartiger Tumor
+Bradykardie
+Bronchialkarzinom
+Bronchiektasen
+Bronchitis
+Bronchoskopie
+Brustamputation
+Brustaufbau
+Brustbeinfraktur
+Brustentzündung
+brusterhaltende Operation
+Brustimplantat
+Brustimplantate
+Brustkrebs
+Brustrekonstruktion
+Brustschmerzen
+Brustvergrößerung
+Brustverkleinerung
+Brustwirbelfraktur
+Bruxismus
+Bulimia nervosa
+Bulimie
+Burn-out
+Burn-out-Syndrom
+Burnout
+Burnout-Syndrom
+Bursitis
+BWS-Syndrom
+Bypass-Operation
+Bypassoperation
+Candidose
+Cannabisabhängigkeit
+Cannabismissbrauch
+CED
+Chemotherapie
+Chirotherapie
+Chlamydien
+Chlamydien-Infektion
+Chlamydieninfektion
+Cholangiokarzinom
+Cholelithiasis
+Cholera
+Cholesteatom
+Cholesterinwerte
+Cholezystektomie
+Cholezystitis
+Chondropathia patellae
+Chorea Huntington
+chronisch krank
+chronisch obstruktive Lungenerkrankung
+chronisch-entzündliche Darmerkrankung
+chronisch-venöse Insuffizienz
+chronische Bronchitis
+chronische Depression
+chronische Erkrankung
+chronische Gastritis
+chronische Hepatitis B
+chronische Hepatitis C
+chronische Herzinsuffizienz
+chronische Kopfschmerzen
+chronische lymphatische Leukämie
+chronische Migräne
+chronische myeloische Leukämie
+chronische Niereninsuffizienz
+chronische Nierenkrankheit
+chronische Pankreatitis
+chronische Polyarthritis
+chronische Rückenschmerzen
+chronische Schmerzen
+chronische Sinusitis
+chronische Wunde
+chronisches Erschöpfungssyndrom
+chronisches Fatigue-Syndrom
+chronisches Nierenversagen
+CIN III
+CLL
+Clusterkopfschmerz
+CMD
+CML
+Cochlea-Implantat
+Colitis ulcerosa
+Commotio cerebri
+Computertomographie
+Contusio cerebri
+COPD
+Corona-Impfung
+Corona-Infektion
+COVID-19
+Coxarthrose
+CPAP-Gerät
+CPAP-Therapie
+craniomandibuläre Dysfunktion
+CRPS
+Cushing-Syndrom
+Cytomegalie
+Dammriss
+Dammschnitt
+Darmkrebs
+Darmpolypen
+Darmresektion
+Darmspiegelung
+Darmverschluss
+Dauerkatheter
+DCIS
+Defibrillatorimplantation
+Dehydratation
+Dekompression
+Dekubitus
+Delirium tremens
+Dellwarzen
+Demenz
+Dengue-Fieber
+Depersonalisation
+Depression
+Depressionen
+depressive Episode
+depressive Störung
+Desensibilisierung
+Diabetes
+Diabetes insipidus
+Diabetes mellitus
+Diabetes mellitus Typ 1
+Diabetes mellitus Typ 2
+Diabetes mellitus Typ I
+Diabetes mellitus Typ II
+Diabetes Typ 1
+Diabetes Typ 2
+diabetische Makulopathie
+diabetische Nephropathie
+diabetische Neuropathie
+diabetische Polyneuropathie
+diabetische Retinopathie
+diabetischer Fuß
+diabetisches Fußsyndrom
+diabetisches Koma
+Dialyse
+Dialysepflicht
+dialysepflichtig
+Diarrhö
+Dickdarmkrebs
+diffus großzelliges B-Zell-Lymphom
+dilatative Kardiomyopathie
+dissoziale Persönlichkeitsstörung
+dissoziative Störung
+distale Radiusfraktur
+Distorsion
+Divertikulitis
+Divertikulose
+Down-Syndrom
+Dranginkontinenz
+Drehschwindel
+Dreimonatskoliken
+Drogenabhängigkeit
+drogeninduzierte Psychose
+Drogenmissbrauch
+Drogensucht
+Druckgeschwür
+duktales Carcinoma in situ
+duktales Mammakarzinom
+Dünndarmkrebs
+Dupuytren-Kontraktur
+Durchblutungsstörung
+Durchblutungsstörungen
+Durchfall
+Durchfälle
+Dysgnathie-Operation
+Dyskalkulie
+Dyslipidämie
+Dysmenorrhoe
+Dysphagie
+Dysplasie
+Dyspnoe
+Dysthymia
+Dysthymie
+Dystonie
+Echokardiographie
+EEG
+Eierstockkrebs
+Eierstockzyste
+Eileiterschwangerschaft
+Ein- und Durchschlafstörungen
+eingeschränkte Alltagskompetenz
+eingeschränkte Leistungsfähigkeit
+Einkoten
+Einnässen
+Eisenmangel
+Eisenmangelanämie
+Eizellspende
+Eklampsie
+Ekzem
+Elektroenzephalographie
+Elektrokrampftherapie
+Elektrotherapie
+Elektrounfall
+Ellenbogenfraktur
+Ellenbogenluxation
+Embolie
+Embolien
+EMDR
+EMG
+emotional instabile Persönlichkeitsstörung
+emotionale Instabilität
+Emphysem
+Encephalomyelitis disseminata
+Enddarmkrebs
+Endokarditis
+Endometriose
+Endometriumkarzinom
+Endoprothese
+Endoskopie
+Entbindung
+Entgiftung
+Entwicklungsstörung
+Entwicklungsstörung der Motorik
+Entwicklungsverzögerung
+Entwöhnungsbehandlung
+Entzugsbehandlung
+Enuresis
+Enzephalitis
+Epicondylitis
+Epicondylitis humeri radialis
+Epilepsie
+epileptischer Anfall
+Epithese
+erblindet
+Erdnussallergie
+erektile Dysfunktion
+Erektionsstörung
+Erektionsstörungen
+Erfrierung
+Ergotherapie
+erhöhte Cholesterinwerte
+erhöhte Leberwerte
+erhöhter Augeninnendruck
+erhöhter Blutdruck
+Ermüdungsbruch
+Erschöpfungsdepression
+Erschöpfungssyndrom
+erworbenes Immunschwächesyndrom
+Erysipel
+Ess-Brech-Sucht
+essentielle Hypertonie
+essentielle Thrombozythämie
+essentieller Tremor
+Essstörung
+Ewing-Sarkom
+Ex-Raucher
+Exazerbation
+exokrine Pankreasinsuffizienz
+Exsikkose
+Extrasystolen
+Extrauteringravidität
+Facettengelenksarthrose
+Facettensyndrom
+Faktor-V-Leiden
+familiäre Hypercholesterinämie
+Fango
+Fazialisparese
+Fehldiagnose
+Fehlgeburt
+Feigwarzen
+Femurfraktur
+Fernmetastasen
+Fersenbeinfraktur
+Fersensporn
+feste Zahnspange
+Fettembolie
+Fettleber
+Fettleibigkeit
+Fettstoffwechselstörung
+Fibromyalgie
+Fibromyalgiesyndrom
+Fibulafraktur
+Fieber
+Fieberkrampf
+Fingeramputation
+Fingerfraktur
+Fingerluxation
+Fingerpolyarthrose
+follikuläres Lymphom
+Fragiles-X-Syndrom
+Fraktur
+Frakturen
+Fremdkörperverletzung
+frontotemporale Demenz
+Frozen Shoulder
+Fruchtwasseruntersuchung
+Frühchen
+Frühgeborenes
+Frühgeburt
+frühkindlicher Autismus
+Frühsommer-Meningoenzephalitis
+Fruktoseintoleranz
+FSME
+Funktionstraining
+Furunkel
+Fußpilz
+Gallenblasenentfernung
+Gallenblasenentzündung
+Gallengangskarzinom
+Gallenkolik
+Gallensteine
+Gallensteinleiden
+Ganglion
+Gangstörung
+Gastritis
+Gastroenteritis
+Gastrointestinaler Stromatumor
+gastroösophageale Refluxkrankheit
+Gastroskopie
+GdB
+GdS
+Gebärmutterentfernung
+Gebärmutterhalskrebs
+Gebärmutterkrebs
+Gebärmuttermyom
+Gebärmuttersenkung
+Gebärmuttervorfall
+Gebiss
+Gedächtnisstörung
+Gedächtnisverlust
+gehbehindert
+Gehbehinderung
+Gehhilfe
+Gehirnerschütterung
+Gehörgangsentzündung
+gehörlos
+Gehörlosigkeit
+geistig behindert
+geistige Behinderung
+Gelbsucht
+Gelenkbeschwerden
+Gelenkerguss
+Gelenkersatz
+Gelenkschmerzen
+Gelenkversteifung
+generalisierte Angststörung
+genetische Beratung
+genetische Untersuchung
+Genitalherpes
+Genitalwarzen
+Gentest
+Gerinnungshemmung
+Gerinnungsstörung
+Gerstenkorn
+Geschlechtsdysphorie
+geschlossene Fraktur
+geschlossene Unterbringung
+Gesichtsfeldausfall
+Gesichtslähmung
+Gesichtsschädelfraktur
+Gestationsdiabetes
+Gewebeprobe
+Gewichtsverlust
+Gewichtszunahme
+Gicht
+Gichtanfall
+Gichtarthritis
+Gingivitis
+Gipsverband
+Glasknochenkrankheit
+Glaskörperabhebung
+Glaukom
+Gleichgewichtsstörung
+Glioblastom
+Gliom
+Glomerulonephritis
+Glücksspielsucht
+Glutenunverträglichkeit
+Golferarm
+Gonarthrose
+Gonorrhö
+Gonorrhoe
+Grad der Behinderung
+Grad der Schädigungsfolgen
+Grand-Mal-Anfall
+Grauer Star
+Grauer-Star-Operation
+grippaler Infekt
+Grippe
+Grippeimpfung
+Grunderkrankung
+Grüner Star
+Gruppentherapie
+Grützbeutel
+Guillain-Barré-Syndrom
+Gürtelrose
+Gürtelrose-Neuralgie
+gutartiger Tumor
+Haarausfall
+Haarverlust
+Hagelkorn
+Halbseitenlähmung
+Hallux rigidus
+Hallux valgus
+Hallux-valgus-Operation
+Halswirbelfraktur
+Haltungsschaden
+Haltungsschäden
+Hämangiom
+Hämatom
+Hamburger Modell
+Hammerzehe
+Hämochromatose
+Hämodialyse
+Hämophilie
+hämorrhagischer Schlaganfall
+Hämorrhoiden
+Handekzem
+Handgelenksbruch
+Handgelenksdistorsion
+Handgelenksfraktur
+Handprothese
+Harnblasenkarzinom
+Harninkontinenz
+Harnröhrenverengung
+Harnverhalt
+Harnwegsinfekt
+Harnwegsinfektion
+Hashimoto-Krankheit
+Hashimoto-Thyreoiditis
+Hausnotruf
+Hausstauballergie
+Hausstaubmilbenallergie
+Hautausschlag
+Hautkrebs
+Hautschäden
+Hautveränderungen
+Heimbeatmung
+Heimdialyse
+Heiserkeit
+Helicobacter-pylori-Infektion
+HELLP-Syndrom
+Hemiparese
+Hemiprothese
+Hepatitis
+Hepatitis A
+Hepatitis B
+Hepatitis C
+Hepatitis D
+Hepatitis E
+Hepatitis-B-Impfung
+Hepatitis-B-Infektion
+hepatozelluläres Karzinom
+Heroinabhängigkeit
+Herpes simplex
+Herpes zoster
+Herz-Kreislauf-Stillstand
+Herzbeschwerden
+Herzecho
+Herzfehler
+Herzinfarkt
+Herzinfarkte
+Herzinsuffizienz
+Herzkatheter
+Herzkatheteruntersuchung
+Herzklappenersatz
+Herzklappenfehler
+Herzklappenoperation
+Herzneurose
+Herzoperation
+Herzrasen
+Herzrhythmusstörung
+Herzrhythmusstörungen
+Herzschrittmacher
+Herzschrittmacherimplantation
+Herzschwäche
+Herzstillstand
+Herztransplantation
+Heuschnupfen
+Hexenschuss
+Hiatushernie
+hinterer Kreuzbandriss
+Hinterwandinfarkt
+Hirnabszess
+Hirnaneurysma
+Hirnblutung
+Hirnhautentzündung
+Hirninfarkt
+Hirnmetastasen
+Hirnprellung
+Hirnschaden
+Hirnschäden
+Hirnstammgliom
+Hirntod
+Hirntumor
+Histaminintoleranz
+histrionische Persönlichkeitsstörung
+Hitzschlag
+HIV
+HIV-Infektion
+HIV-positiv
+Hodenentzündung
+Hodenhochstand
+Hodenkarzinom
+Hodenkrebs
+Hodgkin-Lymphom
+hohes Fieber
+Hohlkreuz
+hörbehindert
+Hörgerät
+Hörgeräteversorgung
+Hörimplantat
+Hörminderung
+Hormontherapie
+Hornhautentzündung
+Hornhauttransplantation
+Hornhautverkrümmung
+Hornhautverletzung
+Hörschaden
+Hörschäden
+Hörstörung
+Hörsturz
+Hörverlust
+Hospiz
+HPV-Infektion
+Hüft-TEP
+Hüftarthrose
+Hüftdysplasie
+Hüftendoprothese
+Hüftgelenkersatz
+Hüftkopfnekrose
+Hüftluxation
+Hüftoperation
+Hüftschmerzen
+Humerusfraktur
+Hundebiss
+Huntington-Krankheit
+HWS-Distorsion
+HWS-Schleudertrauma
+HWS-Syndrom
+Hydrocephalus
+Hydrozele
+Hydrozephalus
+Hyperbare Sauerstofftherapie
+Hypercholesterinämie
+Hyperemesis gravidarum
+Hyperglykämie
+Hyperhidrose
+Hyperkaliämie
+hyperkinetische Störung
+Hyperlipidämie
+Hyperopie
+Hyperparathyreoidismus
+hypertensive Herzkrankheit
+hypertensive Krise
+Hyperthyreose
+Hypertonie
+Hypertriglyzeridämie
+hypertrophe Kardiomyopathie
+Hyperurikämie
+Hypochondrie
+hypochondrische Störung
+Hypoglykämie
+Hypogonadismus
+Hypokaliämie
+Hypomanie
+Hyponatriämie
+Hypophysenadenom
+Hypophyseninsuffizienz
+Hyposensibilisierung
+Hypothyreose
+Hypotonie
+Hysterektomie
+ICSI
+idiopathische Lungenfibrose
+Ikterus
+Ileus
+Iliosakralgelenk-Syndrom
+Immundefekt
+Immunschwäche
+Immunsuppression
+Immuntherapie
+Impetigo
+Impfreaktion
+Impfschaden
+Impfung
+Impingement-Syndrom
+Implantat
+implantierbarer Defibrillator
+Impotenz
+In-vitro-Fertilisation
+infantile Zerebralparese
+Infertilität
+Influenza
+Infusionstherapie
+Inkontinenz
+Inkontinenzhilfen
+Inkontinenzmaterial
+Inlay
+Innenbandriss
+Innenknöchelfraktur
+Innenmeniskusläsion
+Innenmeniskusriss
+Innenohrschwerhörigkeit
+innere Blutung
+innere Verletzungen
+Insektengiftallergie
+Insektenstich
+Insemination
+Insomnie
+instabile Angina pectoris
+insulinpflichtiger Diabetes
+insulinpflichtiger Diabetes mellitus
+Insulinpumpe
+Insulinresistenz
+Insulintherapie
+Intelligenzminderung
+intensivierte Insulintherapie
+intensivmedizinische Behandlung
+Intensivstation
+Internetsucht
+intrazerebrale Blutung
+ischämischer Schlaganfall
+Ischialgie
+Ischias
+ISG-Blockade
+IVF
+Jochbeinfraktur
+Juckreiz
+juvenile idiopathische Arthritis
+Kahnbeinfraktur
+Kaiserschnitt
+Kalkaneusfraktur
+Kalkschulter
+Kältetherapie
+Kammerflimmern
+Kaposi-Sarkom
+Karbunkel
+Kardiomyopathie
+Kardioversion
+Karies
+Karpaltunneloperation
+Karpaltunnelsyndrom
+Karzinom
+Katarakt
+Kataraktoperation
+Katheter
+Katheterablation
+Katzenbiss
+Katzenhaarallergie
+Kaufsucht
+Kehlkopfentzündung
+Kehlkopfkrebs
+Keloid
+Keramikinlay
+Keratitis
+Keratokonus
+Kernspintomographie
+Ketoazidose
+Keuchhusten
+KHK
+Kieferabszess
+Kieferfehlstellung
+Kieferfraktur
+Kiefergelenkbeschwerden
+Kieferoperation
+Kieferorthopädische Behandlung
+Kinderlähmung
+Kinderwunsch
+Kinderwunschbehandlung
+Kindstod
+Klavikulafraktur
+Kleinwuchs
+kleinzelliges Bronchialkarzinom
+Klimakterium
+Klinefelter-Syndrom
+Klinikaufenthalt
+Klumpfuß
+Knalltrauma
+Knick-Senkfuß
+Knie-TEP
+Kniearthrose
+Kniearthroskopie
+Kniebandage
+Kniedistorsion
+Knieendoprothese
+Kniegelenkersatz
+Kniegelenkserguss
+Knieoperation
+Knieprellung
+Kniescheibenbruch
+Kniescheibenluxation
+Knieschmerzen
+Knöchelbruch
+Knochenaufbau
+Knochenbruch
+Knochenbrüche
+Knochenmarkentzündung
+Knochenmarkpunktion
+Knochenmarkspende
+Knochenmarktransplantation
+Knochenmetastasen
+Knochentumor
+Knorpelschaden
+kognitive Verhaltenstherapie
+Kohlenmonoxidvergiftung
+Kokainabhängigkeit
+Kolonkarzinom
+Kolonpolypen
+kolorektales Karzinom
+Koloskopie
+Koma
+Komorbidität
+Kompartmentsyndrom
+komplexe posttraumatische Belastungsstörung
+komplexes regionales Schmerzsyndrom
+Kompressionsstrümpfe
+Konisation
+Konjunktivitis
+Kontaktallergie
+Kontaktekzem
+kontinuierliche Glukosemessung
+Kontraktur
+Kontusion
+Konversionsstörung
+Konzentrationsstörungen
+Kopf-Hals-Tumor
+Kopfläuse
+Kopfschmerzen
+Koronarangiographie
+koronare Herzkrankheit
+Koronarsklerose
+körperbehindert
+Körperbehinderung
+Körperschaden
+Körperschäden
+Korpuskarzinom
+Korsett
+Krallenzehe
+Krampfadern
+Krampfadern-Operation
+Krampfanfall
+Krampfanfälle
+Krankengymnastik
+Krankenhausaufenthalt
+Krankenhausbehandlung
+Krankenhauskeim
+krankgeschrieben
+krankhaftes Übergewicht
+Krankmeldung
+Krankschreibung
+Krätze
+Krebs
+Krebserkrankung
+Krebsnachsorge
+Krebsvorstufe
+Kreislaufkollaps
+kreisrunder Haarausfall
+Kreuzallergie
+Kreuzbandersatz
+Kreuzbandoperation
+Kreuzbandplastik
+Kreuzbandriss
+Kreuzbandruptur
+Kreuzbiss
+Kreuzschmerzen
+Kribbeln in den Händen
+Kropf
+Krücken
+Kunstfehler
+künstliche Befruchtung
+künstliche Ernährung
+künstlicher Darmausgang
+künstliches Hüftgelenk
+künstliches Kniegelenk
+künstliches Koma
+Kunststofffüllung
+Kur
+Kuraufenthalt
+Kurzsichtigkeit
+Kyphoplastie
+Kyphose
+Lagerungsschwindel
+Lähmung
+Lähmungserscheinungen
+Laktoseintoleranz
+Laminektomie
+Langzeit-EKG
+Langzeitblutdruckmessung
+Langzeitsauerstofftherapie
+Lärmschwerhörigkeit
+Laryngitis
+Larynxkarzinom
+Lasik
+Latexallergie
+Läusebefall
+Lebensmittelvergiftung
+Leberbiopsie
+Leberentzündung
+Leberfibrose
+Leberfleck
+Leberkarzinom
+Leberkrebs
+Lebermetastasen
+Leberruptur
+Leberschaden
+Leberschäden
+Lebertransplantation
+Leberversagen
+Leberwerte
+Leberzirrhose
+Legasthenie
+leichte depressive Episode
+leichte kognitive Störung
+leichtes Schädel-Hirn-Trauma
+Leistenbruch
+Leistenbruch-Operation
+Leistenhernie
+Lendenwirbelfraktur
+Lernbehinderung
+Lernschwäche
+Lese-Rechtschreib-Störung
+Leukämie
+Lewy-Körperchen-Demenz
+Libidoverlust
+Lichen ruber
+Lichtdermatose
+Lidrandentzündung
+Linksherzinsuffizienz
+Linksschenkelblock
+Linsenimplantation
+Lipödem
+Lipom
+Lippen-Kiefer-Gaumenspalte
+Lippenherpes
+Lispeln
+LKG-Spalte
+lobuläres Mammakarzinom
+Logopädie
+Lokalrezidiv
+Long Covid
+Long-Covid
+Long-QT-Syndrom
+lose Zahnspange
+Luftröhrenschnitt
+Lumbago
+lumbaler Bandscheibenvorfall
+Lumbalgie
+Lumbalpunktion
+Lumboischialgie
+Lungenembolie
+Lungenemphysem
+Lungenentzündung
+Lungenfibrose
+Lungenfunktionstest
+Lungenhochdruck
+Lungenkarzinom
+Lungenkontusion
+Lungenkrebs
+Lungenödem
+Lungentransplantation
+Lungentuberkulose
+Lupus erythematodes
+Luxation
+LWS-Syndrom
+Lyme-Borreliose
+Lymphdrainage
+Lymphknotenentfernung
+Lymphödem
+Lymphom
+Magen-Darm-Grippe
+Magenbypass
+Magengeschwür
+Magenkarzinom
+Magenkrebs
+Magenschleimhautentzündung
+Magenschmerzen
+Magensonde
+Magenspiegelung
+Magenverkleinerung
+Magersucht
+Major Depression
+Makuladegeneration
+Malaria
+malignes Melanom
+Mammakarzinom
+Mammografie
+Mammographie
+Mandelentzündung
+Mandeloperation
+Mangelernährung
+Manie
+manisch-depressive Erkrankung
+manuelle Lymphdrainage
+manuelle Therapie
+Marcumarisierung
+Marknagelung
+maschinelle Beatmung
+Masern
+Massage
+Mastektomie
+Mastitis
+ME/CFS
+Mediensucht
+Medikamentenabhängigkeit
+Medikamentenallergie
+Medikamentenmissbrauch
+Medikamentenunverträglichkeit
+medizinische Rehabilitation
+Medulloblastom
+mehrfachbehindert
+Mehrfachbehinderung
+Mehrfachverletzung
+Mehrfragmentfraktur
+Mehrlingsschwangerschaft
+Melanom
+Meningeom
+Meningitis
+Meniskusläsion
+Meniskusnaht
+Meniskusoperation
+Meniskusriss
+Meniskusschaden
+Meniskusteilresektion
+Menopause
+Merkzeichen aG
+Merkzeichen B
+Merkzeichen Bl
+Merkzeichen G
+Merkzeichen Gl
+Merkzeichen H
+Merkzeichen RF
+Mesotheliom
+metabolisches Syndrom
+Metallentfernung
+Metastasen
+Metastasierung
+Methadonprogramm
+Migräne
+Migräne mit Aura
+Migräne ohne Aura
+Migräneanfälle
+Milzruptur
+Mitralklappeninsuffizienz
+Mitralklappenprolaps
+Mitralklappenstenose
+Mittelfußfraktur
+mittelgradige depressive Episode
+Mittelhandfraktur
+Mittelohrentzündung
+Mobbing-Folgen
+Mononukleose
+Morbus Addison
+Morbus Alzheimer
+Morbus Basedow
+Morbus Bechterew
+Morbus Crohn
+Morbus Cushing
+Morbus Dupuytren
+Morbus Hodgkin
+Morbus Menière
+Morbus Paget
+Morbus Parkinson
+Morbus Perthes
+Morbus Scheuermann
+Morbus Sudeck
+Morbus Wilson
+MRSA
+MRSA-Infektion
+MRT
+Mukopolysaccharidose
+Mukoviszidose
+multimodale Schmerztherapie
+Multimorbidität
+Multiple Sklerose
+Multiples Myelom
+Mumps
+Mundgeruch
+Mundhöhlenkarzinom
+Muskelatrophie
+Muskeldystrophie
+Muskelfaserriss
+Muskelriss
+Muskelschwund
+Muskelzerrung
+Mutter-Kind-Kur
+Muttermal
+Myalgische Enzephalomyelitis
+Myasthenia gravis
+myelodysplastisches Syndrom
+Myelofibrose
+Mykose
+Myokardinfarkt
+Myokarditis
+Myom
+Myopie
+Nabelbruch
+Nachblutung
+Nackenbeschwerden
+Nackenfaltenmessung
+Nackenschmerzen
+Nagelpilz
+Nahrungsmittelallergie
+Nahrungsmittelunverträglichkeit
+Narbe
+Narbenbruch
+Narbenkorrektur
+Narkolepsie
+Narkose
+narzisstische Persönlichkeitsstörung
+Nasenbeinbruch
+Nasenbeinfraktur
+Nasenkorrektur
+Nasennebenhöhlenentzündung
+Nasennebenhöhlenoperation
+Nasenpolypen
+Nasenscheidewandverkrümmung
+Nebenniereninsuffizienz
+Nebenschilddrüsenüberfunktion
+neoadjuvante Chemotherapie
+Nephroblastom
+Nephrolithiasis
+Nervenleitgeschwindigkeit
+Nervenschaden
+Nervenschäden
+Nervenschädigung
+Nervenverletzung
+Nervenzusammenbruch
+Nesselsucht
+Netzhautablösung
+Netzhautriss
+Neugeborenengelbsucht
+Neurasthenie
+Neuroblastom
+Neuroborreliose
+Neurodermitis
+Neuroendokriner Tumor
+Neuropathie
+nicht-kleinzelliges Bronchialkarzinom
+nichtalkoholische Fettleber
+nichtorganische Insomnie
+Nickelallergie
+niedriger Blutdruck
+Nierenbeckenentzündung
+Nierenentzündung
+Niereninsuffizienz
+Nierenkolik
+Nierenkontusion
+Nierenkrebs
+Nierenschaden
+Nierenschäden
+Nierenspende
+Nierenstein
+Nierensteine
+Nierentransplantation
+Nierenversagen
+Nierenzellkarzinom
+Nikotinabhängigkeit
+Non-Hodgkin-Lymphom
+Norovirus-Infektion
+Notkaiserschnitt
+Notoperation
+NSCLC
+Nukleotomie
+Nussallergie
+Oberarmfraktur
+Oberarmkopffraktur
+Oberschenkelamputation
+Oberschenkelfraktur
+Oberschenkelhalsbruch
+obstruktive Bronchitis
+obstruktive Schlafapnoe
+offene Fraktur
+offener Rücken
+offenes Bein
+Ohrenschmerzen
+Olekranonfraktur
+Omarthrose
+onkologische Behandlung
+onkologische Rehabilitation
+Onlay
+Operation
+Operationsfehler
+Opiatabhängigkeit
+Opioidabhängigkeit
+Opioidtherapie
+Orbitabodenfraktur
+Organschaden
+Organschäden
+Organspende
+Organtransplantation
+Orthese
+orthopädische Einlagen
+orthostatische Hypotonie
+Ösophaguskarzinom
+Ösophagusvarizen
+Osteochondrose
+Osteogenesis imperfecta
+Osteomalazie
+Osteomyelitis
+Osteopathie
+Osteopenie
+Osteoporose
+osteoporotische Wirbelkörperfraktur
+Osteosarkom
+Osteosynthese
+Otitis externa
+Otitis media
+Otosklerose
+Ovarialkarzinom
+Ovarialzyste
+palliativ
+palliative Behandlung
+palliative Chemotherapie
+Palliativstation
+Palliativversorgung
+Panikattacke
+Panikattacken
+Panikstörung
+Pankreaskarzinom
+Pankreatitis
+paranoid-halluzinatorische Schizophrenie
+paranoide Persönlichkeitsstörung
+paranoide Schizophrenie
+Paraplegie
+parenterale Ernährung
+Parkinson
+Parkinson-Krankheit
+Parkinson-Syndrom
+Parodontitis
+Parodontitisbehandlung
+Parodontose
+Parodontosebehandlung
+paroxysmales Vorhofflimmern
+Patellafraktur
+Patellaluxation
+Patellaspitzensyndrom
+pathologische Trauer
+pathologisches Spielen
+Paukenerguss
+Paukenröhrchen
+pAVK
+PCO-Syndrom
+PCOS
+PEG-Sonde
+Peitschenschlagsyndrom
+Pemphigus
+Penicillinallergie
+Peniskarzinom
+Periimplantitis
+Perikarditis
+periphere arterielle Verschlusskrankheit
+Peritonealdialyse
+permanentes Vorhofflimmern
+perniziöse Anämie
+Persönlichkeitsstörung
+pertrochantäre Femurfraktur
+Pertussis
+Perücke
+PET-CT
+Pfeiffersches Drüsenfieber
+Pflegebett
+Pflegegrad 1
+Pflegegrad 2
+Pflegegrad 3
+Pflegegrad 4
+Pflegegrad 5
+Pflegestufe 0
+Pflegestufe 1
+Pflegestufe 2
+Pflegestufe 3
+Phantomschmerz
+Phäochromozytom
+Pharyngitis
+Pharynxkarzinom
+Phenylketonurie
+Phimose
+Phlegmone
+Phobie
+Physiotherapie
+Pilzinfektion
+Plantarfasziitis
+Plasmozytom
+Plattenepithelkarzinom
+Plattenosteosynthese
+Plattfuß
+Platzwunde
+Platzwunden
+Plazenta praevia
+Plazentainsuffizienz
+Pleuraerguss
+Pleuritis
+plötzlicher Herztod
+Plötzlicher Kindstod
+Pneumonie
+Pneumothorax
+Poliomyelitis
+Pollenallergie
+Polyarthrose
+Polycythaemia vera
+Polymyalgia rheumatica
+Polyneuropathie
+Polypektomie
+Polypen
+Polypenentfernung
+Polyposis nasi
+Polysomnographie
+Polytoxikomanie
+Polytrauma
+polyzystische Nierenerkrankung
+polyzystisches Ovarialsyndrom
+Porphyrie
+Portimplantation
+Post-Covid-Syndrom
+postoperative Komplikation
+postpartale Depression
+postthrombotisches Syndrom
+posttraumatische Belastungsstörung
+Potenzstörung
+Prädiabetes
+Präeklampsie
+Präkanzerose
+Pränataldiagnostik
+Prellung
+Prellungen
+Presbyopie
+Pricktest
+primär biliäre Cholangitis
+primär sklerosierende Cholangitis
+professionelle Zahnreinigung
+Prostataentzündung
+Prostatakarzinom
+Prostatakrebs
+Prostatavergrößerung
+Prostatektomie
+Prostatitis
+Prothese
+Prothesenwechsel
+proximale Humerusfraktur
+Pruritus
+Pseudarthrose
+Pseudokrupp
+Psoriasis
+Psoriasis-Arthritis
+Psoriasisarthritis
+psychiatrische Behandlung
+psychiatrische Erkrankung
+psychiatrische Tagesklinik
+psychische Erkrankung
+psychische Störung
+Psychose
+Psychosen
+psychosomatische Beschwerden
+psychosomatische Erkrankung
+psychosomatische Rehabilitation
+Psychotherapie
+PTBS
+Pubertas praecox
+pulmonale Hypertonie
+Pulpitis
+Punktion
+Pyelonephritis
+qualifizierter Entzug
+Querschnittlähmung
+Querschnittslähmung
+Quetschung
+Quincke-Ödem
+Rachenkrebs
+radikale Prostatektomie
+Radiochemotherapie
+Radiotherapie
+Radiusfraktur
+Raucher
+Rauchvergiftung
+Raynaud-Syndrom
+reaktive Arthritis
+Reanimation
+Rechtsherzinsuffizienz
+Rechtsschenkelblock
+Refluxkrankheit
+Refluxösophagitis
+Regelschmerzen
+Regenbogenhautentzündung
+Reha
+Reha-Maßnahme
+Rehabilitation
+Rehaklinik
+Rehamaßnahme
+Rehasport
+Reizblase
+Reizdarm
+Reizdarmsyndrom
+Reizmagen
+Rektumkarzinom
+Remission
+Restless-Legs-Syndrom
+retinierte Weisheitszähne
+Retinoblastom
+Retinopathia pigmentosa
+Rezidiv
+rezidivierende depressive Störung
+Rheuma
+rheumatoide Arthritis
+Rhinitis
+Rhinoplastik
+Rhizarthrose
+Riesenzellarteriitis
+Rippenbruch
+Rippenfellentzündung
+Rippenfraktur
+Rippenprellung
+Rippenserienfraktur
+Risikoschwangerschaft
+Risswunde
+Rollator
+Rollstuhl
+Rosacea
+Rosazea
+Rotatorenmanschettenläsion
+Rotatorenmanschettennaht
+Rotatorenmanschettenruptur
+Rotavirus-Infektion
+Röteln
+Rückenbeschwerden
+Rückenmarksverletzung
+Rückenoperation
+Rückenschmerzen
+saisonal abhängige Depression
+Salmonellose
+Samenspende
+Sarkoidose
+Sarkom
+Sarkopenie
+SARS-CoV-2-Infektion
+Sauerstoffgerät
+Sauerstofftherapie
+Saugglockengeburt
+Säuglingskoliken
+Schädel-Hirn-Trauma
+Schädelbasisfraktur
+Schädelfraktur
+schädlicher Gebrauch von Alkohol
+Scharlach
+Schaufensterkrankheit
+Scheidenpilz
+Scheidensenkung
+Schenkelblock
+Schenkelhalsfraktur
+Schielen
+Schienbeinkopffraktur
+Schilddrüsenkarzinom
+Schilddrüsenknoten
+Schilddrüsenkrebs
+Schilddrüsenüberfunktion
+Schilddrüsenunterfunktion
+schizoaffektive Störung
+schizoide Persönlichkeitsstörung
+Schizophrenie
+schizotype Störung
+Schlafapnoe
+Schlafapnoe-Syndrom
+Schlaflabor
+Schlafstörung
+Schlafstörungen
+Schlaganfall
+Schlaganfälle
+Schlauchmagen
+Schleimbeutelentzündung
+Schleudertrauma
+Schlittenprothese
+Schluckstörung
+Schlüsselbeinbruch
+Schlüsselbeinfraktur
+Schmerzpatient
+Schmerzpumpe
+Schmerzstörung
+Schmerztherapie
+Schnarchen
+Schnellender Finger
+Schnittverletzung
+Schnittwunde
+Schnittwunden
+schubförmig remittierende Multiple Sklerose
+Schulter-Arm-Syndrom
+Schulter-TEP
+Schulterarthrose
+Schulterarthroskopie
+Schulterblattfraktur
+Schultereckgelenksprengung
+Schulterendoprothese
+Schulterimpingement
+Schulterluxation
+Schulteroperation
+Schulterschmerzen
+Schultersteife
+Schuppenflechte
+Schürfwunde
+Schürfwunden
+Schwangerschaft
+Schwangerschaftsabbruch
+Schwangerschaftsdiabetes
+Schwangerschaftsvergiftung
+schwarzer Hautkrebs
+schwerbehindert
+Schwerbehindertenausweis
+Schwerbehinderung
+schwere depressive Episode
+schwere depressive Episode mit psychotischen Symptomen
+schwere depressive Episode ohne psychotische Symptome
+schweres Schädel-Hirn-Trauma
+schwerhörig
+Schwerhörigkeit
+Schwindel
+Sectio
+Sectio caesarea
+seelische Erkrankung
+sehbehindert
+Sehbehinderung
+Sehnennaht
+Sehnenriss
+Sehnenruptur
+Sehnenscheidenentzündung
+Sehnenverletzung
+Sehschwäche
+Sehstörung
+Sehstörungen
+Seitenbandriss
+sekundäre Hypertonie
+Selbstmordversuch
+selbstverletzendes Verhalten
+Selbstverletzung
+Senkfuß
+Sepsis
+septischer Schock
+Septumdeviation
+Septumplastik
+sexuell übertragbare Infektion
+sexuelle Funktionsstörung
+Sicca-Syndrom
+Sichelzellanämie
+Sick-Sinus-Syndrom
+Sinusitis
+Sinuslift
+Sinusvenenthrombose
+Sjögren-Syndrom
+Skabies
+Skaphoidfraktur
+Sklerodermie
+Skoliose
+Sodbrennen
+Somatisierungsstörung
+somatoforme Schmerzstörung
+somatoforme Störung
+Sondenernährung
+Sonnenallergie
+Sonnenstich
+Sonographie
+soziale Phobie
+Spannungskopfschmerz
+Spannungspneumothorax
+Spastik
+Speicheldrüsenentzündung
+Speichenbruch
+Speiseröhrenkrebs
+spezifische Phobie
+Spielsucht
+Spina bifida
+spinale Muskelatrophie
+Spinaliom
+Spinalkanalstenose
+Spirometrie
+Spondylarthrose
+Spondylitis ankylosans
+Spondylodese
+Spondylolisthesis
+Spondylose
+Spontanabort
+Sprachentwicklungsstörung
+Sprachstörung
+Sprachstörungen
+Sprachtherapie
+Spreizfuß
+Sprunggelenkdistorsion
+Sprunggelenkfraktur
+Sprunggelenksarthrose
+Sprunggelenksdistorsion
+Sprunggelenksfraktur
+stabile Angina pectoris
+Stammzelltransplantation
+stationäre Behandlung
+stationäre psychiatrische Behandlung
+stationäre Rehabilitation
+stationärer Aufenthalt
+Stentimplantation
+Sterilisation
+Sterilität
+Stichverletzung
+Stichwunde
+Stillzeit
+Stimmbandknötchen
+Stimmbandlähmung
+Stoma
+Stomaversorgung
+Störung der Geschlechtsidentität
+Stoßwellentherapie
+Strabismus
+Strahlenbehandlung
+Strahlentherapie
+Stressfraktur
+Stromunfall
+Struma
+stufenweise Wiedereingliederung
+Stuhlinkontinenz
+Subarachnoidalblutung
+Substitutionsbehandlung
+Substitutionstherapie
+Suchterkrankung
+Suchttherapie
+Sudeck-Syndrom
+suizidal
+Suizidalität
+Suizidgedanken
+Suizidversuch
+Sulcus-ulnaris-Syndrom
+Supinationstrauma
+Supraspinatussehnenruptur
+supraventrikuläre Tachykardie
+Synkope
+Syphilis
+systemische Sklerose
+systemischer Lupus erythematodes
+Szintigraphie
+Tachykardie
+Tagesklinik
+Tätowierungsentfernung
+taub
+Taubheit
+Taubheitsgefühl
+taubstumm
+Teilnarkose
+Teilprothese
+Teilremission
+Tendinosis calcarea
+Tendovaginitis
+Tennisarm
+terminale Niereninsuffizienz
+Testosteronmangel
+Tetanus
+Tetanusimpfung
+Tetraplegie
+Thalassämie
+Thoraxprellung
+Thoraxtrauma
+Thrombophilie
+Thrombophlebitis
+Thrombose
+Thrombosen
+Thromboseprophylaxe
+Thrombozytopenie
+TIA
+Tibiafraktur
+Tibiakopffraktur
+tiefe Beinvenenthrombose
+tiefenpsychologisch fundierte Psychotherapie
+Tierbiss
+Tierhaarallergie
+Tinnitus
+Tollwut
+Tonsillektomie
+Tonsillitis
+Totalendoprothese
+Totgeburt
+Tourette-Syndrom
+Toxoplasmose
+Tracheotomie
+Transfusion
+transitorische ischämische Attacke
+Transplantation
+Transsexualität
+Trauerreaktion
+Traumatherapie
+Tremor
+Treppenlift
+Trigeminusneuralgie
+Trikuspidalinsuffizienz
+Tripper
+Trisomie 13
+Trisomie 18
+Trisomie 21
+trockenes Auge
+Trommelfellperforation
+Trommelfellriss
+Trümmerfraktur
+Tubenligatur
+Tuberkulose
+Tumor
+Tumorentfernung
+Tumorerkrankung
+Tumornachsorge
+Tumoroperation
+Tumorresektion
+Tumorrezidiv
+Turner-Syndrom
+Typ-1-Diabetes
+Typ-2-Diabetes
+Typhus
+Übelkeit
+überaktive Blase
+Überbein
+Überbiss
+Übergewicht
+übermäßiges Schwitzen
+Überzuckerung
+Ulcus cruris
+Ulcus duodeni
+Ulcus ventriculi
+Ultraschalluntersuchung
+Umknicktrauma
+Umstellungsosteotomie
+unerfüllter Kinderwunsch
+Unfruchtbarkeit
+Unfruchtbarkeit des Mannes
+ungewollter Gewichtsverlust
+Unterarmgehstützen
+Unterbiss
+Unterbringung nach PsychKG
+Unterernährung
+Untergewicht
+Unterkieferfraktur
+Unterkühlung
+Unterleibsschmerzen
+Unterschenkelamputation
+Unterschenkelbruch
+Unterschenkelfraktur
+Unterzuckerung
+Urtikaria
+Uterusmyom
+Uveitis
+Vaginalmykose
+Vaginismus
+Varikosis
+Varikozele
+Varizen
+Vasektomie
+vaskuläre Demenz
+Vaskulitis
+Vater-Kind-Kur
+Veneers
+Venenentzündung
+Ventrikelseptumdefekt
+ventrikuläre Tachykardie
+Verätzung
+Verbrennung
+Verbrennung dritten Grades
+Verbrennung zweiten Grades
+Verbrennungen
+Verbrühung
+Vergiftung
+Verhaltenstherapie
+Verrenkung
+Verstauchung
+Versteifungsoperation
+Vertebroplastie
+Vitamin-B12-Mangel
+Vitamin-D-Mangel
+Vitiligo
+Vollnarkose
+Vollprothese
+Vollremission
+Von-Willebrand-Syndrom
+vordere Kreuzbandruptur
+vorderer Kreuzbandriss
+Vorderwandinfarkt
+Vorhautverengung
+Vorhofflattern
+Vorhofflimmern
+Vorhofseptumdefekt
+vorzeitige Menopause
+vorzeitige Wehen
+vorzeitiger Blasensprung
+Vulvakarzinom
+Wachkoma
+Wachstumshormonmangel
+Wachstumsstörung
+Wächterlymphknoten
+Wadenbeinbruch
+wahnhafte Störung
+Wärmetherapie
+Warzen
+Wassergymnastik
+Weber-B-Fraktur
+Weber-C-Fraktur
+Wechseljahresbeschwerden
+Weichteilrheuma
+Weichteilsarkom
+Weisheitszähne
+Weisheitszahnentfernung
+weißer Hautkrebs
+Weißfleckenkrankheit
+Weitsichtigkeit
+Wespengiftallergie
+Wespenstich
+Wiederbelebung
+Wiedereingliederung
+Wilms-Tumor
+Windpocken
+Winterdepression
+Wirbelbruch
+Wirbelgleiten
+Wirbelkörperfraktur
+Wirbelsäulenoperation
+Wirbelsäulenverletzung
+Wochenbett
+Wochenbettdepression
+WPW-Syndrom
+Wundheilungsstörung
+Wundinfekt
+Wundinfektion
+Wundliegen
+Wundrose
+Wurmbefall
+Wurzelbehandlung
+Wurzelentzündung
+Wurzelkanalbehandlung
+Wurzelspitzenentzündung
+Wurzelspitzenresektion
+Zahnabszess
+Zähneknirschen
+Zahnentfernung
+Zahnersatz
+Zahnextraktion
+Zahnfehlstellung
+Zahnfleischentzündung
+Zahnfleischrückgang
+Zahnfraktur
+Zahnfüllung
+Zahnimplantat
+Zahnkaries
+Zahnkrone
+Zahnlosigkeit
+Zahnprothese
+Zahnreinigung
+Zahnschäden
+Zahnschmerzen
+Zahnspange
+Zahnstein
+Zahnverletzung
+Zahnverlust
+Zahnwurzelentzündung
+Zangengeburt
+Zeckenbiss
+Zehenamputation
+Zehenfraktur
+Zellveränderung
+Zerebralparese
+Zerrung
+zervikaler Bandscheibenvorfall
+Zervikalsyndrom
+Zervixdysplasie
+Zervixkarzinom
+zielgerichtete Therapie
+Zirkumzision
+Zöliakie
+Zuckerkrankheit
+Zungenkarzinom
+zwanghafte Persönlichkeitsstörung
+Zwangseinweisung
+Zwangserkrankung
+Zwangsgedanken
+Zwangshandlungen
+Zwangsstörung
+Zwerchfellbruch
+Zwillingsschwangerschaft
+Zwölffingerdarmgeschwür
+Zyklothymie
+Zyklusstörung
+Zystenniere
+zystische Fibrose
+Zystitis
+Zystoskopie
+Zytomegalie
