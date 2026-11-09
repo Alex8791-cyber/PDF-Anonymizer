@@ -1013,3 +1013,438 @@ def test_kleinschreibung_in_mail_adressen_macht_namen_nicht_mehrdeutig(monkeypat
     funde = analysiere_text(text, {"namen", "email"}, [], [])
     assert gedeckt(funde, text, "Brenner zahlt", "Brenner")
     assert not any(not st["an"] for f in funde for st in f["stellen"])
+
+
+# ----------------------------------------------------------------------
+# Schutzstufen: Gesundheitsdaten werden in „hoch“/„ausgewogen“ erkannt, aber nur abgewählt angeboten
+# (Integration Agent „wissen“: muster.hinweis_kategorien); Hinweise; NIE-Liste unabhängig vom Leerraum (EQ-19)
+# ----------------------------------------------------------------------
+from anonymisierer import muster as mu  # noqa: E402
+
+ARZTBERICHT = ["Arztbericht", "Diagnose: Lumboischialgie links (M54.4)", "Medikation: Ibuprofen 600 mg bei Bedarf",
+               "IBAN DE89 3704 0044 0532 0130 00"]
+
+
+def _stufe(name):
+    """Kategorien einer Schutzstufe ohne Namen (kein Sprachmodell nötig)."""
+    return set(mu.PROFILE[name]["aktive"]) - {"namen"}
+
+
+def _ausgabetext(erg):
+    with fitz.open(erg["ausgabe"]) as doc:
+        return "\n".join(s.get_text() for s in doc)
+
+
+@pytest.mark.parametrize("stufe", ["hoch", "ausgewogen"])
+def test_gesundheitsdaten_werden_angeboten_aber_nicht_angehakt(tmp_path, stufe):
+    from anonymisierer.schwaerzung import schwaerze_pdf
+    pdf = _seiten_pdf(tmp_path / "arzt.pdf", ARZTBERICHT)
+    e = analysiere_pdf(pdf, _stufe(stufe), [], [], profil=stufe, ocr=_FakeLeer())
+    gesundheit = {f["kategorie"]: f for f in e["funde"] if f["kategorie"] in mu.GESUNDHEIT}
+    assert {k: f["text"] for k, f in gesundheit.items()} == {"diagnose": "Lumboischialgie links (M54.4)",
+                                                              "medikament": "Ibuprofen 600 mg bei Bedarf"}
+    for f in gesundheit.values():
+        assert f["stellen"] and not any(st["an"] for st in f["stellen"]), f
+        assert f["hinweis"] == analyse.HINWEIS_GESUNDHEIT
+        assert f["hinweis"] == "Gesundheitsdaten (Art. 9 DSGVO) – angeboten, nicht angehakt"
+        assert f["anzahl"] == 1 and f["seiten"] == [1] and f["ersatz"] in ("[DIAGNOSE]", "[MEDIKAMENT]")
+    iban = next(f for f in e["funde"] if f["kategorie"] == "iban")
+    assert all(st["an"] for st in iban["stellen"]) and iban["hinweis"] is None
+    # Reihenfolge der Fundliste = Dokumentreihenfolge, auch für nur angebotene Funde
+    assert [f["kategorie"] for f in e["funde"] if f["kategorie"] in mu.GESUNDHEIT | {"iban"}] == \
+        ["diagnose", "medikament", "iban"]
+    # genau EINE Meldung je Dokument, in einfachem Deutsch, dazu derselbe Text in "hinweise"
+    meldungen = [m for m in e["meldungen"] if m["code"] == "GESUNDHEITSDATEN"]
+    assert len(meldungen) == 1 and meldungen[0]["art"] == "hinweis" and meldungen[0]["seite"] is None
+    text = meldungen[0]["text"]
+    assert text.startswith("Das Dokument enthält Gesundheitsdaten (Diagnosen, Medikamente).")
+    assert "nicht angehakt" in text and "anhaken" in text and "„Maximal“" in text
+    assert e["hinweise"].count(text) == 1
+    # Schwärzen wie angeboten: Gesundheitsdaten bleiben lesbar, die IBAN nicht
+    erg = schwaerze_pdf(pdf, e["funde"], modell=e["modell"], ocr=_FakeLeer(), ziel_ordner=tmp_path / "aus1")
+    aus = _ausgabetext(erg)
+    assert "Lumboischialgie" in aus and "Ibuprofen" in aus and "DE89" not in aus and erg["reste"] == []
+    # die Nutzerin hakt die Diagnose an -> sie wird geschwärzt, das Medikament bleibt
+    for st in gesundheit["diagnose"]["stellen"]:
+        st["an"] = True
+    erg = schwaerze_pdf(pdf, e["funde"], modell=e["modell"], ocr=_FakeLeer(), ziel_ordner=tmp_path / "aus2")
+    aus = _ausgabetext(erg)
+    assert "Lumboischialgie" not in aus and "M54.4" not in aus and "[DIAGNOSE]" in aus and "Ibuprofen" in aus
+    assert erg["reste"] == [] and erg["stellen_nicht_lokalisiert"] == 0
+
+
+def test_gesundheitsdaten_in_maximal_normal_geschwaerzt(tmp_path):
+    from anonymisierer.schwaerzung import schwaerze_pdf
+    pdf = _seiten_pdf(tmp_path / "arzt.pdf", ARZTBERICHT)
+    e = analysiere_pdf(pdf, _stufe("maximal"), [], [], profil="maximal", ocr=_FakeLeer())
+    gesundheit = [f for f in e["funde"] if f["kategorie"] in mu.GESUNDHEIT]
+    assert {f["kategorie"] for f in gesundheit} == {"diagnose", "medikament"}
+    assert all(st["an"] for f in gesundheit for st in f["stellen"]) and all(f["hinweis"] is None for f in gesundheit)
+    assert not any(m["code"] == "GESUNDHEITSDATEN" for m in e["meldungen"]) and not e["hinweise"]
+    erg = schwaerze_pdf(pdf, e["funde"], modell=e["modell"], ocr=_FakeLeer(), ziel_ordner=tmp_path / "aus")
+    aus = _ausgabetext(erg)
+    assert "Lumboischialgie" not in aus and "Ibuprofen" not in aus and "[MEDIKAMENT]" in aus and erg["reste"] == []
+
+
+def test_selbst_gewaehlte_gesundheitskategorien_gelten():
+    text = "\n".join(ARZTBERICHT)
+
+    def zustand(funde):
+        return {f["kategorie"]: [st["an"] for st in f["stellen"]] for f in funde if f["kategorie"] in mu.GESUNDHEIT}
+    # „hoch“ mit selbst angehakten Diagnosen: Diagnose aktiv, Medikament nur angeboten
+    funde = analysiere_text(text, _stufe("hoch") | {"diagnose"}, [], [], profil="hoch")
+    assert zustand(funde) == {"diagnose": [True], "medikament": [False]}
+    assert next(f for f in funde if f["kategorie"] == "diagnose")["hinweis"] is None
+    # „maximal“, Diagnosen selbst abgewählt (Benutzerdefiniert): gemeldet und abgewählt angeboten, nicht
+    # verschwiegen
+    funde, hinweise = analyse._analysiere(text, _stufe("maximal") - {"diagnose"}, [], [], profil="maximal")
+    assert zustand(funde) == {"diagnose": [False], "medikament": [True]}
+    assert any("Gesundheitsdaten (Diagnosen)" in h for h in hinweise)
+    # bisherige Text-Schnittstelle ohne Schutzstufe: nur die aktivierten Kategorien, nichts angeboten
+    assert zustand(analysiere_text(text, _stufe("hoch"), [], [])) == {}
+
+
+def test_angebotene_gesundheitsstelle_schluckt_keine_andere_stelle(monkeypatch):
+    """Eine abgewählt angebotene Diagnose darf eine überlappende Stelle anderer Art (Name, IMMER-Begriff, Kennung)
+    nicht schlucken – sonst bliebe der Name in „Diabetes … bei Herrn Meier“ stehen. Liegt sie ganz in einer
+    angehakten Stelle, entfällt sie (wird ohnehin geschwärzt)."""
+    text = "Diagnose: Diabetes mellitus Typ 2 bei Herrn Meier\nIBAN DE89 3704 0044 0532 0130 00"
+    funde = analysiere_text(text, _stufe("hoch"), [], ["Meier"], profil="hoch")
+    dia = next(f for f in funde if f["kategorie"] == "diagnose")
+    assert dia["text"] == "Diabetes mellitus Typ 2 bei Herrn Meier" and [st["an"] for st in dia["stellen"]] == [False]
+    meier = next(f for f in funde if f["kategorie"] == "begriff")
+    assert [(st["text"], st["an"]) for st in meier["stellen"]] == [("Meier", True)]
+    assert gedeckt(funde, text, "Meier")
+    # Namen (KI-Kandidat) ebenso
+    monkeypatch.setattr(na, "finde_personen", lambda t: _kandidaten_aus(t, "Meier"))
+    funde = analysiere_text(text, _stufe("hoch") | {"namen"}, [], [], profil="hoch")
+    assert gedeckt(funde, text, "Meier") and any(f["kategorie"] == "namen" for f in funde)
+    assert [st["an"] for f in funde if f["kategorie"] == "diagnose" for st in f["stellen"]] == [False]
+    # „maximal“: alles angehakt; der IMMER-Begriff behält auch hier seine eigene Stelle (Review „Integration Wissen“:
+    # sonst bliebe er nach dem Abwählen der Diagnose lesbar)
+    funde = analysiere_text(text, _stufe("maximal"), [], ["Meier"], profil="maximal")
+    assert gedeckt(funde, text, "Meier") and gedeckt(funde, text, "Diabetes mellitus Typ 2")
+    meier = next(f for f in funde if f["kategorie"] == "begriff")
+    assert [(st["text"], st["an"]) for st in meier["stellen"]] == [("Meier", True)]
+    # ganz in einer angehakten Stelle (IMMER-Begriff über die ganze Angabe): kein Angebot, keine Meldung
+    meldungen = []
+    funde, _ = analyse._analysiere("Diagnose: Diabetes mellitus Typ 2 laut Akte", _stufe("hoch"), [],
+                                   ["Diabetes mellitus Typ 2 laut Akte"], profil="hoch", meldungen=meldungen)
+    assert [f["kategorie"] for f in funde] == ["begriff"] and not meldungen
+
+
+def test_angebotene_gesundheitsdaten_bleiben_bei_der_weitergabe_im_dokument_abgewaehlt():
+    """Weitergabe im Dokument: weitere Vorkommen einer Diagnose (auch ohne Gesundheitskontext) sind Stellen
+    desselben Funds – ebenfalls abgewählt."""
+    text = ("Diagnose: Lumboischialgie links (M54.4)\nIBAN DE89 3704 0044 0532 0130 00\n\n"
+            "Kostenaufstellung Lumboischialgie links (M54.4) siehe Anlage")
+    funde = analysiere_text(text, _stufe("hoch"), [], [], profil="hoch")
+    dia = next(f for f in funde if f["kategorie"] == "diagnose")
+    assert len(dia["stellen"]) == 2 and not any(st["an"] for st in dia["stellen"])
+    assert "weitergabe" in dia["quellen"] and dia["anzahl"] == 2
+
+
+def test_lesefehler_quelle_wird_zum_hinweis():
+    funde = analysiere_text("IBAN DE89 3704 0044 0532 0130 01", OHNE_NAMEN, [], [])
+    iban = next(f for f in funde if f["kategorie"] == "iban")
+    assert "muster.iban.lesefehler" in iban["quellen"] and iban["hinweis"] == mu.HINWEIS_PRUEFZIFFER
+    assert all(st["an"] for st in iban["stellen"]), "Lesefehler-Verdacht wird trotzdem geschwärzt"
+    gueltig = next(f for f in analysiere_text("IBAN DE89 3704 0044 0532 0130 00", OHNE_NAMEN, [], [])
+                   if f["kategorie"] == "iban")
+    assert gueltig["hinweis"] is None
+    # Hinweise werden verbunden (ohne Doppelungen)
+    assert analyse._hinweise_verbinden(analyse.HINWEIS_GESUNDHEIT, None, mu.HINWEIS_PRUEFZIFFER,
+                                       f"{analyse.HINWEIS_GESUNDHEIT}; x") == \
+        f"{analyse.HINWEIS_GESUNDHEIT}; {mu.HINWEIS_PRUEFZIFFER}; x"
+    assert analyse._hinweise_verbinden(None, "") is None
+
+
+def test_lesefehler_hinweis_wandert_mit_der_weitergabe(tmp_path):
+    a = _seiten_pdf(tmp_path / "a.pdf", ["IBAN DE89 3704 0044 0532 0130 01"])
+    b = _seiten_pdf(tmp_path / "b.pdf", ["Konto DE89 3704 0044 0532 0130 01 laut Telefonat"])
+    ea = analysiere_pdf(a, OHNE_NAMEN, [], [], ocr=_FakeLeer())
+    eb = analysiere_pdf(b, {"email"}, [], [], ocr=_FakeLeer())          # B allein erkennt die IBAN nicht
+    assert eb["funde"] == []
+    assert analyse.weitergabe_anwenden([ea, eb]) >= 1
+    iban_b = next(f for f in eb["funde"] if f["kategorie"] == "iban")
+    assert iban_b["hinweis"] == f"{mu.HINWEIS_PRUEFZIFFER}; {analyse.HINWEIS_WEITERGABE}"
+    assert all(st["an"] for st in iban_b["stellen"])
+
+
+@pytest.mark.parametrize("text, nie, frei", [
+    ("Konto-Nr. DE89370400440532013000", "DE89 3704 0044 0532 0130 00", "DE89370400440532013000"),
+    ("IBAN DE89 3704 0044 0532 0130 00", "DE89370400440532013000", "DE89 3704 0044 0532 0130 00"),
+    ("IBAN DE89 3704 0044 0532 0130 00", "DE89  3704 0044\t0532 0130 00", "DE89 3704 0044 0532 0130 00"),
+    ("Kunden-Nr. 1234567", "123 4567", "1234567"),
+    ("Kunden-Nr. 123 4567", "1234567", "123 4567"),
+    ("Tel. 01712345678", "0171 2345678", "01712345678"),
+])
+def test_nie_liste_nummern_unabhaengig_vom_leerraum(text, nie, frei):
+    """Gutachten EQ-19: eine IBAN/Nummer auf der NIE-Liste gilt auch ohne bzw. mit anderem Leerraum – und wird
+    genau EINMAL als freigegeben gemeldet (keine Meldung für Bruchstücke wie „0044 0532 0130 00“)."""
+    funde, hinweise = analyse._analysiere(text, OHNE_NAMEN, [nie], [])
+    assert funde == []
+    assert [h for h in hinweise if "NIE-Liste" in h] == [f"Durch NIE-Liste freigegeben: {frei}"]
+
+
+@pytest.mark.parametrize("text, nie, bleibt", [
+    ("Kunden-Nr. 41234", "123", "41234"),
+    ("Kunden-Nr. 1234", "123", "1234"),
+    ("Kunden-Nr. 123 456", "123", "123 456"),
+    ("Kunden-Nr. 12345678", "1234", "12345678"),
+    ("Kunden-Nr. 123 45678", "123 4567", "123 45678"),
+    ("IBAN DE89 3704 0044 0532 0130 00", "DE89 3704 0044 0532 0130", "DE89 3704 0044 0532 0130 00"),
+])
+def test_nie_liste_nummer_gibt_keine_laengere_nummer_frei(text, nie, bleibt):
+    """Ganzphrasen-Semantik bleibt: NIE "123" gibt weder "41234" noch eine längere Nummer frei."""
+    assert bleibt in [f["text"] for f in analysiere_text(text, OHNE_NAMEN, [nie], [])]
+
+
+def _namensfund(e, text, *stellen_texte, an=True):
+    """Namens-Fund wie von der KI, mit Stellen an allen Vorkommen der Texte im Modell des Ergebnisses."""
+    dok = e["modell"]
+    stellen = []
+    for t in stellen_texte:
+        for s, ende in analyse.ganzwort_stellen(dok, t, "name"):
+            for nr, ls, le in dok.lokal(s, ende):
+                if not any(st["seite"] == nr and st["start"] < le and ls < st["ende"] for st in stellen):
+                    stellen.append({"seite": nr, "start": ls, "ende": le, "an": an, "text": dok.seiten[nr].text[ls:le]})
+    fund = {"id": f"f{len(e['funde']) + 1}", "kategorie": "namen", "anzeige": "Name", "text": text,
+            "ersatz": "[PERSON A]", "seiten": [1], "anzahl": len(stellen), "kontext": "", "stellen": stellen,
+            "quellen": ["ner"], "sicherheit": 0.6, "hinweis": None}
+    e["funde"].append(fund)
+    return fund
+
+
+def test_weitergabe_hakt_nichts_an_was_die_nutzerin_abgewaehlt_hat(tmp_path):
+    a = _seiten_pdf(tmp_path / "a.pdf", ["Versicherungsnehmerin: Erika Musterfrau", "Frau Musterfrau zahlt."])
+    b = _seiten_pdf(tmp_path / "b.pdf", ["Notiz: Erika Musterfrau rief an.", "Rückruf an Frau Musterfrau."])
+    ea = analysiere_pdf(a, {"iban"}, [], [], ocr=_FakeLeer())
+    eb = analysiere_pdf(b, {"iban"}, [], [], ocr=_FakeLeer())
+    _namensfund(ea, "Erika Musterfrau", "Erika Musterfrau", "Musterfrau")
+    abgewaehlt = _namensfund(eb, "Erika Musterfrau", "Erika Musterfrau", an=False)   # Entscheidung der Nutzerin
+    vorher = [dict(st) for st in abgewaehlt["stellen"]]
+    assert analyse.weitergabe_anwenden([ea, eb]) == 1
+    neu = [st for st in abgewaehlt["stellen"] if st not in vorher]
+    assert [(st["text"], st["an"]) for st in neu] == [("Musterfrau", False)]
+    assert [st for st in abgewaehlt["stellen"] if st in vorher] == vorher     # nichts umgeschaltet
+    # teilweise angehakt: vorhandene Zustände bleiben, neue Stellen sind angehakt
+    ea = analysiere_pdf(a, {"iban"}, [], [], ocr=_FakeLeer())
+    eb = analysiere_pdf(b, {"iban"}, [], [], ocr=_FakeLeer())
+    _namensfund(ea, "Erika Musterfrau", "Erika Musterfrau", "Musterfrau")
+    teil = _namensfund(eb, "Erika Musterfrau", "Erika Musterfrau", "Rückruf")
+    teil["stellen"][1]["an"] = False
+    analyse.weitergabe_anwenden([ea, eb])
+    assert [(st["text"], st["an"]) for st in teil["stellen"]] == [("Erika Musterfrau", True), ("Rückruf", False),
+                                                                    ("Musterfrau", True)]
+
+
+def test_weitergabe_ergaenzt_namen_in_angebotener_gesundheitsstelle(tmp_path):
+    """Dokumentübergreifend: eine abgewählt angebotene Diagnose im Zieldokument blockiert keinen Namen."""
+    a = _seiten_pdf(tmp_path / "a.pdf", ["Versicherungsnehmerin: Erika Musterfrau"])
+    b = _seiten_pdf(tmp_path / "b.pdf", ["Diagnose: Diabetes mellitus Typ 2 bei Frau Musterfrau"])
+    ea = analysiere_pdf(a, _stufe("hoch"), [], [], profil="hoch", ocr=_FakeLeer())
+    eb = analysiere_pdf(b, _stufe("hoch"), [], [], profil="hoch", ocr=_FakeLeer())
+    dia = next(f for f in eb["funde"] if f["kategorie"] == "diagnose")
+    assert dia["text"].endswith("bei Frau Musterfrau") and not dia["stellen"][0]["an"]
+    _namensfund(ea, "Musterfrau", "Musterfrau")
+    assert analyse.weitergabe_anwenden([ea, eb]) == 1
+    name_b = next(f for f in eb["funde"] if f["kategorie"] == "namen")
+    assert [(st["text"], st["an"]) for st in name_b["stellen"]] == [("Musterfrau", True)]
+    assert not dia["stellen"][0]["an"]
+
+
+def test_weitergabe_und_laufwissen_lassen_angebotene_kategorien_abgewaehlt(tmp_path, monkeypatch):
+    """Eine nur angebotene Kategorie bleibt auch dokumentübergreifend abgewählt (hier eine Kennung, damit die
+    Weitergabe sie überhaupt sucht) und wird nicht als Kennung ins Laufwissen übernommen."""
+    monkeypatch.setitem(mu.PROFILE["hoch"], "hinweis", mu.GESUNDHEIT | {"vertrag"})
+    aktive = {"iban"}
+    lauf = analyse.LaufWissen()
+    a = _seiten_pdf(tmp_path / "a.pdf", ["Versicherungsschein-Nr.: LV-2024-887766", "IBAN DE89 3704 0044 0532 0130 00"])
+    b = _seiten_pdf(tmp_path / "b.pdf", ["Rückruf zu LV-2024-887766 erbeten.", "Konto DE89370400440532013000"])
+    ea = analysiere_pdf(a, aktive, [], [], profil="hoch", lauf=lauf, ocr=_FakeLeer())
+    eb = analysiere_pdf(b, aktive, [], [], profil="hoch", lauf=lauf, ocr=_FakeLeer())
+    va = next(f for f in ea["funde"] if f["kategorie"] == "vertrag")
+    assert not any(st["an"] for st in va["stellen"]) and "angeboten, nicht angehakt" in va["hinweis"]
+    assert not any(k[0] == "vertrag" for k in lauf.kennungen) and ("iban", "de89370400440532013000") in lauf.kennungen
+    assert not any(f["kategorie"] == "vertrag" for f in eb["funde"])
+    analyse.weitergabe_anwenden([ea, eb])
+    vb = next(f for f in eb["funde"] if f["kategorie"] == "vertrag")
+    assert [(st["text"], st["an"]) for st in vb["stellen"]] == [("LV-2024-887766", False)]
+    assert "angeboten, nicht angehakt" in vb["hinweis"] and analyse.HINWEIS_WEITERGABE in vb["hinweis"]
+
+
+# ----------------------------------------------------------------------
+# Review „Integration Wissen“: Vertrag §9 (Meldung mit Art. 9 DSGVO, abgewählt angeboten), aktive Gesundheitsstellen
+# schlucken keinen Namen (auch dokumentübergreifend), nur vermutete Gesundheitsangaben (Tarif-/Leistungsbegriffe)
+# ----------------------------------------------------------------------
+def test_gesundheitsmeldung_nennt_art_9_dsgvo_und_bietet_abgewaehlt_an():
+    """Vertrag §9 (angeglichen an die Vorgaben der Integration): in „hoch“ und „ausgewogen“ werden Diagnosen und
+    Medikamente gemeldet – der Meldungstext nennt „Art. 9 DSGVO“ wie der Vertrag – und abgewählt angeboten (an:
+    False); anhaken oder „Maximal“ wählen. Die Beschreibung der Stufe sagt dasselbe."""
+    for stufe in ("hoch", "ausgewogen"):
+        meldungen = []
+        funde, hinweise = analyse._analysiere("\n".join(ARZTBERICHT), _stufe(stufe), [], [], profil=stufe,
+                                              meldungen=meldungen)
+        gesundheit = [m for m in meldungen if m["code"] == "GESUNDHEITSDATEN"]
+        assert len(gesundheit) == 1 and (gesundheit[0]["art"], gesundheit[0]["seite"]) == ("hinweis", None)
+        text = gesundheit[0]["text"]
+        assert text.startswith("Das Dokument enthält Gesundheitsdaten (Diagnosen, Medikamente).")
+        assert "Art. 9 DSGVO" in text and "nicht angehakt" in text and "„Maximal“" in text, text
+        assert hinweise.count(text) == 1
+        stellen = [st["an"] for f in funde if f["kategorie"] in mu.GESUNDHEIT for st in f["stellen"]]
+        assert stellen == [False, False]
+        assert "gemeldet und können angehakt werden" in mu.PROFILE[stufe]["beschreibung"]
+
+
+MAXIMAL_ARZTBERICHT = ["Arztbericht", "Patient: Hans Meier, geb. 12.03.1961",
+                       "Diagnose: Diabetes mellitus Typ 2 bei Herrn Meier",
+                       "Befund: Morbus Crohn bei Frau Schulz", "IBAN DE89 3704 0044 0532 0130 00"]
+
+
+@pytest.mark.parametrize("stufe, aktive_extra, immer", [
+    ("maximal", set(), []),                          # „maximal“: Diagnosen angehakt
+    ("hoch", {"diagnose"}, []),                      # „hoch“, Diagnosen selbst angehakt (Benutzerdefiniert)
+    ("maximal", set(), ["Meier"]),                   # IMMER-Begriff in der angehakten Diagnose
+])
+def test_angehakte_diagnose_schluckt_keinen_namen(tmp_path, monkeypatch, stufe, aktive_extra, immer):
+    """Befund: eine AKTIVE Gesundheitsstelle schluckte den Namen („… bei Herrn Meier“) – wählte die Nutzerin die
+    Diagnose ab (damit die KI sie lesen kann), blieb der Name ohne Warnung stehen (reste [], anonym_01.pdf).
+    Jetzt behält der Name seine eigene, angehakte Stelle; die abgewählte Diagnose bleibt sonst lesbar („Typ 2“ und
+    „Morbus Crohn“ sind dabei keine unbekannten Eigennamen)."""
+    from anonymisierer.schwaerzung import schwaerze_pdf
+    monkeypatch.setattr(na, "finde_personen", lambda t: [])      # ohne Sprachmodell: wissen.namen findet die Namen
+    pdf = _seiten_pdf(tmp_path / "arzt.pdf", MAXIMAL_ARZTBERICHT)
+    aktive = (set(mu.PROFILE[stufe]["aktive"]) | aktive_extra) & (set(mu.PROFILE["maximal"]["aktive"]))
+    e = analysiere_pdf(pdf, aktive, [], immer, profil=stufe, ocr=_FakeLeer())
+    diagnosen = [f for f in e["funde"] if f["kategorie"] == "diagnose"]
+    assert [f["text"] for f in diagnosen] == ["Diabetes mellitus Typ 2 bei Herrn Meier", "Morbus Crohn bei Frau Schulz"]
+    assert all(st["an"] for f in diagnosen for st in f["stellen"]), "aktiv: angehakt"
+    namen_texte = {st["text"] for f in e["funde"] if f["kategorie"] in ("namen", "begriff") for st in f["stellen"]
+                   if st["an"]}
+    assert {"Meier", "Schulz"} <= namen_texte, namen_texte
+    assert not namen_texte & {"Typ", "Morbus", "Crohn", "Diabetes"}, namen_texte
+    # alles angehakt: weder Name noch Diagnose lesbar
+    erg = schwaerze_pdf(pdf, e["funde"], modell=e["modell"], ocr=_FakeLeer(), ziel_ordner=tmp_path / "aus1")
+    aus = _ausgabetext(erg)
+    assert not [w for w in ("Meier", "Schulz", "Diabetes", "Crohn", "DE89") if w in aus], aus
+    assert erg["reste"] == [] and erg["stellen_nicht_lokalisiert"] == 0
+    # Diagnosen abgewählt: sie bleiben lesbar, die Namen darin nicht
+    for f in diagnosen:
+        for st in f["stellen"]:
+            st["an"] = False
+    erg = schwaerze_pdf(pdf, e["funde"], modell=e["modell"], ocr=_FakeLeer(), ziel_ordner=tmp_path / "aus2")
+    aus = _ausgabetext(erg)
+    assert "Diabetes mellitus Typ 2 bei Herrn" in aus and "Morbus Crohn bei Frau" in aus, aus
+    assert "Meier" not in aus and "Schulz" not in aus and "DE89" not in aus, aus
+    assert erg["reste"] == [] and erg["stellen_nicht_lokalisiert"] == 0
+
+
+def test_weitergabe_findet_namen_in_angehakter_diagnose(tmp_path):
+    """Dokumentübergreifend wie im Dokument: B („Diagnose: … bei Meier“) wird VOR A analysiert, wo die Person steht.
+    In „maximal“ (Diagnose angehakt) blockierte die Gesundheitsstelle die Weitergabe – 0 neue Stellen, „Meier“
+    blieb nach dem Abwählen der Diagnose lesbar. Jetzt bekommt B eine eigene, angehakte Stelle, wie in „hoch“."""
+    b = _seiten_pdf(tmp_path / "b.pdf", ["Arztbericht", "Diagnose: Diabetes mellitus Typ 2 bei Meier"])
+    a = _seiten_pdf(tmp_path / "a.pdf", ["Antrag", "Versicherte Person: Hans Meier, geb. 12.03.1961"])
+    for stufe in ("hoch", "maximal"):
+        lauf = analyse.LaufWissen()
+        eb = analysiere_pdf(b, _stufe(stufe), [], [], profil=stufe, ocr=_FakeLeer(), lauf=lauf)
+        ea = analysiere_pdf(a, _stufe(stufe), [], [], profil=stufe, ocr=_FakeLeer(), lauf=lauf)
+        _namensfund(ea, "Meier", "Meier")                         # wie die KI in A
+        dia = next(f for f in eb["funde"] if f["kategorie"] == "diagnose")
+        assert dia["text"] == "Diabetes mellitus Typ 2 bei Meier"
+        assert analyse.weitergabe_anwenden([eb, ea]) == 1, stufe
+        name_b = next(f for f in eb["funde"] if f["kategorie"] == "namen")
+        assert [(st["text"], st["an"]) for st in name_b["stellen"]] == [("Meier", True)], stufe
+        assert [st["an"] for st in dia["stellen"]] == [stufe == "maximal"]       # Diagnose unverändert
+
+
+@pytest.mark.parametrize("satz, beispiel", [
+    ("Ihr Tarif: Krankenhaustagegeld 50 EUR, Zahnersatz 80 %, Brillen bis 300 EUR.", "Zahnersatz"),
+    ("Wir übernehmen die Kosten der Heilbehandlung und der Rehabilitation.", "Rehabilitation"),
+    ("Tarif A: Ambulant 100 %, Psychotherapie bis 30 Sitzungen je Jahr.", "Psychotherapie"),
+    ("Leistung bei schweren Erkrankungen wie Krebs, Herzinfarkt und Schlaganfall: 50.000 EUR.", "Krebs"),
+])
+def test_tarifbegriffe_nur_als_moegliche_gesundheitsdaten(satz, beispiel):
+    """Befund: in „hoch“ lösten Tarif- und Leistungsbegriffe ohne jede Person die Meldung „Das Dokument enthält
+    Gesundheitsdaten“ aus. Sie werden weiter angeboten (Erkennung unverändert), aber vorsichtig formuliert:
+    „möglicherweise“, mit dem gefundenen Begriff – und die Oberfläche erkennt sie an gesundheit_nur_vermutet."""
+    meldungen = []
+    funde, _ = analyse._analysiere(satz, set(mu.PROFILE["hoch"]["aktive"]) - {"namen"}, [], [], profil="hoch",
+                                   meldungen=meldungen)
+    gesundheit = [f for f in funde if f["kategorie"] in mu.GESUNDHEIT]
+    assert gesundheit and all(not st["an"] for f in gesundheit for st in f["stellen"])
+    assert all(f["hinweis"] == analyse.HINWEIS_GESUNDHEIT_VERMUTET for f in gesundheit), gesundheit
+    assert all(analyse.gesundheit_nur_vermutet(f) for f in gesundheit)
+    assert all("wissen.gesundheit.vermutet" in f["quellen"] for f in gesundheit)
+    assert gesundheit[0]["text"] == beispiel                     # „wie Krebs“ war zu weit nach links erweitert
+    text = next(m["text"] for m in meldungen if m["code"] == "GESUNDHEITSDATEN")
+    assert text.startswith("Das Dokument enthält möglicherweise Gesundheitsdaten") and f"„{beispiel}“" in text
+    assert "Art. 9 DSGVO" in text and "Tarif- und Leistungsübersichten" in text
+
+
+@pytest.mark.parametrize("satz", [
+    "Herr Meier leidet an Diabetes mellitus Typ 2.",
+    "Die Patientin ist seit 2019 in Psychotherapie.",
+    "Seit der Chemotherapie im Frühjahr kann Herr Meier nicht mehr arbeiten.",
+    "Diagnose: Lumboischialgie links (M54.4)\nPhysiotherapie 2x wöchentlich",
+    "Medikation: Bisoprolol 2,5 mg 1-0-0",
+])
+def test_gesundheitsdaten_mit_personenbezug_bleiben_sicher(satz):
+    """Gegenprobe: Etikett, ICD-Code, Dosierung oder Bezug zu einer Person („leidet an“, „Patientin“, „Herr Meier“)
+    -> sichere Meldung „Das Dokument enthält Gesundheitsdaten“ und Hinweis HINWEIS_GESUNDHEIT."""
+    meldungen = []
+    funde, _ = analyse._analysiere(satz, set(mu.PROFILE["hoch"]["aktive"]) - {"namen"}, [], [], profil="hoch",
+                                   meldungen=meldungen)
+    gesundheit = [f for f in funde if f["kategorie"] in mu.GESUNDHEIT]
+    assert gesundheit and all(f["hinweis"] == analyse.HINWEIS_GESUNDHEIT for f in gesundheit), gesundheit
+    assert not any(analyse.gesundheit_nur_vermutet(f) for f in gesundheit)
+    text = next(m["text"] for m in meldungen if m["code"] == "GESUNDHEITSDATEN")
+    assert text.startswith("Das Dokument enthält Gesundheitsdaten") and "möglicherweise" not in text
+
+
+def test_ein_sicherer_gesundheitsfund_macht_die_meldung_sicher():
+    """Mischung: Tarifbegriffe (nur vermutet) und weit davon eine Diagnose mit ICD-Code -> Meldung ohne
+    „möglicherweise“; die Tarifbegriffe behalten ihren vorsichtigen Hinweis."""
+    text = ("Tarif ZahnPlus: Zahnersatz 80 %, Zahnbehandlung 100 %.\n"
+            "Beitrag monatlich 24,90 EUR, Wartezeit acht Monate, Höchstbetrag im ersten Jahr 500 EUR, danach "
+            "steigend. Kündigungsfrist drei Monate zum Ende des Versicherungsjahres; Beitragsrückerstattung nach "
+            "zwei Jahren ohne Leistungsbezug.\n"
+            "Diagnose: Lumboischialgie links (M54.4)")
+    meldungen = []
+    funde, _ = analyse._analysiere(text, set(mu.PROFILE["hoch"]["aktive"]) - {"namen"}, [], [], profil="hoch",
+                                   meldungen=meldungen)
+    hinweise = {f["text"]: f["hinweis"] for f in funde if f["kategorie"] in mu.GESUNDHEIT}
+    assert hinweise.pop("Lumboischialgie links (M54.4)") == analyse.HINWEIS_GESUNDHEIT
+    assert "Zahnersatz" in hinweise and set(hinweise.values()) == {analyse.HINWEIS_GESUNDHEIT_VERMUTET}, hinweise
+    text = next(m["text"] for m in meldungen if m["code"] == "GESUNDHEITSDATEN")
+    assert text.startswith("Das Dokument enthält Gesundheitsdaten (Diagnosen).") and "möglicherweise" not in text
+
+
+def test_leistungsbegriffe_mit_person_im_dokument_sind_sichere_gesundheitsdaten():
+    """Gegenstück zur Tarifübersicht: eine Leistungsabrechnung nennt die versicherte Person (hier ihr Geburtsdatum) –
+    „Physiotherapie“ ist dort eine Angabe über sie: sicherer Hinweis und Meldung ohne „möglicherweise“."""
+    meldungen = []
+    funde, _ = analyse._analysiere("Leistungsabrechnung\nVersicherte Person, geb. 12.03.1961\n"
+                                   "Physiotherapie 6 Sitzungen, erstattet 180,00 EUR", _stufe("hoch"), [], [],
+                                   profil="hoch", meldungen=meldungen)
+    physio = next(f for f in funde if f["kategorie"] == "diagnose")
+    assert physio["text"] == "Physiotherapie" and "wissen.gesundheit.vermutet" in physio["quellen"]
+    assert physio["hinweis"] == analyse.HINWEIS_GESUNDHEIT and not analyse.gesundheit_nur_vermutet(physio)
+    text = next(m["text"] for m in meldungen if m["code"] == "GESUNDHEITSDATEN")
+    assert text.startswith("Das Dokument enthält Gesundheitsdaten (Diagnosen).") and "möglicherweise" not in text
+
+
+def test_gesundheitsbegriff_ist_kein_name(monkeypatch):
+    """Ein Namens-Treffer, der nur aus Diagnosen/Medikamenten besteht (die KI in einer Tabellenzelle: „Distale
+    Radiusfraktur“), schwärzte die Diagnose als [PERSON …] – in „hoch“, wo sie lesbar angeboten wird, und in „maximal“
+    nach dem Abwählen. Er entfällt; ein bekannter Nachname nach einer Anrede („Frau Krebs“) bleibt ein Name."""
+    text = "Gesundheitsfragen\nBehandlungen (5 Jahre):\t\tDistale Radiusfraktur links (S52.5)\nAuskunft gab Frau Krebs."
+    monkeypatch.setattr(na, "finde_personen", lambda t: _kandidaten_aus(t, "Distale Radiusfraktur", "Krebs"))
+    for stufe in ("hoch", "maximal"):
+        funde = analysiere_text(text, set(mu.PROFILE[stufe]["aktive"]), [], [], profil=stufe)
+        assert [f["text"] for f in funde if f["kategorie"] == "namen"] == ["Krebs"], stufe
+        dia = next(f for f in funde if f["kategorie"] == "diagnose")
+        assert dia["text"] == "Distale Radiusfraktur links (S52.5)"
+        assert [st["an"] for st in dia["stellen"]] == [stufe == "maximal"]
+        assert gedeckt(funde, text, "Frau Krebs", "Krebs")

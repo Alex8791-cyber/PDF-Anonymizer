@@ -602,10 +602,30 @@ _PERSONENZEILE_RE = re.compile(
     r"Sohn|Tochter|Mutter|Vater|gez\.|i\.[ \t]?A\.|i\.[ \t]?V\.|Unterschrift)(?![\wäöüß])")
 
 
+# „Typ 2“, „Grad II“, „Stadium IV“: Bezeichnung mit Nummer, kein Name (auch in Diagnosen hinter der Listenangabe)
+_BEZEICHNUNGEN = {"typ", "grad", "schweregrad", "stadium", "stufe", "klasse", "phase", "gruppe", "pflegegrad"}
+_BEZEICHNUNG_NUMMER_RE = re.compile(r"[ \t]+(?:\d{1,2}|[IVX]{1,4})[a-c]?(?![\w.,])")
+# Innerhalb einer Gesundheitsangabe ist ein Wort nur nach „bei“ oder einer Anrede ein Name („… bei Herrn Meier“)
+_PERSON_DAVOR_RE = re.compile(r"(?<![\wäöüß])(?:bei|Herrn?|Frau|Hr\.|Fr\.|Dr\.|Prof\.)"
+                              r"(?:[ \t]+[A-ZÄÖÜ][\wäöüß'’\-]*\.?){0,2}[ \t]+$")
+
+
+def _gesundheit_spannen(text: str) -> list:
+    """Spannen von Diagnosen/Medikamenten: Listeneinträge der Wissensbasis und die ganzen erkannten Angaben
+    (wissen_kontext, mit Erweiterungen wie „Obstruktives …“, „…, Ein-Gefäß-Erkrankung (I25.11)“)."""
+    from . import wissen_kontext                       # spät importiert: Ladereihenfolge der Detektor-Module
+    spannen = [(v.start, v.ende) for liste in ("diagnosen", "medikamente") for v in wissen.index(liste).finde(text)]
+    return spannen + wissen_kontext.diagnosen_stellen(text) + wissen_kontext.medikamente_stellen(text)
+
+
 def unbekannte_eigennamen(text: str) -> list:
     """Großgeschriebene Wörter in Personenzeilen, die weder Allerweltswort noch Erlaubnisliste, Beruf, Diagnose,
-    Titel, Etikett oder Satzanfang sind ("Name: Xyzzab Qwonk")."""
+    Titel, Etikett oder Satzanfang sind ("Name: Xyzzab Qwonk"). Wörter innerhalb einer Diagnose oder eines
+    Medikaments („Morbus Crohn“, „Diabetes mellitus Typ 2“, „Obstruktives Schlafapnoe-Syndrom“) sind keine Namen,
+    außer nach „bei“ oder einer Anrede („… bei Herrn Xyzzab“); Bezeichnungen mit Nummer („Grad II“) auch nicht –
+    sonst stünde in einer abgewählten, also lesbaren Diagnose „Morbus [PERSON B]“."""
     aus = []
+    gesundheit = None                                   # Spannen von Diagnosen/Medikamenten, erst bei Bedarf
     for zeile_m in re.finditer(r"[^\n]+", text):
         zeile = zeile_m.group(0)
         if not _PERSONENZEILE_RE.search(zeile):
@@ -622,6 +642,13 @@ def unbekannte_eigennamen(text: str) -> list:
             if allerwelt or allow or _PERSONENZEILE_RE.fullmatch(w) or wissen.ist_beruf(w) \
                     or wissen.ist_diagnose(w) or wissen.ist_anrede_titel(w) or _STRASSENENDE_RE.search(w) \
                     or re.match("(?:" + _FIRMA_KOPF + ")$", w) or w.casefold() in _MARKEN:
+                continue
+            if w.casefold() in _BEZEICHNUNGEN and _BEZEICHNUNG_NUMMER_RE.match(text, s + len(w)):
+                continue
+            if gesundheit is None:
+                gesundheit = _gesundheit_spannen(text)
+            if any(a <= s and s + len(w) <= b for a, b in gesundheit) \
+                    and not _PERSON_DAVOR_RE.search(text[max(0, s - 60):s]):
                 continue
             aus.append(_treffer(s, s + len(w), text, 0.4))
     return aus

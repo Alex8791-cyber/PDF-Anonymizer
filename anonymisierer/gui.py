@@ -41,6 +41,7 @@ except ImportError:
 # Vertragsteile aus Phase 2: echte Engine, sonst Attrappe (12.5) bzw. None (Funktion entfällt)
 weitergabe_anwenden = getattr(_analyse_modul, "weitergabe_anwenden", None)
 LaufWissen = getattr(_analyse_modul, "LaufWissen", None)
+gesundheit_nur_vermutet = getattr(_analyse_modul, "gesundheit_nur_vermutet", None)
 freigeben = getattr(_schwaerz_modul, "freigeben", None) or attrappen.freigeben
 verwerfen = getattr(_schwaerz_modul, "verwerfen", None) or attrappen.verwerfen
 WARNUNG_KEIN_TREFFER = getattr(_schwaerz_modul, "WARNUNG_KEIN_TREFFER", attrappen.WARNUNG_KEIN_TREFFER)
@@ -87,6 +88,12 @@ PROTOKOLL_MAX_ZEILEN = 5000
 VORLADEN_NACH_MS = 800              # spaCy-Modell so lange nach dem Start im Hintergrund laden (PERF-09)
 
 HAKEN = {"an": "☑", "aus": "☐", "teil": "⊟"}
+# Zeichen vor der Kategorie in der Fundliste: ⚑ = Fund mit Hinweis der Engine (Statuszeile zeigt ihn; steht auch an
+# angehakten Kennungen), ⚕ = Gesundheitsdaten (Art. 9 DSGVO), die nur angeboten werden – nur dieses Zeichen nennt
+# der Abschlussdialog (Befund: wer jedes ⚑ anklickt, hakte angehakte Kennungen ab)
+MARKE_HINWEIS = "⚑ "
+MARKE_GESUNDHEIT = "⚕ "
+GESUNDHEIT_KATEGORIEN = frozenset(getattr(_muster_modul, "GESUNDHEIT", ("diagnose", "medikament")))
 SPALTEN = ("kategorie", "text", "seiten", "anzahl", "kontext", "ersatz")
 # Spalte -> (Breite, Mindestbreite, dehnbar) bei 100 %
 SPALTEN_MASSE = {"#0": (185, 150, False), "kategorie": (130, 105, False), "text": (160, 130, True),
@@ -106,6 +113,24 @@ STATUS_TEXT = {"fertig": "✔ fertig", "pruefen": "⚠ prüfen", "fehler": "✖ 
                "keine": "keine Ausgabe"}
 
 _KATEGORIE_SCHLUESSEL = {eintrag[0] for eintrag in KATEGORIEN}
+
+
+def _ohne_marke(anzeige: str) -> str:
+    """Kategorie-Anzeige ohne vorangestelltes Zeichen (⚑/⚕)."""
+    for marke in (MARKE_GESUNDHEIT, MARKE_HINWEIS):
+        if anzeige.startswith(marke):
+            return anzeige[len(marke):]
+    return anzeige
+
+
+def _profil_wert(profile, name: str, schluessel: str):
+    """Eintrag `schluessel` einer Schutzstufe (dict wie muster.PROFILE oder Objekt mit Attribut), sonst None."""
+    eintrag = profile.get(name) if isinstance(profile, dict) else None
+    if isinstance(eintrag, dict):
+        return eintrag.get(schluessel)
+    return getattr(eintrag, schluessel, None)
+
+
 _NEUE_KATEGORIEN = bool(_KATEGORIE_SCHLUESSEL & {"beruf", "arbeitgeber", "diagnose", "medikament"})
 
 
@@ -116,8 +141,9 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
         kasten = ("Nur je nach Schutzstufe erkannt: Diagnosen, Beruf, Arbeitgeber. Nicht erkannt werden: "
                   "Unterschriften, Handschrift, Freitext; Text in Bildern nur unsicher (OCR).")
         grenzen_kopf = "NICHT oder nur teilweise erkannt werden:\n"
-        grenzen_umfang = ("  • Diagnosen, Krankheiten, Medikamente: nur bekannte Begriffe, geschwärzt erst in der "
-                          "Schutzstufe „Maximal“ (sonst als Hinweis gemeldet)\n"
+        grenzen_umfang = ("  • Diagnosen, Krankheiten, Medikamente: nur bekannte Begriffe, angehakt erst in der "
+                          "Schutzstufe „Maximal“ (sonst gemeldet und nicht angehakt in der Fundliste angeboten, "
+                          "Zeichen ⚕)\n"
                           "  • Beruf, Arbeitgeber: nur mit Etikett oder Personenbezug (ab Schutzstufe „Hoch“); "
                           "Einkommen und Familienstand nicht\n")
     else:
@@ -1231,7 +1257,9 @@ class AnonymisiererApp:
         seiten_text = ", ".join(str(s) for s in seiten[:6]) + (" …" if len(seiten) > 6 else "")
         anzeige = fund["anzeige"]
         if fund.get("hinweis"):
-            anzeige = "⚑ " + anzeige                           # unsicherer Fund (Hinweis der Engine)
+            # ⚕ = angebotene Gesundheitsdaten, ⚑ = sonstiger Hinweis der Engine (auch an angehakten Funden)
+            marke = MARKE_GESUNDHEIT if fund.get("kategorie") in GESUNDHEIT_KATEGORIEN else MARKE_HINWEIS
+            anzeige = marke + anzeige
         self.baum.insert(iid, "end", iid=f"{iid}::{index}", text=HAKEN[zustand],
                          values=(anzeige, str(fund["text"]).replace("\n", " "), seiten_text,
                                  fund.get("anzahl", 1), _kontext_anzeige(fund.get("kontext", "")),
@@ -1495,7 +1523,7 @@ class AnonymisiererApp:
         for iid in self.baum.get_children(""):
             pdf = self.zeilen.get(iid)
             for kind in self.baum.get_children(iid):
-                if self.baum.set(kind, "kategorie").lstrip("⚑ ") == anzeige.lstrip("⚑ "):
+                if _ohne_marke(self.baum.set(kind, "kategorie")) == _ohne_marke(anzeige):
                     self._kind_setzen(pdf, kind, zustand == "an")
             self._nach_aenderung(pdf)
         self._start_knopf_aktualisieren()
@@ -1786,7 +1814,24 @@ class AnonymisiererApp:
         text = attrappen.profil_beschreibung(PROFILE, name, KATEGORIEN)
         if name == attrappen.BENUTZERDEFINIERT:
             text = (f"Eigene Auswahl der Kategorien (Erkennungsregeln der Stufe „{_profil_name(self.basis_profil)}“).")
+            if set(_profil_wert(PROFILE, self.basis_profil, "hinweis") or ()) & GESUNDHEIT_KATEGORIEN \
+                    - self._aktive_kategorien():
+                text += " Nicht angehakte Gesundheitsdaten werden gemeldet und abgewählt angeboten."
         self.profil_beschreibung.config(text=text)
+
+    @staticmethod
+    def _mindestens_so_stark(neu: str, basis: str) -> bool:
+        """Ist die Stufe `neu` mindestens so streng wie die Grundstufe `basis`? Reihenfolge Ausgewogen < Hoch <
+        Maximal; dazu dürfen keine Erkennungsregeln (muster.PROFILE "optionen", z. B. alle_geburtsdaten) und keine
+        Hinweis-Kategorien der Grundstufe fehlen. Nur auf eine solche Stufe springt die Auswahl von selbst."""
+        reihenfolge = attrappen.PROFIL_REIHENFOLGE
+        if neu in reihenfolge and basis in reihenfolge and reihenfolge.index(neu) < reihenfolge.index(basis):
+            return False
+        optionen_neu = _profil_wert(PROFILE, neu, "optionen") or {}
+        optionen_basis = _profil_wert(PROFILE, basis, "optionen") or {}
+        if any(an and not optionen_neu.get(schluessel) for schluessel, an in dict(optionen_basis).items()):
+            return False
+        return set(_profil_wert(PROFILE, basis, "hinweis") or ()) <= set(_profil_wert(PROFILE, neu, "hinweis") or ())
 
     def _profil_gewaehlt(self):
         """Radioknopf der Schutzstufe angeklickt."""
@@ -1798,12 +1843,17 @@ class AnonymisiererApp:
         self._einstellung_geaendert()
 
     def _kategorie_geaendert(self, *_):
-        """Häkchen einer Kategorie geändert: Stufe nachführen (passt die Auswahl zu keiner, „Benutzerdefiniert“)."""
+        """Häkchen einer Kategorie geändert: Stufe nachführen. Passt die Auswahl genau zu einer Stufe, die mindestens
+        so streng ist wie die Grundstufe (Ausgewogen + E-Mail -> Hoch), gilt diese; sonst „Benutzerdefiniert“ mit den
+        Erkennungsregeln der Grundstufe – „Maximal“ ohne Diagnosen und Medikamente bleibt also „Maximal“ (alle
+        Geburtsdaten, unbekannte Eigennamen) und springt nicht auf das schwächere „Hoch“ mit derselben
+        Kategorienmenge."""
         if not self._profil_wird_gesetzt and not self._einstellungen_werden_gesetzt:
             aktive = self._aktive_kategorien()
             aktuell = self.profil_var.get()
             if aktuell == attrappen.BENUTZERDEFINIERT or self.profil_kategorien(aktuell) != aktive:
-                passend = [n for n in attrappen.PROFIL_REIHENFOLGE if self.profil_kategorien(n) == aktive]
+                passend = [n for n in attrappen.PROFIL_REIHENFOLGE if self.profil_kategorien(n) == aktive
+                           and self._mindestens_so_stark(n, self.basis_profil)]
                 if aktuell in passend:
                     neu = aktuell
                 elif passend:
@@ -1813,7 +1863,7 @@ class AnonymisiererApp:
                 if neu != attrappen.BENUTZERDEFINIERT:
                     self.basis_profil = neu
                 self.profil_var.set(neu)
-                self._profil_beschreibung_anzeigen()
+            self._profil_beschreibung_anzeigen()
         self._einstellung_geaendert()
 
     def _einstellungen_anwenden(self):
@@ -2015,7 +2065,7 @@ class AnonymisiererApp:
         self._einstellung_geaendert()
         self._dialog("info", "Kundenliste importiert",
                      f"{anzahl} Kunden geladen – gespeichert ohne Klartext.\n\nDas Programm merkt sich nur "
-                     f"verschlüsselte Prüfwerte, keine Namen oder Nummern. Die CSV-Datei wurde nicht verändert und "
+                     f"nicht umkehrbare Prüfwerte, keine Namen oder Nummern. Die CSV-Datei wurde nicht verändert und "
                      f"kann gelöscht werden, wenn sie sonst nicht gebraucht wird.{hinweis}")
 
     def _spalten_zuordnen(self, pfad: Path):
@@ -2369,62 +2419,119 @@ class AnonymisiererApp:
                       f"anderen Dateien dieses Laufs ergänzt.", "hinweis")
 
         gesamt = sum(len(e["funde"]) for e in ergebnisse.values())
+        # „nur angeboten“ = alle Stellen abgewählt (Gesundheitsdaten in „Hoch“); angehakt zählt wie der Schwärzen-Knopf
+        # (Funde und manuelle Markierungen dieser Dateien, auch teilweise angehakt)
+        angeboten_funde = [e["funde"][i] for pdf, e in ergebnisse.items() for i in range(len(e["funde"]))
+                           if self.fund_zustand(pdf, i) == "aus"]
+        angehakt = sum(1 for pdf in ergebnisse if self.baum.exists(str(pdf)) for k in self.baum.get_children(str(pdf))
+                       if self._zustand(k) in ("an", "teil"))
+        nur_gesundheit = bool(angeboten_funde) and all(f.get("kategorie") in GESUNDHEIT_KATEGORIEN
+                                                       for f in angeboten_funde)
         codes = {pdf: meldungs_codes(e) for pdf, e in ergebnisse.items()}
         ohne_text = [pdf for pdf, e in ergebnisse.items() if not e["funde"]
                      and codes[pdf] & {"KEIN_TEXT", "KAUM_LESBAR"}]
         gesundheit = [pdf for pdf in ergebnisse if "GESUNDHEITSDATEN" in codes[pdf]]
+        vermutet = [pdf for pdf in gesundheit if self._gesundheit_nur_vermutet(ergebnisse[pdf])]
+        gesundheit_sicher = [pdf for pdf in gesundheit if pdf not in vermutet]
         mit_fehler = [(pdf, e["fehler"]) for pdf, e in ergebnisse.items() if e["fehler"]]
         mit_warnung = [(pdf, e["warnungen"]) for pdf, e in ergebnisse.items() if e["warnungen"]]
 
-        if gesamt:
-            self._log(f"Analyse fertig: {gesamt} Fund(e) in {len(ergebnisse)} Datei(en). "
+        if gesamt and angehakt:
+            davon = f", davon {len(angeboten_funde)} nur angeboten (nicht angehakt)" if angeboten_funde else ""
+            self._log(f"Analyse fertig: {gesamt} Fund(e) in {len(ergebnisse)} Datei(en){davon}. "
                       f"Bitte Liste prüfen (Doppelklick = Vorschau), dann schwärzen.", "ok")
-            self._status(f"{gesamt} Fund(e) in {len(ergebnisse)} Datei(en) – Liste prüfen (Doppelklick auf eine "
-                         f"Datei = Vorschau), dann schwärzen.")
+            self._status(f"{gesamt} Fund(e) in {len(ergebnisse)} Datei(en){davon} – Liste prüfen (Doppelklick auf "
+                         f"eine Datei = Vorschau), dann schwärzen.")
+        elif gesamt:
+            was = "mögliche Gesundheitsangaben" if nur_gesundheit else "Funde"
+            self._log(f"Analyse fertig: keine Personendaten zum Schwärzen in {len(ergebnisse)} Datei(en) – nur "
+                      f"{gesamt} {was} angeboten (nicht angehakt). Ohne Häkchen wird keine Ausgabedatei erzeugt.",
+                      "ok", zaehlen=False)
+            self._status(f"Keine Personendaten zum Schwärzen – nur {was} angeboten (nicht angehakt). Bitte prüfen; "
+                         f"zum Schwärzen anhaken.")
         else:
             self._log(f"Analyse fertig: 0 Funde in {len(ergebnisse)} Datei(en) – es gibt nichts zu schwärzen, "
                       f"es wird keine Ausgabedatei erzeugt.", "warnung" if ohne_text else "ok", zaehlen=False)
             self._status("Keine Funde – nichts zu schwärzen. Bitte Hinweise im Protokoll lesen.")
 
-        zeilen = []
+        # Abschlussdialog aus Blöcken (je Überschrift mit ihren Punkten), durch Leerzeilen getrennt
+        bloecke: list[list[str]] = []
         art = "info"
         if gesamt == 0:
-            zeilen.append("Es wurden keine personenbezogenen Daten erkannt. Es gibt nichts zu schwärzen, "
-                          "deshalb bleibt der Schwärzen-Knopf aus und es wird keine Ausgabedatei erzeugt.")
+            bloecke.append(["Es wurden keine personenbezogenen Daten erkannt. Es gibt nichts zu schwärzen, "
+                            "deshalb bleibt der Schwärzen-Knopf aus und es wird keine Ausgabedatei erzeugt."])
             if ohne_text:
                 art = "warning"
-                zeilen.append("")
-                zeilen.append("ACHTUNG – in diesen Dateien war kein Text lesbar (z. B. unlesbarer Scan). "
-                              "Dort konnte NICHTS geprüft werden; diese Dateien nicht ungeprüft weitergeben:")
-                zeilen += [f"  • {self._anzeigename(p)}" for p in ohne_text[:10]]
+                bloecke.append(["ACHTUNG – in diesen Dateien war kein Text lesbar (z. B. unlesbarer Scan). "
+                                "Dort konnte NICHTS geprüft werden; diese Dateien nicht ungeprüft weitergeben:"]
+                               + [f"  • {self._anzeigename(p)}" for p in ohne_text[:10]])
             else:
-                zeilen.append("")
-                zeilen.append("Mögliche Gründe: Das Dokument enthält keine Namen, IBANs, Adressen usw. "
-                              "(z. B. ein Bedingungswerk), oder die Daten stehen in Bildern oder Handschrift. "
-                              "Bitte das Dokument selbst durchsehen (Doppelklick = Vorschau).")
-        if mit_fehler:
-            art = "warning"
-            zeilen.append("")
-            zeilen.append("Nicht analysierbar:")
-            zeilen += [f"  • {self._anzeigename(p)}: {f}" for p, f in mit_fehler[:10]]
-        if gesundheit and self.basis_profil != "maximal":
-            art = "warning"
-            zeilen.append("")
-            zeilen.append("Gesundheitsdaten (Art. 9 DSGVO) erkannt – sie bleiben in dieser Schutzstufe lesbar; "
-                          "„Maximal“ schwärzt sie:")
-            zeilen += [f"  • {self._anzeigename(p)}" for p in gesundheit[:10]]
+                bloecke.append(["Mögliche Gründe: Das Dokument enthält keine Namen, IBANs, Adressen usw. "
+                                "(z. B. ein Bedingungswerk), oder die Daten stehen in Bildern oder Handschrift. "
+                                "Bitte das Dokument selbst durchsehen (Doppelklick = Vorschau)."])
+        elif not angehakt:
+            bloecke.append([f"Keine Personendaten zum Schwärzen erkannt (keine Namen, Anschriften, IBANs, Nummern …). "
+                            f"In der Fundliste stehen nur angebotene, NICHT angehakte Stellen. Ohne Häkchen bleibt "
+                            f"der Schwärzen-Knopf aus, und es wird keine Ausgabedatei erzeugt."])
         if self.warnungen_anzahl and gesamt:
             art = "warning"
-            zeilen.insert(0, f"Die Analyse hat {gesamt} Fund(e) ergeben und {self.warnungen_anzahl} "
-                             f"Warnung(en)/Fehler gemeldet (Details im Protokoll):")
-            for p, ws in mit_warnung[:10]:
-                zeilen.append(f"  • {self._anzeigename(p)}: {ws[0]}" + (f" (+{len(ws) - 1})" if len(ws) > 1 else ""))
-        elif self.warnungen_anzahl and not gesamt and mit_warnung and not ohne_text:
+            kopf = (f"Die Analyse hat {gesamt} Fund(e) ergeben und {self.warnungen_anzahl} Warnung(en)/Fehler "
+                    f"gemeldet (Details im Protokoll)" if angehakt else
+                    f"Die Analyse hat {self.warnungen_anzahl} Warnung(en)/Fehler gemeldet (Details im Protokoll)")
+            punkte = [f"  • {self._anzeigename(p)}: {ws[0]}" + (f" (+{len(ws) - 1})" if len(ws) > 1 else "")
+                      for p, ws in mit_warnung[:10]]
+            # Überschrift und ihre Punkte als EIN Block – vorne, wenn etwas angehakt ist
+            bloecke.insert(0 if angehakt else len(bloecke), [kopf + (":" if punkte else ".")] + punkte)
+        if mit_fehler:
             art = "warning"
-            zeilen.append("")
-            zeilen.append(f"{self.warnungen_anzahl} Warnung(en) – Details im Protokoll.")
-        if zeilen:
+            bloecke.append(["Nicht analysierbar:"] + [f"  • {self._anzeigename(p)}: {f}" for p, f in mit_fehler[:10]])
+        if gesundheit_sicher:
+            # die Engine meldet GESUNDHEITSDATEN nur, wenn sie Funde abgewählt anbietet (Hinweis-Kategorien der
+            # Schutzstufe) – in „Maximal“ sind sie angehakt und es gibt keine Meldung. Erkennungszeichen ist ⚕ (nur
+            # an angebotenen Gesundheitsdaten), nicht ⚑ (steht auch an angehakten Kennungen)
+            art = "warning"
+            bloecke.append([f"Gesundheitsdaten (Art. 9 DSGVO) erkannt – sie stehen in der Fundliste, sind aber NICHT "
+                            f"angehakt und bleiben deshalb lesbar. Zum Schwärzen bitte die nicht angehakten Zeilen "
+                            f"mit {MARKE_GESUNDHEIT.strip()} („Diagnosen …“, „Medikamente …“) anhaken – schneller per "
+                            f"Rechtsklick auf eine solche Zeile → „Kategorie … überall anhaken“ – oder die Schutzstufe "
+                            f"„Maximal“ wählen:"]
+                           + [f"  • {self._anzeigename(p)}" for p in gesundheit_sicher[:10]])
+        if vermutet:
+            bloecke.append([f"Möglicherweise Gesundheitsdaten (Art. 9 DSGVO): erkannt wurden nur Fachbegriffe ohne "
+                            f"Etikett wie „Diagnose:“, ohne ICD-Code und ohne Bezug zu einer Person – in Tarif- und "
+                            f"Leistungsübersichten sind das meist nur Leistungen. Sie stehen NICHT angehakt in der "
+                            f"Fundliste ({MARKE_GESUNDHEIT.strip()}) und bleiben lesbar. Sind es Angaben über eine "
+                            f"Person, bitte anhaken oder die Schutzstufe „Maximal“ wählen:"]
+                           + [f"  • {self._anzeigename(p)}{self._beispiele(ergebnisse[p])}" for p in vermutet[:10]])
+        if self.warnungen_anzahl and not gesamt and mit_warnung and not ohne_text:
+            art = "warning"
+            bloecke.append([f"{self.warnungen_anzahl} Warnung(en) – Details im Protokoll."])
+        if bloecke:
+            zeilen = []
+            for block in bloecke:
+                if zeilen:
+                    zeilen.append("")
+                zeilen += block
             self._dialog(art, "Analyse abgeschlossen" if gesamt else "Keine Funde", "\n".join(zeilen))
+
+    @staticmethod
+    def _gesundheit_nur_vermutet(ergebnis: dict) -> bool:
+        """Beruhen alle angebotenen Gesundheitsfunde einer Datei nur auf allgemeinen Fachbegriffen (Engine:
+        analyse.gesundheit_nur_vermutet)? Ohne diese Funktion (ältere Engine) gilt die Meldung als sicher."""
+        if gesundheit_nur_vermutet is None:
+            return False
+        funde = [f for f in ergebnis.get("funde", []) if f.get("kategorie") in GESUNDHEIT_KATEGORIEN
+                 and f.get("hinweis")]
+        return bool(funde) and all(gesundheit_nur_vermutet(f) for f in funde)
+
+    @staticmethod
+    def _beispiele(ergebnis: dict, anzahl: int = 3) -> str:
+        """„ („Psychotherapie“, „Zahnersatz“ …)“ – die ersten angebotenen Gesundheitsbegriffe einer Datei."""
+        texte = list(dict.fromkeys(str(f.get("text", "")).replace("\n", " ") for f in ergebnis.get("funde", [])
+                                   if f.get("kategorie") in GESUNDHEIT_KATEGORIEN and f.get("hinweis")))
+        if not texte:
+            return ""
+        return " (" + ", ".join(f"„{x}“" for x in texte[:anzahl]) + (" …" if len(texte) > anzahl else "") + ")"
 
     # ------------------------------------------------------------------
     # Schwärzen

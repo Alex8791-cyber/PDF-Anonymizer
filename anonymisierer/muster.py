@@ -1527,7 +1527,7 @@ PROFILE = {
         "aktive": frozenset(_KERN),
         "hinweis": GESUNDHEIT,                 # erkannt, aber nur gemeldet und abgewählt angeboten
         "beschreibung": "Direkte Kennungen: Namen, Anschrift, IBAN, Telefon, Nummern … – mehr Zusammenhang "
-                        "für die KI. Gesundheitsdaten werden nur gemeldet.",
+                        "für die KI. Gesundheitsdaten werden gemeldet und können angehakt werden.",
         "optionen": {"alle_geburtsdaten": False, "unbekannte_eigennamen": False, "bilder_schwaerzen": False},
     },
     "hoch": {
@@ -1539,7 +1539,8 @@ PROFILE = {
     },
     "maximal": {
         "aktive": frozenset(_KERN | {"beruf", "arbeitgeber", "international", "ort"} | GESUNDHEIT),
-        "hinweis": frozenset(),
+        # hier aktiv; nur wer sie selbst abwählt (Benutzerdefiniert), bekommt sie gemeldet und abgewählt angeboten
+        "hinweis": GESUNDHEIT,
         "beschreibung": "Größter Schutz, weniger Zusammenhang für die KI. Zusätzlich: Diagnosen, Medikamente, "
                         "alle plausiblen Geburtsdaten und unbekannte Eigennamen bei Personen.",
         "optionen": {"alle_geburtsdaten": True, "unbekannte_eigennamen": True, "bilder_schwaerzen": True},

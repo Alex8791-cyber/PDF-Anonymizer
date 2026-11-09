@@ -699,9 +699,12 @@ class VorschauFenster:
         for mid, eintrag in manuelle:
             if eintrag["art"] != "bereich" and any(_vergroessert(r).contains(punkt) for r in eintrag["rechtecke"]):
                 return ("manuell", mid)
-        for rect, index, si in self.fund_stellen():
-            if _vergroessert(rect).contains(punkt):
-                return ("stelle", index, si)
+        unter = [(rect, index, si) for rect, index, si in self.fund_stellen() if _vergroessert(rect).contains(punkt)]
+        if unter:
+            # die kleinste Stelle gewinnt: ein Name in einer abgewählt angebotenen Diagnose („Diabetes … bei Herrn
+            # Meier“) bekommt den Klick, nicht die umfassende Gesundheitsangabe
+            rect, index, si = min(unter, key=lambda u: u[0].width * u[0].height)
+            return ("stelle", index, si)
         for wort in self.daten().get("woerter", []):
             if _vergroessert(wort[0], 0.5).contains(punkt):
                 return ("wort", wort)
