@@ -3,6 +3,7 @@
 # Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
 # Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
 # Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+Abschleppdienst
 Absender
 Absender(in)
 Absender/-in
@@ -78,6 +79,9 @@ Aussteller/in
 Ausstellerin
 Auszubildende
 Auszubildender
+Autohaus
+Autowerkstatt
+Bäckerei
 Bearbeiter
 Bearbeiter(in)
 Bearbeiter/-in
@@ -181,6 +185,7 @@ Erblasser(in)
 Erblasser/-in
 Erblasser/in
 Erblasserin
+Ergotherapie
 Ersteller
 Ersteller(in)
 Ersteller/-in
@@ -189,6 +194,7 @@ Erstellerin
 erstellt von
 Erziehungsberechtigte
 Erziehungsberechtigter
+Fa.
 Facharzt
 Fachärztin
 Fahrer
@@ -216,6 +222,7 @@ Familienname
 Family name
 Firma/Name
 First name
+Friseursalon
 frühere Namen
 früherer Name
 Führungskraft
@@ -257,6 +264,7 @@ Gutachter
 Gutachter(in)
 Gutachter/-in
 Gutachter/in
+Gutachterbüro
 Gutachterin
 Halter
 Halter(in)
@@ -276,6 +284,7 @@ Hausverwalter(in)
 Hausverwalter/-in
 Hausverwalter/in
 Hausverwalterin
+Hausverwaltung
 Hebamme
 Heilpraktiker
 Heilpraktiker(in)
@@ -295,6 +304,8 @@ Ihr Betreuer
 Ihre Ansprechpartnerin
 Ihre Beraterin
 Ihre Betreuerin
+Immobilienbüro
+Ingenieurbüro
 Inh.
 Inhaber
 Inhaber(in)
@@ -318,6 +329,7 @@ Käufer(in)
 Käufer/-in
 Käufer/in
 Käuferin
+Kfz-Werkstatt
 Kind
 Kind 1
 Kind 2
@@ -360,6 +372,7 @@ Leistungsempfänger/-in
 Leistungsempfänger/in
 Leistungsempfängerin
 Leistungserbringer
+Logopädie
 Mädchenname
 Makler
 Makler(in)
@@ -367,6 +380,7 @@ Makler/-in
 Makler/in
 Maklerbüro
 Maklerin
+Malerbetrieb
 Mandant
 Mandant(in)
 Mandant/-in
@@ -377,6 +391,7 @@ Melder(in)
 Melder/-in
 Melder/in
 Melderin
+Metzgerei
 Mieter
 Mieter(in)
 Mieter/-in
@@ -468,6 +483,8 @@ Pfleger(in)
 Pfleger/-in
 Pfleger/in
 Pflegerin
+Physiotherapie
+Physiotherapiepraxis
 Policyholder
 Prämienzahler
 Prämienzahler(in)
@@ -505,7 +522,9 @@ Sachbearbeiter/in
 Sachbearbeiterin
 Sachbearbeitung
 Sachverständige
+Sachverständigenbüro
 Sachverständiger
+Sanitätshaus
 Schadenmelder
 Schadenmelder(in)
 Schadenmelder/-in
@@ -516,6 +535,7 @@ Schädiger(in)
 Schädiger/-in
 Schädiger/in
 Schädigerin
+Schreinerei
 Schuldner
 Schuldner(in)
 Schuldner/-in
@@ -686,6 +706,7 @@ Vorstandsvorsitzende
 Vorstandsvorsitzender
 VP
 Waise
+Werkstatt
 Witwe
 Witwer
 Zahlungsempfänger

@@ -577,6 +577,21 @@ def test_etikett_wert_kennungsarten(text, kategorie, wert):
     assert (kategorie, wert) in _text(text, "struktur.etikett_wert")
 
 
+@pytest.mark.parametrize("text,name", [
+    ("anbei die Rechnung der Werkstatt Berger und die Fotos.", "Berger"),
+    ("Behandlung bei Physiotherapie Santoro", "Santoro"),
+    ("Autohaus Schmidt & Söhne GmbH", "Schmidt"),
+])
+def test_name_in_firmenbezeichnung_hinter_betriebswort(text, name):
+    assert ("namen", name) in _text(text, "struktur.etikett_wert")
+
+
+@pytest.mark.parametrize("text", ["die Werkstatt hat geöffnet", "Die Werkstatt Auto Berg GmbH hat angerufen",
+                                  "Verhältnis zum VN:\t\tMitbewohner, berechtigter Fahrer"])
+def test_betriebswort_und_wendung_gegenproben(text):
+    assert not [w for k, w in _text(text, "struktur.etikett_wert") if k == "namen"]
+
+
 @pytest.mark.parametrize("text", ["Hauptstraße Nr. 5", "Seite Nr. 12345", "Position Nr. 123456"])
 def test_nr_hinter_strasse_oder_seite_ist_keine_kennung(text):
     assert _text(text, "struktur.etikett_wert") == []

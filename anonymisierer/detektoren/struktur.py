@@ -1366,8 +1366,7 @@ def _mit_doppelpunkt(seite, et: Etikett) -> bool:
     return bool(rest.strip(" \t_.…")) or "_" in rest or "…" in rest or ".." in rest
 
 
-_WENDUNG_DAVOR_RE = re.compile(r"(?<![\w])(?:zum|zur|zu|des|der|dem|den|vom|von|mit|für|fur|gegen|über|ueber|"
-                               r"bei|ohne|als|wie|und|oder|eines|einer|eines)[ \t]+$")
+_WENDUNG_DAVOR_RE = re.compile(r"(?<![\w])(?:zum|zur|vom|beim|des|eines|für|fur|gegen|über|ueber|ohne)[ \t]+$")
 
 
 def _in_wendung(text: str, lg: Lage, et: Etikett) -> bool:
