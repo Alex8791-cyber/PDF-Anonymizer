@@ -3,6 +3,7 @@
 
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import threading
@@ -93,9 +94,14 @@ def scan_pdf(pfad, zeilen, dpi=200, winkel=0.0, rotate=0, fontsize=12, unsichtba
 
 
 def pdftotext(pfad):
-    if not PDFTOTEXT:
-        pytest.skip("pdftotext fehlt")
-    return subprocess.run([PDFTOTEXT, "-layout", str(pfad), "-"], capture_output=True, text=True).stdout
+    """Textebene, wie ein fremdes Werkzeug sie liest: pdftotext -layout (Poppler); ohne Poppler (z. B. auf dem
+    Windows-Runner) PyMuPDF in Layout-Reihenfolge – der Test läuft dann trotzdem, statt übersprungen zu werden."""
+    if PDFTOTEXT:
+        aus = subprocess.run([PDFTOTEXT, "-layout", str(pfad), "-"], capture_output=True, text=True)
+        if aus.returncode == 0 and aus.stdout is not None:
+            return aus.stdout
+    with fitz.open(pfad) as doc:
+        return "\n".join(seite.get_text("text", sort=True) for seite in doc)
 
 
 def volltext(pfad):
@@ -106,15 +112,84 @@ def volltext(pfad):
         doc.close()
 
 
+_HEX_STRING_RE = re.compile(r"<([0-9A-Fa-f\s]{4,})>")
+_LITERAL_RE = re.compile(r"\((?:[^()\\]|\\.)*\)", re.S)
+_ESCAPES = {"n": b"\n", "r": b"\r", "t": b"\t", "b": b"\b", "f": b"\f", "(": b"(", ")": b")", "\\": b"\\"}
+
+
+def _literal_bytes(s: str) -> bytes:
+    """PDF-Literalzeichenkette (ohne Klammern) mit Escapes (\\ddd, \\n …) -> Bytes."""
+    aus, i = bytearray(), 0
+    while i < len(s):
+        if s[i] == "\\" and i + 1 < len(s):
+            j = i + 1
+            while j < len(s) and j < i + 4 and s[j] in "01234567":
+                j += 1
+            if j > i + 1:
+                aus.append(int(s[i + 1:j], 8) & 0xFF)
+                i = j
+                continue
+            aus += _ESCAPES.get(s[i + 1], s[i + 1].encode("latin-1", "replace"))
+            i += 2
+            continue
+        aus += s[i].encode("latin-1", "replace")
+        i += 1
+    return bytes(aus)
+
+
+def _zeichenkette(b: bytes) -> str:
+    if b.startswith(b"\xfe\xff"):
+        return b[2:].decode("utf-16-be", "ignore")
+    if b.startswith(b"\xff\xfe"):
+        return b[2:].decode("utf-16-le", "ignore")
+    return b.decode("latin-1")
+
+
+def _rohtext_pymupdf(pfad) -> str:
+    """Rückfall ohne qpdf: jedes Objekt als Quelltext, seine Zeichenketten dekodiert (PDFDocEncoding/UTF-16)
+    und jeder Strom entpackt und in Latin-1, UTF-8 und UTF-16 gelesen (wie qpdf --qdf --decode-level=all)."""
+    teile = []
+    with fitz.open(pfad) as doc:
+        for xref in range(1, doc.xref_length()):
+            try:
+                quelle = doc.xref_object(xref, compressed=False) or ""
+            except Exception:
+                quelle = ""
+            try:
+                strom = doc.xref_stream(xref) if doc.xref_is_stream(xref) else None
+            except Exception:
+                strom = None
+            texte = [quelle] + ([strom.decode("latin-1")] if strom else [])
+            for t in texte:                 # Objektquelle und entpackter Strom (z. B. "<4d6178> Tj")
+                teile.append(t)
+                for m in _HEX_STRING_RE.finditer(t):
+                    try:
+                        teile.append(_zeichenkette(bytes.fromhex("".join(m.group(1).split()))))
+                    except ValueError:
+                        pass
+                for m in _LITERAL_RE.finditer(t):
+                    teile.append(_zeichenkette(_literal_bytes(m.group(0)[1:-1])))
+            if strom:
+                teile += [strom.decode("utf-8", "ignore"), strom.decode("utf-16-be", "ignore"),
+                          strom[1:].decode("utf-16-be", "ignore")]
+        try:
+            teile.append(doc.pdf_trailer())
+        except Exception:
+            pass
+    return "\n".join(teile)
+
+
 def qdf_rohbytes(pfad):
-    """Alle Objekte dekomprimiert (qpdf --qdf) – findet Klartext auch in Strömen und Strukturen."""
-    if not QPDF:
-        pytest.skip("qpdf fehlt")
-    ziel = Path(str(pfad) + ".qdf")
-    subprocess.run([QPDF, "--qdf", "--object-streams=disable", "--decode-level=all", str(pfad), str(ziel)],
-                   capture_output=True)
-    roh = ziel.read_bytes()
-    return roh.decode("latin-1") + roh.decode("utf-16-be", "ignore")
+    """Alle Objekte dekomprimiert (qpdf --qdf) – findet Klartext auch in Strömen und Strukturen. Ohne qpdf
+    (Windows-Runner) derselbe Blick über PyMuPDF."""
+    if QPDF:
+        ziel = Path(str(pfad) + ".qdf")
+        subprocess.run([QPDF, "--qdf", "--object-streams=disable", "--decode-level=all", str(pfad), str(ziel)],
+                       capture_output=True)
+        if ziel.exists():
+            roh = ziel.read_bytes()
+            return roh.decode("latin-1") + roh.decode("utf-16-be", "ignore")
+    return _rohtext_pymupdf(pfad)
 
 
 def bereich_hell(pfad, nr, rect, dpi=100):
@@ -1112,3 +1187,22 @@ def test_beschnitt_wird_entfernt_wenn_nebenkanal_modul_scheitert(tmp_path, monke
     assert "Musterfrau" not in pdftotext(e["ausgabe"]) and "Musterfrau" not in qdf_rohbytes(e["ausgabe"])
     assert any(m["code"] == "NEBENKANAL_ENTFERNT" and m["art"] == "warnung" and "defekt" in m["text"]
                for m in e["meldungen"])
+
+
+def test_pruefhelfer_ohne_poppler_und_qpdf(tmp_path, monkeypatch):
+    """Windows-Runner ohne pdftotext/qpdf: die Prüf-Helfer fallen auf PyMuPDF zurück und finden Klartext
+    in Textebene, Metadaten (UTF-16) und komprimierten Strömen – Leck-Prüfungen bleiben also scharf."""
+    import sys
+    modul = sys.modules[__name__]
+    monkeypatch.setattr(modul, "PDFTOTEXT", None)
+    monkeypatch.setattr(modul, "QPDF", None)
+    doc = fitz.open()
+    seite = doc.new_page()
+    seite.insert_text((50, 80), "Versicherungsnehmerin Erika Musterfrau", fontsize=11)
+    doc.set_metadata({"author": "Jürgen Ölmann"})
+    pdf = tmp_path / "helfer.pdf"
+    doc.save(pdf, deflate=True)
+    doc.close()
+    assert "Musterfrau" in pdftotext(pdf)
+    roh = qdf_rohbytes(pdf)
+    assert "Musterfrau" in roh and "Ölmann" in roh
