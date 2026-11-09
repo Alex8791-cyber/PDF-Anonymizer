@@ -48,13 +48,20 @@ sie immer zum Programm passt.
 | E-Mail-Adressen | max.mustermann@example.de | `[E-MAIL]` | an |  |
 | Telefonnummern | 0171 2345678 | `[TELEFON]` | an |  |
 | Geburtsdaten | geb. am 02.09.1983 | `[GEB-DATUM]` | an | Datum hinter „geb.“, „Geburtsdatum“ … |
-| Straße + Hausnummer | Hauptstraße 12a | `[ADRESSE]` | an |  |
+| Straße + Hausnummer, Postfach | Hauptstraße 12a | `[ADRESSE]` | an |  |
 | PLZ + Ort | 90402 Nürnberg | `[PLZ ORT]` | an |  |
-| Vertrags-/Kunden-/Schein-Nummern | Versicherungsschein-Nr. LV-2024-887766 | `[VERTRAGS-NR]` | an | Nummer hinter einem Etikett wie „Vertrags-Nr.“ |
+| Vertrags-/Kunden-/Schein-/Aktenzeichen | Versicherungsschein-Nr. LV-2024-887766 | `[VERTRAGS-NR]` | an | Nummer hinter einem Etikett wie „Vertrags-Nr.“ |
 | Sozialversicherungsnummern | 12 345678 A 123 | `[SV-NR]` | an |  |
 | Steuer-IDs | 91064389278 | `[STEUER-ID]` | an | amtliche Prüfziffer, auch ohne Beschriftung |
+| Steuernummern / USt-IdNr. | – | `[STEUER-NR]` | an |  |
+| Krankenversichertennummern | – | `[KV-NR]` | an |  |
 | Kindergeldnummern | 009FK407160 | `[KINDERGELD-NR]` | an |  |
 | Kfz-Kennzeichen | N-XY 123 | `[KENNZEICHEN]` | an |  |
+| Fahrzeug-Identnummern (FIN) | – | `[FIN]` | an |  |
+| Ausweis-/Pass-/Führerscheinnummern | – | `[AUSWEIS-NR]` | an |  |
+| SEPA-Mandatsreferenzen | – | `[MANDATSREFERENZ]` | an |  |
+| BIC (bei IBAN oder Etikett) | – | `[BIC]` | an |  |
+| Kreditkartennummern | – | `[KREDITKARTE]` | an |  |
 | ALLE Datumsangaben (Vorsicht!) | 15.03.2024 | `[DATUM]` | aus | Vorsicht: auch Vertrags- und Briefdaten |
 <!-- TABELLE-ENDE -->
 
