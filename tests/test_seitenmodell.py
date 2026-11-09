@@ -66,14 +66,22 @@ def test_ligaturen_werden_aufgeloest_und_zeigen_auf_dieselbe_glyphe(tmp_path):
 
 
 def test_nfc_nbsp_weiche_trennstriche_und_nullbreite():
-    dok = dokument_aus_text("Herr Müller wohnt in Köln, Muster­mann, Max​Mustermann")
+    # Vertrag 12.7 (neu): ein weicher Trennstrich MITTEN in der Zeile mit sichtbarer Glyphe ist ein Bindestrich
+    # (Windows-Textauslesung); reiner Text hat synthetische Glyphen mit Breite. Vorher entfiel er immer.
+    dok = dokument_aus_text("Herr Mu\u0308ller\xa0wohnt in Ko\u0308ln, Muster\xadmann, Max\u200bMustermann")
     seite = dok.seiten[0]
-    assert "Herr Müller wohnt in Köln, Mustermann, MaxMustermann" == seite.text
+    assert "Herr Müller wohnt in Köln, Muster-mann, MaxMustermann" == seite.text
     i = seite.text.index("ü")
     g = seite.abbildung[i]
-    assert seite.zeichen[g].c == "u" and seite.zeichen[seite.verbunden[g]].c == "̈"
-    s = seite.text.index("Mustermann,")
-    assert any(seite.zeichen[x].c == "­" for x in seite.glyphen(s, s + 10)), "weicher Trennstrich mitschwärzen"
+    assert seite.zeichen[g].c == "u" and seite.zeichen[seite.verbunden[g]].c == "\u0308"
+    s = seite.text.index("Muster-mann,")
+    assert seite.zeichen[seite.abbildung[s + 6]].c == "\xad", "Bindestrich zeigt auf die Trennstrich-Glyphe"
+    # ohne sichtbare Glyphe (Breite 0) entfällt er weiterhin und wird mit dem Wort geschwärzt
+    roh = [(c, sm._rect(50 + 6 * k, 50, 50 + 6 * k + (0 if c == "\xad" else 6), 62), 60.0, 10.0, -1)
+           for k, c in enumerate("Muster\xadmann")]
+    s2 = sm._seite_aus_zeilen(0, fitz.Rect(0, 0, 595, 842), [sm._Rohzeile(0, roh)])
+    assert s2.text == "Mustermann"
+    assert any(s2.zeichen[x].c == "\xad" for x in s2.glyphen(0, 10)), "weicher Trennstrich mitschwärzen"
 
 
 def test_silbentrennung_regeln():
@@ -538,3 +546,44 @@ def test_blocksatz_mit_einzeln_gesetzten_woertern_bleibt_fliesstext(tmp_path):
     from anonymisierer.analyse import analysiere_pdf
     e = analysiere_pdf(pdf, {"iban"}, [], [])
     assert [f["text"] for f in e["funde"]] == ["DE89 3704 0044 0532 0130 00"]
+
+
+# ----------------------------------------------------------------------
+# Vertrag 12.7: Unicode-Normalisierung (Befund Windows-CI: NBSP statt Leerzeichen, sichtbarer U+00AD statt
+# Bindestrich, U+2011 in Nummern)
+# ----------------------------------------------------------------------
+def test_normalisiere_text_regeln_und_abbildung():
+    roh = ("Noémie Bonnet 51­633867 Tel‑0421 3498­936 a.krause@schwarzwald­versicherung.de "
+           "１２ 3–4 5−6 x y　z A – B Versicherungs­\nnehmer Klein­\nHoffmann")
+    text, abbildung = sm.normalisiere_text(roh)
+    assert text == ("Noémie Bonnet 51-633867 Tel-0421 3498-936 a.krause@schwarzwald-versicherung.de 12 3-4 5-6 "
+                    "x y z A – B Versicherungsnehmer Klein-Hoffmann")
+    assert len(abbildung) == len(text)
+    for i, j in enumerate(abbildung):
+        if j >= 0 and text[i].isalnum() and roh[j].isascii():
+            assert roh[j] == text[i]
+    assert roh[abbildung[text.index("12")]] == "１"
+    assert sm.normalisiere_text("") == ("", [])
+    # Suchtexte folgen derselben Regel
+    assert sm.suchtext_normalisieren("schwarzwald­versicherung 3–4 Tel‑0421 １") == \
+        "schwarzwald-versicherung 3-4 Tel-0421 1"
+
+
+@pytest.mark.skipif(not DEJAVU.exists(), reason="DejaVuSans fehlt")
+def test_windows_sonderzeichen_im_seitentext(tmp_path):
+    pdf = textseite(tmp_path / "win.pdf", ["Versicherungsnehmerin Noémie Bonnet",
+                                           "Kundennummer 51­633867, Telefon 0421 3498­936",
+                                           "a.krause@schwarzwald­versicherung.de, Mobil 0171‑2345678",
+                                           "Zeitraum 3–4 Wochen, Abzug −5 EUR",
+                                           "Versicherungs­", "nehmer Klein­", "Hoffmann"],
+                    fontname="F0", fontfile=str(DEJAVU))
+    dok = baue(pdf)
+    t = dok.text
+    for erwartet in ("Noémie Bonnet", "51-633867", "0421 3498-936", "a.krause@schwarzwald-versicherung.de",
+                     "0171-2345678", "3-4 Wochen", "Versicherungsnehmer Klein-Hoffmann"):
+        assert erwartet in t, (erwartet, t)
+    assert "−5 EUR" in t                      # Minus nicht zwischen Ziffern: unverändert
+    # sichtbarer weicher Trennstrich zeigt auf seine Glyphe (wird mitgeschwärzt)
+    s = dok.seiten[0]
+    i = t.index("51-633867") + 2
+    assert s.abbildung[i] >= 0 and s.zeichen[s.abbildung[i]].c == "­"

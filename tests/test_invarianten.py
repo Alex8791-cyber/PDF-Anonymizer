@@ -249,3 +249,32 @@ def test_invarianten_scans_mit_rotate(tmp_path, dienst, rotate):
     kontrolle = dienst.text(erg["ausgabe"], 0)
     for rest in ("Mustermann", "3704", "1983", "2345678"):
         assert rest not in kontrolle, (rotate, rest, kontrolle)
+
+
+def windows_sonderzeichen(pfad):
+    """Vertrag 12.7: Textauslesung wie auf dem Windows-Runner – NBSP statt Leerzeichen, sichtbarer weicher
+    Trennstrich (U+00AD) statt Bindestrich, U+2011 in Nummern."""
+    doc = fitz.open()
+    _seite(doc, ["Versicherungsnehmerin: Frau Noémie Bonnet",
+                 "Kundennummer: 51­633867",
+                 "Telefon 0421 3498­936, Mobil 0171‑2345678",
+                 "E-Mail a.krause@schwarzwald­versicherung.de",
+                 "IBAN DE89 3704 0044 0532 0130 00"], fontname="F0", fontfile=str(DEJAVU))
+    doc.save(pfad)
+    doc.close()
+
+
+@pytest.mark.skipif(not DEJAVU.exists(), reason="DejaVuSans fehlt")
+def test_windows_sonderzeichen_werden_erkannt_und_geschwaerzt(tmp_path):
+    pdf = tmp_path / "windows.pdf"
+    windows_sonderzeichen(pdf)
+    analyse, erg = invarianten_pruefen(pdf, KeinOcr(), immer=["Noémie Bonnet"])
+    texte = {" ".join(f["text"].split()) for f in analyse["funde"]}
+    for wert in ("Noémie Bonnet", "51-633867", "0421 3498-936", "0171-2345678",
+                 "a.krause@schwarzwald-versicherung.de", "DE89 3704 0044 0532 0130 00"):
+        assert any(wert in t for t in texte), (wert, texte)
+    with fitz.open(erg["ausgabe"]) as aus:
+        ausgabe = "\n".join(s.get_text() for s in aus)
+    for rest in ("Bonnet", "633867", "3498", "2345678", "krause", "schwarzwald", "3704"):
+        assert rest not in ausgabe, (rest, ausgabe)
+    assert erg["status"] == "fertig", erg["meldungen"]

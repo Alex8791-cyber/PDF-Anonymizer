@@ -64,8 +64,15 @@ ZEILEN_VEREINEN = True            # MuPDF-Zeilen gleicher Grundlinie eines Block
 
 _LIGATUREN = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl",
               "ﬅ": "st", "ﬆ": "st"}
-_OHNE_BREITE = frozenset("­​‌‍⁠﻿")
-_TRENNSTRICHE = frozenset("-‐‑")
+_OHNE_BREITE = frozenset("\u00ad\u200b\u200c\u200d\u2060\ufeff")
+_TRENNSTRICHE = frozenset("-\u2010\u2011")
+# Vertrag 12.7 (Befund Windows-CI): Bedeutung hängt von der Glyphenbreite ab – mit sichtbarer Glyphe ist der
+# weiche Trennstrich ein Bindestrich ("51\u00ad633867" = "51-633867") und U+FEFF ein Leerzeichen, sonst entfallen sie
+_BREITE_ABHAENGIG = {"\u00ad": "-", "\ufeff": " "}
+_BINDESTRICHE = {"\u2010": "-", "\u2011": "-"}
+_STRICHE_ZWISCHEN_ZIFFERN = frozenset("\u2012\u2013\u2212")      # -> "-" nur zwischen zwei Ziffern
+_STRICH_ZIFFERN_RE = re.compile("(?<=[0-9])[\u2012\u2013\u2212](?=[0-9])")
+_ZIFFERN = frozenset("0123456789")
 # Trennzeichen, die im Modus "kennung" zwischen Zeichengruppen flexibel sind ("DE89 3704" = "DE893704")
 _KENNUNG_TRENNER = frozenset(" \t\n\r\f\v-./()‐‑–")
 _KENNUNG_LAUF_RE = re.compile(r"[^\s\-./()‐‑–]+")
@@ -186,6 +193,10 @@ def zeichen_normalisieren(c: str) -> str:
             n = ""
         elif c in _LIGATUREN:
             n = _LIGATUREN[c]
+        elif c in _BINDESTRICHE:
+            n = _BINDESTRICHE[c]
+        elif "\uff10" <= c <= "\uff19":                 # Vollbreite-Ziffern
+            n = chr(ord(c) - 0xFF10 + 0x30)
         elif c == "\t":
             n = "\t"
         elif c.isspace():
@@ -199,18 +210,22 @@ def zeichen_normalisieren(c: str) -> str:
 _TRENN_LOESCHEN_RE = re.compile(r"(?<=[^\W\d_])[-‐‑][ \t]*\n[ \t\f]*(?=[^\W\d_])")
 
 
+# weicher Trennstrich mitten im Wort/in der Nummer: im reinen Text als sichtbar behandelt (Vertrag 12.7)
+_WEICH_MITTE_RE = re.compile("(?<=[^\\W_])\u00ad(?=[^\\W_])")
+
+
 def suchtext_normalisieren(text: str) -> str:
     """Fundtext so normalisieren wie den Seitentext: Zeichenregeln (NFC, Ligaturen, Leerzeichen,
     weiche Trennstriche), Silbentrennung über einen Zeilenumbruch, Leerraum zusammengezogen."""
     if not text:
         return ""
     teile = []
-    for c in unicodedata.normalize("NFC", text):
+    for c in _WEICH_MITTE_RE.sub("-", unicodedata.normalize("NFC", text)):
         if c == "\n":
             teile.append("\n")
         else:
             teile.append(zeichen_normalisieren(c))
-    text = "".join(teile)
+    text = _STRICH_ZIFFERN_RE.sub("-", "".join(teile))
 
     def trennung(m):
         folgend = text[m.end()] if m.end() < len(text) else ""
@@ -1112,6 +1127,7 @@ def _zusammensetzen(zeilen: list) -> tuple:
     for zid, rz in enumerate(zeilen):
         einheiten = []           # (Textzeichen, Glyphenindex oder -1)
         weich_am_ende = False
+        striche = False
         letzte = -1
         block, horizontal, quelle = rz.block, rz.horizontal, rz.quelle
         for el in rz.inhalt:
@@ -1125,9 +1141,13 @@ def _zusammensetzen(zeilen: list) -> tuple:
                 feld_glyphen.setdefault(-wort_id - 2, []).append(g)
                 wort_id = -1
             wort_ids.append(wort_id)
-            n = norm_cache.get(c)
-            if n is None:
-                n = zeichen_normalisieren(c)
+            if c in _BREITE_ABHAENGIG:
+                # Vertrag 12.7: mit sichtbarer Glyphe Bindestrich bzw. Leerzeichen, sonst entfällt das Zeichen
+                n = _BREITE_ABHAENGIG[c] if rect.x1 - rect.x0 > 0.01 else ""
+            else:
+                n = norm_cache.get(c)
+                if n is None:
+                    n = zeichen_normalisieren(c)
             if len(n) == 1 and n.isalnum():          # häufigster Fall: Buchstabe/Ziffer
                 einheiten.append((n, g))
                 letzte = g
@@ -1145,11 +1165,19 @@ def _zusammensetzen(zeilen: list) -> tuple:
                     einheiten[-1] = (komp, einheiten[-1][1])
                     _verbinden(verbunden, einheiten[-1][1], g)
                     continue
+            if n in _STRICHE_ZWISCHEN_ZIFFERN:
+                striche = True
             for ch in n:
                 einheiten.append((ch, g))
             letzte = g
             if not n.isspace():
                 weich_am_ende = False
+        if striche:
+            # U+2012/U+2013/U+2212 zwischen zwei Ziffern -> "-" (Vertrag 12.7), sonst unverändert
+            for i in range(1, len(einheiten) - 1):
+                if (einheiten[i][0] in _STRICHE_ZWISCHEN_ZIFFERN and einheiten[i - 1][0] in _ZIFFERN
+                        and einheiten[i + 1][0] in _ZIFFERN):
+                    einheiten[i] = ("-", einheiten[i][1])
         einheiten_je_zeile.append((einheiten, weich_am_ende))
 
     text: list = []
@@ -1703,3 +1731,16 @@ def dokument_aus_text(text: str) -> Dokument:
     dok = Dokument(None, [seite])
     dok.aus_text = True
     return dok
+
+
+def normalisiere_text(text: str) -> tuple:
+    """Vertrag 12.7: reiner Text nach denselben Regeln wie der Seitentext (Leerzeichen-Varianten -> " ",
+    weicher Trennstrich mitten im Wort -> "-" bzw. am Zeilenende Silbentrennung, U+2010/U+2011 -> "-",
+    Gedanken-/Minusstrich zwischen Ziffern -> "-", Vollbreite-Ziffern, Ligaturen, NFC). Für Regeln, die Text
+    von außen bekommen. Liefert (text, abbildung): abbildung[i] = Index im Eingabetext, aus dem Zeichen i
+    stammt (-1 = eingefügt, z. B. ein Zeilenumbruch)."""
+    if not text:
+        return "", []
+    seite = dokument_aus_text(text).seiten[0]
+    herkunft = [i for i, c in enumerate(text) if c != "\n"]       # Glyphe g <- Eingabezeichen herkunft[g]
+    return seite.text, [herkunft[g] if 0 <= g < len(herkunft) else -1 for g in seite.abbildung]
