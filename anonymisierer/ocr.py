@@ -522,6 +522,13 @@ def _lesung_bewerten(texte) -> dict:
             "lange_treffer": lange}
 
 
+def lesung_plausibel(texte) -> bool:
+    """Öffentlich: Ist eine OCR-Lesung (Liste von Wörtern/Texten) plausibel? Dieselbe Regel wie die
+    Ausrichtungssuche (_plausibel(_lesung_bewerten(...))); die internen Namen bleiben für ältere Aufrufer
+    (restrisiko) erhalten."""
+    return _plausibel(_lesung_bewerten(texte))
+
+
 def _plausibilitaet(texte) -> float:
     """Plausibilität einer Lesung auf der Skala 0..1 (Quote starker Wörter / PLAUSIBEL_SKALA, gekappt)."""
     return min(1.0, _lesung_bewerten(texte)["quote"] / PLAUSIBEL_SKALA)

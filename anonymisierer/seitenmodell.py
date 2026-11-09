@@ -616,7 +616,23 @@ class Seite:
         Durchsuchbarer Scan (Textebene und OCR verknüpft, _textebene_verknuepfen): Treffer der Textebene
         schwärzen die Bildstelle ihrer OCR-Partner (erstes Rechteck) und die unsichtbaren Zeichen selbst
         (weiteres, schmales Rechteck je Wort); Treffer der OCR zusätzlich die verknüpften unsichtbaren Zeichen.
-        So verschwinden immer beide – auch wenn die Textebene gegen das Bild versetzt oder nicht schräg ist."""
+        So verschwinden immer beide – auch wenn die Textebene gegen das Bild versetzt oder nicht schräg ist.
+        Reicht die Stelle über eine Spaltengrenze ("\\t\\t"), bekommt jedes Spaltenstück eigene Rechtecke: ein
+        Rechteck über die Lücke träfe den Inhalt dazwischen (andere Spalte) und sein Platzhalter überdeckte
+        die Platzhalter der Nachbarn."""
+        ergebnis: list = []
+        stueck = start = max(0, start)
+        ende = min(ende, len(self.text))
+        for i in range(start, ende + 1):
+            if i < ende and self.text[i] != "\t":
+                continue
+            if self.text[stueck:i].strip():
+                ergebnis.extend(self._rechtecke_stueck(stueck, i))
+            stueck = i + 1
+        return ergebnis
+
+    def _rechtecke_stueck(self, start: int, ende: int) -> list:
+        """rechtecke() für ein Stück ohne Spaltengrenze."""
         gruppen: dict = {}
         for g in self.glyphen(start, ende):
             gruppen.setdefault(self.zeichen[g].zeile, []).append(g)
@@ -1361,7 +1377,10 @@ def _umbruch_passt(zeichen: list, einheiten: list, ende: int, folge: list) -> bo
     if g_ende < 0 or folge_g is None:
         return True
     letzte, naechste = zeichen[g_ende], zeichen[folge_g]
-    if not (letzte.horizontal and naechste.horizontal):
+    ocr = letzte.quelle != "text" and naechste.quelle != "text"
+    if ocr and letzte.block != naechste.block:
+        return False
+    if not ocr and not (letzte.horizontal and naechste.horizontal):
         return True
     k = ende - 1
     while k > 0 and einheiten[k - 1][0] != "\t":
@@ -1370,8 +1389,28 @@ def _umbruch_passt(zeichen: list, einheiten: list, ende: int, folge: list) -> bo
     if seg_g is None:
         return True
     groesse = letzte.groesse or 10.0
-    nx0 = naechste.rect.x0
-    return nx0 < letzte.rect.x0 and nx0 >= zeichen[seg_g].rect.x0 - max(3 * groesse, 30.0)
+    if not ocr:
+        nx0 = naechste.rect.x0
+        return nx0 < letzte.rect.x0 and nx0 >= zeichen[seg_g].rect.x0 - max(3 * groesse, 30.0)
+    # OCR-Zeilen (in Lesefolge, derselbe Block): dieselbe Regel entlang der Leserichtung der Zeile statt der
+    # Seiten-x-Achse – bei kopfstehenden Scans beginnt die Folgezeile auf der Seite RECHTS, bei seitlichen unten
+    zeile_g = next((g for ch, g in einheiten[:ende] if g >= 0 and not ch.isspace()), seg_g)
+
+    def mitte(r):
+        return (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
+    ax, ay = mitte(zeichen[zeile_g].rect)
+    bx, by = mitte(letzte.rect)
+    laenge = math.hypot(bx - ax, by - ay)
+    if laenge < 1.0:
+        return True
+    rx, ry = (bx - ax) / laenge, (by - ay) / laenge
+
+    def lage(r):
+        mx, my = mitte(r)
+        return (mx - ax) * rx + (my - ay) * ry
+    hoehe = letzte.rect.width if abs(ry) > abs(rx) else letzte.rect.height   # quer zur Leserichtung
+    t_folge = lage(naechste.rect)
+    return t_folge < laenge and t_folge >= lage(zeichen[seg_g].rect) - max(3 * hoehe, 30.0)
 
 
 def _zusammensetzen(zeilen: list) -> tuple:

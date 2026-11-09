@@ -641,6 +641,69 @@ def test_ocr_spaltentrenner_bei_grosser_luecke_wie_textseite(tmp_path):
     assert seite.text[s:e] == "Max Mustermann"
 
 
+def test_stelle_ueber_spaltengrenze_bekommt_je_spalte_ein_rechteck(tmp_path):
+    """Fußzeile in Spalten (Seed-1 046): "… HRB 98644" links, "USt-IdNr." rechts in derselben Zeile, dazwischen
+    die mittlere Spalte eine Zeile höher. Ein Treffer über den Spaltentrenner ("98644\\t\\tUSt-IdNr") bekam früher
+    EIN Rechteck über die ganze Lücke: es traf die mittlere Spalte, und sein großer Platzhalter überdeckte die
+    Platzhalter der Nachbarn. Jetzt je Spaltenstück ein Rechteck – alle Glyphen bedeckt, die Lücke frei."""
+    woerter = [(60, 800, 75, 808, "HRB"), (78, 800, 105, 808, "98644"),
+               (380, 801, 420, 809, "USt-IdNr."), (424, 801, 470, 809, "DE871667547")]
+    for textebene in (False, True):
+        d = fitz.open(_leere_seite(tmp_path))
+        if textebene:
+            for x0, y0, x1, y1, text in woerter:
+                d[0].insert_text((x0, y1 - 1), text, fontsize=8)
+            seite = sm.seite_aufbauen(d[0], 0)
+        else:
+            seite = sm.seite_aufbauen(d[0], 0, ocr_woerter=woerter)
+        d.close()
+        s = seite.text.index("98644")
+        e = seite.text.index("USt-IdNr") + len("USt-IdNr")
+        assert "\t\t" in seite.text[s:e], seite.text
+        teile = seite.rechtecke(s, e)
+        rects = [t[0] for t in teile]
+        assert len(rects) == 2, (textebene, rects)
+        assert all(r.x1 < 200 or r.x0 > 300 for r in rects), "kein Rechteck über die Lücke"
+        for g in seite.glyphen(s, e):
+            z = seite.zeichen[g]
+            if not z.c.isspace():
+                assert any(r.intersects(z.rect) for r in rects), z.c
+        assert seite.rechtecke(s, s + 5)[0][0] == rects[0], "Stück links unverändert"
+
+
+@pytest.mark.parametrize("winkel", [0, 180, 90, 270])
+def test_silbentrennung_auf_scan_in_leserichtung(tmp_path, winkel):
+    """Silbentrennung auf Scans: "von Hol-" / "ger Ehrlich" wird verbunden – auch kopfstehend (180°: die
+    Folgezeile beginnt auf der Seite RECHTS vom Trennstrich) und seitlich. Früher verglich die Prüfung die
+    Seiten-x-Lage (nur für aufrechte Zeilen richtig), der Name blieb zerrissen ("Hol-\\nger"); jetzt gilt
+    dieselbe Regel entlang der Leserichtung. Eine Tabellenzeile, deren letzte Zelle auf "-" endet, bleibt
+    getrennt: die Folgezeile beginnt weit vor dieser Zelle."""
+    b, h = 595.0, 842.0
+
+    def lage(x0, y0, x1, y1, text, zeile, nr):      # aufrecht gedachte Lage -> Lage auf der Seite
+        if winkel == 180:
+            x0, y0, x1, y1 = b - x1, h - y1, b - x0, h - y0
+        elif winkel == 90:                           # Leserichtung auf der Seite von unten nach oben
+            x0, y0, x1, y1 = y0, h - x1, y1, h - x0
+        elif winkel == 270:                          # … von oben nach unten
+            x0, y0, x1, y1 = b - y1, x0, b - y0, x1
+        return (x0, y0, x1, y1, text, 0, zeile, nr, winkel, 0.0)
+    woerter = [lage(50, 100, 120, 112, "Gesteuert", 0, 0), lage(125, 100, 160, 112, "wurde", 0, 1),
+               lage(165, 100, 220, 112, "der", 0, 2), lage(225, 100, 260, 112, "Wagen", 0, 3),
+               lage(265, 100, 285, 112, "von", 0, 4), lage(290, 100, 320, 112, "Hol-", 0, 5),
+               lage(50, 115, 70, 127, "ger", 1, 0), lage(75, 115, 120, 127, "Ehrlich,", 1, 1),
+               lage(125, 115, 160, 127, "fuhr", 1, 2), lage(165, 115, 190, 127, "auf.", 1, 3),
+               # Tabelle: letzte Zelle "Versicherungs-", die nächste Zeile beginnt in der ersten Spalte
+               lage(50, 130, 80, 142, "Kunde", 2, 0), lage(250, 130, 320, 142, "Versicherungs-", 2, 1),
+               lage(50, 145, 80, 157, "nummer", 3, 0), lage(250, 145, 300, 157, "4711", 3, 1)]
+    d = fitz.open(_leere_seite(tmp_path))
+    seite = sm.seite_aufbauen(d[0], 0, ocr_woerter=woerter)
+    d.close()
+    assert "von Holger Ehrlich, fuhr auf." in seite.text, seite.text
+    assert ganzwort_stellen(seite, "Holger Ehrlich", "name")
+    assert "Versicherungs-\nnummer" in seite.text, seite.text
+
+
 def test_ocr_zeichen_in_leserichtung_bei_kopfstehendem_scan(tmp_path):
     """180°: die Leserichtung läuft auf der Seite nach links – das erste Zeichen sitzt am RECHTEN Ende der
     Wortbox (früher anteilig von links: Vorschau und Zeichenlage waren gespiegelt)."""
