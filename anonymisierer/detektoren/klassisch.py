@@ -6,7 +6,8 @@ verortet (exakte Vorkommen, sonst über den gemeinsamen Vergleicher). Die Namens
 Positionen. Dazu kommen die IMMER-Begriffe und eine Formularfeld-Regel (Etikett + Wert, Kammfelder).
 
 Übergangsmodul: Agent "regeln" ersetzt die Muster-/Namens-Detektoren durch eigene Module, die Spans
-direkt liefern (gleiche Register-Namen mit ersetzt=True, oder dieses Modul wird entfernt).
+direkt liefern (gleiche Register-Namen mit ersetzt=True, oder dieses Modul wird entfernt). Alle Einträge hier
+sind nur_wenn_frei: lädt ein Ersatzmodul vorher, bleibt dessen Detektor – die Reihenfolge ist egal.
 """
 
 from __future__ import annotations
@@ -110,7 +111,8 @@ _PLAUSIBEL = {"strasse": _strasse_plausibel}
 
 for _schluessel, _anzeige, _platzhalter, _f, _an in muster.KATEGORIEN:
     if _f is not None:
-        registrieren(f"muster.{_schluessel}", {_schluessel}, ALLE_PROFILE, _muster_detektor(_schluessel))
+        registrieren(f"muster.{_schluessel}", {_schluessel}, ALLE_PROFILE, _muster_detektor(_schluessel),
+                     nur_wenn_frei=True)
 
 
 # ----------------------------------------------------------------------
@@ -313,7 +315,7 @@ def _zellen_namen_bestaetigen(texte: set):
     return ok
 
 
-@detektor("ner", {"namen"})
+@detektor("ner", {"namen"}, nur_wenn_frei=True)
 def namen_erkennen(dok, kontext):
     """KI-Namenserkennung (spaCy) plus Regeln für Briefe, Formulare und Tabellen (namen.finde_personen);
     Tabellenzellen zusätzlich einzeln."""
@@ -350,7 +352,7 @@ def namen_erkennen(dok, kontext):
 # ----------------------------------------------------------------------
 # IMMER-Begriffe
 # ----------------------------------------------------------------------
-@detektor("immer", {"begriff"})
+@detektor("immer", {"begriff"}, nur_wenn_frei=True)
 def immer_begriffe(dok, kontext):
     """IMMER-schwärzen-Begriffe der Nutzerin: jede Ganzwort-Stelle (Groß-/Kleinschreibung egal)."""
     treffer, gesehen = [], set()
@@ -379,7 +381,7 @@ def _kamm_datum(wert: str):
     return 1 <= t <= 31 and 1 <= m <= 12
 
 
-@detektor("klassisch.formularfeld", set(muster.KATEGORIE_PRIORITAET) | {"namen"})
+@detektor("klassisch.formularfeld", set(muster.KATEGORIE_PRIORITAET) | {"namen"}, nur_wenn_frei=True)
 def formularfelder(dok, kontext):
     """Muster auf 'Etikett: Wert' jedes Formularfelds; Treffer im Wert werden an der Stelle des
     eingebrannten Werts verortet. Kammfelder mit Geburtsdatum (TTMMJJJJ ohne Punkte) zählen als

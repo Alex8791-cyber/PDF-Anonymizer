@@ -62,13 +62,18 @@ REGISTER: list = []                 # [Eintrag(name, kategorien, profile, funkti
 LADEFEHLER: list = []               # Texte zu Modulen, die nicht geladen werden konnten
 
 
-def registrieren(name: str, kategorien, profile=ALLE_PROFILE, funktion=None, ersetzt: bool = False) -> Eintrag:
-    """Trägt einen Detektor ein. Doppelte Namen nur mit ersetzt=True (dann an derselben Stelle)."""
+def registrieren(name: str, kategorien, profile=ALLE_PROFILE, funktion=None, ersetzt: bool = False,
+                 nur_wenn_frei: bool = False) -> Eintrag:
+    """Trägt einen Detektor ein. Doppelte Namen nur mit ersetzt=True (dann an derselben Stelle).
+    nur_wenn_frei=True (Rückfall-Detektoren wie klassisch.py): ist der Name schon vergeben, bleibt der
+    vorhandene Detektor – so ist die Ladereihenfolge der Module egal."""
     if funktion is None or not callable(funktion):
         raise TypeError(f"Detektor {name!r}: Funktion fehlt")
     eintrag = Eintrag(name, frozenset(kategorien), frozenset(profile or ALLE_PROFILE), funktion)
     for i, alt in enumerate(REGISTER):
         if alt.name == name:
+            if nur_wenn_frei and not ersetzt:
+                return alt
             if not ersetzt:
                 raise ValueError(f"Detektor {name!r} ist schon registriert (ersetzt=True zum Überschreiben)")
             REGISTER[i] = eintrag
@@ -77,10 +82,10 @@ def registrieren(name: str, kategorien, profile=ALLE_PROFILE, funktion=None, ers
     return eintrag
 
 
-def detektor(name: str, kategorien, profile=ALLE_PROFILE, ersetzt: bool = False):
+def detektor(name: str, kategorien, profile=ALLE_PROFILE, ersetzt: bool = False, nur_wenn_frei: bool = False):
     """Dekorator: registriert f(dok: Dokument, kontext: Kontext) -> list[Treffer]."""
     def dekorieren(funktion):
-        registrieren(name, kategorien, profile, funktion, ersetzt=ersetzt)
+        registrieren(name, kategorien, profile, funktion, ersetzt=ersetzt, nur_wenn_frei=nur_wenn_frei)
         return funktion
     return dekorieren
 

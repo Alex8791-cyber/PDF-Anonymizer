@@ -587,3 +587,23 @@ def test_windows_sonderzeichen_im_seitentext(tmp_path):
     s = dok.seiten[0]
     i = t.index("51-633867") + 2
     assert s.abbildung[i] >= 0 and s.zeichen[s.abbildung[i]].c == "­"
+
+
+def test_rueckfall_detektoren_sind_reihenfolge_unabhaengig(register, monkeypatch):
+    """klassisch.py registriert nur_wenn_frei: lädt ein Ersatzmodul (Agent "regeln") VOR klassisch, bleibt
+    dessen "ner"; lädt es danach, ersetzt es mit ersetzt=True. Kein ValueError, kein Ladefehler."""
+    import importlib
+
+    from anonymisierer.detektoren import klassisch
+
+    def eigene(dok, kontext):
+        return []
+    register.clear()
+    detektoren.registrieren("ner", {"namen"}, funktion=eigene)        # Ersatz zuerst geladen
+    monkeypatch.setattr(detektoren, "LADEFEHLER", [])
+    importlib.reload(klassisch)                                          # Rückfall danach: kein Fehler
+    assert [e.funktion for e in register if e.name == "ner"] == [eigene]
+    assert any(e.name == "muster.iban" for e in register)
+    detektoren.registrieren("ner", {"namen"}, funktion=klassisch.namen_erkennen, ersetzt=True)
+    detektoren.registrieren("ner", {"namen"}, funktion=eigene, ersetzt=True)   # Ersatz danach geladen
+    assert [e.funktion for e in register if e.name == "ner"] == [eigene]
