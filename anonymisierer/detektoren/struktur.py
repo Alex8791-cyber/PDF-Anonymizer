@@ -41,6 +41,12 @@ try:
 except Exception:  # pragma: no cover
     _muster = None
 
+try:
+    from ..namen import personen_teilen as _personen_teilen
+except Exception:  # pragma: no cover
+    def _personen_teilen(text, start, ende):
+        return [(start, ende)]
+
 
 # ----------------------------------------------------------------------
 # Kategorien
@@ -460,6 +466,23 @@ def _etiketten_roh(text: str) -> list:
     return aus
 
 
+def _etiketten_ocr_unscharf(seite) -> list:
+    """Von der OCR verlesene Etiketten ("Name, Vomame:", "Kundenntimmer 76183905") – nur in OCR-Zeilen
+    (detektoren/etiketten_unscharf.py)."""
+    try:
+        from .etiketten_unscharf import unscharfe_etiketten
+        from .ocr_lesart import OCR_QUELLEN, zeile_ist_ocr
+    except Exception:  # pragma: no cover - Modul fehlt
+        return []
+    if not any(z.quelle in OCR_QUELLEN for z in seite.zeichen):
+        return []
+    aus = []
+    for z in seite.zeilen:
+        if z.ende > z.start and zeile_ist_ocr(seite, z):
+            aus.extend(unscharfe_etiketten(seite.text, z.start, z.ende))
+    return aus
+
+
 def etiketten(seite) -> list:
     """Etiketten einer Seite (nach Lage geordnet, nicht überlappend, nie über eine Zellgrenze)."""
     zw = getattr(seite, "_struktur_etiketten", None)
@@ -467,7 +490,7 @@ def etiketten(seite) -> list:
         return zw[1]
     text = seite.text
     lg = lage(seite)
-    roh = _etiketten_roh(text)
+    roh = _etiketten_roh(text) + _etiketten_ocr_unscharf(seite)
     # neutrale Spaltenköpfe und laufende Nummern
     for m in re.finditer(r"(?<![\w.])([A-Za-zÄÖÜäöüß][\w.\-äöüß]*|#)(?![\w])", text):
         w = m.group(1)
@@ -1417,8 +1440,12 @@ def _namens_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
             continue
         if sp.woerter == 1 and not sp.bekannt and not mit_trenner:
             break
-        gruppe = text[sp.start:sp.ende] if sp.woerter >= 2 else None
-        aus.append(Wert(sp.start, sp.ende, "namen", gruppe))
+        # "Jörg Ziegler Ursula Frank" (Komma von der OCR verschluckt): je Person ein Wert
+        teile = _personen_teilen(text, sp.start, sp.ende) if sp.woerter >= 3 and not sp.komma \
+            else [(sp.start, sp.ende)]
+        for a, b in teile:
+            gruppe = text[a:b] if len(text[a:b].split()) >= 2 and (len(teile) > 1 or sp.woerter >= 2) else None
+            aus.append(Wert(a, b, "namen", gruppe))
         if not liste:
             break
         pos = sp.ende

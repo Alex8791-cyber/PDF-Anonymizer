@@ -291,8 +291,11 @@ def _datenreihen(text: str, reihen: list, i_kopf: int, tab: _Tabelle, h: float, 
             break
         if zellen[0].x0 < links + 1.0 and len(zellen) == 1 and len(text[zellen[0].start:zellen[0].ende].split()) > 4:
             break
-        if any(_ETIKETT_DOPPELPUNKT_RE.search(text, z.start, z.ende) for z in zellen):
-            break                                    # "Tarif: …": ein Formularblock nach der Tabelle
+        if (len(zellen) <= 2 or _ETIKETT_DOPPELPUNKT_RE.search(text, zellen[0].start, zellen[0].ende)) \
+                and any(_ETIKETT_DOPPELPUNKT_RE.search(text, z.start, z.ende) for z in zellen):
+            break                                    # "Tarif: …": ein Formularblock nach der Tabelle – nicht aber
+            #                                          ein OCR-Rest mit Doppelpunkt mitten in einer vollen Reihe
+            #                                          ("13 Mazur, Weronika | Abs: | 16.08.66 | …")
         teile = []
         for z in zellen:
             teile += [(idx, s, e) for idx, s, e in _zuordnen(spalten, z, h) if idx is not None]

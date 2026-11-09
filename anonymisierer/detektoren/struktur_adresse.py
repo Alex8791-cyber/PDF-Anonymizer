@@ -327,8 +327,12 @@ def _stellen_detektor(kategorie: str, alt):
             if lesart is None:
                 continue
             for st in _muster.stellen(kategorie, lesart, nur_streng=True):
-                if st.ende <= st.start or SPALTENTRENNER in text[st.start:st.ende]:
+                if st.ende <= st.start:
                     continue
+                if SPALTENTRENNER in text[st.start:st.ende] and not (
+                        kategorie == "plzort" and getattr(_muster, "plz_ort_zellenpaar", lambda *_: False)(
+                            text, st.start, st.ende)):
+                    continue                          # Trenner nur zwischen PLZ-Zelle und Ort-Zelle
                 if kategorie == "strasse" and _BETRAG_DANACH_RE.match(text, st.ende):
                     continue                          # "Am Kurpark 946,21": Betrag, keine Hausnummer
                 gesehen.setdefault((st.start, st.ende), st)

@@ -14,7 +14,7 @@ try:
 except ImportError:  # ältere PyMuPDF-Versionen
     import fitz
 
-from anonymisierer import detektoren, seitenmodell
+from anonymisierer import detektoren, muster, seitenmodell
 from anonymisierer.detektoren import Kontext
 from anonymisierer.detektoren import struktur as st
 from anonymisierer.muster import KATEGORIEN
@@ -148,6 +148,16 @@ def test_gremium_aufzaehlung_ergibt_einzelne_namen():
     dok = seitenmodell.dokument_aus_text("Vorstand: Katarzyna Kowalski, Dipl.-Ing. Jörg Ziegler, Ursula Frank")
     namen = [w for k, w in _treffer(dok, "struktur.etikett_wert") if k == "namen"]
     assert namen == ["Katarzyna Kowalski", "Jörg Ziegler", "Ursula Frank"]
+
+
+def test_gremium_ohne_komma_wird_an_vornamen_geteilt():
+    """OCR hat das Aufzählungskomma verschluckt: "Jörg Ziegler Ursula Frank" sind zwei Personen."""
+    for text in ("Vorstand: Katarzyna Kowalski, Dipl.-Ing. Jörg Ziegler Ursula Frank",
+                 "Zeugen: Jörg Ziegler Ursula Frank"):
+        dok = seitenmodell.dokument_aus_text(text)
+        namen = [w for k, w in _treffer(dok, "struktur.etikett_wert") if k == "namen"]
+        assert "Jörg Ziegler" in namen and "Ursula Frank" in namen, namen
+        assert not any("Ziegler Ursula" in n for n in namen), namen
 
 
 @pytest.mark.parametrize("text", ["Sehr geehrte Damen", "Montag", "Kundenservice", "Versicherte Person",
@@ -499,6 +509,36 @@ def test_muster_plzort_fehlgriffe_und_ortszusaetze(text, erwartet):
 ])
 def test_plz_ort_endet_an_zellgrenzen_und_fremden_woertern(text, erwartet):
     assert [text[a:b] for a, b in st.plz_ort_spannen(text, 0, len(text))] == [erwartet]
+
+
+@pytest.mark.parametrize("text", [
+    "Registergericht: Amtsgericht Lübeck, 45650 Musterstadt",
+    "Amtsgericht München HRB\n12345 München",
+    "Sitz: Hamburg - Amtsgericht Hamburg HIRB 73610\t\tMateusz Grabowski",       # OCR: "HIRB"
+])
+def test_muster_plzort_registernummern(text):
+    """Registernummern hinter HRB/HRA/Amtsgericht/Registergericht/Handelsregister sind keine PLZ – die Muster-Regel
+    selbst (muster.py) und die Stellen-Neuregistrierung (struktur_adresse.py) lassen sie stehen."""
+    dok = seitenmodell.dokument_aus_text(text)
+    assert _detektor("muster.plzort")(dok, Kontext({"plzort"})) == []
+    assert st.plz_ort_spannen(text, 0, len(text)) == []
+
+
+def test_muster_plzort_plz_und_ort_in_nachbarzellen():
+    """"27568 ⇥⇥ Bremerhaven" (Formular mit Kästchen, breite OCR-Lücke, Tabelle PLZ | Ort): eine Stelle über genau
+    den Trenner zwischen reiner PLZ-Zelle und Ort-Zelle – auch für das Muster mit Stellen –, der Anschriftenblock
+    darüber wird erkannt; in Nachbarzellen läuft keine Stelle hinein."""
+    text = "Herrn\nMax Mustermann\nHauptstraße 5\n27568\t\tBremerhaven\t\tKfz\t\tSpreewald"
+    dok = seitenmodell.dokument_aus_text(text)
+    orte = [dok.text[t.start:t.ende] for t in _detektor("muster.plzort")(dok, Kontext({"plzort"}))]
+    assert orte == ["27568\t\tBremerhaven"]
+    block = set(_treffer(dok, "struktur.adressblock"))
+    assert ("strasse", "Hauptstraße 5") in block and ("namen", "Max Mustermann") in block
+    for t in detektoren.alle_treffer(dok, Kontext(ALLE, "hoch")):
+        stelle = dok.text[t.start:t.ende]
+        assert "Kfz" not in stelle and "Spreewald" not in stelle, t
+        assert "\t\t" not in stelle or (t.kategorie == "plzort" and muster.plz_ort_zellenpaar(dok.text, t.start,
+                                                                                          t.ende)), t
 
 
 def test_muster_anschrift_als_stellen_nie_ueber_spaltentrenner():

@@ -152,3 +152,54 @@ def test_kalenderwort_als_nachname(text, name):
                                   "Wir melden uns am Freitag, den 14. Mai."])
 def test_kalenderwort_ohne_namenskontext_kein_name(text):
     assert not any(k in ("Montag", "Freitag", "Mai") for k in _regeln(text))
+
+
+# ---------------------------------------------------------------------- Runde 1, Paket erkennung-ocr
+def test_strasse_ohne_punkt_ist_kein_name():
+    """"Habsburgerstr" (die OCR hat den Punkt verloren) ist eine Straße, kein Name."""
+    assert na._STRASSENSUFFIX_RE.search("habsburgerstr")
+    assert not na._plausibel("Habsburgerstr", 0, 13)
+    assert not na._plausibel("Habsburgerstr", 0, 13, regel=True)
+    text = "Max Mustermann Habsburgerstr"
+    assert na._bereinigen(text, 0, len(text)) == (0, 14)
+
+
+@pytest.mark.parametrize("text, erwartet", [
+    ("Jörg Ziegler Ursula Frank", ["Jörg Ziegler", "Ursula Frank"]),
+    ("Dipl.-Ing. Jörg Ziegler Ursula Frank", ["Dipl.-Ing. Jörg Ziegler", "Ursula Frank"]),
+    ("Jörg Ziegler Dr. Ursula Frank", ["Jörg Ziegler", "Dr. Ursula Frank"]),
+    ("Thomas Frank Ursula Wolf", ["Thomas Frank", "Ursula Wolf"]),            # "Frank": auch Nachname
+    ("Max Mustermann Erika Musterfrau", ["Max Mustermann", "Erika Musterfrau"]),
+    ("Jörg Ziegler Ursula", ["Jörg Ziegler", "Ursula"]),                       # eindeutiger Vorname am Ende
+    ("KATARZYNA KOŁODZIEJ JÖRG ZIEGLER", ["KATARZYNA KOŁODZIEJ", "JÖRG ZIEGLER"]),
+    ("Anna Maria Schmidt", ["Anna Maria Schmidt"]),                           # Doppelvorname
+    ("Karl Heinz Frank", ["Karl Heinz Frank"]),
+    ("Hans Peter Müller", ["Hans Peter Müller"]),
+    ("Max Mustermann Frank", ["Max Mustermann Frank"]),                       # mehrdeutig am Ende: bleibt
+    ("Peter Schmidt, Anna Weber", ["Peter Schmidt, Anna Weber"]),             # Komma: andere Regeln
+    ("Jörg Ziegler von Ursula Frank", ["Jörg Ziegler von Ursula Frank"]),
+])
+def test_personen_teilen(text, erwartet):
+    assert [text[s:e] for s, e in na.personen_teilen(text, 0, len(text))] == erwartet
+
+
+def test_regel_kandidaten_mehrerer_personen_getrennt():
+    texte = _regeln("Zeuge: Jörg Ziegler Ursula Frank")
+    assert "Jörg Ziegler" in texte and "Ursula Frank" in texte
+    assert "Jörg Ziegler Ursula Frank" not in texte
+
+
+@braucht_modell
+def test_ki_spanne_mehrerer_personen_getrennt():
+    """Die KI fasst "Jörg Ziegler Ursula Frank" (Komma von der OCR verschluckt) zu einer Person zusammen."""
+    texte = {k["text"] for k in na.finde_personen(
+        "Schwarzwald Lebensversicherung AG\nVorstand: Lea Hagedorn (Vorsitzende), Dipl.-Ing. Jörg Ziegler "
+        "Ursula Frank\nSitz: Freiburg")}
+    assert {"Jörg Ziegler", "Ursula Frank"} <= texte
+    assert not any("Ziegler Ursula" in t for t in texte)
+
+
+def test_verlesenes_etikett_ist_kein_name():
+    for wort in ("Vomame", "Verscherungsnchmer"):
+        assert na._ist_sachwort(wort), wort
+        assert not na._plausibel(f"{wort}\t\tx", 0, len(wort))

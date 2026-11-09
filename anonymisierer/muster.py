@@ -15,8 +15,12 @@ dem normalisierten Text (``seitenmodell.normalisiere_text``, dieselbe Regel wie 
 werden auf den Eingabetext zurückgerechnet.
 
 Die Muster laufen bewusst nicht über Zeilenumbrüche (Ausnahmen: IBAN und PLZ+Ort mit genau einem Umbruch,
-Telefonnummern hinter einem Etikett), und alle Wiederholungen sind nach oben begrenzt, damit lange Zeilen
-nicht zu quadratischer Laufzeit führen.
+Telefonnummern hinter einem Etikett, Daten mit ausgeschriebenem Monat und Aktenzeichen, die am Zeilenende
+umbrechen), und alle Wiederholungen sind nach oben begrenzt, damit lange Zeilen nicht zu quadratischer Laufzeit
+führen. Über den Spaltentrenner "\\t\\t" des Seitenmodells läuft kein Muster in eine Nachbarzelle (einzige Stelle
+mit Trenner: eine reine PLZ-Zelle mit der Ort-Zelle daneben, siehe plz_ort_zellenpaar). Lesefehler-Toleranz für
+OCR-Text (O/0, I/1, eingefügte Doppelpunkte …) liegt in detektoren/ocr_lesart.py – nur dort ist bekannt, welcher
+Text aus der OCR stammt.
 
 Außerdem: ``KATEGORIEN`` (Häkchen der Oberfläche), ``KATEGORIE_PRIORITAET`` und ``PROFILE`` (Schutzstufen,
 Vertrag Abschnitt 9).
@@ -328,8 +332,12 @@ _TEL_KONTEXT_RE = re.compile(
     r"rufnummer|rückrufnummer|erreichbar[ \t]+unter|erreichen[ \t]+sie[ \t]+(?:mich|uns|ihn|sie)[ \t]+unter|"
     r"(?:mich|uns)[ \t]+unter|unter[ \t]+der[ \t]+nummer|whatsapp|unter))\.?[ \t]*:?[ \t]*")
 _TEL_LOSE_RE = re.compile(
-    r"(?:\+\d{2,3}[ \t.\-/]{0,2}(?:\n[ \t]*)?(?:\(0\)[ \t]?)?|\(0\d{1,5}\)[ \t]?|0(?=[\d ]))"
+    r"(?:\+\d{2,3}[ \t.\-/]{0,2}(?:\n[ \t]*)?(?:\(0\)[ \t]?)?|\(0\d{1,5}\)[ \t]?|0(?=[\d \n]))"
     r"(?:[\d \t./\-–()]|\n(?=[ \t]*[\d(])){2,40}")
+
+
+# hinter dem Zeilenumbruch: Aufzählung ("6. Unfallhergang") oder Betrag ("45,90 EUR") statt Rest der Nummer
+_AUFZAEHLUNG_DANACH_RE = re.compile(r"[.)][ \t]+[A-Za-zÄÖÜäöü]|,\d{1,2}(?!\d)")
 
 
 def _ziffern(text: str) -> int:
@@ -337,8 +345,8 @@ def _ziffern(text: str) -> int:
 
 
 def _tel_gueltig(treffer: str) -> bool:
-    if not 8 <= _ziffern(treffer) <= 15 or _TEL_DATUM_RE.match(treffer):
-        return False
+    if not 8 <= _ziffern(treffer) <= 15 or _TEL_DATUM_RE.match(treffer.replace("O", "0")):
+        return False                                   # auch "O1/08/1966" (OCR: O statt 0) ist ein Datum
     return not _TEL_SERVICE_RE.match(re.sub(r"[ \t\-/–().\n]", "", treffer))
 
 
@@ -356,6 +364,15 @@ def _telefon_spannen(text: str) -> list:
         roh = m.group(0)
         while roh and not roh[-1].isdigit():
             roh = roh[:-1]                                   # bis zur letzten Ziffer
+        if "\n" in roh:
+            # über den Umbruch nur echte Zifferngruppen, keine Aufzählung der Folgezeile ("6. Unfallhergang")
+            vor, _, nach = roh.partition("\n")
+            ende_nach = m.start() + len(roh)
+            einzeln = re.fullmatch(r"[ \t]*\d{1,3}", nach) is not None      # nur EINE kurze Zahl in der Folgezeile
+            if sum(c.isdigit() for c in nach) < 2 or (einzeln and _AUFZAEHLUNG_DANACH_RE.match(text, ende_nach)):
+                roh = vor.rstrip(" \t./-–(")
+                while roh and not roh[-1].isdigit():
+                    roh = roh[:-1]
         s, e = m.start(), m.start() + len(roh)
         if roh.count("(") != roh.count(")") or roh.count("\n") > 1:
             continue
@@ -401,7 +418,8 @@ _MONAT_RE = "(?:" + "|".join(sorted((re.escape(m) for m in _MONATE), key=len, re
 _DATUM_RE = re.compile(
     r"(?<!\d)(?:"
     r"\d{1,2}\.[ \t]?\d{1,2}\.[ \t]?(?:19|20)?\d{2}"                 # 02.09.1983 / 2.9.83
-    r"|\d{1,2}\.[ \t]?" + _MONAT_RE + r"[ \t]?(?:19|20)\d{2}"        # 2. September 1983
+    # 2. September 1983, auch über einen Umbruch: "27." ⏎ "Januar 1976"
+    r"|\d{1,2}\.(?:[ \t]?|[ \t]*\n[ \t]*)" + _MONAT_RE + r"[ \t]?(?:19|20)\d{2}"
     r"|(?:19|20)\d{2}-\d{2}-\d{2}"                                    # 1983-09-02
     r"|\d{1,2}/\d{1,2}/(?:19|20)\d{2}"                                # 02/09/1983
     r")(?!\d)", re.IGNORECASE)
@@ -432,7 +450,7 @@ def _datum_zerlegen(datum: str):
     if m:
         t, mo, j = int(m.group(1)), int(m.group(2)), int(m.group(3))
     else:
-        m = re.fullmatch(r"(\d{1,2})\.[ \t]?([A-Za-zäöüÄÖÜ]+)\.?[ \t]?(\d{4})", d)
+        m = re.fullmatch(r"(\d{1,2})\.[ \t]*\n?[ \t]*([A-Za-zäöüÄÖÜ]+)\.?[ \t]?(\d{4})", d)
         if m:
             mo = _MONATE.get(m.group(2).lower())
             if mo is None:
@@ -676,20 +694,39 @@ _ORT_STOPP = (r"(?!(?:Tel|Telefon|Telefax|Fax|Mobil|Handy|E-Mail|Mail|Internet|W
               r"Ust-IdNr|Umsatzsteuer|Finanzamt|Bank|Sparkasse)"
               r"(?![\wäöüß]))"
               r"(?![\wäöüß]{0,40}(?i:straße|strasse|str\.|weg|allee|gasse)(?![\wäöüß]))")
+# Leerraum innerhalb einer Zelle: Leerzeichen und einzelne Tabulatoren, nie der Spaltentrenner "\t\t" des
+# Seitenmodells (PLZ und Ort in Nachbarzellen gehören nicht zusammen, ein Ort läuft nicht in die Nachbarspalte)
+_IN_ZELLE = r"(?:[ ]|\t(?!\t))"
 _ORT_WORT = (r"(?:[A-ZÄÖÜ][a-zäöü]{1,2}\.|[A-ZÄÖÜ][\wäöüß]{1,30}(?:-[\wäöüßA-ZÄÖÜ]{1,30}){0,3}"
              r"|\([A-ZÄÖÜ][\wäöüß]{1,30}\)"
-             r"|(?:[aivb]\.[ \t]?d\.[ \t]?)[A-ZÄÖÜ][\wäöüß]{1,30}\.?"
-             r"|(?:am|an der|in der|bei|im|ob der|a\.[ \t]?d\.|v\.[ \t]?d\.|i\.[ \t]?d\.|b\.|an)[ \t]+[A-ZÄÖÜ][\wäöüß]{1,30})")
+             r"|(?:[aivb]\.[ ]?d\.[ ]?)[A-ZÄÖÜ][\wäöüß]{1,30}\.?"
+             r"|(?:am|an der|in der|bei|im|ob der|a\.[ ]?d\.|v\.[ ]?d\.|i\.[ ]?d\.|b\.|an)" + _IN_ZELLE
+             + r"+[A-ZÄÖÜ][\wäöüß]{1,30})")
 _PLZ_ORT_RE = re.compile(
     r"(?<![\d\-/,])"
     r"(?:(?:D|DE)[-\s]?(?!00)\d{5}|(?:A|CH|L|FL)[-\s]\d{4}|(?!00)\d{5})(?!\d)"
-    r"(?:[ \t]+|[ \t]*\n[ \t]*)"                               # höchstens EIN Zeilenumbruch
-    + _ORT_STOPP + _ORT_WORT + r"(?:[ \t]+" + _ORT_STOPP + _ORT_WORT + r"){0,3}(?![\wäöüß])")
+    r"(?:" + _IN_ZELLE + "+|" + _IN_ZELLE + r"*\n" + _IN_ZELLE + "*)"      # höchstens EIN Zeilenumbruch
+    + _ORT_STOPP + _ORT_WORT + r"(?:" + _IN_ZELLE + "+" + _ORT_STOPP + _ORT_WORT + r"){0,3}(?![\wäöüß])")
 _PLZ_ETIKETT_DAVOR_RE = re.compile(
     r"(?i:nr\.?|nummer|summe|betrag|wert|eur|€|euro|leistung|deckung|beitrag|fahrleistung|vertrag|"
     r"kunden|konto|zeichen|ref\.?|referenz|position|pos\.?|artikel|menge|anzahl|seite|blatt|"
     r"kennung|id|code|schlüssel|key|hrb|hra|gnr|vr|pr|registergericht|amtsgericht|handelsregister|"
     r"register|blz|bankleitzahl|steuer-?nr\.?|ust-?id(?:nr)?\.?)[ \t:.]*$")
+# PLZ und Ort in zwei Nachbarzellen ("53285 ⇥⇥ Bonn": Tabelle mit Spalten PLZ | Ort, Formular mit Kästchen, breite
+# OCR-Lücke): EINE Stelle über genau diesen einen Spaltentrenner – nur, wenn die PLZ-Zelle nur die PLZ und die
+# Ort-Zelle nur den Ort enthält (Nachbarzellen wie "Kfz", "Spreewald" nimmt sie nie mit; die Schwärzung zeichnet je
+# Zelle ein eigenes Rechteck)
+_PLZ_ZELLE_ORT_RE = re.compile(
+    r"(?:^|(?<=\t\t)|(?<=\n))[ ]*((?:(?:D|DE)[-\s]?)?(?!00)\d{5})[ ]*\t\t[ ]*"
+    r"(" + _ORT_STOPP + _ORT_WORT + r"(?:" + _IN_ZELLE + "+" + _ORT_STOPP + _ORT_WORT + r"){0,3})(?![\wäöüß])"
+    r"(?=[ ]*(?:\t\t|\n|$|,))")
+# Registernummer statt PLZ: hinter HRB/HRA, Amtsgericht, Registergericht oder Handelsregister – auch mit dem Ort
+# des Gerichts dazwischen ("Amtsgericht Frankfurt am Main 12345", "Registergericht: Amtsgericht Lübeck, 45650",
+# OCR "HR B 16963", "HR8 16963") und über das Zeilenende ("… HRB" ⏎ "16963 …")
+_PLZ_REGISTER_DAVOR_RE = re.compile(
+    r"(?<![\wäöüß])(?i:HR[ ]?[AB8]|HRA|HRB|GnR|Amtsgericht|Registergericht|Handelsregister|Registerg\.)"
+    r"(?:[ \t:.,/]+(?:[A-ZÄÖÜ][\wäöüß.\-]*|am|an|der|dem|im|in|i\.|a\.|d\.|v\.|b\.|HRA|HRB|Nr\.?)){0,5}"
+    r"[ \t:.,/]*$")
 _ORT_DATUM_DANACH_RE = re.compile(r"^[ \t]*,?[ \t]*(?:den[ \t]+|im[ \t]+|am[ \t]+)?\d{1,2}\.")
 # OCR-Reste hinter dem Ort ("81675 München Bu", "95632 Wunsiedel Beer"): ein letztes kurzes Wort, das kein
 # Ortsteil sein kann, wird abgeschnitten
@@ -742,16 +779,30 @@ def _ort_wortzahl(woerter: list) -> int:
     return anzahl
 
 
+def _plz_davor_ausgeschlossen(text: str, s: int) -> bool:
+    """Steht vor der Zahl an `s` ein Etikett (Nr., Betrag, Konto …) oder eine Registerangabe (HRB, Amtsgericht …)
+    – auch am Ende der Zeile davor, wenn die Zahl eine Zeile beginnt? Dann ist sie keine PLZ."""
+    if s > 0 and text[s - 1] == "." and text[max(0, s - 3):s] != "...":
+        return True                                     # "1.23456 Name" – aber Füllpunkte "....45879 Ort" ja
+    davor = text[max(0, s - 40):s].rsplit("\n", 1)[-1]
+    if _PLZ_ETIKETT_DAVOR_RE.search(davor) or _PLZ_REGISTER_DAVOR_RE.search(text[max(0, s - 60):s].rsplit(
+            "\n", 1)[-1]):
+        return True
+    if not davor.strip() and s > 0:
+        # PLZ am Zeilenanfang: Registerangabe am Ende der Zeile davor ("Amtsgericht Freiburg HRB" ⏎ "16963 …")
+        vorige = text[max(0, s - 80):s].rstrip(" \t")
+        if vorige.endswith("\n") and _PLZ_REGISTER_DAVOR_RE.search(vorige[:-1].rsplit("\n", 1)[-1]):
+            return True
+    return False
+
+
 def _plz_ort_spannen(text: str) -> list:
     ergebnisse = []
     for m in _PLZ_ORT_RE.finditer(text):
         s, e = m.start(), m.end()
-        if s > 0 and text[s - 1] == "." and text[max(0, s - 3):s] != "...":
-            continue                                    # "1.23456 Name" – aber Füllpunkte "....45879 Ort" ja
-        treffer = m.group(0)
-        davor = text[max(0, s - 40):s].rsplit("\n", 1)[-1]
-        if _PLZ_ETIKETT_DAVOR_RE.search(davor):
+        if _plz_davor_ausgeschlossen(text, s):
             continue
+        treffer = m.group(0)
         if "\n" in treffer:
             # Umbruch zwischen PLZ und Ort: Folgezeile darf keine Ort-Datum-Zeile sein
             if _ORT_DATUM_DANACH_RE.match(text[e:e + 30]):
@@ -770,7 +821,40 @@ def _plz_ort_spannen(text: str) -> list:
             if len(wort) <= 3 and not text[e:e + 1] in ("-", "."):
                 e = s + rest.start()
         ergebnisse.append(Stelle(s, e))
+    if "\t\t" in text:
+        # PLZ-Zelle und Ort-Zelle nebeneinander: eine Stelle über genau den Trenner dazwischen
+        belegt = [(st.start, st.ende) for st in ergebnisse]
+        for m in _PLZ_ZELLE_ORT_RE.finditer(text):
+            s = m.start(1)
+            if any(a < m.end(2) and s < b for a, b in belegt) or _plz_davor_ausgeschlossen(text, s):
+                continue
+            woerter = list(re.finditer(r"\S+", m.group(2)))
+            anzahl = _ort_wortzahl([w.group(0) for w in woerter])
+            if anzahl < len(woerter):
+                continue                                # die Zelle enthält mehr als einen Ort ("Mateusz Grabowski")
+            ergebnisse.append(Stelle(s, m.start(2) + woerter[anzahl - 1].end(), 0.7))
+        ergebnisse.sort()
     return ergebnisse
+
+
+def plz_ort_zellenpaar(text: str, start: int, ende: int) -> bool:
+    """Ist text[start:ende] eine PLZ-Zelle mit der ganzen Ort-Zelle daneben ("53285 ⇥⇥ Bonn")? Dann ist ihr
+    Spaltentrenner der einzige erlaubte: PLZ + Ort reicht sonst nie über einen Spaltentrenner."""
+    m = _ZELLENPAAR_RE.fullmatch(text, start, ende)
+    if m is None:
+        return False
+    zeilenanfang = text.rfind("\n", 0, start) + 1
+    zelle = text.rfind("\t\t", zeilenanfang, start)
+    if text[(zelle + 2 if zelle >= 0 else zeilenanfang):start].strip(" "):
+        return False                                    # vor der PLZ steht etwas in ihrer Zelle
+    if not _ZELLENENDE_RE.match(text, ende):
+        return False                                    # die Ort-Zelle geht weiter ("73610 ⇥⇥ Mateusz Grabowski")
+    woerter = m.group(2).split()
+    return _ort_wortzahl(woerter) == len(woerter)
+
+
+_ZELLENPAAR_RE = re.compile(r"((?:(?:D|DE)[-\s]?)?\d{5})[ ]*\t\t[ ]*([^\t\n]+)")
+_ZELLENENDE_RE = re.compile(r"[ ]*(?:\t\t|\n|,|$)")
 
 
 def finde_plz_ort_stellen(text):
@@ -780,8 +864,10 @@ def finde_plz_ort_stellen(text):
 def finde_plz_ort(text):
     """PLZ + Ort, auch mehrteilig (Frankfurt am Main, Bad Homburg v. d. Höhe, St. Ingbert,
     Frankfurt (Oder), Neu-Ulm, Weiden i.d.OPf.), in Versalien (90402 NÜRNBERG) und mit Länderkürzel
-    (D-90402, A-1010, CH-8001). Keine Beträge ('50000 Euro'), keine Registernummern ('HRB 16963') und
-    keine Nummern vor einem Zeilenumbruch ('Vermittler-Nr. 55123 / Stuttgart, 14.03.2025')."""
+    (D-90402, A-1010, CH-8001). Keine Beträge ('50000 Euro'), keine Registernummern ('HRB 16963',
+    'Amtsgericht Lübeck, 45650') und keine Nummern vor einem Zeilenumbruch ('Vermittler-Nr. 55123 /
+    Stuttgart, 14.03.2025'). Nie über einen Spaltentrenner in Nachbarzellen; nur eine reine PLZ-Zelle mit der
+    Ort-Zelle daneben ('53285 ⇥⇥ Bonn') ist eine Stelle über genau diesen Trenner."""
     return [text[s:e] for s, e in finde_plz_ort_stellen(text)]
 
 
@@ -828,7 +914,17 @@ def _nummern_token(token: str) -> bool:
         return False
     if any(c.isdigit() for c in token):
         return True
-    return len(token) <= 3 and token.isupper()
+    return (len(token) <= 3 and token.isupper()) or token in _REGISTERZEICHEN
+
+
+# Registerzeichen in Aktenzeichen von Gerichten und Staatsanwaltschaften ("92 Js 6010/24", "4 Ds 123/24")
+_REGISTERZEICHEN = frozenset({"Js", "UJs", "Ds", "Cs", "Ls", "Gs", "Ks", "Ns", "Qs", "Ss", "Ws", "Bs", "Hs",
+                              "AR", "VRs", "BRs", "Ca", "Sa", "Ta"})
+# Aktenzeichen, das am Zeilenende umbricht ("Aktenzeichen 381 C" ⏎ "817/23) nahm den Unfall auf")
+_AKTENZEICHEN_ANFANG_RE = re.compile(r"[ \t]*(\d{1,4}[ ]+(?:[A-Z]{1,3}|" + "|".join(sorted(
+    ["Js", "UJs", "Ds", "Cs", "Ls", "Gs", "Ks", "Ns", "Qs", "Ss", "Ws", "Bs", "Hs", "VRs", "BRs", "Ca", "Sa", "Ta"],
+    key=len, reverse=True)) + r"))[ \t]*$")
+_AKTENZEICHEN_REST_RE = re.compile(r"[ \t]*(\d{1,6}/\d{2,4})(?![\d/])")
 
 
 def _nummer_aus_zeile(zeile: str):
@@ -924,6 +1020,13 @@ def _vertrag_spannen(text: str) -> list:
             # Tabellenzeile "Versicherungsnummer  LV-2024-887766  Beginn 01.10.2024": der Wert steht in
             # derselben Zeile hinter dem breiten Abstand (Gutachten EQ-09)
             wert = _nummer_aus_zeile(rest.lstrip(" \t"))
+        if (wert is None or len(wert) <= 4) and not spaltenkopf and zeilenende < len(text):
+            # Aktenzeichen über den Zeilenumbruch ("381 C" ⏎ "817/23"): Zahl + Registerzeichen am Zeilenende,
+            # Aktennummer/Jahr am Anfang der Folgezeile
+            a = _AKTENZEICHEN_ANFANG_RE.fullmatch(rest)
+            b = _AKTENZEICHEN_REST_RE.match(text, zeilenende + 1) if a else None
+            if a and b:
+                wert = text[m.end() + trenner.end() + a.start(1):b.end(1)]
         if wert is None and spaltenkopf:
             zeilenanfang = text.rfind("\n", max(0, m.start() - 400), m.start()) + 1
             wert = _nummer_in_folgezeilen(text, m.start(), m.start() - zeilenanfang)
@@ -1021,8 +1124,13 @@ def _steuer_id_struktur(nummer: str) -> bool:
 
 
 _STEUER_ID_ETIKETT_RE = re.compile(
-    r"(?:Steuer[\s\-]?(?:ID|Id|id|IdNr\.?|Identifikationsnummer)|IdNr\.?|Identifikationsnummer|TIN)"
-    r"[^\d\n]{0,12}?\n?[^\d\n]{0,12}?(\d[\d ]{1,13}(?:\n[ \t]*)?[\d ]{0,13}\d)(?!\d)")
+    r"(?:Steuer[\s\-]?(?:Identifikationsnummer|IdNr\.?|ID|Id|id)|IdNr\.?|Identifikationsnummer|TIN)(?![A-Za-zäöü])"
+    r"(?P<zwischen>[^\d\n]{0,12}?\n?[^\d\n]{0,12}?|[^\d\n:.;]{0,45}:[ \t]*)"
+    r"(\d[\d ]{1,13}(?:\n[ \t]*)?[\d ]{0,13}\d)(?!\d)")
+
+
+_ANDERES_ETIKETT_RE = re.compile(r"(?i:tel(?:efon)?|fax|mobil|handy|iban|konto|vertrag|kunden|versicherungs|"
+                                 r"nr\.|nummer|datum|geb\.|geboren)")
 
 
 def _steuerid_spannen(text: str) -> list:
@@ -1030,10 +1138,12 @@ def _steuerid_spannen(text: str) -> list:
     # 1) Mit Beschriftung — auch Formularlayouts wie "Identifikationsnummer (4)" mit bis zu 12 Zeichen
     #    zwischen Etikett und Nummer (inkl. Zeilenumbruch); die Prüfziffer bestimmt nur die Sicherheit
     for m in _STEUER_ID_ETIKETT_RE.finditer(text):
-        wert = m.group(1).strip()
+        if _ANDERES_ETIKETT_RE.search(m.group("zwischen")):
+            continue                                    # "Steuer-ID und Telefon: 0911 …": Nummer des Telefons
+        wert = m.group(2).strip()
         if sum(c.isdigit() for c in wert) != 11 or wert.count("\n") > 1:
             continue
-        s = m.start(1) + (len(m.group(1)) - len(m.group(1).lstrip()))
+        s = m.start(2) + (len(m.group(2)) - len(m.group(2).lstrip()))
         gueltig = _steuer_id_gueltig(wert)
         aus.append(Stelle(s, s + len(wert), 1.0 if gueltig else 0.8, True,
                           None if gueltig else HINWEIS_PRUEFZIFFER))
@@ -1209,6 +1319,7 @@ _MANDAT_ETIKETT_RE = re.compile(
     r"(?i:Mandatsreferenz(?:nummer|-?Nr\.?)?|Mandats-?Nr\.?|SEPA-?Mandat(?:s)?"
     r"[-\s]?(?:Nr\.?|Nummer|Referenz)?|Mandat-?ID)[ \t]*:?")
 _MANDAT_WERT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9\-./+]{3,34}(?![A-Za-z0-9])")
+_FUELL_REST_RE = re.compile(r"[a-z]{1,3}[.…]+(?=[ \t.…_:]|$)")
 
 
 def _mandat_spannen(text: str) -> list:
@@ -1227,6 +1338,8 @@ def _mandat_spannen(text: str) -> list:
                 pos += 1
             elif c in " \t.…_:":
                 pos += 1
+            elif _FUELL_REST_RE.match(text, pos):
+                pos = _FUELL_REST_RE.match(text, pos).end()     # "nn." zwischen den Füllpunkten (OCR)
             else:
                 w = _MANDAT_WERT_RE.match(text, pos)
                 if w is None:
