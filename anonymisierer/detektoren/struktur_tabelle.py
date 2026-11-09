@@ -343,8 +343,34 @@ def _wert_fuer_spalte(text: str, s: int, e: int, sp: Spalte) -> list:
     if "kontakt" in arten:
         return _kontakt(text, s, e, sp.kategorie)
     if "person" in arten:
-        return _namen(text, s, e, nur_bekannt=bool(_ORG_ROLLEN_RE.match(sp.eintrag)))
+        namen = _namen(text, s, e, nur_bekannt=bool(_ORG_ROLLEN_RE.match(sp.eintrag)))
+        if _ARBEITGEBER_KOPF_RE.match(_vergleichsform(sp.eintrag)):
+            return _arbeitgeber(text, s, e) + namen
+        return namen
     return []
+
+
+_ARBEITGEBER_KOPF_RE = re.compile(r"(?:arbeitgeber(?:in)?|dienstherr|beschaftigungsbetrieb|ausbildungsbetrieb|"
+                                  r"beschaftigungsstelle)\b")
+
+
+def _arbeitgeber(text: str, s: int, e: int) -> list:
+    """Spalte "Arbeitgeber": der ganze Zellwert ist der Arbeitgeber (Kategorie "arbeitgeber"); Organisationen
+    der Erlaubnisliste (Versicherer, Banken, Behörden) bleiben stehen, Ziffern- und Strichzellen auch."""
+    while s < e and text[s] in " \t":
+        s += 1
+    while e > s and text[e - 1] in " \t,;":
+        e -= 1                                        # Schlusspunkt bleibt ("e.V.", "Gebr.")
+    wert = text[s:e]
+    if len(wert) < 3 or not re.search(r"[A-Za-zÄÖÜäöüß]{2}", wert) or "\n" in wert:
+        return []
+    if _wissen is not None:
+        try:
+            if _wissen.ist_allowlist(wert):
+                return []
+        except Exception:
+            pass
+    return [(s, e, "arbeitgeber", None)]
 
 
 # ----------------------------------------------------------------------
@@ -534,7 +560,7 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
     return aus
 
 
-@detektor(QUELLE, ALLE_KATEGORIEN)
+@detektor(QUELLE, ALLE_KATEGORIEN | {"arbeitgeber"})
 def tabelle(dok, kontext):
     """Tabellen mit Spaltenköpfen: Werte der Personen-, Kennungs-, Geburts-, Anschrift- und Kontaktspalten."""
     treffer = []

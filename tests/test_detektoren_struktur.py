@@ -383,6 +383,18 @@ def test_tabelle_endet_vor_formularblock(tmp_path):
     assert not texte & {"Vertragsdaten", "Tarif", "BIC", "SEPA-Lastschrift", "PflegeTagegeld"}
 
 
+def test_arbeitgeberspalte_ganze_zelle(tmp_path):
+    """Spalte "Arbeitgeber" (Versicherungsverlauf): der Zellwert ist der Arbeitgeber; Organisationen der
+    Erlaubnisliste bleiben stehen."""
+    inhalt = [(72, 300, "Zeitraum"), (200, 300, "Arbeitgeber"), (420, 300, "Beitragsmonate"),
+              (72, 314, "1998 - 2004"), (200, 314, "Maschinenfabrik Ostertal AG"), (420, 314, "72"),
+              (72, 328, "2005 - 2012"), (200, 328, "Bäckerei Hofmeister"), (420, 328, "96"),
+              (72, 342, "2013 - 2024"), (200, 342, "Deutsche Rentenversicherung Bund"), (420, 342, "144")]
+    dok = _modell(_pdf(tmp_path / "verlauf.pdf", [inhalt]))
+    werte = _texte(dok, "struktur.tabelle", "arbeitgeber")
+    assert werte == {"Maschinenfabrik Ostertal AG", "Bäckerei Hofmeister"}
+
+
 def test_layoutspalten_sind_keine_tabelle(tmp_path):
     """Anschriftfeld links und Informationsblock rechts auf gleicher Höhe bilden keine Tabelle."""
     inhalt = [(71, 200, "Frau"), (71, 211, "Yasmin Mansour"), (71, 222, "Postfach 2 20"), (71, 233, "89073 Ulm"),
