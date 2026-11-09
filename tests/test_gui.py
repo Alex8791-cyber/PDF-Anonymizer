@@ -403,9 +403,11 @@ def test_layout_schwaerzen_knopf_und_protokoll_immer_sichtbar(anzeige, skalierun
         assert app.protokoll.get("end-2l", "end-1c").strip().startswith("⚠")
         # Analysieren-Knopf ist auf dem Standardbildschirm bei 100 % ohne Scrollen erreichbar
         if anzeige == "standard" and skalierung == 1.3333 and sh >= 1080:  # nur auf echtem FHD-Schirm
-            assert not app.oben_roll.winfo_ismapped(), "Einstellbereich sollte bei FHD/100 % nicht scrollen"
+            # Geprueft wird die Nutzeranforderung (Knopf ohne Scrollen erreichbar), nicht die Bildlaufleiste:
+            # ob der Einstellbereich scrollt, haengt von den Systemschriften ab (CI-Runner != Windows).
             oben, unten = lage(app.analyse_knopf)
-            assert unten <= fenster_h
+            assert 0 <= oben and unten <= fenster_h, \
+                f"Analysieren-Knopf bei FHD/100 % nicht ohne Scrollen sichtbar ({oben}..{unten} von {fenster_h})"
         _screenshot(root, display, _screenshot_ordner(tmp_path_factory) / f"layout_{anzeige}_{skalierung}.png")
     finally:
         try:
