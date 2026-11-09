@@ -609,7 +609,8 @@ def test_versicherungsschein_lesezeichen_und_metadaten(tmp_path):
 # ----------------------------------------------------------------------
 def test_neutrale_ausgabenamen_zuordnung_nie_ueberschreiben(tmp_path):
     pdf = textseite(tmp_path / "Mustermann_Max_Police_LV-2024-887766.pdf", [NAME, "Vertrag LV-2024-887766"])
-    e1 = schwaerze_pdf(pdf, [fund(NAME)])
+    # beide Werte schwärzen: eine stehen gebliebene Vertragsnummer wäre ein Restrisiko-Verdacht (-> _PRUEFEN)
+    e1 = schwaerze_pdf(pdf, [fund(NAME), fund("LV-2024-887766", "[VERTRAGS-NR]", "vertrag")])
     assert e1["ausgabe"].name == "anonym_01.pdf"
     assert e1["ausgabe"].parent == tmp_path / "anonymisiert"
     pruef1 = md5(e1["ausgabe"])
@@ -623,9 +624,10 @@ def test_neutrale_ausgabenamen_zuordnung_nie_ueberschreiben(tmp_path):
     # Lücke wird nicht wiederverwendet, Zielordner-Option greift
     e1["ausgabe"].unlink()
     ziel = tmp_path / "woanders"
-    e3 = schwaerze_pdf(pdf, [fund(NAME)], ziel_ordner=ziel)
+    beide = [fund(NAME), fund("LV-2024-887766", "[VERTRAGS-NR]", "vertrag")]
+    e3 = schwaerze_pdf(pdf, beide, ziel_ordner=ziel)
     assert e3["ausgabe"].parent == ziel and e3["ausgabe"].name == "anonym_01.pdf"
-    e4 = schwaerze_pdf(pdf, [fund(NAME)])
+    e4 = schwaerze_pdf(pdf, beide)
     assert e4["ausgabe"].name == "anonym_03.pdf"
     assert not list((tmp_path / "anonymisiert").glob(".anonym_tmp_*")), "keine Hilfsdateien übrig"
 
@@ -759,7 +761,9 @@ def test_selbstkontrolle_ohne_fehlalarm_durch_platzhalter(tmp_path):
     funde = [fund("Person", "[PERSON A]"), fund("Thomas Bergmann", "[PERSON B]"), fund("Ing", "[PERSON C]"),
              fund("Vertrags", "[VERTRAGS-NR]", "vertrag")]
     e = schwaerze_pdf(pdf, funde)
-    assert e["ausgabe"].name == "anonym_01.pdf" and e["reste"] == [], e
+    # keine Reste der Selbstkontrolle durch Platzhalter; _PRUEFEN darf nur der (berechtigte) Restrisiko-Verdacht
+    # "Hofmann" auslösen – der Nachname bleibt stehen, weil nur "Ing" als Fund übergeben wurde
+    assert e["reste"] == [] and [v.text for v in e["verdacht"]] == ["Hofmann"], e
     text = volltext(e["ausgabe"])
     assert "[PERSON A]" in text and "[PERSON B]" in text
     assert "Vertragsnummer" in text, "'Vertrags' ist kein Ganzwort – bleibt stehen"

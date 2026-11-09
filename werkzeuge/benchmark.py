@@ -70,6 +70,15 @@ def main(argv=None) -> int:
     if g["ueberschwaerzung"] is not None:
         print(f"Über-Schwärzung: {g['ueberschwaerzung']:.4f} ({g['behalten_fehlt']}/{g['behalten_n']})")
     print(f"Fehlalarme: {g['fehlalarme']} von {g['funde']} Funden")
+    rr = ergebnis.get("restrisiko") or {}
+    if rr.get("kern_lecks") is not None:
+        abdeckung = rr.get("verdachtsabdeckung")
+        print(f"Restrisiko: stille Lecks {rr.get('stille_lecks')} in {rr.get('dokumente_mit_stillem_leck')} "
+              f"Dokument(en), Verdachtsabdeckung "
+              f"{'-' if abdeckung is None else f'{100 * abdeckung:.1f} %'} "
+              f"({rr.get('kern_lecks_abgedeckt')}/{rr.get('kern_lecks')}), Fehlverdacht je Seite "
+              f"{rr.get('fehlverdacht_je_seite')}, _PRUEFEN {rr.get('ausgaben_pruefen')} "
+              f"(davon ohne Kern-Leck {rr.get('pruefen_ohne_leck')})")
     print(f"Bericht: {ausgabe / 'bericht.md'}")
     return 0
 

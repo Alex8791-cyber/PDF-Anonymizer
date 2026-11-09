@@ -24,6 +24,22 @@ Kennzahlen je Eintrag mit erwartung=schwaerzen:
     leck       der normalisierte Volltext steht noch in einem Kanal (Pixel: alle Wörter sichtbar)
     teilweise  kein Volltreffer, aber ein signifikantes Token steht noch auf derselben Seite
     entfernt   sonst
+Restrisiko (zweite Verteidigungslinie, Vertrag Abschnitt 7) – je Dokument werden der Status der Ausgabe
+("fertig"/"pruefen" aus schwaerze_pdf, sonst aus dem Namen _PRUEFEN) und die Verdachtsstellen festgehalten:
+    stille Lecks          Kern-Einträge mit Status leck/teilweise in Dokumenten, deren Ausgabe NICHT _PRUEFEN ist
+                          (ohne Ausgabe zählt als nicht _PRUEFEN) – diese Zahl muss 0 werden
+    Verdachtsabdeckung    Anteil der Kern-Einträge mit leck/teilweise, die ein Verdacht überdeckt: Rechteck des
+                          Verdachts schneidet ein Wortrechteck des Eintrags (gleiche Seite), Verdachtstext und
+                          Eintrag überlappen (gefaltet, an Wortgrenzen) oder teilen ein signifikantes Token auf
+                          derselben Seite; ein Seitenverdacht ohne Rechteck deckt seine ganze Seite ab
+    Fehlverdacht je Seite Verdachtsstellen, die keinen zu schwärzenden Eintrag (Kern oder erweitert) überdecken,
+                          im Mittel je Seite
+    _PRUEFEN ohne Leck    Dokumente mit Ausgabe _PRUEFEN, in denen kein Kern-Eintrag geleckt ist
+    nur Pixelrest         Teil-Lecks, die NUR der Pixelvergleich sieht und deren Wörter alle unter der Sichtbarkeits-
+                          schwelle liegen (auf Scans oft Unterstreichung/Schräglage im Wortrechteck statt lesbarer
+                          Reste): die Abdeckung wird zusätzlich ohne sie berichtet
+Gezählt werden die Verdachtsstellen der Restrisiko-Prüfung und – wie in der Vorschau der Oberfläche – die von der
+Selbstkontrolle gemeldeten Reste mit ihrer Lage (gui_attrappen.reste_als_verdacht).
 Normalisierung siehe normalisierung.py (Schema-Normalisierung + Diakritika-Faltung + Wortgrenzen).
 Mehrdeutigkeit: Kommt ein Wert/Token im ORIGINAL auch außerhalb der Einträge vor (z. B. ein Ortsname im
 Briefkopf des Versicherers), zählt erst ein Vorkommen ÜBER dieser Grundzahl als Rest.
@@ -100,11 +116,17 @@ class Pipeline:
             self.analysiere_pdf = self.analyse.analysiere_pdf
             self.schwaerze_pdf = self.schwaerzung.schwaerze_pdf
             self.kategorien = self.muster.KATEGORIEN
+            try:   # Reste der Selbstkontrolle mit Lage (wie die Vorschau der Oberfläche sie zeigt)
+                self.reste_als_verdacht = getattr(importlib.import_module("anonymisierer.gui_attrappen"),
+                                                  "reste_als_verdacht", None)
+            except Exception:
+                self.reste_als_verdacht = None
         except ImportError:                          # ältere Programmversion (eine Datei)
             pa = importlib.import_module("pdf_anonymisierer")
             if not _liegt_in(pa.__file__, self.repo):
                 raise RuntimeError(f"Weder 'anonymisierer' noch 'pdf_anonymisierer.py' in {self.repo} gefunden")
             self.ocr_modul = None
+            self.reste_als_verdacht = None
             self.analysiere_pdf = pa.analysiere_pdf
             self.schwaerze_pdf = pa.schwaerze_pdf
             self.kategorien = pa.KATEGORIEN
@@ -391,6 +413,17 @@ def tesseract_cli() -> str | None:
     return shutil.which("tesseract")
 
 
+def cli_umgebung() -> dict:
+    """Umgebung für die Tesseract-Kommandozeile: nur EIN OpenMP-Thread (setdefault – ein Aufrufer kann einen
+    anderen Wert vorgeben). Mit mehreren Threads warten diese auf ausgelasteten Rechnern (parallele Läufe,
+    CI-Runner mit 2-4 Kernen) aktiv aufeinander: eine 300-dpi-Seite brauchte dann Minuten statt Sekunden, lief
+    in den Timeout, und die zweite Leseart fehlte still. Die OCR des Programms (in PyMuPDF eingebaut, ohne
+    OpenMP) ist davon nicht betroffen – die gemessene Programm-Laufzeit ändert sich nicht."""
+    umgebung = dict(os.environ)
+    umgebung.setdefault("OMP_THREAD_LIMIT", "1")
+    return umgebung
+
+
 def _cli_tessdata() -> str | None:
     for kandidat in (os.environ.get("BENCHMARK_TESSDATA"), "/usr/share/tesseract-ocr/5/tessdata",
                      "/usr/share/tesseract-ocr/4.00/tessdata", "/usr/share/tessdata"):
@@ -412,7 +445,8 @@ def ocr_cli(page, winkel: int, arbeitsordner: Path) -> str:
     if td:
         befehl[1:1] = ["--tessdata-dir", td]
     try:
-        aus = subprocess.run(befehl, capture_output=True, text=True, timeout=300, errors="replace")
+        aus = subprocess.run(befehl, capture_output=True, text=True, timeout=300, errors="replace",
+                             env=cli_umgebung())
         return aus.stdout
     except Exception:
         return ""
@@ -647,6 +681,7 @@ def bewerte_dokument(pdf: Path, wahrheit: dict, pipeline: Pipeline, dienst, ziel
         "fehler": erg.get("fehler") or out.get("fehler"), "ocr_seiten_programm": erg.get("ocr_seiten", 0),
         "warnungen": list(erg.get("warnungen") or []) + list(out.get("warnungen") or [])})
     ausgabe = Path(out["ausgabe"]) if out.get("ausgabe") else None
+    ergebnis.update(_status_und_verdacht(out, ausgabe, pipeline))
     if ausgabe is None or not ausgabe.exists():
         # Keine Ausgabe = nichts wurde geschwärzt: das Original gilt als „Ausgabe“ (vorsichtige Wertung)
         ergebnis["keine_ausgabe"] = True
@@ -746,11 +781,89 @@ def bewerte_dokument(pdf: Path, wahrheit: dict, pipeline: Pipeline, dienst, ziel
             continue
         schaedlich = any(_ueberlappt(g, b) or (tok & bt) for b, bt in behalten)
         fehlalarme.append({"text": f.get("text"), "kategorie": f.get("kategorie"), "trifft_kontext": schaedlich})
+    verdacht_bewerten(ergebnis, bewertete, eintraege)
     ergebnis.update({"eintraege": bewertete, "fehlalarme": fehlalarme, "dauer_bewertung_s": round(t4 - t3, 2),
                      "funde": [{"kategorie": f.get("kategorie"), "text": f.get("text"), "seiten": f.get("seiten")}
                                for f in funde],
                      "ocr_seiten_bewertung": sorted(aus.ocr), "pixel_seiten": sorted(bilder)})
     return ergebnis
+
+
+def _verdacht_feld(v, name, standard=None):
+    if isinstance(v, dict):
+        return v.get(name, standard)
+    return getattr(v, name, standard)
+
+
+def verdacht_serialisieren(v) -> dict:
+    """Verdacht (NamedTuple des Programms oder dict) -> JSON-taugliches dict (Rechtecke als [x0, y0, x1, y1])."""
+    rechtecke = []
+    for r in _verdacht_feld(v, "rechtecke") or []:
+        try:
+            rechtecke.append([round(float(x), 2) for x in fitz.Rect(r)])
+        except Exception:
+            continue
+    seite = _verdacht_feld(v, "seite")
+    start = _verdacht_feld(v, "start", -1)
+    return {"seite": int(seite) if seite is not None else None, "start": -1 if start is None else int(start),
+            "ende": int(_verdacht_feld(v, "ende", -1) or -1), "text": str(_verdacht_feld(v, "text", "") or ""),
+            "grund": str(_verdacht_feld(v, "grund", "") or ""), "rechtecke": rechtecke}
+
+
+def _status_und_verdacht(out: dict, ausgabe, pipeline) -> dict:
+    """Status der Ausgabe ("fertig"/"pruefen"; ältere Programmversionen ohne "status": aus dem Namen) und die
+    Verdachtsstellen (Restrisiko-Prüfung + Reste der Selbstkontrolle mit Lage, wie die Vorschau sie zeigt)."""
+    status = out.get("status")
+    if ausgabe is None or not Path(ausgabe).exists():
+        status = None
+    elif status not in ("fertig", "pruefen") or "_PRUEFEN" in Path(ausgabe).name.upper():
+        status = "pruefen" if "_PRUEFEN" in Path(ausgabe).name.upper() else "fertig"
+    verdacht = [verdacht_serialisieren(v) for v in out.get("verdacht") or []]
+    reste_verdacht = []
+    if out.get("reste") and ausgabe is not None and Path(ausgabe).exists() \
+            and getattr(pipeline, "reste_als_verdacht", None) is not None:
+        try:
+            reste_verdacht = [verdacht_serialisieren(v)
+                              for v in pipeline.reste_als_verdacht(ausgabe, out["reste"], out.get("verdacht") or [])]
+        except Exception:
+            reste_verdacht = []
+    return {"status_ausgabe": status, "verdacht": verdacht, "reste_verdacht": reste_verdacht,
+            "dauer_restrisiko_s": out.get("dauer_restrisiko_s")}
+
+
+def _verdacht_trifft(v: dict, e: dict, kasten: list, nadel: Gefaltet, tokens: set) -> bool:
+    """Überdeckt der Verdacht v den Eintrag e (Wortrechtecke der Wahrheit in `kasten`)?"""
+    seite = v.get("seite")
+    gleiche_seite = seite is not None and int(seite) + 1 == e["seite"]
+    if gleiche_seite and not v.get("rechtecke") and int(v.get("start", 0) or 0) < 0:
+        return True                              # Seitenverdacht ("Seite selbst durchsehen")
+    if gleiche_seite and kasten:
+        for r in v.get("rechtecke") or []:
+            rv = fitz.Rect(r)
+            for k in kasten:
+                if rv.intersects(k) and abs(rv & k) > 0.15 * min(abs(k) or 1.0, abs(rv) or 1.0):
+                    return True
+    if _ueberlappt(Gefaltet(v.get("text", "")), nadel):
+        return True
+    return bool(gleiche_seite and tokens and tokens & set(signifikante_token(v.get("text", ""))))
+
+
+def verdacht_bewerten(ergebnis: dict, bewertete: list, wahrheit_eintraege: list) -> None:
+    """Je zu schwärzendem Eintrag "verdacht_abgedeckt", je Verdacht "trifft" (überdeckt er einen zu schwärzenden
+    Eintrag, Kern oder erweitert?) – Grundlage für Verdachtsabdeckung und Fehlverdacht."""
+    verdacht = list(ergebnis.get("verdacht") or []) + list(ergebnis.get("reste_verdacht") or [])
+    wahrheit = {w["id"]: w for w in wahrheit_eintraege}
+    vorbereitet = []
+    for r in bewertete:
+        if r.get("erwartung") != "schwaerzen":
+            continue
+        w = wahrheit.get(r["id"], {})
+        kasten = [fitz.Rect(x[:4]) for x in w.get("woerter") or [] if any(c.isalnum() for c in str(x[4]))]
+        vorbereitet.append((r, kasten, Gefaltet(r["text"]), set(signifikante_token(r["text"]))))
+    for v in verdacht:
+        v["trifft"] = any(_verdacht_trifft(v, r, kasten, nadel, tokens) for r, kasten, nadel, tokens in vorbereitet)
+    for r, kasten, nadel, tokens in vorbereitet:
+        r["verdacht_abgedeckt"] = any(_verdacht_trifft(v, r, kasten, nadel, tokens) for v in verdacht)
 
 
 def _ueberlappt(a: Gefaltet, b: Gefaltet) -> bool:
@@ -906,9 +1019,90 @@ def kennzahlen(dokumente: list) -> dict:
     if scan_docs:
         laufzeit["scan_dokumente_s_median"] = round(statistics.median(
             [d.get("dauer_analyse_s", 0) + d.get("dauer_schwaerzung_s", 0) for d in scan_docs]), 2)
+    restrisiko = restrisiko_kennzahlen(dokumente)
+    gesamt.update({k: restrisiko[k] for k in ("stille_lecks", "dokumente_mit_stillem_leck", "verdachtsabdeckung",
+                                                "fehlverdacht_je_seite", "ausgaben_pruefen", "pruefen_ohne_leck")})
+    if restrisiko.get("restrisiko_s_je_seite") is not None:
+        laufzeit["restrisiko_s_gesamt"] = restrisiko["restrisiko_s_gesamt"]
+        laufzeit["restrisiko_s_je_seite"] = restrisiko["restrisiko_s_je_seite"]
     return {"gesamt": gesamt, "je_kategorie": je_kategorie, "je_merkmal": je_merkmal, "je_kanal": je_kanal,
             "je_typ": je_typ, "je_hinweis": je_hinweis, "diagnosen": dict(diagnosen.most_common()),
-            "laufzeit": laufzeit}
+            "laufzeit": laufzeit, "restrisiko": restrisiko}
+
+
+def nur_pixelrest(e: dict) -> bool:
+    """Teil-Leck allein über den Pixelvergleich, und jedes der verbliebenen Wörter liegt unter der
+    Sichtbarkeitsschwelle (also kein Wort mehr als zur Hälfte lesbar)?"""
+    reste, pixel = e.get("reste") or [], e.get("pixel") or []
+    if e.get("status") != "teilweise" or not reste or not pixel or any(k != "pixel" for _, k in reste):
+        return False
+    rest_token = {t for t, _ in reste}
+    werte = [a for wort, a in pixel if rest_token & set(token(wort))]
+    return bool(werte) and max(werte) < SICHTBAR_SCHWELLE
+
+
+def restrisiko_kennzahlen(dokumente: list) -> dict:
+    """Stille Lecks, Verdachtsabdeckung, Fehlverdacht je Seite, _PRUEFEN ohne Leck (Definitionen im Modulkopf)."""
+    seiten = sum(d.get("seiten") or 0 for d in dokumente) or 1
+    stille, docs_still, pruefen, pruefen_ohne_leck, pruefen_ohne_jedes = 0, [], 0, [], []
+    gezaehlt, abgedeckt, verdacht_n, fehl, nicht_abgedeckt = 0, 0, 0, [], []
+    ohne_pixel_n, ohne_pixel_abgedeckt = 0, 0
+    je_kat: dict = defaultdict(lambda: {"n": 0, "abgedeckt": 0})
+    for d in dokumente:
+        status = d.get("status_ausgabe")
+        alle_lecks = [e for e in d.get("eintraege", []) if e.get("erwartung") == "schwaerzen"
+                      and e.get("status") in ("leck", "teilweise")]
+        kern_lecks = [e for e in alle_lecks if e.get("umfang") == "kern"]
+        if status == "pruefen":
+            pruefen += 1
+            if not kern_lecks:
+                pruefen_ohne_leck.append(d["dokument"])
+            if not alle_lecks:
+                pruefen_ohne_jedes.append(d["dokument"])
+        elif kern_lecks:
+            stille += len(kern_lecks)
+            docs_still.append(d["dokument"])
+        for e in kern_lecks:
+            gezaehlt += 1
+            je_kat[e["kategorie"]]["n"] += 1
+            pixelrest = nur_pixelrest(e)
+            if not pixelrest:
+                ohne_pixel_n += 1
+                ohne_pixel_abgedeckt += bool(e.get("verdacht_abgedeckt"))
+            if e.get("verdacht_abgedeckt"):
+                abgedeckt += 1
+                je_kat[e["kategorie"]]["abgedeckt"] += 1
+            else:
+                nicht_abgedeckt.append({"dokument": d["dokument"], "seite": e.get("seite"), "kategorie": e["kategorie"],
+                                        "status": e["status"], "text": e["text"], "kanal": e.get("kanal"),
+                                        "bemerkung": e.get("bemerkung", ""), "ausgabe_pruefen": status == "pruefen",
+                                        "nur_pixelrest": pixelrest})
+        for v in list(d.get("verdacht") or []) + list(d.get("reste_verdacht") or []):
+            verdacht_n += 1
+            if not v.get("trifft", True):
+                fehl.append({"dokument": d["dokument"],
+                             "seite": v["seite"] + 1 if v.get("seite") is not None else None,
+                             "text": v.get("text"), "grund": v.get("grund")})
+    dauer = [d["dauer_restrisiko_s"] for d in dokumente if d.get("dauer_restrisiko_s") is not None]
+    n = len(dokumente)
+    return {
+        "stille_lecks": stille, "dokumente_mit_stillem_leck": len(docs_still),
+        "dokumente_mit_stillem_leck_quote": round(len(docs_still) / n, 4) if n else None,
+        "dokumente_still": docs_still,
+        "verdachtsabdeckung": round(abgedeckt / gezaehlt, 4) if gezaehlt else None,
+        "kern_lecks": gezaehlt, "kern_lecks_abgedeckt": abgedeckt,
+        "verdachtsabdeckung_ohne_pixelrest": round(ohne_pixel_abgedeckt / ohne_pixel_n, 4) if ohne_pixel_n else None,
+        "kern_lecks_ohne_pixelrest": ohne_pixel_n, "kern_lecks_ohne_pixelrest_abgedeckt": ohne_pixel_abgedeckt,
+        "verdacht": verdacht_n, "fehlverdacht": len(fehl), "fehlverdacht_je_seite": round(len(fehl) / seiten, 3),
+        "ausgaben_pruefen": pruefen, "ausgaben_pruefen_quote": round(pruefen / n, 4) if n else None,
+        "pruefen_ohne_leck": len(pruefen_ohne_leck), "pruefen_ohne_leck_dokumente": pruefen_ohne_leck,
+        "pruefen_ohne_jedes_leck": len(pruefen_ohne_jedes),
+        "je_kategorie": {k: dict(v, quote=round(v["abgedeckt"] / v["n"], 4) if v["n"] else None)
+                         for k, v in sorted(je_kat.items())},
+        "nicht_abgedeckt": nicht_abgedeckt, "fehlverdacht_liste": fehl,
+        "restrisiko_s_gesamt": round(sum(dauer), 2) if dauer else None,
+        "restrisiko_s_je_seite": round(sum(dauer) / seiten, 3) if dauer else None,
+    }
 
 
 # ----------------------------------------------------------------------
@@ -983,7 +1177,7 @@ def _umgebung(pipeline: Pipeline, cli_ocr: bool) -> dict:
     if cli_ocr and prog:
         try:
             u["tesseract_cli"] = subprocess.run([prog, "--version"], capture_output=True, text=True,
-                                                timeout=20).stdout.split("\n")[0]
+                                                timeout=20, env=cli_umgebung()).stdout.split("\n")[0]
         except Exception:
             u["tesseract_cli"] = "vorhanden"
     else:
@@ -1002,6 +1196,50 @@ def _tabelle(kopf: list, zeilen: list) -> list:
     aus = ["| " + " | ".join(kopf) + " |", "|" + "|".join("---" for _ in kopf) + "|"]
     aus += ["| " + " | ".join(str(z).replace("|", "\\|") for z in zeile) + " |" for zeile in zeilen]
     return aus
+
+
+def _restrisiko_bericht(e: dict) -> list:
+    rr = e.get("restrisiko")
+    if not rr:
+        return []
+    g = e["gesamt"]
+    zeilen = ["", "## Restrisiko: Verdacht und _PRUEFEN", ""]
+    zeilen += _tabelle(["Kennzahl", "Wert"], [
+        ["**stille Lecks** (Kern leck/teilweise, Ausgabe nicht _PRUEFEN)",
+         f"**{rr['stille_lecks']}** in {rr['dokumente_mit_stillem_leck']} Dokument(en) "
+         f"({_p(rr.get('dokumente_mit_stillem_leck_quote'))} der Dokumente)"],
+        ["Verdachtsabdeckung (Kern leck/teilweise mit Verdacht)",
+         f"{_p(rr['verdachtsabdeckung'])} ({rr['kern_lecks_abgedeckt']}/{rr['kern_lecks']})"],
+        ["Verdachtsabdeckung ohne reine Pixelreste",
+         f"{_p(rr.get('verdachtsabdeckung_ohne_pixelrest'))} ({rr.get('kern_lecks_ohne_pixelrest_abgedeckt')}/"
+         f"{rr.get('kern_lecks_ohne_pixelrest')})"],
+        ["Fehlverdacht je Seite (Verdacht ohne zu schwärzenden Eintrag)",
+         f"{rr['fehlverdacht_je_seite']} ({rr['fehlverdacht']} von {rr['verdacht']} Verdachtsstellen)"],
+        ["Ausgaben _PRUEFEN", f"{rr['ausgaben_pruefen']} von {g['dokumente']} ({_p(rr['ausgaben_pruefen_quote'])})"],
+        ["_PRUEFEN ohne Kern-Leck / ohne jedes Leck", f"{rr['pruefen_ohne_leck']} / {rr['pruefen_ohne_jedes_leck']}"],
+        ["Restrisiko-Prüfung (Laufzeit gesamt / je Seite)",
+         f"{rr['restrisiko_s_gesamt']} s / {rr['restrisiko_s_je_seite']} s"
+         if rr.get("restrisiko_s_gesamt") is not None else "–"],
+    ])
+    if rr["je_kategorie"]:
+        zeilen += [""]
+        zeilen += _tabelle(["Kategorie", "Kern leck/teilweise", "mit Verdacht", "Abdeckung"],
+                           [[k, v["n"], v["abgedeckt"], _p(v["quote"])] for k, v in rr["je_kategorie"].items()])
+    if rr["dokumente_still"]:
+        zeilen += ["", "Dokumente mit stillem Leck: " + ", ".join(rr["dokumente_still"])]
+    if rr["nicht_abgedeckt"]:
+        zeilen += ["", f"### Lecks ohne Verdacht ({len(rr['nicht_abgedeckt'])})", ""]
+        zeilen += _tabelle(["Dokument", "S.", "Kategorie", "Status", "Text", "Kanal", "Ausgabe _PRUEFEN", "nur Pixelrest",
+                            "Bemerkung"],
+                           [[x["dokument"], x["seite"], x["kategorie"], x["status"], f"`{x['text']}`", x["kanal"],
+                             "ja" if x["ausgabe_pruefen"] else "nein", "ja" if x.get("nur_pixelrest") else "nein",
+                             x["bemerkung"]] for x in rr["nicht_abgedeckt"][:150]])
+    if rr["fehlverdacht_liste"]:
+        gruende = Counter(f["grund"] for f in rr["fehlverdacht_liste"])
+        zeilen += ["", f"### Fehlverdacht nach Grund ({rr['fehlverdacht']})", ""]
+        zeilen += _tabelle(["Grund", "Anzahl"], [[k, v] for k, v in gruende.most_common()])
+        zeilen += ["", "Beispiele: " + "; ".join(f"{f['grund']}: `{f['text']}`" for f in rr["fehlverdacht_liste"][:60])]
+    return zeilen
 
 
 def bericht_markdown(e: dict) -> str:
@@ -1031,6 +1269,7 @@ def bericht_markdown(e: dict) -> str:
         ["Langsamstes Dokument", f"{lz['max_dokument'][1]} ({lz['max_dokument'][0]:.1f} s)"],
         ["Bewertung (Kontroll-OCR, Pixel, Kanäle) gesamt", f"{lz['bewertung_s_gesamt']} s"],
     ])
+    zeilen += _restrisiko_bericht(e)
     zeilen += ["", "## Je Kategorie", ""]
     zeilen += _tabelle(["Kategorie", "Umfang", "n", "entfernt", "teilweise", "Leck", "Recall"],
                        [[k, v["umfang"], v["n"], v["entfernt"], v["teilweise"], v["leck"], _p(v["recall"])]

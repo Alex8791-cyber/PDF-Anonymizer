@@ -1253,15 +1253,36 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
     verdacht = []
     if _restrisiko is not None and hasattr(_restrisiko, "restrisiko_pruefen"):
         lauf.abbruch_pruefen()
+        import time as _zeit
+        beginn = _zeit.perf_counter()
         try:
-            platzhalter = sorted({f.get("ersatz") for f in lauf.funde if f.get("ersatz")} | {PLATZHALTER_BEREICH})
+            platzhalter = sorted({f.get("ersatz") for f in lauf.funde if f.get("ersatz")}
+                                 | set(lauf.abgekuerzt) | {PLATZHALTER_BEREICH})
+            # Was die Prüfung über die Seiten wissen darf, ohne die Erkennung zu teilen: Art und Ausrichtung der OCR
+            # je Seite (die Kontroll-OCR der Selbstkontrolle liegt damit schon im Zwischenspeicher – kein zweiter
+            # OCR-Lauf), die OCR-Wörter unveränderter Seiten (aus der Analyse), die Formularfelder des Originals und
+            # die bewusst abgewählten Stellen (Entscheidung der Nutzerin, kein Verdacht).
+            ocr_modus = dict(lauf.ocr_modus)
+            zusatz = {"ocr_modus": ocr_modus,
+                      "winkel": {nr: lauf.winkel(nr) for nr, art in ocr_modus.items()
+                                 if art == "seite" and lauf.rects_je_seite.get(nr)},
+                      "bildbereiche": dict(lauf.bildbereiche),
+                      "ocr_woerter": {nr: list(lauf.ocr_cache[nr]) for nr in ocr_modus
+                                      if nr in lauf.ocr_cache and not lauf.rects_je_seite.get(nr)},
+                      "felder": list(getattr(lauf.modell, "felder", None) or []),
+                      "abgewaehlt": [(st.get("seite"), st.get("text") or f.get("text", "")) for f in lauf.funde
+                                     for st in (f.get("stellen") or []) if not st.get("an", True)],
+                      "abbruch": lauf.abbruch}
             verdacht = list(_restrisiko.restrisiko_pruefen(
                 tmp, ocr=lauf.ocr, platzhalter=platzhalter, profil=profil,
-                nie=getattr(lauf.analyse_modell, "nie", None)) or [])
+                nie=getattr(lauf.analyse_modell, "nie", None), **zusatz) or [])
+        except _Abgebrochen:
+            raise
         except Exception as e:
             lauf.melden("warnung", "VERDACHT", f"Restrisiko-Prüfung ist ausgefallen ({e}) – Ausgabe bitte prüfen.")
             verdacht = []
             lauf.restrisiko_fehler = True
+        ergebnis["dauer_restrisiko_s"] = round(_zeit.perf_counter() - beginn, 3)
     ergebnis["verdacht"] = verdacht
     if verdacht:
         lauf.melden("warnung", "VERDACHT",
