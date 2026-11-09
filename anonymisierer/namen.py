@@ -6,6 +6,7 @@ finde_personen (Kandidaten mit Position und Zusammengehörigkeit), NAMEN_STOPPLI
 ner_fehler.
 """
 
+import functools
 import re
 
 _NLP = None          # das geladene Sprachmodell (oder None)
@@ -48,6 +49,9 @@ NAMEN_STOPPLISTE = {
     "gmbh", "co", "kg", "ag", "mbh", "versicherung", "lebensversicherung",
     "herr", "frau", "herrn", "sehr", "geehrte", "geehrter", "grüßen",
     "freundlichen", "mit", "und",
+    # Kopfzeilen von E-Mails und Grußformeln
+    "gesendet", "weitergeleitet", "antwort", "grüße", "gruß", "herzliche", "herzlichen", "freundliche",
+    "beste", "besten", "liebe", "lieben", "viele", "vielen",
     # Feldbezeichner / Rollen
     "steuer", "steuer-id", "steuerid", "kindergeld", "kindergeld-nr", "zulage", "zulagen",
     "zulagennummer", "zulagenummer", "person", "personen", "sohn", "tochter", "kind", "kinder",
@@ -104,6 +108,10 @@ NAMEN_STOPPLISTE = {
     "rentenfaktor", "eigenbeitrag", "zusatzbaustein", "todesfall", "leistungsfall", "schadenfall",
     "hinterbliebene", "bezugsrecht", "beitragsbefreiung", "selbstbeteiligung", "schadenfreiheitsklasse",
     "rückstufung", "kostenvoranschlag", "restwert", "regelaltersrente", "rentenanwartschaft",
+    # Fehlalarme des Entwicklungs-Benchmarks (Feldbezeichner, Überschriften, Fußzeilen)
+    "vorsitz", "vorsitzender", "vorsitzende", "aufsichtsrat", "aufsichtsratsvorsitzender", "brutto", "netto",
+    "sparte", "kollegen", "kollegin", "kollege", "gedruckt", "raucher", "nichtraucher", "behandelnder",
+    "behandelnde", "bezugsberechtigt", "stadtauswärts", "stadteinwärts", "zeitart", "schadentag", "schadenort",
 }
 
 # Adjektive, die Straßennamen einleiten (Lange Straße) — als Einzelwort kein Name,
@@ -178,11 +186,111 @@ _ABKUERZUNGEN_GROSS = {"IBAN", "BIC", "SEPA", "GMBH", "EUR", "USD", "CHF", "PDF"
                        "DKV", "HDI", "AXA", "WWK", "LVM", "ERGO", "VHV", "DEVK", "ARAG", "ADAC", "DRV", "GDV",
                        "BAFIN", "LEI", "UID", "VIN", "FIN", "HSN", "TSN", "SF", "USA", "EU"}
 
+# Großbuchstaben aller lateinischen Schriften (Ågren, Çelik, Łukasz, Šimić, Ørsted …)
+_GROSS = "A-ZÄÖÜÀ-ÖØ-ÞĀĂĄĆČĎĐĒĖĘĚĞĢĪĮİĶĹĻĽŁŃŅŇŌŐŒŔŘŚŞŠŢŤŪŮŰŲŹŻŽȘȚ"
+
+# Komposita-Endungen von Sachwörtern (Schadenanzeige, Familientarif, Praxisanschrift, Hundehalter …);
+# gilt nur für Wörter, die mindestens 3 Zeichen länger sind als die Endung (Halter/Partner/Zeit bleiben Namen)
+_SACHWORT_ENDUNGEN = (
+    "nummer", "schein", "bescheid", "anzeige", "meldung", "tarif", "verlust", "anschrift", "pflicht", "fähig",
+    "frei", "heit", "keit", "schaft", "protokoll", "auskunft", "rechnung", "abrechnung", "vermerk", "abteilung",
+    "schutz", "summe", "beitrag", "datum", "bereich", "stelle", "dauer", "antrag", "vertrag", "police",
+    "versicherung", "erklärung", "bestätigung", "mitteilung", "übersicht", "angaben", "angabe", "daten", "halter",
+    "nehmer", "geber", "steller", "zahler", "empfänger", "partner", "person", "personen", "kosten", "gebühr",
+    "leistung", "leistungen", "zahlung", "zeit", "zeitraum", "beginn", "ablauf", "betrag", "quote", "klasse",
+    "stufe", "option", "optionen", "baustein", "bausteine", "paket", "variante", "tätigkeit", "beruf",
+    "unterlagen", "nachweis", "formular", "fragebogen", "hinweise", "bedingungen", "grundlage", "verfahren",
+    "apotheke", "praxis", "klinik", "tag", "ort", "termin", "wert", "werte", "fall", "berechtigt",
+    "pflichtig", "stand", "gebiet", "amt",
+    "straße", "strasse", "str", "weg", "platz", "allee", "gasse",      # Straßennamen ohne Hausnummer (Hauptstr)
+)
+# Adjektiv-/Partizipstämme, die großgeschrieben vor Rollenwörtern stehen ("Betreuender Vermittler",
+# "Mitversichertes Kind", "Fälliger Beitrag", "Erstattungsfähig")
+_SACHWORT_STAEMME = {
+    "fällig", "betreuend", "zuständig", "versichert", "mitversichert", "erstattungsfähig", "beitragsfrei", "gültig",
+    "folgend", "weiter", "sonstig", "allgemein", "besonder", "jährlich", "monatlich", "einmalig", "laufend",
+    "bisherig", "gesamt", "voraussichtlich", "garantiert", "möglich", "zusätzlich", "abweichend", "ehemalig",
+    "derzeitig", "aktuell", "vorläufig", "endgültig", "verstorben", "geschieden", "verheiratet", "ledig",
+    "verwitwet", "selbstständig", "selbständig", "angestellt", "berufstätig", "arbeitslos", "erwerbstätig",
+    "pflegebedürftig", "beitragspflichtig", "leistungspflichtig", "steuerpflichtig", "nachstehend", "vorstehend",
+    "obig", "unterzeichnend", "unterzeichnet", "betroffen", "geschädigt", "beteiligt", "berechtigt", "verpflichtet",
+    "beauftragt", "bevollmächtigt", "behandelnd", "begutachtend", "vertretend", "ausstellend", "einreichend",
+    "antragstellend", "leistend", "zahlend", "haftend", "mitwirkend", "erforderlich", "notwendig", "wichtig",
+    # Feldbezeichner ohne passende Endung
+    "optionen", "zahlweise", "dokumentart", "vorversicherer", "versicherer", "erwerbsminderung", "zahlungsart",
+}
+# Etiketten, hinter denen kein Personenname steht (Beruf: Polier, Tarif: Komfort, Marke: Opel …)
+_SACHETIKETT_RE = re.compile(
+    r"(?<![\wäöüß])(?:Beruf|Tätigkeit|Berufsbezeichnung|Tarif|Tarifname|Produkt|Produktname|Sparte|Marke|Typ|"
+    r"Modell|Hersteller|Fahrzeug|Diagnose|Verwendungszweck|Leistungsart|Optionen|Bausteine?|Deckung|Zahlweise|"
+    r"Vertragsart|Versicherungsart|Dokumentart|Status)(?:[ \t]*/[ \t]*[\wäöüß]+)?[ \t]*:[ \t]*$")
+_SACHETIKETT_WERT_RE = re.compile(
+    r"(?<![\wäöüß])(?:Beruf|Tätigkeit|Berufsbezeichnung|Tarif|Tarifname|Produkt|Produktname|Sparte|Marke|Typ|"
+    r"Modell|Hersteller|Fahrzeug|Diagnose|Verwendungszweck|Leistungsart|Zahlweise|Vertragsart|Versicherungsart|"
+    r"Dokumentart|Status)(?:[ \t]*/[ \t]*[\wäöüß]+)?[ \t]*:[ \t]*([A-ZÄÖÜ][\wäöüß\-]{1,40})")
+
+
+# hinter einem Einzelwort: es ist Teil eines Firmennamens ("Taunus Krankenversicherung AG", "Harz Leben")
+_FIRMA_DANACH_RE = re.compile(
+    r"[ \t]+(?:[A-ZÄÖÜ][a-zäöüß]*(?:versicherung(?:en)?|versicherungs-?ag|kasse|bank|gruppe)|Versicherung(?:en)?|"
+    r"Rechtsschutz|Versicherer|Bank|Sparkasse|Assekuranz|Leben|Allgemeine|Gruppe|Holding|AG|SE|GmbH|KG|VVaG|"
+    r"a\.[ \t]?G\.|e\.[ \t]?V\.)(?![\wäöüß])")
+
+
+def _sachwerte(text: str) -> set:
+    """Einzelwörter, die im Text als Wert hinter einem Sach-Etikett stehen ("Beruf: Polier",
+    "Tarif: Komfort") — sie sind auch an anderer Stelle (Formularfeld ohne Etikett) kein Name."""
+    return {m.group(1).casefold() for m in _SACHETIKETT_WERT_RE.finditer(text)}
+
+
+@functools.lru_cache(maxsize=32768)
+def _wissen_art(wort: str) -> tuple:
+    """(bekannter Name?, Allerweltswort?, Diagnose/Beruf?) aus der Wissensbasis (ohne Wissensbasis: alles False)."""
+    try:
+        from . import wissen
+    except Exception:  # pragma: no cover
+        return False, False, False
+    w = wort.strip(".,;:()[]\"'")
+    if not w:
+        return False, False, False
+    try:
+        name = wissen.ist_vorname(w) or wissen.ist_nachname(w)
+        allerwelt = len(w) >= 4 and wissen.ist_allerweltswort(w)
+        sache = bool(wissen.index("diagnosen").eintrag_fuer(w) or wissen.index("berufe").eintrag_fuer(w))
+    except Exception:  # pragma: no cover - Wissensbasis beschädigt
+        return False, False, False
+    return name, allerwelt, sache
+
+
+def _ist_sachwort(wort: str) -> bool:
+    """Großgeschriebenes Nicht-Namenswort: Stopplisten-Eintrag (auch gebeugt: Mitversichertes, Kunden),
+    Allerweltswort der Wissensbasis, Kompositum mit Sachwort-Endung (Schadenanzeige, Hundehalter) oder
+    Adjektiv/Partizip (Betreuender, Gedruckt). Bei Bindestrich-Wörtern genügt ein Sachwort-Teil
+    (Kraftfahrt-Haftpflicht, Kfz-Versicherungsschein). Bekannte Vor-/Nachnamen sind nie Sachwörter."""
+    w = wort.lower().strip(".,;:()[]\"'")
+    name, allerwelt, sache = _wissen_art(wort)
+    if name and "-" not in w:
+        return False
+    if allerwelt or (sache and not name):
+        return True
+    for teil in (t for t in w.split("-") if t):
+        if teil in NAMEN_STOPPLISTE or teil in _NAMENSENDE or teil in _FIRMENWOERTER or teil in _SACHWORT_STAEMME:
+            return True
+        for n in (1, 2):                      # Beugung abstreifen: Mitversichertes -> mitversicherte
+            stamm = teil[:-n]
+            if len(stamm) >= 4 and (stamm in NAMEN_STOPPLISTE or stamm in _SACHWORT_STAEMME):
+                return True
+        if any(teil.endswith(e) and len(teil) >= len(e) + 3 for e in _SACHWORT_ENDUNGEN):
+            return True
+        if _wissen_art(teil)[1]:
+            return True
+    return False
+
 
 # ----------------------------------------------------------------------
 # Hilfen
 # ----------------------------------------------------------------------
-_NAME_WORT = r"[A-ZÄÖÜ][\wäöüß'’\-]{1,40}"
+_NAME_WORT = "[" + _GROSS + r"][\wäöüß'’\-]{1,40}"
 _TITEL_RE = (r"(?:(?:Dr|Prof|Dipl|Mag|Ing|Med|Jur|Rer|Nat|Phil|Habil|Univ|Dent|Vet|RA|StB|Dipl\.-Ing|Dipl\.-Kfm|"
              r"Dipl\.-Jur|Dipl\.-Psych|Dipl\.-Kffr|B\.A|M\.A|M\.Sc|B\.Sc|LL\.M|h\.c|med|rer|nat|jur|phil|dent|vet|"
              r"habil|univ|pol|oec)\.?[ \t]+)")
@@ -267,6 +375,51 @@ def _ner_kurzzeilen(nlp, text: str) -> set:
     return spannen
 
 
+def _ner_versalien_zeilen(nlp, text: str) -> set:
+    """Titelform-Pass nur für die Zeilen mit ALL-CAPS-Wörtern (MAX MUSTERMANN) samt je einer Nachbarzeile:
+    dieselben Namen wie ein Titelform-Durchlauf über den Gesamttext, aber ohne die NER ein zweites Mal
+    über das ganze Dokument laufen zu lassen (Gutachten PERF-04)."""
+    zeilen = text.split("\n")
+    offsets, pos = [], 0
+    for z in zeilen:
+        offsets.append(pos)
+        pos += len(z) + 1
+    betroffen = set()
+    for i, z in enumerate(zeilen):
+        if _hat_versalien(z):
+            betroffen.update((i - 1, i, i + 1))
+    bloecke, block = [], []
+    for i in sorted(b for b in betroffen if 0 <= b < len(zeilen)):
+        if block and i != block[-1] + 1:
+            bloecke.append(block)
+            block = []
+        block.append(i)
+    if block:
+        bloecke.append(block)
+    spannen = set()
+    if not bloecke:
+        return spannen
+    texte = ["\n".join(_titelform(zeilen[i]) for i in b) for b in bloecke]
+    for b, doc in zip(bloecke, nlp.pipe(texte, batch_size=64)):
+        basis = offsets[b[0]]
+        for ent in doc.ents:
+            if ent.label_ == "PER":
+                spannen.add((basis + ent.start_char, basis + ent.end_char))
+    # Kurzzeilen in Titelform (Adressfenster in Versalien: "HERRN" ⏎ "MAX MUSTERMANN")
+    kurz, kurz_offsets = [], []
+    for b in bloecke:
+        for i in b:
+            inhalt = zeilen[i].strip()
+            if 2 <= len(inhalt) <= 80 and _hat_versalien(zeilen[i]):
+                kurz.append(_titelform(zeilen[i]))
+                kurz_offsets.append(offsets[i])
+    for basis, doc in zip(kurz_offsets, nlp.pipe(kurz, batch_size=64)):
+        for ent in doc.ents:
+            if ent.label_ == "PER":
+                spannen.add((basis + ent.start_char, basis + ent.end_char))
+    return spannen
+
+
 _LUECKE_RE = re.compile(r"\n|[ \t]{2,}")
 
 
@@ -307,7 +460,8 @@ def _bereinigen(text: str, start: int, ende: int):
         wort = m.group(1).lower().strip(".,")
         voll = m.group(1).lower()
         if (wort in ANREDEN or voll in ANREDEN or wort in TITEL or voll in TITEL
-                or wort in NAMEN_STOPPLISTE or (voll in _VERSICHERER_EINZELWORT and not mit_anrede)):
+                or (wort in NAMEN_STOPPLISTE and not _kalendername(text, start, wort))
+                or (voll in _VERSICHERER_EINZELWORT and not mit_anrede)):
             start += m.end()
             mit_anrede = wort in ANREDEN or voll in ANREDEN
         else:
@@ -317,6 +471,9 @@ def _bereinigen(text: str, start: int, ende: int):
         if not m:
             break
         wort = m.group(1).lower().strip(".,;:")
+        if (wort in NAMEN_STOPPLISTE and wort not in _NAMENSENDE
+                and _nachname_hinter_vorname(text, start, start + m.start(), m.group(1))):
+            break                                    # "Eckhard Freitag", "Erika Mai": Nachname, kein Wochentag
         if (wort in _NAMENSENDE or wort in NAMEN_STOPPLISTE or wort in _FIRMENWOERTER
                 or _STRASSENSUFFIX_RE.search(wort) or any(c.isdigit() for c in wort)):
             ende = start + m.start()
@@ -325,6 +482,20 @@ def _bereinigen(text: str, start: int, ende: int):
     while ende > start and text[ende - 1] in " \t\n\r,.;:()[]\"'*":
         ende -= 1
     return (start, ende) if ende > start else None
+
+
+def _nachname_hinter_vorname(text: str, start: int, ende: int, wort: str) -> bool:
+    """Steht `wort` (großgeschrieben, bekannter Nachname) direkt hinter einem bekannten Vornamen?"""
+    if not wort[:1].isupper():
+        return False
+    try:
+        from . import wissen
+        if not wissen.ist_nachname(wort.strip(".,;:")):
+            return False
+        davor = text[start:ende].split()
+        return bool(davor) and wissen.ist_vorname(davor[-1].strip(".,;:"))
+    except Exception:  # pragma: no cover
+        return False
 
 
 def _namensteile(name: str) -> list:
@@ -343,26 +514,89 @@ def _namensteile(name: str) -> list:
     return teile
 
 
-def _plausibel(text: str, start: int, ende: int) -> bool:
+# Monats- und Wochentagsnamen sind auch Nachnamen ("Erika Mai", "Eckhard Freitag"): hinter Herr/Frau oder einem
+# Namens-Etikett ("Nachname: Freitag") gilt das Wort als Name, sonst bleibt es ein Kalenderwort
+_KALENDERWOERTER = frozenset({
+    "januar", "februar", "märz", "april", "mai", "juni", "juli", "august", "september", "oktober", "november",
+    "dezember", "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag"})
+_NAMENSETIKETT_DAVOR_RE = re.compile(
+    r"(?:(?<![\wäöüß])(?:Nachname|Familienname|Geburtsname|Name)[ \t]*:[ \t]*|"
+    r"(?<![\wäöüß])(?:Herrn?|Frau|Hr\.|Fr\.)[ \t]+)(?:[A-ZÄÖÜ][a-zäöü]{0,4}\.[ \t-]*)*$")
+
+
+def _kalendername(text: str, start: int, wort: str) -> bool:
+    """Monats-/Wochentagsname an `start` als Nachname: direkt hinter Herr/Frau (auch mit Titel) oder einem
+    Namens-Etikett ("Frau Mai", "Herrn Dr. Freitag", "Nachname: Freitag")."""
+    return (wort.lower().strip(".,;:") in _KALENDERWOERTER
+            and _NAMENSETIKETT_DAVOR_RE.search(text, max(0, start - 40), start) is not None)
+
+
+# OCR-Reste, die die KI für Namen hält: fremde Zeichen ("i= SEE", "Ust«-TeiNe", "Aues|y"), dreifache
+# Buchstaben ("IE EEESTEUER"), ein klein geschriebenes erstes Wort, das kein Namenspartikel ist ("ee BEER",
+# "us Wersicherungsschein"), Großbuchstaben mitten im Wort ("TeiNe" – aber McLean, DeLuca, LaToya)
+_OCR_ZEICHEN_RE = re.compile(r"[^\w\s.,'’()\-]")
+_DREIFACH_RE = re.compile(r"([^\W\d_])\1\1", re.IGNORECASE)
+_BINNEN_GROSS_RE = re.compile(r"[a-zäöüß][A-ZÄÖÜ]")
+_BINNEN_ERLAUBT_RE = re.compile(r"(?:Mc|Mac|De|Di|Da|Du|La|Le|Van|Von|Fitz|O)[A-ZÄÖÜ][a-zäöüß]")
+
+
+def _ocr_rest(name: str) -> bool:
+    """Sieht der KI-Treffer wie ein OCR-Rest aus statt wie ein Name?"""
+    if _OCR_ZEICHEN_RE.search(name) or _DREIFACH_RE.search(name):
+        return True
+    woerter = name.split()
+    erstes = woerter[0].strip(".,;:()") if woerter else ""
+    if erstes[:1].islower() and erstes.lower() not in PARTIKEL:
+        return True
+    for wort in woerter:
+        for stueck in wort.split("-"):
+            binnen = _BINNEN_GROSS_RE.search(stueck)
+            if binnen and not (_BINNEN_ERLAUBT_RE.match(stueck) and binnen.start() <= 3
+                               and not _BINNEN_GROSS_RE.search(stueck, binnen.end())):
+                return True
+    return False
+
+
+def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
     """Plausibilitätsfilter: keine Ziffern/Kürzel, keine Feldbezeichner, keine Versicherer,
-    keine Organisationen, mindestens ein großgeschriebenes Wort mit >= 3 Buchstaben."""
+    keine Organisationen, mindestens ein großgeschriebenes Wort mit >= 3 Buchstaben (>= 2 hinter
+    Herr/Frau: "Herr Li", Gutachten EQ-11). Reine KI-Treffer (regel=False) zusätzlich: keine Sachwörter
+    (Überschriften, Feldbezeichner, Produkte, Allerweltswörter der Wissensbasis, Gutachten EQ-04), keine kurzen
+    Versalien-Kürzel (RLV), nichts hinter Sach-Etiketten (Beruf:, Tarif:), kein Ortsteil ("am Taunus")."""
     name = text[start:ende]
-    if len(name) < 3 or any(c.isdigit() for c in name):
+    vorher = text[max(0, start - 12):start]
+    mit_anrede = _VORHER_ANREDE_RE.search(vorher) is not None
+    if len(name) < (2 if mit_anrede else 3) or any(c.isdigit() for c in name):
         return False
     if re.search(r"-(?:ID|Nr|No|Id)\.?$", name, re.IGNORECASE) or _KFZ_RE.match(name):
         return False
     norm = re.sub(r"\s+", " ", name.lower()).strip()
-    vorher = text[max(0, start - 12):start]
-    mit_anrede = _VORHER_ANREDE_RE.search(vorher) is not None
+    if regel and _kalendername(text, start, norm):
+        return True                           # "Frau Mai", "Nachname: Freitag"
     if norm in NAMEN_STOPPLISTE or (norm in VERSICHERER_NAMEN and not mit_anrede):
         return False
     teile = _namensteile(name)
     if not teile:
         return False
-    if not any(len(re.sub(r"[^\wäöüß]", "", t)) >= 3 and t[0].isupper() for t in teile):
+    mindestlaenge = 2 if mit_anrede else 3
+    if not any(len(re.sub(r"[^\wäöüß]", "", t)) >= mindestlaenge and t[0].isupper() for t in teile):
         return False
     if any(t.lower().strip(".") in _FIRMENWOERTER for t in teile):
         return False
+    if not regel and not mit_anrede:
+        if _ocr_rest(name):
+            return False                      # OCR-Reste ("IE EEESTEUER", "ee BEER", "i= SEE")
+        if all(_ist_sachwort(t) for t in teile):
+            return False                      # "Schadenanzeige Kraftfahrt-Haftpflicht", "Familientarif"
+        if len(teile) == 1 and teile[0].isupper() and len(teile[0]) <= 4:
+            return False                      # Kürzel wie RLV, BU, KFZ (Versalien-Namen kommen über die Regeln)
+        zeilenanfang = text.rfind("\n", 0, start) + 1
+        if _SACHETIKETT_RE.search(text[zeilenanfang:start]):
+            return False                      # "Beruf / Arbeitgeber: Polier, …"
+        if len(teile) == 1 and re.search(r"(?<![\wäöüß])(?:am|an der|im|ob der|in der|vor der)[ \t]+$", vorher):
+            return False                      # "Hofheim am Taunus", "Frankfurt am Main"
+        if len(teile) == 1 and _FIRMA_DANACH_RE.match(text, ende):
+            return False                      # "Taunus Krankenversicherung AG": Teil eines Firmennamens
     if all(t.lower().strip(".") in NAMEN_STOPPLISTE or t.lower().strip(".") in _NAMENSENDE
            or (t.lower() in _VERSICHERER_EINZELWORT and not mit_anrede) for t in teile):
         return False
@@ -412,7 +646,7 @@ _UNTERSCHRIFT_RE = re.compile(
     r"(?<![\wäöüß])(?:i\.[ \t]?A\.|i\.[ \t]?V\.|gez\.|ppa\.|p\.[ \t]?p\.)[ \t]+" + _TITEL_RE + r"*"
     r"(" + _NAME_WORT + r"(?:[ \t]+" + _NAME_WORT + r"){0,2})")
 _BEZIEHUNG_RE = re.compile(
-    r"(?<![\wäöüß])(?:Ihr|Ihre|Ihren|Ihrem|Ihrer|unser|unsere|unseren|unserem|mein|meine|meinen|meinem|"
+    r"(?<![\wäöüß])(?i:Ihr|Ihre|Ihren|Ihrem|Ihrer|unser|unsere|unseren|unserem|mein|meine|meinen|meinem|"
     r"sein|seine|seinen|seinem|der|die|den|dem|des)[ \t]+"
     r"(?:Sohn|Tochter|Kind|Enkel|Enkelin|Ehefrau|Ehemann|Ehegatte|Ehegattin|Lebensgefährt(?:e|in)|"
     r"Lebenspartner(?:in)?|Partner(?:in)?|Nachbar(?:in)?|Mandant(?:in)?|Kollege|Kollegin|Mitarbeiter(?:in)?|"
@@ -429,13 +663,15 @@ _TABELLENKOPF_RE = re.compile(r"(?<![\wäöüß])(Name, Vorname|Nachname, Vornam
 _ZELLE_RE = re.compile(r"^[A-ZÄÖÜ][\wäöüß'’\-]+(?:,?[ \t][A-ZÄÖÜ][\wäöüß'’\-]+){0,2}$")
 
 
-def _kandidat(kandidaten, text, start, ende, gruppe=None):
-    """Kandidaten bereinigen, prüfen und eintragen (an breiten Lücken endet der Name)."""
+def _kandidat(kandidaten, text, start, ende, gruppe=None, regel=False):
+    """Kandidaten bereinigen, prüfen und eintragen (an breiten Lücken endet der Name).
+    regel=True: Treffer einer Kontextregel (Rolle, Anrede, Adressfenster, Tabelle) — dort gelten
+    die strengen Filter für reine KI-Treffer nicht."""
     luecke = _LUECKE_RE.search(text, start, ende)
     if luecke:
         ende = luecke.start()
     bereich = _bereinigen(text, start, ende)
-    if bereich and _plausibel(text, *bereich):
+    if bereich and _plausibel(text, *bereich, regel=regel):
         kandidaten.append({"text": text[bereich[0]:bereich[1]], "start": bereich[0],
                            "ende": bereich[1], "gruppe": gruppe})
         return True
@@ -447,6 +683,13 @@ def _name_kuerzen(text: str, start: int, ende: int):
     pos = start
     for m in re.finditer(r"[^\s,]+", text[start:ende]):
         wort = m.group(0).lower().strip(".,;:")
+        if (wort in NAMEN_STOPPLISTE and wort not in _NAMENSENDE and pos > start
+                and _nachname_hinter_vorname(text, start, start + m.start(), m.group(0))):
+            pos = start + m.end()                    # "Erika Mai", "Eckhard Freitag": Nachname, kein Monat
+            continue
+        if pos == start and _kalendername(text, start + m.start(), wort):
+            pos = start + m.end()                    # "Frau Mai", "Nachname: Freitag, Eckhard"
+            continue
         if (wort in _NAMENSENDE or wort in NAMEN_STOPPLISTE or wort in _FIRMENWOERTER
                 or _STRASSENSUFFIX_RE.search(wort) or any(c.isdigit() for c in wort)):
             return start, pos if pos > start else start
@@ -464,23 +707,23 @@ def _regel_kandidaten(text: str) -> list:
             links, rechts = name.split(",", 1)
             if len(_namensteile(links)) != 1 or len(_namensteile(rechts)) > 2:
                 e = s + len(links)                   # "Katarzyna Nowak, Kennzeichen" -> nur der Name
-        _kandidat(kandidaten, text, s, e)
+        _kandidat(kandidaten, text, s, e, regel=True)
     # 2) Anrede im Satz: "Frau Schulze aus der Nachbarschaft", "Herrn Dr. Hans Weber"
     for m in _ANREDE_RE.finditer(text):
         s, e = _name_kuerzen(text, m.start(1), m.end(1))
-        _kandidat(kandidaten, text, s, e)
+        _kandidat(kandidaten, text, s, e, regel=True)
     # 3) Unterschriften: "i. A. Sabine Krüger", "gez. Peter Schmidt"
     for m in _UNTERSCHRIFT_RE.finditer(text):
         s, e = _name_kuerzen(text, m.start(1), m.end(1))
-        _kandidat(kandidaten, text, s, e)
+        _kandidat(kandidaten, text, s, e, regel=True)
     # 3a) Titel: "Dr. Max Mustermann", "Prof. Dr. med. Anna Berg", "Dipl.-Ing. Max Hofer"
     for m in _TITEL_NAME_RE.finditer(text):
         s, e = _name_kuerzen(text, m.start(1), m.end(1))
-        _kandidat(kandidaten, text, s, e)
+        _kandidat(kandidaten, text, s, e, regel=True)
     # 3b) Beziehungswörter im Satz: "Ihr Sohn Ben", "unsere Tochter Mia", "der Zeuge Herr Weber"
     for m in _BEZIEHUNG_RE.finditer(text):
         s, e = _name_kuerzen(text, m.start(1), m.end(1))
-        _kandidat(kandidaten, text, s, e)
+        _kandidat(kandidaten, text, s, e, regel=True)
     # 4) Adressfenster: Zeilen zwischen "Herrn"/"Frau" und der Straßenzeile
     zeilen = text.split("\n")
     offsets, pos = [], 0
@@ -505,7 +748,7 @@ def _regel_kandidaten(text: str) -> list:
                 teile.append(text[bereich[0]:bereich[1]])
         gruppe = " ".join(teile) if len(teile) > 1 else None
         for j in namenszeilen:
-            _kandidat(kandidaten, text, offsets[j], offsets[j] + len(zeilen[j]), gruppe)
+            _kandidat(kandidaten, text, offsets[j], offsets[j] + len(zeilen[j]), gruppe, regel=True)
     # 5) Tabellen mit Spaltenkopf Name / Vorname
     for i, zeile in enumerate(zeilen):
         koepfe = [(m.start(), m.group(1)) for m in _TABELLENKOPF_RE.finditer(zeile)]
@@ -543,7 +786,7 @@ def _regel_kandidaten(text: str) -> list:
             for anfang, ende, kopf, inhalt in zeilen_kandidaten:
                 if "," in inhalt:
                     gruppe = inhalt
-                _kandidat(kandidaten, text, anfang, ende, gruppe)
+                _kandidat(kandidaten, text, anfang, ende, gruppe, regel=True)
     return kandidaten
 
 
@@ -556,20 +799,32 @@ def finde_personen(text: str) -> list:
     wenn Bestandteile zusammengehören (Tabellenzeile Name/Vorname, Adressfenster über zwei
     Zeilen), sonst None. Ohne Modell greifen nur die Regeln."""
     kandidaten = _regel_kandidaten(text)
+    # Werte hinter Sach-Etiketten (Beruf: Polier) sind nirgends ein Name — außer hinter Herr/Frau
+    sachwerte = _sachwerte(text)
+
+    def sachwert(k) -> bool:
+        return (k["text"].casefold() in sachwerte
+                and not _VORHER_ANREDE_RE.search(text[max(0, k["start"] - 12):k["start"]]))
+
+    if sachwerte:
+        kandidaten = [k for k in kandidaten if not sachwert(k)]
     nlp = lade_ner()
     if nlp is not None and text.strip():
         spannen = _ner_spannen(nlp, text) | _ner_kurzzeilen(nlp, text)
-        if _hat_versalien(text):
-            normal = _titelform(text)
-            spannen |= _ner_spannen(nlp, normal) | _ner_kurzzeilen(nlp, normal)
+        spannen |= _ner_versalien_zeilen(nlp, text)
         for start, ende in sorted(_an_umbruechen_teilen(text, spannen)):
             if not _kandidat(kandidaten, text, start, ende):
                 continue
             k = kandidaten[-1]
+            if sachwerte and sachwert(k):
+                kandidaten.pop()
+                continue
             if " " in k["text"]:
                 continue
             m = _KOMMA_VORNAME_RE.match(text, k["ende"])
-            if m and _plausibel(text, m.start(1), m.end(1)) and m.group(1).lower() not in _NAMENSENDE:
+            if (m and _plausibel(text, m.start(1), m.end(1)) and m.group(1).lower() not in _NAMENSENDE
+                    and not _VORHER_ANREDE_RE.search(text[max(0, k["start"] - 12):k["start"]])):
+                # (hinter "Frau Krüger," beginnt ein Satz, keine Nachname-Vorname-Folge)
                 voll = text[k["start"]:m.end(1)]
                 kandidaten.append({"text": voll, "start": k["start"], "ende": m.end(1), "gruppe": voll})
                 kandidaten.append({"text": m.group(1), "start": m.start(1), "ende": m.end(1), "gruppe": voll})
