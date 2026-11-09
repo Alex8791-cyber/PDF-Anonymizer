@@ -1064,7 +1064,9 @@ def test_versal_eszett_und_alle_schreibweisen(tmp_path):
                                              "der Großteil bleibt, groß auch."], fontname="F0",
                     fontfile=str(SCHRIFT_ESZETT))
     e = schwaerze_pdf(pdf, [fund("Groß")], ocr=FakeDienst())
-    text = volltext(e["ausgabe"])
+    # Mit Windows-Schriften (Arial, Segoe UI) liefert die Textebene geschützte Leerzeichen statt normaler;
+    # angeglichen, damit die Prüfungen unten auf beiden Systemen dasselbe bedeuten (auch "Frau Groß" not in …)
+    text = volltext(e["ausgabe"]).replace("\xa0", " ")
     assert "GROẞ" not in text and "GROSS" not in text and "Frau Groß" not in text
     assert "Großteil" in text and "groß auch" in text and e["reste"] == []
 
