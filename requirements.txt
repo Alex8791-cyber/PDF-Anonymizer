@@ -1,0 +1,14 @@
+# PDF-Anonymisierer – Laufzeitabhängigkeiten
+#
+# Installation (immer mit --only-binary, damit pip nie einen Quellbau startet):
+#   python -m pip install --only-binary=:all: -r requirements.txt
+#
+# Bereichs-Pins statt exakter Versionen: PyMuPDF liefert für Windows-ARM64 und
+# 32-Bit nur bis 1.28.x fertige Wheels, x64 bekommt die aktuelle 2.x-Version.
+pymupdf>=1.24,<3
+spacy>=3.8,<3.9
+tkinterdnd2>=0.4
+
+# Deutsches Sprachmodell für die Namenserkennung – passend zu spaCy 3.8.x,
+# als fertiges Wheel direkt von GitHub (kein "spacy download" nötig).
+de_core_news_md @ https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl

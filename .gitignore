@@ -9,3 +9,4 @@ dist/
 .venv/
 venv/
 .claude/
+.python_pfad.txt
