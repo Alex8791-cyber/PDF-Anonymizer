@@ -72,6 +72,22 @@ def pumpe(root, bedingung=None, timeout=20.0) -> bool:
         time.sleep(0.01)
 
 
+def zellenbox(app, eintrag, spalte, timeout=3.0):
+    """Liefert die Zellenbox (x, y, b, h) eines sichtbaren Baumeintrags; wartet, bis Tk sie gezeichnet hat
+    (unter Windows ist die Box direkt nach dem Einfügen noch leer)."""
+    root = app.root
+    app.baum.see(eintrag)
+    ende = time.time() + timeout
+    while True:
+        root.update()
+        box = app.baum.bbox(eintrag, spalte)
+        if box:
+            return box
+        if time.time() > ende:
+            raise AssertionError(f"Zellenbox von {eintrag!r}/{spalte} bleibt leer")
+        time.sleep(0.02)
+
+
 def starte_lauf(app, aktion, timeout=30.0):
     """Startet einen Lauf (aktion = app.analysieren / app.schwaerzen) und wartet auf sein Ende."""
     vorher = app.laeufe_beendet
@@ -446,14 +462,14 @@ def test_einfachklick_schaltet_doppelklick_auf_kopf_und_dreieck_nicht(app, umgeb
     kinder = app.baum.get_children(eltern)
 
     # Einfachklick in die Häkchen-Spalte eines Funds schaltet genau diesen Fund um
-    x, y, b, h = app.baum.bbox(kinder[1], "#0")
+    x, y, b, h = zellenbox(app, kinder[1], "#0")
     klick(app.baum, x + b // 2, y + h // 2)
     assert app._zustand(kinder[1]) == "aus" and app._zustand(kinder[0]) == "an"
     assert app._zustand(eltern) == "teil"
     assert app.baum.item(kinder[1], "text") == gui.HAKEN["aus"]
 
     # Klick in eine andere Spalte (Gefundener Text) schaltet nichts
-    x2, y2, b2, h2 = app.baum.bbox(kinder[0], "text")
+    x2, y2, b2, h2 = zellenbox(app, kinder[0], "text")
     klick(app.baum, x2 + 5, y2 + h2 // 2)
     assert app._zustand(kinder[0]) == "an"
 
@@ -463,7 +479,7 @@ def test_einfachklick_schaltet_doppelklick_auf_kopf_und_dreieck_nicht(app, umgeb
     assert [app._zustand(k) for k in kinder] == ["an", "aus", "an"]
 
     # Doppelklick auf den Dateinamen: wählt die Datei aus, klappt nichts zu und schaltet nichts
-    xe, ye, be, he = app.baum.bbox(eltern, "#0")
+    xe, ye, be, he = zellenbox(app, eltern, "#0")
     klick(app.baum, xe + be - 10, ye + he // 2, anzahl=2)
     assert app.baum.item(eltern, "open") in (True, 1, "true")
     assert [app._zustand(k) for k in kinder] == ["an", "aus", "an"]
