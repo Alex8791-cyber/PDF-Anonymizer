@@ -597,10 +597,15 @@ class AnonymisiererApp:
         self.ordner_knopf = self._knopf(knoepfe, "Ergebnisordner öffnen", self.ergebnisordner_oeffnen, True)
         self.ordner_knopf.pack(side="left", padx=(8, 0))
         self.ordner_knopf.config(state="disabled")
-        self.warn_label = tk.Label(knoepfe, text="", font=self.f_fett, bg=FARBE_KARTE, fg=FARBE_WARNUNG)
+        # Fortschritt und Warnzähler in eigener Zeile: in der Knopfzeile bekam der Balken bei breiten
+        # Systemschriften (z. B. DejaVu Sans, 150 % Skalierung) keinen Platz mehr und verschwand.
+        fortschritt_zeile = tk.Frame(leiste, bg=FARBE_KARTE)
+        fortschritt_zeile.pack(side="top", fill="x", pady=(4, 0))
+        self.warn_label = tk.Label(fortschritt_zeile, text="", font=self.f_fett, bg=FARBE_KARTE,
+                                   fg=FARBE_WARNUNG)
         self.warn_label.pack(side="right", padx=(8, 0))
-        self.fortschritt = ttk.Progressbar(knoepfe, mode="determinate")
-        self.fortschritt.pack(side="left", fill="x", expand=True, padx=(12, 0))
+        self.fortschritt = ttk.Progressbar(fortschritt_zeile, mode="determinate")
+        self.fortschritt.pack(side="left", fill="x", expand=True)
 
     def _baue_protokoll(self, eltern):
         rahmen = tk.Frame(eltern, bg=FARBE_KARTE, padx=8, pady=4,

@@ -81,14 +81,14 @@ jobs:
         timeout-minutes: 25
         env:
           PDF_ANONYMISIERER_SCREENSHOTS: ${{ runner.temp }}/screenshots
-        run: xvfb-run -a -s "-screen 0 1920x1080x24" python -W ignore -m pytest -q -rs tests/
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" python -W ignore -m pytest -q -rs --timeout=300 --timeout-method=thread --durations=15 tests/
 
       - name: Tests (Windows)
         if: runner.os == 'Windows'
         timeout-minutes: 25
         env:
           PDF_ANONYMISIERER_SCREENSHOTS: ${{ runner.temp }}/screenshots
-        run: python -W ignore -m pytest -q -rs tests/
+        run: python -W ignore -m pytest -v -rs --timeout=300 --timeout-method=thread --durations=15 tests/
 
       - name: Layout-Screenshots sichern
         if: always()
