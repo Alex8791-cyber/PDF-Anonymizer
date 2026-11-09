@@ -413,6 +413,17 @@ def tesseract_cli() -> str | None:
     return shutil.which("tesseract")
 
 
+def cli_umgebung() -> dict:
+    """Umgebung für die Tesseract-Kommandozeile: nur EIN OpenMP-Thread (setdefault – ein Aufrufer kann einen
+    anderen Wert vorgeben). Mit mehreren Threads warten diese auf ausgelasteten Rechnern (parallele Läufe,
+    CI-Runner mit 2-4 Kernen) aktiv aufeinander: eine 300-dpi-Seite brauchte dann Minuten statt Sekunden, lief
+    in den Timeout, und die zweite Leseart fehlte still. Die OCR des Programms (in PyMuPDF eingebaut, ohne
+    OpenMP) ist davon nicht betroffen – die gemessene Programm-Laufzeit ändert sich nicht."""
+    umgebung = dict(os.environ)
+    umgebung.setdefault("OMP_THREAD_LIMIT", "1")
+    return umgebung
+
+
 def _cli_tessdata() -> str | None:
     for kandidat in (os.environ.get("BENCHMARK_TESSDATA"), "/usr/share/tesseract-ocr/5/tessdata",
                      "/usr/share/tesseract-ocr/4.00/tessdata", "/usr/share/tessdata"):
@@ -434,7 +445,8 @@ def ocr_cli(page, winkel: int, arbeitsordner: Path) -> str:
     if td:
         befehl[1:1] = ["--tessdata-dir", td]
     try:
-        aus = subprocess.run(befehl, capture_output=True, text=True, timeout=300, errors="replace")
+        aus = subprocess.run(befehl, capture_output=True, text=True, timeout=300, errors="replace",
+                             env=cli_umgebung())
         return aus.stdout
     except Exception:
         return ""
@@ -1165,7 +1177,7 @@ def _umgebung(pipeline: Pipeline, cli_ocr: bool) -> dict:
     if cli_ocr and prog:
         try:
             u["tesseract_cli"] = subprocess.run([prog, "--version"], capture_output=True, text=True,
-                                                timeout=20).stdout.split("\n")[0]
+                                                timeout=20, env=cli_umgebung()).stdout.split("\n")[0]
         except Exception:
             u["tesseract_cli"] = "vorhanden"
     else:

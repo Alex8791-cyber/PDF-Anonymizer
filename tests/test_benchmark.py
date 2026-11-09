@@ -227,3 +227,30 @@ def test_restrisiko_kennzahlen_aus_dokumenten():
     v = bewertung.verdacht_serialisieren(Verdacht(0, 1, 5, "Text", "Grund", [fitz.Rect(1, 2, 3, 4)]))
     assert v == {"seite": 0, "start": 1, "ende": 5, "text": "Text", "grund": "Grund", "rechtecke": [[1.0, 2.0, 3.0, 4.0]]}
     json.dumps(v)
+
+
+def test_tesseract_kommandozeile_mit_einem_openmp_thread(tmp_path, monkeypatch):
+    """Die zweite Leseart (Tesseract-Kommandozeile) läuft mit OMP_THREAD_LIMIT=1 – auf ausgelasteten Rechnern
+    warten mehrere OpenMP-Threads sonst aktiv aufeinander und die Seite läuft in den Timeout. Ein vom Aufrufer
+    gesetzter Wert bleibt erhalten."""
+    import pymupdf as fitz
+    aufrufe = []
+
+    class Lauf:
+        stdout = "Text"
+
+    def run(befehl, **kwargs):
+        aufrufe.append(kwargs.get("env"))
+        return Lauf()
+
+    monkeypatch.setattr(bewertung, "tesseract_cli", lambda: "tesseract")
+    monkeypatch.setattr(bewertung.subprocess, "run", run)
+    doc = fitz.open()
+    seite = doc.new_page(width=100, height=100)
+    monkeypatch.delenv("OMP_THREAD_LIMIT", raising=False)
+    assert bewertung.ocr_cli(seite, 0, tmp_path) == "Text"
+    monkeypatch.setenv("OMP_THREAD_LIMIT", "3")
+    bewertung.ocr_cli(seite, 0, tmp_path)
+    doc.close()
+    assert [a.get("OMP_THREAD_LIMIT") for a in aufrufe] == ["1", "3"]
+    assert not list(tmp_path.iterdir()), "Seitenbild wird gelöscht"
