@@ -531,6 +531,53 @@ def etiketten(seite) -> list:
 
 
 PII_ARTEN = frozenset({"person", "kennung", "datum_geburt", "adresse", "kontakt"})
+
+
+def etikett_fuer_text(text: str, mit_vertragsdaten: bool = False):
+    """Etikett (Arten, Kategorie, Eintrag) für einen frei stehenden Bezeichner – Formularfeld, zweizeiliger
+    Spaltenkopf ("Versicherungs-" + "nummer") – oder None. Der Bezeichner muss ganz (bzw. zur Hälfte) ein
+    Etikett der Wissensbasis sein; zusammengesetzte Nummern-Wörter ("Bestandsnummer") zählen als Kennung."""
+    if _wissen is None or not text:
+        return None
+    sauber = text.strip().rstrip(":").strip()
+    if not sauber:
+        return None
+    arten = set()
+    eintrag = None
+    for art in ARTEN:
+        try:
+            e = _wissen.index(f"etiketten_{art}").eintrag_fuer(sauber)
+        except Exception:
+            e = None
+        if e is None:
+            try:
+                vorkommen = _wissen.finde(sauber, f"etiketten_{art}")
+            except Exception:
+                vorkommen = []
+            if vorkommen:
+                v = max(vorkommen, key=lambda v: v.ende - v.start)
+                if v.ende - v.start >= 0.5 * len(sauber) and not (art == "vertragsdaten" and v.text.islower()):
+                    e = v.eintrag
+        if e is not None:
+            arten.add(art)
+            eintrag = eintrag or e
+    if not arten and _NUMMERN_WORT_RE.fullmatch(sauber) and not _NUMMERN_FREMD.match(sauber):
+        arten, eintrag = {"kennung"}, sauber
+    if not arten:
+        k = sauber.casefold()
+        if k in NEUTRALE_KOEPFE or k.rstrip(".") in NEUTRALE_KOEPFE:
+            return Etikett(0, 0, frozenset({"neutral"}), None, sauber)
+        return None
+    if arten == {"vertragsdaten"} and not mit_vertragsdaten:
+        return None
+    kategorie = None
+    if "kennung" in arten:
+        kategorie = kennung_kategorie(eintrag)
+        if kategorie is None:
+            return None
+    elif "kontakt" in arten:
+        kategorie = kontakt_kategorie(eintrag)
+    return Etikett(0, 0, frozenset(arten), kategorie, eintrag)
 _NR_VORWORT_RE = re.compile(r"([A-ZÄÖÜ][\wäöüß\-]{3,})[ \t]*\(?[ \t]*$")
 _STRASSENWORT_RE = re.compile(r"(?i)(?:str|straße|strasse|weg|platz|allee|gasse|ring|damm|ufer|haus|zimmer|raum|"
                               r"seite|position|artikel|tarif|produkt|anlage|ziffer|abschnitt|paragraph)$")
@@ -725,6 +772,10 @@ _FIRMEN_TOKEN = frozenset({"gmbh", "ag", "kg", "mbh", "ohg", "gbr", "se", "eg", 
                            "a.g.", "kgaa", "ug", "ltd", "ltd.", "inc", "inc.", "co", "co.", "&", "partg", "aör",
                            "versicherung", "versicherungen", "bank", "sparkasse", "kasse", "gesellschaft",
                            "service", "kundenservice", "team", "abteilung"})
+# Wortenden von Betrieben und Einrichtungen ("Löwen-Apotheke", "Physiotherapie", "Zahnarztpraxis")
+_BETRIEB_ENDUNG_RE = re.compile(r"(?i)(?:apotheke|praxis|klinik|klinikum|zentrum|therapie|labor|institut|"
+                                r"versicherung|kasse|bank|werkstatt|autohaus|service|gmbh|büro|buero|kanzlei|"
+                                r"handel|bäckerei|metzgerei|gruppe|verwaltung)$")
 _NAME_TOKEN_RE = re.compile(r"[^\W\d_][\w'’]*(?:\.?-[\w'’]+|\.[\w'’]+)*\.?")
 
 
@@ -896,8 +947,9 @@ def namen_spanne(text: str, pos: int, grenze: int, komma: bool = True, max_woert
                 return None
         except Exception:
             pass
-    if any(t.casefold().strip(".,") in _FIRMEN_TOKEN for t in spanne.split()):
-        return None
+    if any(t.casefold().strip(".,") in _FIRMEN_TOKEN or _BETRIEB_ENDUNG_RE.search(t.strip(".,"))
+           for t in spanne.split()):
+        return None                                  # "Löwen-Apotheke", "Müller GmbH": Betrieb, keine Person
     bekannt = any(wort_bekannter_name(text[a:b]) for a, b, _ in namen)
     if len(woerter) == 1 and spanne.isupper() and len(spanne) <= 3 and not bekannt:
         return None                                  # "ERS", "PKV": Kürzel oder OCR-Rest, kein Name
@@ -977,8 +1029,19 @@ def strasse_spanne(text: str, pos: int, grenze: int):
     return s, e
 
 
+# Ortszusatz ohne Leerzeichen hinter dem Ortsnamen: "Weiden i.d.OPf.", "Lauf a.d.Pegnitz", "Freiburg i. Br."
+ORTSZUSATZ_RE = re.compile(r"[ ](?:[a-zäöü]{1,3}\.[ ]?){1,3}[A-ZÄÖÜ][\wäöüß]*\.?|[ ]?\((?:[A-ZÄÖÜ][\wäöüß.]*[ ]?){1,3}\)")
+
+
+def ort_verlaengern(text: str, ende: int, grenze: int) -> int:
+    """Ende eines Ortsnamens um einen abgekürzten Zusatz verlängern ("Weiden" -> "Weiden i.d.OPf.")."""
+    m = ORTSZUSATZ_RE.match(text, ende, grenze)
+    return m.end() if m else ende
+
+
 def plz_ort_spannen(text: str, start: int, ende: int) -> list:
-    """[(s, e)] von PLZ + Ort im Bereich (Muster der Wissensbasis, Spannen im Text)."""
+    """[(s, e)] von PLZ + Ort im Bereich (Muster der Wissensbasis, Spannen im Text; abgekürzte Ortszusätze
+    wie "i.d.OPf." gehören dazu)."""
     aus = []
     if _muster is None:
         return aus
@@ -990,7 +1053,7 @@ def plz_ort_spannen(text: str, start: int, ende: int) -> list:
             k = teil.find(t)
         if k < 0:
             continue
-        aus.append((start + k, start + k + len(t)))
+        aus.append((start + k, ort_verlaengern(text, start + k + len(t), ende)))
         pos = k + len(t)
     return aus
 
@@ -1033,7 +1096,14 @@ _BIC_RE = re.compile(r"[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?(?![\w])")
 _AUSWEIS_RE = re.compile(r"(?=[A-Z0-9]*\d)[A-Z0-9]{6,12}(?![\w])")
 
 
+NR_VORSATZ_RE = re.compile(r"[ \t]*(?:Nr\.?|NR\.?|No\.?|Nº|Nummer|NUMMER)[ \t]*:?[ \t]*")
+
+
 def _kennungs_wert(text: str, s: int, e: int, kategorie: str, streng: bool) -> list:
+    # "Nr." vor dem Wert gehört zum Etikett ("Versicherungsschein-" / "Nr. KH 0815 4471 2")
+    m = NR_VORSATZ_RE.match(text, s, e)
+    if m and m.end() < e:
+        s = m.end()
     # Kennungsarten mit eigener Form (wenige oder keine Ziffern): Kennzeichen, BIC, Ausweis
     for kat, regel in (("kfz", _KFZ_RE), ("bic", _BIC_RE), ("ausweis", _AUSWEIS_RE)):
         if kategorie == kat:
@@ -1182,6 +1252,8 @@ def _adress_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
     return []
 
 
+_ORT_DATUM_VORN_RE = re.compile(r"[ \t]*[A-ZÄÖÜ][^,\n\t]{1,40},[ \t]*(?:den[ \t]+)?\d{1,2}\.[ ]?(?:\d{1,2}\.|[A-ZÄÖÜa-zäöü]{3,9}\.?)"
+                                r"[ ]?(?:19|20)?\d{2}[ \t]*,?[ \t]*")
 _ORG_ROLLEN_RE = re.compile(r"(?i)^(?:arbeitgeber|auftraggeber|gläubiger|glaubiger|firma|name ?/ ?firma|"
                             r"firma ?/ ?name|absender|empfänger|zahlungsempfänger|aussteller|verwalter|"
                             r"hausverwalter|vermieter)")
@@ -1194,8 +1266,12 @@ def _namens_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
     org = bool(_ORG_ROLLEN_RE.match(et.eintrag))
     aus = []
     pos = i
+    # "Unterschrift: Nürnberg, 14.06.2025, Giovanni Esposito": Ort und Datum vor dem Namen überspringen
+    m = _ORT_DATUM_VORN_RE.match(text, pos, e)
+    if m:
+        pos = m.end()
     while pos < e:
-        sp = namen_spanne(text, pos, e, komma=not liste)
+        sp = namen_spanne(text, pos, e, komma=not (liste or org))
         if sp is None:
             if not liste:
                 break
@@ -1279,10 +1355,26 @@ def _etikett_am_ende(seite, lg: Lage, et: Etikett) -> bool:
 
 
 def _mit_doppelpunkt(seite, et: Etikett) -> bool:
-    """Folgt dem Etikett ein Doppelpunkt (Formularzeile "Name: ____")? Dann steht der Wert rechts,
-    die Zeile darunter ist das nächste Feld."""
+    """Folgt dem Etikett ein Doppelpunkt mit Platz für den Wert in derselben Zeile (Formularzeile
+    "Name: ____")? Dann steht der Wert rechts, die Zeile darunter ist das nächste Feld. Endet die Zeile mit
+    dem Doppelpunkt ("Vorsitz Aufsichtsrat:" über dem Namen), darf der Wert darunter stehen."""
     m = re.match(r"[ \t]*(?:\([^()\n]{1,25}\)[ \t]*)?:", seite.text[et.ende:et.ende + 30])
-    return m is not None
+    if m is None:
+        return False
+    zeile = seite.zeile_von(et.start)
+    rest = seite.text[et.ende + m.end():zeile.ende] if zeile is not None else ""
+    return bool(rest.strip(" \t_.…")) or "_" in rest or "…" in rest or ".." in rest
+
+
+_WENDUNG_DAVOR_RE = re.compile(r"(?<![\w])(?:zum|zur|zu|des|der|dem|den|vom|von|mit|für|fur|gegen|über|ueber|"
+                               r"bei|ohne|als|wie|und|oder|eines|einer|eines)[ \t]+$")
+
+
+def _in_wendung(text: str, lg: Lage, et: Etikett) -> bool:
+    """Steht ein Personen-Etikett mitten in einer Wendung ("Verhältnis zum VN", "Angaben des Fahrers")?"""
+    zelle = lg.zelle_bei(et.start)
+    vorn = text[zelle.start if zelle else max(0, et.start - 30):et.start]
+    return bool(_WENDUNG_DAVOR_RE.search(vorn))
 
 
 def _etikett_am_zellanfang(seite, lg: Lage, et: Etikett) -> bool:
@@ -1399,6 +1491,8 @@ def etikett_wert(dok, kontext):
         for idx, et in enumerate(alle):
             if not et.arten & PII_ARTEN:
                 continue
+            if et.arten <= {"person"} and _in_wendung(seite.text, lg, et):
+                continue                              # "Verhältnis zum VN: Mitbewohner" ist kein Personenfeld
             werte = []
             bereich = wert_bereich_rechts(seite, lg, et, alle, idx)
             if bereich is not None:

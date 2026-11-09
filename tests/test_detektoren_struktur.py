@@ -197,6 +197,18 @@ def test_etikett_wert_gegenproben(text):
     assert _text(text, "struktur.etikett_wert") == []
 
 
+def test_eq09_umbrochenes_etikett_ueber_tabellenzellen():
+    """Gutachten EQ-09 (b): Kopfzelle "Versicherungsschein-", der Wert "Nr. KH 0815 4471 2" steht in der Zelle
+    darunter; "Verhältnis zum VN: Mitbewohner" ist kein Personenfeld."""
+    from pathlib import Path
+    dok = _modell(Path(__file__).parent / "daten" / "c_schadenmeldung.pdf")
+    werte = set(_treffer(dok, "struktur.tabelle")) | set(_treffer(dok, "struktur.etikett_wert"))
+    assert ("vertrag", "KH 0815 4471 2") in werte
+    assert ("namen", "Adeyemi, Olumide") in werte
+    assert ("telefon", "0176 / 23 45 67 89") in werte
+    assert not any(w == "Mitbewohner" for _, w in werte)
+
+
 def test_etikett_wert_kennung_in_folgezeile():
     text = "Kündigung meiner Privathaftpflichtversicherung, Versicherungsschein-Nr.\nHR-2022-251237"
     assert ("vertrag", "HR-2022-251237") in _text(text, "struktur.etikett_wert")
@@ -312,6 +324,33 @@ def test_tabelle_kopf_entscheidet_ueber_daten(tmp_path):
     assert not any("Person" in w or "Kind" in w for w in texte), "Rollen sind keine Namen"
 
 
+def test_tabelle_kopf_ueber_zwei_zeilen_in_versalien(tmp_path):
+    """Spaltenköpfe über zwei Zeilen ("PERSONAL-" / "NUMMER", "GEBURTS-" / "DATUM") und in Versalien."""
+    inhalt = [(72, 300, "MITARBEITER"), (200, 300, "PERSONAL-"), (300, 300, "GEBURTS-"), (400, 300, "ABTEILUNG"),
+              (200, 309, "NUMMER"), (300, 309, "DATUM"),
+              (72, 324, "Weber, Jonas"), (200, 324, "P-004711"), (300, 324, "03.04.1981"), (400, 324, "Vertrieb"),
+              (72, 337, "Kaya, Elif"), (200, 337, "P-008150"), (300, 337, "17.11.1990"), (400, 337, "Schaden")]
+    dok = _modell(_pdf(tmp_path / "personal.pdf", [inhalt]))
+    treffer = _treffer(dok, "struktur.tabelle")
+    assert ("vertrag", "P-004711") in treffer and ("vertrag", "P-008150") in treffer
+    assert ("geburt", "03.04.1981") in treffer and ("geburt", "17.11.1990") in treffer
+    assert ("namen", "Weber, Jonas") in treffer and ("namen", "Kaya, Elif") in treffer
+    assert not any(w in ("Vertrieb", "Schaden") for _, w in treffer)
+
+
+def test_tabelle_leistungserbringer(tmp_path):
+    """Leistungserbringer-Spalte: Ärzte und Namen in Firmenbezeichnungen sind Personen, Apotheken nicht."""
+    inhalt = [(72, 300, "Person"), (130, 300, "Datum"), (200, 300, "Leistungserbringer"), (380, 300, "Betrag"),
+              (72, 314, "Ida"), (130, 314, "12.09.2025"), (200, 314, "Physiotherapie Tran"), (380, 314, "847,38"),
+              (72, 327, "Ida"), (130, 327, "13.08.2025"), (200, 327, "Dr. med. Erika Weber"), (380, 327, "1252,86"),
+              (72, 340, "Ida"), (130, 340, "20.08.2025"), (200, 340, "Löwen-Apotheke"), (380, 340, "1625,27")]
+    dok = _modell(_pdf(tmp_path / "leistung.pdf", [inhalt]))
+    namen = _texte(dok, "struktur.tabelle", "namen")
+    assert {"Tran", "Erika Weber", "Ida"} <= namen
+    assert not any("Apotheke" in n or "Physiotherapie" in n for n in namen)
+    assert not _texte(dok, "struktur.tabelle", "geburt"), "Behandlungsdaten sind keine Geburtsdaten"
+
+
 def test_tabelle_endet_vor_formularblock(tmp_path):
     inhalt = [(72, 300, "Name"), (180, 300, "Vorname"), (280, 300, "Geb.-Datum"),
               (72, 314, "Brandt"), (180, 314, "Dennis"), (280, 314, "12.02.1979"),
@@ -395,6 +434,19 @@ def test_muster_ohne_firmenanschriften(tmp_path):
     assert not any("16963" in o for o in orte), "Registernummer ist keine PLZ"
     vorschlaege = getattr(dok, "struktur_vorschlaege", [])
     assert any("Wernigerode" in dok.text[v["start"]:v["ende"]] for v in vorschlaege), "Firmenanschrift vermerkt"
+
+
+@pytest.mark.parametrize("text,erwartet", [
+    ("92637 Weiden i.d.OPf.\t\tBU", ["92637 Weiden i.d.OPf."]),
+    ("91207 Lauf a.d.Pegnitz", ["91207 Lauf a.d.Pegnitz"]),
+    ("95028 Hof", ["95028 Hof"]),
+    ("32423 Minden Versicherungsnummer 12 345678 A 123", ["32423 Minden"]),
+    ("Amtsgericht Freiburg HRB 16963\nVorstand: Anton Schulze", []),
+    ("Sitz: Lübbenau HRB 17205 USt-IdNr. DE469515275", []),
+])
+def test_muster_plzort_fehlgriffe_und_ortszusaetze(text, erwartet):
+    dok = seitenmodell.dokument_aus_text(text)
+    assert [dok.text[t.start:t.ende] for t in _detektor("muster.plzort")(dok, Kontext({"plzort"}))] == erwartet
 
 
 def test_adressblock_kunde(tmp_path):
@@ -497,3 +549,82 @@ def test_lage_schraege_und_zellen():
     roh = [(0, 1, 10, 100 + 0.01 * 10, 20, 110 + 0.01 * 10, z, 10, True) for z in range(4)]
     roh += [(2, 3, 400, 100 + 0.01 * 400, 420, 110 + 0.01 * 400, z, 10, True) for z in range(4)]
     assert abs(st._schraege(roh) - 3.9 / 395) < 1e-6
+
+
+def test_lage_kopfstehender_scan():
+    """Leserichtung 180°: Text läuft nach links, Zeilen nach oben – die Lage dreht zurück."""
+    roh = []
+    for z in range(4):
+        y = 700 - 20 * z
+        roh += [(10 * z, 10 * z + 3, 500, y, 520, y + 10, z, 0, True),
+                (10 * z + 4, 10 * z + 7, 300, y, 320, y + 10, z, 0, True)]
+    assert st._richtung(roh) == 180
+    gedreht = st._drehen(roh[0], 180, 595, 842)
+    assert gedreht[2] == 595 - 520 and gedreht[3] == 842 - 710
+
+
+# ----------------------------------------------------------------------
+# Nummern hinter Substantiven, Kennungsarten, Anrede im Fließtext, c/o, Firmenanschriften
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text,kategorie,wert", [
+    ("Ihre Lebensversicherung Nr. LV-2011-009307 – Ablauf zum 19.12.2025", "vertrag", "LV-2011-009307"),
+    ("Anlage: Kopie Personalausweis (Nr. TLH4PLJCH)", "ausweis", "TLH4PLJCH"),
+    ("BIC:\t\tTTCGDEMNXXX", "bic", "TTCGDEMNXXX"),
+    ("Mandatsreferenz: SEPA816626-520", "mandat", "SEPA816626-520"),
+    ("Sozialversicherungsnummer:\t\t03 241061 C 515", "svnr", "03 241061 C 515"),
+])
+def test_etikett_wert_kennungsarten(text, kategorie, wert):
+    assert (kategorie, wert) in _text(text, "struktur.etikett_wert")
+
+
+@pytest.mark.parametrize("text", ["Hauptstraße Nr. 5", "Seite Nr. 12345", "Position Nr. 123456"])
+def test_nr_hinter_strasse_oder_seite_ist_keine_kennung(text):
+    assert _text(text, "struktur.etikett_wert") == []
+
+
+@pytest.mark.parametrize("text,name", [
+    ("Fragen beantwortet Ihnen gern Frau de Vries in unserer Beratungsstelle.", "de Vries"),
+    ("Ihr Berater Herr Ågren ist erreichbar.", "Ågren"),
+    ("die Mutter, Frau Yildirim, leidet an Asthma.", "Yildirim"),
+])
+def test_anrede_im_fliesstext(text, name):
+    assert ("namen", name) in _text(text, "struktur.anrede_gruss")
+
+
+@pytest.mark.parametrize("text", ["Frau Doktor hat angerufen.", "Sehr geehrter Herr Müller, Max Müller ist versichert."])
+def test_anrede_im_fliesstext_gegenproben(text):
+    namen = {w for _, w in _text(text, "struktur.anrede_gruss")}
+    assert "Doktor" not in namen and "Müller, Max Müller" not in namen
+
+
+def test_c_o_anschrift_bleibt_personenanschrift():
+    text = "Schmidt Finanz GmbH\nc/o Thomas Schmidt\nHauptstraße 12a\n60311 Frankfurt am Main\n"
+    dok = seitenmodell.dokument_aus_text(text)
+    assert "60311 Frankfurt am Main" in {dok.text[t.start:t.ende] for t in
+                                         _detektor("muster.plzort")(dok, Kontext(ALLE))}
+
+
+@pytest.mark.parametrize("text,anschrift,vorschlag", [
+    ("Rentenauskunft\nFrau Anna Berg, geboren am 02.09.1983\n"
+     "Deutsche Rentenversicherung Nordbayern, Postfach 10 11 12, 90401 Nürnberg\n", "90401 Nürnberg", False),
+    ("Thomas Schmidt\nVersicherungsmakler\nSchmidt Finanz GmbH · Hauptstraße 12a · 60311 Frankfurt am Main\n"
+     "Tel.: 069 123456-0\n", "60311 Frankfurt am Main", True),
+])
+def test_firmenanschrift_bleibt_und_wird_vorgeschlagen(text, anschrift, vorschlag):
+    """Vertragsänderung Phase 3 (EQ-15): Anschriften von Behörden und Firmen werden nicht geschwärzt.
+    Unbekannte Firmen (nicht in der Erlaubnisliste) werden als Vorschlag vermerkt (dok.struktur_vorschlaege),
+    damit die Oberfläche sie anbieten kann; bekannte Organisationen (Deutsche Rentenversicherung) nicht."""
+    dok = seitenmodell.dokument_aus_text(text)
+    gefunden = {dok.text[t.start:t.ende] for t in _detektor("muster.plzort")(dok, Kontext(ALLE))}
+    assert anschrift not in gefunden
+    vorgeschlagen = {dok.text[v["start"]:v["ende"]] for v in getattr(dok, "struktur_vorschlaege", [])}
+    assert (anschrift in vorgeschlagen) is vorschlag
+
+
+def test_tabelle_kundenspalte_braucht_namensbeleg():
+    """"Berlin, Hamburg" in der Kundenspalte ist kein Name (kein bekannter Vor- oder Nachname in der Reihe)."""
+    text = ("Nr. Kunde (Name, Vorname)\t\tgeb.\t\tOrt\n"
+            "1 Hahn, Annika\t\t14.03.1961\t\tBerlin\n"
+            "2 Berlin, Hamburg\t\t01.01.1970\t\tKöln\n")
+    namen = {w for k, w in _text(text, "struktur.tabelle") if k == "namen"}
+    assert "Hahn, Annika" in namen and "Berlin, Hamburg" not in namen

@@ -31,7 +31,7 @@ import functools
 import re
 
 from . import REGISTER, Treffer, detektor, registrieren
-from .struktur import (lage, namen_spanne, plz_ort_spannen, strasse_spanne, _muster, _wissen)
+from .struktur import (lage, namen_spanne, ort_verlaengern, plz_ort_spannen, strasse_spanne, _muster, _wissen)
 
 MM = 72 / 25.4
 
@@ -260,13 +260,16 @@ def _plz_ort_bereinigen(dok, t: Treffer):
             ende = rest_start + worte[behalten - 1].end()
             break
         if behalten == 0 and "\n" in zwischen and _ist_etikett_oder_allerwelt(kern):
-            return None
-        if _ist_etikett_oder_allerwelt(kern) and not _ortszusatz(kern):
+            return None                               # "16963\nVorstand": Ort in der Folgezeile ist ein Wort
+        if _ist_etikett(kern) and not _ortszusatz(kern):
             if behalten == 0:
-                return None
+                return None                           # "17205 USt-IdNr"
             ende = rest_start + worte[behalten - 1].end()
-            break
+            break                                     # "32423 Minden Versicherungsnummer"
         behalten += 1
+    if ende == t.ende:
+        zeile_ende = text.find("\n", ende)
+        ende = ort_verlaengern(text, ende, zeile_ende if zeile_ende >= 0 else len(text))
     if ende != t.ende:
         return t._replace(ende=ende)
     return t
@@ -282,20 +285,30 @@ def _ortszusatz(wort: str) -> bool:
 
 @functools.lru_cache(maxsize=16384)
 def _ist_etikett_oder_allerwelt(wort: str) -> bool:
+    if _ist_etikett(wort):
+        return True
+    if _wissen is None:
+        return False
+    titel = wort.title() if wort.isupper() else wort
+    try:
+        return _wissen.ist_allerweltswort(titel) and not _wissen.ist_nachname(titel)
+    except Exception:
+        return False
+
+
+@functools.lru_cache(maxsize=16384)
+def _ist_etikett(wort: str) -> bool:
+    """Feldbezeichner (Personen, Kennungen, Geburt, Kontakt, Vertragsdaten) – kein Ortsname."""
     if not wort or not wort[0].isalpha():
         return True
     if _wissen is None:
         return False
     titel = wort.title() if wort.isupper() else wort
     try:
-        for art in ("person", "kennung", "datum_geburt", "kontakt", "vertragsdaten"):
-            if _wissen.index(f"etiketten_{art}").eintrag_fuer(titel):
-                return True
-        if _wissen.ist_allerweltswort(titel) and not _wissen.ist_nachname(titel):
-            return True
+        return any(_wissen.index(f"etiketten_{art}").eintrag_fuer(titel)
+                   for art in ("person", "kennung", "datum_geburt", "kontakt", "vertragsdaten"))
     except Exception:
         return False
-    return False
 
 
 def firmen_filter(dok, treffer: list, kategorie: str) -> list:

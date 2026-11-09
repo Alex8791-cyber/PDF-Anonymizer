@@ -60,6 +60,8 @@ Arbeitnehmer/in
 Arbeitnehmerin
 Arbeitnehmername
 Arzt
+Arzt/Ärztin
+Arzt/Therapeut
 Ärztin
 Aufsichtsrat
 Aufsichtsratsvorsitzende
@@ -87,6 +89,7 @@ Begünstigter
 behandelnde Ärzte
 behandelnde Ärztin
 behandelnder Arzt
+Behandelnder Arzt/Therapeut
 Behandler
 Behandler(in)
 Behandler/-in
@@ -356,6 +359,7 @@ Leistungsempfänger(in)
 Leistungsempfänger/-in
 Leistungsempfänger/in
 Leistungsempfängerin
+Leistungserbringer
 Mädchenname
 Makler
 Makler(in)
@@ -480,6 +484,10 @@ Radfahrer(in)
 Radfahrer/-in
 Radfahrer/in
 Radfahrerin
+Rechnungsaussteller
+Rechnungsausstellerin
+Rechnungssteller
+Rechnungsstellerin
 Rechtsanwalt
 Rechtsanwältin
 Reisende
@@ -544,6 +552,7 @@ Testamentsvollstreckerin
 Therapeut
 Therapeut(in)
 Therapeut/-in
+Therapeut/Arzt
 Therapeut/in
 Therapeutin
 Tierhalter

@@ -26,7 +26,7 @@ from typing import NamedTuple
 
 from . import Treffer, detektor
 from .struktur import (_ORG_ROLLEN_RE, ALLE_KATEGORIEN, PARTIKEL, PII_ARTEN, SICHERHEIT_SPALTE, Lage, _wissen,
-                       datums_spannen, etiketten,
+                       NR_VORSATZ_RE, datums_spannen, etikett_fuer_text, etiketten,
                        geburtsdatum_plausibel, ist_kennungsform, kennung_spanne, lage, muster_spannen,
                        namen_spanne, ort_spanne, plz_ort_spannen, strasse_spanne, ueberlappung, _muster,
                        _vergleichsform)
@@ -156,6 +156,55 @@ def _kopf_spalten(text: str, reihe: Reihe, ets: list, starts: list, breite: floa
             spalten.append(Spalte(x0, x1, frozenset(), None, inhalt))
         else:
             spalten.append(Spalte(x0, x1, et.arten, et.kategorie, et.eintrag))
+    return spalten
+
+
+def _kopf_zweizeilig(text: str, r1: Reihe, r2: Reihe, h: float, breite: float) -> list | None:
+    """Kopf über zwei Zeilen ("Versicherungs-" / "nummer", "Geburts-" / "datum", "Kunden-" / "Nr."):
+    Zellen beider Reihen werden je Spalte verbunden und als Ganzes in den Etiketten nachgeschlagen."""
+    if r2.y0 - r1.y1 > 0.9 * h:
+        return None
+    spalten_roh: list = []                           # [x0, x1, [Texte]]
+    for zelle in sorted(list(r1.zellen) + list(r2.zellen), key=lambda z: (z.y0, z.x0)):
+        inhalt = text[zelle.start:zelle.ende]
+        if _WERTARTIG_RE.search(inhalt) or len(inhalt.split()) > 4:
+            return None
+        for s in spalten_roh:
+            if ueberlappung(zelle.x0, zelle.x1, s[0], s[1]) > 0:
+                s[0], s[1] = min(s[0], zelle.x0), max(s[1], zelle.x1)
+                s[2].append(inhalt)
+                break
+        else:
+            spalten_roh.append([zelle.x0, zelle.x1, [inhalt]])
+    if len(spalten_roh) < 2 or not any(len(s[2]) > 1 for s in spalten_roh):
+        return None
+    spalten = []
+    for x0, x1, texte in sorted(spalten_roh):
+        # Lesarten: Trennstrich entfällt ("Geburts-" + "datum") oder bleibt ("Kunden-" + "Nr.")
+        lesarten = [texte[0]]
+        for t in texte[1:]:
+            neu = []
+            for v in lesarten:
+                if v.endswith("-"):
+                    neu += [v[:-1] + t, v + t]
+                else:
+                    neu.append(v + " " + t)
+            lesarten = neu
+        et, verbunden = None, lesarten[0]
+        for v in lesarten:
+            et = etikett_fuer_text(v, mit_vertragsdaten=True)
+            if et is not None:
+                verbunden = v
+                break
+        if et is None:
+            spalten.append(Spalte(x0, x1, frozenset(), None, verbunden))
+        else:
+            spalten.append(Spalte(x0, x1, et.arten, et.kategorie, et.eintrag))
+    mit_etikett = [sp for sp in spalten if sp.arten]
+    if len(mit_etikett) < 2 or not any(sp.arten & PII_ARTEN for sp in spalten):
+        return None
+    if any(b.x0 - a.x1 > 0.33 * breite for a, b in zip(spalten, spalten[1:])):
+        return None
     return spalten
 
 
@@ -301,6 +350,9 @@ def _wert_fuer_spalte(text: str, s: int, e: int, sp: Spalte) -> list:
 # ----------------------------------------------------------------------
 # Werte je Spaltenart
 # ----------------------------------------------------------------------
+_EINRICHTUNG_RE = re.compile(r"(?i)(?:krankenhaus|klinik|klinikum|kliniken|hospital|spital|stift|kirche|schule|apotheke|"
+                             r"heim|zentrum|institut|universität|hochschule|kita|kindergarten|sanatorium|reha|"
+                             r"(?<![\w])st\.|(?<![\w])sankt(?![\w]))")
 _LAUFNUMMER_RE = re.compile(r"[ \t]*(?:\d{1,4}[.)]?|[-–•*])[ \t]+")
 
 
@@ -310,8 +362,18 @@ def _namen(text: str, s: int, e: int, nur_bekannt: bool = False) -> list:
         s = m.end()
     aus = []
     pos = s
+    sp = namen_spanne(text, pos, e)
+    if sp is None and not _EINRICHTUNG_RE.search(text[s:e]):
+        # Betriebswort vor dem Namen ("Physiotherapie Tran", "Praxis Dr. Haidari"): ein bis zwei Wörter überspringen;
+        # Einrichtungen ("Krankenhaus St. Ansgar", "Apotheke am Markt") sind keine Personen
+        for m in list(re.finditer(r"[ \t]+", text[s:e]))[:2]:
+            kandidat = namen_spanne(text, s + m.end(), e)
+            if kandidat is not None and kandidat.bekannt:
+                sp, pos = kandidat, kandidat.start
+                break
     while pos < e:
-        sp = namen_spanne(text, pos, e)
+        if sp is None:
+            sp = namen_spanne(text, pos, e)
         if sp is None or (nur_bekannt and not sp.bekannt and not sp.komma):
             break
         aus.append((sp.start, sp.ende, "namen", text[sp.start:sp.ende] if sp.woerter >= 2 else None))
@@ -320,6 +382,7 @@ def _namen(text: str, s: int, e: int, nur_bekannt: bool = False) -> list:
         if not m or m.end() == 0:
             break
         pos = sp.ende + m.end()
+        sp = None
     return aus
 
 
@@ -343,6 +406,9 @@ def _kennung(text: str, s: int, e: int, kategorie: str | None) -> list:
     i = s
     while i < e and text[i] in " \t":
         i += 1
+    m = NR_VORSATZ_RE.match(text, i, e)
+    if m and m.end() < e:
+        i = m.end()                                   # "Nr. KH 0815 4471 2" unter "Versicherungsschein-"
     sp = kennung_spanne(text, i, e, 3)
     if sp is None:
         return []
@@ -428,13 +494,21 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
                     roh.extend(kandidaten)
         for nr, a, b, kat, gruppe, reihe in roh:
             treffer.append((nr, a, b, kat, gruppe, reihe, idx))
-    # Namen brauchen einen Beleg je Reihe: ein bekannter Vor- oder Nachname in einer Personenzelle der Reihe
-    # ("von Schönau" neben "Silke"); "Berlin, Hamburg" in der Kundenspalte ist kein Name
-    belegt_reihen = set()
-    for t in treffer:
+    # Namen brauchen einen Beleg: ein bekannter Vor- oder Nachname in der Zelle – oder, bei getrennten Spalten
+    # "Name" und "Vorname", in der Partnerzelle derselben Reihe ("von Schönau" neben "Silke").
+    # "Berlin, Hamburg" in der Kundenspalte ist kein Name.
+    paar_idx = {i for i, sp in enumerate(tab.spalten) if "person" in sp.arten
+                and _vergleichsform(sp.eintrag) in ("name", "nachname", "familienname", "vorname", "vornamen",
+                                                    "rufname", "first name", "given name", "last name", "surname")}
+    belegt = set()
+    belegt_paar = set()
+    for k, t in enumerate(treffer):
         if t[3] == "namen" and _namensbeleg(dok.seiten[t[0]].text[t[1]:t[2]]):
-            belegt_reihen.add(t[5])
-    treffer = [t for t in treffer if t[3] != "namen" or t[5] in belegt_reihen]
+            belegt.add(k)
+            if t[6] in paar_idx:
+                belegt_paar.add(t[5])
+    treffer = [t for k, t in enumerate(treffer)
+               if t[3] != "namen" or k in belegt or (t[6] in paar_idx and t[5] in belegt_paar)]
     # Personen über Spalten "Name" + "Vorname" derselben Reihe gruppieren
     if vorname_idx:
         je_reihe: dict = {}
@@ -505,11 +579,15 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
         offen = tab if tab is not None and _bis_seitenende(lg, tab) else None
     while i < len(reihen):
         spalten = _kopf_spalten(text, reihen[i], ets, starts, breite)
+        kopf_ende = i
+        if spalten is None and i + 1 < len(reihen):
+            spalten = _kopf_zweizeilig(text, reihen[i], reihen[i + 1], h, breite)
+            kopf_ende = i + 1
         if spalten is None:
             i += 1
             continue
-        tab = _Tabelle(spalten, reihen[i])
-        j = _datenreihen(text, reihen, i, tab, h, nr, ist_kopf)
+        tab = _Tabelle(spalten, reihen[kopf_ende])
+        j = _datenreihen(text, reihen, kopf_ende, tab, h, nr, ist_kopf)
         if tab.reihen:
             treffer += _werte_der_tabelle(dok, tab)
             offen = tab if _bis_seitenende(lg, tab) else None

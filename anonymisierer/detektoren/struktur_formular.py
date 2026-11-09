@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 
 from . import Treffer, detektor
-from .struktur import (ALLE_KATEGORIEN, ARTEN, Etikett, _wissen, kennung_kategorie, kontakt_kategorie, werte_lesen)
+from .struktur import ALLE_KATEGORIEN, etikett_fuer_text, werte_lesen
 
 QUELLE = "struktur.formularfeld"
 
@@ -27,40 +27,12 @@ def _feldname_lesbar(name: str) -> str:
 
 
 def _etikett_fuer(text: str):
-    """Etikett-Objekt (Arten, Kategorie, Eintrag) für einen Feldbezeichner oder None."""
-    if _wissen is None or not text:
+    """Etikett-Objekt (Arten, Kategorie, Eintrag) für einen Feldbezeichner oder None (neutrale Köpfe zählen
+    nicht)."""
+    et = etikett_fuer_text(text)
+    if et is None or "neutral" in et.arten:
         return None
-    sauber = text.strip().rstrip(":").strip()
-    arten = set()
-    eintrag = None
-    for art in ARTEN:
-        try:
-            e = _wissen.index(f"etiketten_{art}").eintrag_fuer(sauber)
-        except Exception:
-            e = None
-        if e is None:
-            # längstes Etikett irgendwo im Bezeichner ("Ort (Wohnsitz)", "Ihr Vorname")
-            try:
-                vorkommen = _wissen.finde(sauber, f"etiketten_{art}")
-            except Exception:
-                vorkommen = []
-            if vorkommen:
-                v = max(vorkommen, key=lambda v: v.ende - v.start)
-                if v.ende - v.start >= 0.5 * len(sauber):
-                    e = v.eintrag
-        if e is not None:
-            arten.add(art)
-            eintrag = eintrag or e
-    if not arten or arten == {"vertragsdaten"}:
-        return None
-    kategorie = None
-    if "kennung" in arten:
-        kategorie = kennung_kategorie(eintrag)
-        if kategorie is None:
-            return None
-    elif "kontakt" in arten:
-        kategorie = kontakt_kategorie(eintrag)
-    return Etikett(0, 0, frozenset(arten), kategorie, eintrag)
+    return et
 
 
 def _kamm_datum(wert: str):
