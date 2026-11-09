@@ -280,6 +280,9 @@ def test_seiten_blaettern_und_zoom(app, umgebung, monkeypatch):
     # Das Bild füllt die Breite; unter Windows nimmt die senkrechte Bildlaufleiste nach dem ersten
     # Zeichnen bis zu ~20 px weg, deshalb darf es etwas schmaler sein, aber nie breiter.
     assert -3 <= soll - fenster._bild.width() <= 25
+    # Tasten gehen in Tk an das Fenster mit dem Tastaturfokus; die Vorschau nimmt ihn beim Öffnen selbst
+    app.root.update()
+    assert fenster.fenster.focus_get() is not None, "Vorschau hat nach dem Öffnen keinen Tastaturfokus"
     fenster.fenster.event_generate("<Next>")
     app.root.update()
     assert fenster.seite == 1 and fenster.seiten_label.cget("text") == "Seite 2 / 3"

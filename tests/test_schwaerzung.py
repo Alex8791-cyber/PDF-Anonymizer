@@ -14,7 +14,7 @@ import pytest
 
 import pymupdf as fitz
 
-from conftest import braucht_ocr
+from conftest import braucht_ocr, schrift_mit_zeichen
 from anonymisierer import schwaerzung
 from anonymisierer.ocr import OcrDienst
 from anonymisierer.schwaerzung import WARNUNG_KEIN_TREFFER, schwaerze_pdf
@@ -893,6 +893,7 @@ from anonymisierer.muster import KATEGORIEN  # noqa: E402
 
 OHNE_NAMEN = {k for k, _, _, _, an in KATEGORIEN if an} - {"namen"}
 DEJAVU = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+SCHRIFT_ESZETT = schrift_mit_zeichen("ẞßÄÖÜäöü")   # Linux: DejaVu Sans, Windows: Arial/Segoe UI
 
 
 def _analysiert(pdf, aktive=OHNE_NAMEN, immer=()):
@@ -1052,11 +1053,12 @@ def test_formular_d03_geburtsdatum(tmp_path):
     assert "30.07.1988" not in pdftotext(e["ausgabe"]) and "30.07.1988" not in qdf_rohbytes(e["ausgabe"])
 
 
+@pytest.mark.skipif(SCHRIFT_ESZETT is None, reason="keine installierte Schrift mit Versal-ß (ẞ)")
 def test_versal_eszett_und_alle_schreibweisen(tmp_path):
     """Gutachten S-16/KQ-01: 'Groß' trifft auch 'GROẞ' und 'GROSS'; Versalien und Normalschrift beide weg."""
     pdf = textseite(tmp_path / "gross.pdf", ["Frau GROẞ und Herr GROSS", "Sehr geehrte Frau Groß,",
                                              "der Großteil bleibt, groß auch."], fontname="F0",
-                    fontfile=str(DEJAVU) if DEJAVU.exists() else None)
+                    fontfile=str(SCHRIFT_ESZETT))
     e = schwaerze_pdf(pdf, [fund("Groß")], ocr=FakeDienst())
     text = volltext(e["ausgabe"])
     assert "GROẞ" not in text and "GROSS" not in text and "Frau Groß" not in text

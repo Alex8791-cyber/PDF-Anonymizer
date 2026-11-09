@@ -200,6 +200,7 @@ class VorschauFenster:
         f.update_idletasks()
         self.modus_wechseln(modus, seite=seite, markieren=markieren, erzwingen=True)
         self.sperren(self.gesperrt)
+        self.nach_vorn()
 
     # ------------------------------------------------------------------
     # Aufbau
@@ -311,10 +312,14 @@ class VorschauFenster:
             return False
 
     def nach_vorn(self):
+        """Fenster nach vorn holen und ihm die Tastatur geben (Bild auf/ab, Pos1/Ende, +/-). Unter Windows bekam
+        ein neues Vorschaufenster den Tastaturfokus nicht immer – die Blättertasten liefen dann ins Leere.
+        Geöffnet wird die Vorschau nur auf Wunsch des Nutzers, das Fenster nimmt also keinem anderen Programm
+        ungefragt den Fokus."""
         try:
             self.fenster.deiconify()
             self.fenster.lift()
-            self.fenster.focus_set()
+            self.fenster.focus_force()
         except tk.TclError:
             pass
 

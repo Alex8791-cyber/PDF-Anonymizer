@@ -74,10 +74,16 @@ def roh_text(pfad) -> str:
 
 
 def pdftotext(pfad, cropbox=False) -> str:
+    """Text, wie ein fremdes Werkzeug ihn liest. Ausgabe ausdrücklich als UTF-8 und tolerant dekodiert: unter
+    Windows liegt ggf. ein xpdf-pdftotext im Pfad, das sonst Latin-1 schreibt (mit text=True lieferte
+    subprocess dann None) und -cropbox nicht kennt (dann zählt der Lauf ohne den Schalter)."""
     if not PDFTOTEXT:
         return ""
-    args = [PDFTOTEXT] + (["-cropbox"] if cropbox else []) + ["-layout", str(pfad), "-"]
-    return subprocess.run(args, capture_output=True, text=True).stdout
+    args = [PDFTOTEXT, "-enc", "UTF-8"] + (["-cropbox"] if cropbox else []) + ["-layout", str(pfad), "-"]
+    aus = subprocess.run(args, capture_output=True)
+    if aus.returncode != 0 and cropbox:
+        return pdftotext(pfad)
+    return (aus.stdout or b"").decode("utf-8", errors="replace")
 
 
 def seitentext(pfad) -> str:
@@ -412,8 +418,11 @@ def test_text_unter_dem_beschnitt_und_ausserhalb_der_mediabox(tmp_path):
     s.insert_text((620, 300), "rechts außerhalb: Mustermann", fontsize=11)
     s.set_cropbox(fitz.Rect(0, 0, 595, 700))
     pdf = speichern(doc, tmp_path / "beschnitt.pdf")
-    if PDFTOTEXT:
-        assert GEHEIM in pdftotext(pdf), "pdftotext liest den abgeschnittenen Rand"
+    # Vorbedingung: der Text unter dem Beschnitt steht wirklich in der Datei und wird sichtbar, sobald jemand den
+    # Beschnitt aufhebt (Poppler-pdftotext liest ihn sogar direkt; ein xpdf-pdftotext unter Windows nicht)
+    with fitz.open(pdf) as vorher:
+        vorher[0].set_cropbox(vorher[0].mediabox)
+        assert GEHEIM in vorher[0].get_text(), "Testaufbau: Text unter dem Beschnitt fehlt"
     doc = fitz.open(pdf)
     sichtbar_vorher = doc[0].get_text()
     z = nebenkanaele_entfernen(doc)

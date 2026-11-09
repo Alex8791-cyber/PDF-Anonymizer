@@ -17,6 +17,14 @@ Ablauf je Dokument:
   4. Optional rastern (scan.py), Nebenkanäle anbringen, Schriften verkleinern, speichern.
 
 Alles ist frei erfunden; derselbe Seed liefert dieselben Dokumente und dieselbe Wahrheit.
+
+Merkmal "sonderzeichen_windows" (ab Generator 1.1, Vertrag 12.7): In etwa jedem sechsten Textdokument mit
+eingebetteter Schrift stehen in ausgewählten Einträgen (Namen, Telefon, E-Mail, IBAN, Kennungen, Anschrift)
+NBSP statt Leerzeichen und sichtbare weiche Trennstriche (U+00AD) bzw. geschützte Bindestriche (U+2011/U+2010)
+statt "-" – so, wie die Textebene von PDFs aus Windows-Programmen aussehen kann. Auswahl und Ersetzungen kommen
+aus einem EIGENEN Zufallsstrom ("sonderzeichen/<seed>/<nr>"): Plan, Inhalte und Schriften aller Dokumente bleiben
+wie in Generator 1.0, nur die ausgewählten Dokumente enthalten zusätzlich diese Zeichen (ihre Wahrheit nennt
+das Merkmal und die Bemerkung "Sonderzeichen (Windows)"). Bereits erzeugte Korpora werden nicht neu erzeugt.
 """
 
 import json
@@ -38,7 +46,8 @@ from .bausteine import Dok, ascii_name, datum, name_bem
 from .dokumenttypen import TYPEN, typ_antrag_formular
 from .normalisierung import Gefaltet
 
-GENERATOR_VERSION = "1.0"
+GENERATOR_VERSION = "1.1"
+SONDERZEICHEN_QUOTE = 0.18      # Anteil der Textdokumente mit Merkmal "sonderzeichen_windows"
 
 # ----------------------------------------------------------------------
 # Scan-Varianten (Wertebereiche werden je Dokument aus dem Seed gezogen)
@@ -319,6 +328,12 @@ def _merkmale_aus_eintraegen(eintraege: list) -> set:
     return mm
 
 
+def sonderzeichen_gewaehlt(plan: Plan, seed: int) -> bool:
+    """Bekommt dieses Dokument das Merkmal "sonderzeichen_windows"? Eigener Zufallsstrom, nur Textdokumente
+    (bei Scans gibt es keine Textebene mit Sonderzeichen)."""
+    return not plan.scan and random.Random(f"sonderzeichen/{seed}/{plan.nr}").random() < SONDERZEICHEN_QUOTE
+
+
 def erzeuge_dokument(plan: Plan, seed: int, ordner: Path, max_versuche: int = 40) -> dict:
     """Erzeugt ein Dokument nach Plan, speichert PDF + Wahrheit und liefert die Wahrheit."""
     ordner = Path(ordner)
@@ -327,6 +342,8 @@ def erzeuge_dokument(plan: Plan, seed: int, ordner: Path, max_versuche: int = 40
     for versuch in range(max_versuche):
         rng = random.Random(f"{seed}/{plan.nr}/{versuch}")
         dok = Dok(rng, f"{seed}-{plan.nr:03d}", querformat=(plan.typ == "bestandsliste"))
+        if sonderzeichen_gewaehlt(plan, seed):
+            dok.satz.sonderzeichen = f"sonderzeichen/{seed}/{plan.nr}"
         if plan.typ == "antrag_formular" and plan.scan:
             typ = typ_antrag_formular(dok, formular=False)       # Papierantrag, eingescannt
         else:

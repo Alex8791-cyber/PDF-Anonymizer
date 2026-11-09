@@ -383,3 +383,277 @@ def test_laufzeit_lange_zeile(funktion):
     start = time.perf_counter()
     funktion(text)
     assert time.perf_counter() - start < 2.0
+
+
+# ======================================================================
+# Phase 3: Stellen-Schnittstelle, Unicode (Vertrag 12.7), Gutachten EQ-04..EQ-20, Schutzstufen
+# ======================================================================
+TEXT_FUNKTIONEN = [mu.finde_iban, mu.finde_email, mu.finde_telefon, mu.finde_geburtsdaten, mu.finde_strasse,
+                   mu.finde_plz_ort, mu.finde_vertragsnummern, mu.finde_sv_nummer, mu.finde_steuer_id,
+                   mu.finde_steuernummer, mu.finde_kv_nummer, mu.finde_kindergeldnummer, mu.finde_kennzeichen,
+                   mu.finde_fin, mu.finde_ausweisnummer, mu.finde_mandatsreferenz, mu.finde_bic, mu.finde_kreditkarte,
+                   mu.finde_alle_daten]
+BEISPIEL = ("Versicherungsnehmer: Max Mustermann, geb. am 02.09.1983, Hauptstraße 12a, 90402 Nürnberg\n"
+            "Tel. 0911 / 123 45 67, max@example.de, IBAN DE89 3704 0044 0532 0130 00 BIC COBADEFFXXX\n"
+            "Versicherungsschein-Nr. LV-2024-887766, SV-Nr. 12 345678 A 123, Steuer-ID 86095742719,\n"
+            "Steuernummer 123/4567/8901, KV-Nr. A123456789, Kindergeld-Nr. 009FK407160, Kennzeichen N-AB 1234,\n"
+            "FIN WVWZZZ1KZAW123456, Personalausweis-Nr. L01X00T47, Mandatsreferenz M-2024-556677,\n"
+            "Kreditkarte 4532 0151 1283 0366")
+
+
+@pytest.mark.parametrize("funktion", TEXT_FUNKTIONEN, ids=lambda f: f.__name__)
+def test_stellen_schnittstelle_passt_zu_fundtexten(funktion):
+    stellen_fn = getattr(mu, funktion.__name__ + "_stellen")
+    stellen = stellen_fn(BEISPIEL)
+    texte = [BEISPIEL[s:e] for s, e in stellen]
+    assert texte, funktion.__name__
+    assert set(texte) == set(funktion(BEISPIEL))
+    for s, e in stellen:
+        assert 0 <= s < e <= len(BEISPIEL) and BEISPIEL[s:e] == BEISPIEL[s:e].strip()
+
+
+def test_normalisieren_schnellpfad_und_abbildung():
+    assert mu.normalisieren("ganz normaler Text") == ("ganz normaler Text", None)
+    roh = "Noémie Bonnet 51­633867 Tel‑0421"
+    norm, abbildung = mu.normalisieren(roh)
+    assert norm == "Noémie Bonnet 51-633867 Tel-0421" and len(abbildung) == len(norm)
+    assert roh[abbildung[norm.index("51-6") + 2]] == "­"
+    assert mu._normalisieren_einfach(roh)[0] == norm
+
+
+# Vertrag 12.7: Windows-Schriften liefern NBSP, schmale Leerzeichen, sichtbare weiche Trennstriche und U+2011
+@pytest.mark.parametrize("funktion, text, erwartet", [
+    (mu.finde_telefon, "Telefon 0421 3498­936", "0421 3498­936"),
+    (mu.finde_telefon, "Mobil 0171‑2345678", "0171‑2345678"),
+    (mu.finde_telefon, "Tel. +49 911 1234567", "+49 911 1234567"),
+    (mu.finde_email, "a.krause@schwarzwald­versicherung.de", "a.krause@schwarzwald­versicherung.de"),
+    (mu.finde_iban, "IBAN DE89 3704 0044 0532 0130 00", "DE89 3704 0044 0532 0130 00"),
+    (mu.finde_iban, "IBAN DE89 3704 0044 0532 0130 00", "DE89 3704 0044 0532 0130 00"),
+    (mu.finde_vertragsnummern, "Kundennummer 51­633867", "51­633867"),
+    (mu.finde_vertragsnummern, "Versicherungsschein-Nr. LV‑2024‑887766", "LV‑2024‑887766"),
+    (mu.finde_kennzeichen, "Kennzeichen N‑AB 1234", "N‑AB 1234"),
+    (mu.finde_plz_ort, "90402 Nürnberg", "90402 Nürnberg"),
+    (mu.finde_strasse, "Hauptstraße 12a", "Hauptstraße 12a"),
+    (mu.finde_geburtsdaten, "geb. am 02.09.1983", "02.09.1983"),
+    (mu.finde_sv_nummer, "SV-Nr. 12 345678 A 123", "12 345678 A 123"),
+    (mu.finde_mandatsreferenz, "Mandatsreferenz M‑2024‑556677", "M‑2024‑556677"),
+    (mu.finde_telefon, "Telefon ０９１１ 123456", "０９１１ 123456"),
+])
+def test_unicode_sonderzeichen_windows(funktion, text, erwartet):
+    assert funktion(text) == [erwartet]
+    s, e = getattr(mu, funktion.__name__ + "_stellen")(text)[0]
+    assert text[s:e] == erwartet
+
+
+# ---------------------------------------------------------------------- Gutachten EQ-05..EQ-17
+@pytest.mark.parametrize("text, erwartet", [
+    ("Geboren am: 02.09.1983", ["02.09.1983"]),                   # EQ-05
+    ("GEBOREN AM 02.09.1983", ["02.09.1983"]),
+    ("GEB.-DATUM 02.09.1983", ["02.09.1983"]),
+    ("Name Vorname Geb.-Datum Rolle\nMüller\nAnna\n1988-10-12 VN", ["1988-10-12"]),   # Geb.-Datum vor Geb.
+    ("Herr Paul Weber, Jg. 1961, Fahrer", ["1961"]),             # Jahrgang
+    ("geb. 1961 in Erfurt", ["1961"]),
+])
+def test_geburtsdatum_stichwoerter_phase3(text, erwartet):
+    assert mu.finde_geburtsdaten(text) == erwartet
+
+
+def test_jahrgang_nicht_bei_vertragsdaten():
+    assert mu.finde_geburtsdaten("Beitragsjahr 2024, Jahrgang der Police unbekannt") == []
+    assert mu.finde_geburtsdaten("geb. 01.02.2099") == []                   # Zukunft
+
+
+@pytest.mark.parametrize("text, erwartet", [
+    ("Gläubiger-ID: DE98ZZZ09999999999", []),                             # EQ-06/KQ-11
+    ("Bei Fragen erreichen Sie uns unter 0800 123 4567.", []),            # EQ-07 Hotline
+    ("Service 0180 5 123456 und 0900 1234567", []),
+    ("Tel. +33 6 12 34 56 78", ["+33 6 12 34 56 78"]),                   # EQ-08
+    ("Tel. +41 79 320 53 58, +43 1 3975369", ["+41 79 320 53 58", "+43 1 3975369"]),
+    ("Geburtsdatum 01/10/2024 und 02/09/1983", []),                      # EQ-14
+    ("Sie erreichen sie/ihn unter +49 (0)7141\n842332 oder per Mail.", ["+49 (0)7141\n842332"]),
+    ("Für Rückfragen erreichen Sie uns unter 0385\n897335.", ["0385\n897335"]),
+    ("Bei Fragen bin ich unter 01 74 / 423\n15 49 erreichbar.", ["01 74 / 423\n15 49"]),
+    ("Meine Telefonnummer: +49\n(0)355 9825916. Bitte", ["+49\n(0)355 9825916"]),
+])
+def test_telefon_gutachten_und_zeilenumbruch(text, erwartet):
+    assert mu.finde_telefon(text) == erwartet
+
+
+def test_telefon_tabellenzellen_nicht_verbinden():
+    assert mu.finde_telefon("PLZ\n01067\n90402\nOrt") == []                # zwei PLZ-Zellen sind keine Nummer
+    assert mu.finde_telefon("0911 123456\n45,90 EUR") == ["0911 123456"]
+
+
+@pytest.mark.parametrize("text, erwartet", [
+    ("Versicherungsnummer  LV-2024-887766  Beginn 01.10.2024", ["LV-2024-887766"]),       # EQ-09 (a)
+    ("Kunden-Nr.\tKD 4711-0815\tStand 2025", ["KD 4711-0815"]),
+    ("Versicherungsschein-\nZeitraum\nBeginn\nNr. KH 0815 4471 2", ["KH 0815 4471 2"]),     # EQ-09 (b)
+    ("Ihre Lebensversicherung Nr. LV-2011-009307 – Ablauf zum 19.12.2025", ["LV-2011-009307"]),
+    ("Auszahlung aus Ihrem Vertrag 47.897.336.2 – fehlende Angaben", ["47.897.336.2"]),
+    ("Registrierungsnummer D-T4E8-U6G1F-15 (§ 34d Abs. 1 GewO)", ["D-T4E8-U6G1F-15"]),
+    ("Ihr Vertrag vom 01.01.2020 und der Vertrag 2024", []),
+])
+def test_vertragsnummern_phase3(text, erwartet):
+    assert mu.finde_vertragsnummern(text) == erwartet
+
+
+def test_vertragsnummern_lineare_laufzeit():                                # EQ-17 / PERF-07
+    text = "Kunden-Nr.: 4711 " * 3000
+    start = time.perf_counter()
+    mu.finde_vertragsnummern(text)
+    assert time.perf_counter() - start < 1.0
+    text = ("IBAN DE89 3704 0044 0532 0130 00 BIC COBADEFFXXX " * 2000)
+    start = time.perf_counter()
+    assert mu.finde_bic(text) == ["COBADEFFXXX"]
+    assert time.perf_counter() - start < 2.0
+
+
+def test_strasse_fahrbahn_und_roemische_zahlen():                           # EQ-12, EQ-13
+    assert mu.finde_strasse("Er befuhr die Bundesstraße 7 in Richtung Weimar") == []
+    assert mu.finde_strasse("Anschrift: Bundesstraße 7, 99423 Weimar") == ["Bundesstraße 7"]
+    assert mu.finde_kennzeichen("BGH, Urteil vom 11.11.2020 – IV ZR 123/19") == []
+
+
+@pytest.mark.parametrize("text", [
+    "Platz der Republik 99 a", "ZUM STEINBRUCH 66", "Alt-Moabit 61", "An den Eichen 140", "Auf der Höhe 32d",
+    "Kleine Bergstraße 16", "Obere Hauptstr. 38d", "Untere Grabenstraße 54", "Hinter der Kirche 9 a",
+    "Straße der Einheit 5",
+])
+def test_strasse_sonderformen(text):
+    assert mu.finde_strasse(text) == [text]
+
+
+def test_strasse_ocr_umbruch_in_praeposition():
+    assert mu.finde_strasse("Hinter\nder Kirche 9 a") == ["Hinter\nder Kirche 9 a"]
+
+
+def test_plz_ort_phase3():
+    assert mu.finde_plz_ort("Amtsgericht Hamburg HRB 16963\nVorstand: Dr. Max Weber") == []
+    assert mu.finde_plz_ort("Sitz: Köln · HRB 91206\nUSt-IdNr. DE123456789") == []
+    assert mu.finde_plz_ort("92637 Weiden i.d.OPf.") == ["92637 Weiden i.d.OPf."]
+    assert mu.finde_plz_ort("neu: Lindenallee 4\n0.....45879 Gelsenkirchen") == ["45879 Gelsenkirchen"]
+    assert mu.finde_plz_ort("81675 München Bu") == ["81675 München"]                # OCR-Rest
+    assert mu.finde_plz_ort("53474 Bad Neuenahr-Ahrweiler") == ["53474 Bad Neuenahr-Ahrweiler"]
+
+
+def test_ust_idnr_firma_oder_person():                                       # EQ-16
+    fuss = "Hanse Krankenversicherung a. G. · USt-IdNr. DE123456789 · Vorstand: J. Petersen"
+    assert mu.finde_steuernummer(fuss) == []
+    assert mu.finde_steuernummer("Zahnärztin Dr. Anna Berg\nUSt-IdNr. DE123456789") == ["DE123456789"]
+
+
+# ---------------------------------------------------------------------- Prüfziffern: Sicherheit statt Ausschluss
+def test_pruefziffer_ungueltig_bleibt_fund_mit_hinweis():
+    st = mu.stellen("iban", "IBAN: DE89 3704 0044 0532 0130 01")
+    assert len(st) == 1 and not st[0].streng and st[0].hinweis == mu.HINWEIS_PRUEFZIFFER and st[0].sicherheit < 1
+    assert mu.finde_iban("IBAN: DE89 3704 0044 0532 0130 01") == []           # Text-Schnittstelle bleibt streng
+    st = mu.stellen("iban", "Konto DESG 9065 3989 4189 3574 45 (OCR)")        # Prüfziffern als Buchstaben gelesen
+    assert [("DESG 9065 3989 4189 3574 45", False)] == [("Konto DESG 9065 3989 4189 3574 45 (OCR)"[s.start:s.ende],
+                                                         s.streng) for s in st]
+    assert mu.stellen("iban", "ab12 3456 7890 1234 5678 90") == []
+    st = mu.stellen("steuerid", "Steuer-ID: 86095742718")
+    assert len(st) == 1 and st[0].hinweis == mu.HINWEIS_PRUEFZIFFER
+    st = mu.stellen("kreditkarte", "Kreditkarte: VISA 4532 0151 1283 0367")
+    assert len(st) == 1 and not st[0].streng
+    assert mu.stellen("kreditkarte", "Vertrag 4532 0151 1283 0367") == []
+    assert mu.quellen_hinweis("muster.iban.lesefehler") == mu.HINWEIS_PRUEFZIFFER
+    assert mu.quellen_hinweis("muster.iban") is None
+
+
+def test_ausweis_amtliche_formate():
+    # neuer Personalausweis/Reisepass: 9 Zeichen + Prüfziffer (ICAO 9303), auch ohne Etikett (nur Stellen-API)
+    nummer = "L01X00T47" + str(mu._icao_pruefziffer("L01X00T47"))
+    st = mu.stellen("ausweis", f"Kopie liegt bei ({nummer}).")
+    assert [nummer] == [f"Kopie liegt bei ({nummer})."[s.start:s.ende] for s in st]
+    falsch = "L01X00T47" + str((mu._icao_pruefziffer("L01X00T47") + 1) % 10)
+    assert mu.stellen("ausweis", f"Nummer {falsch}") == []
+    assert mu.finde_ausweisnummer("Anlage: Kopie Personalausweis (Nr. TLH4PLJCH)") == ["TLH4PLJCH"]
+    assert mu.finde_ausweisnummer("Führerscheinnummer: J010000SD51") == ["J010000SD51"]
+    assert mu.finde_ausweisnummer("Reisepassnummer C01X00T47") == ["C01X00T47"]
+
+
+def test_bic_mandat_kvnr_phase3():
+    assert mu.finde_bic("BIC:\nCOBADEFFXXX") == ["COBADEFFXXX"]
+    st = mu.stellen("bic", "Bankverbindung Commerzbank COBADEFFXXX")      # ohne Etikett und IBAN: unsicher
+    assert len(st) == 1 and not st[0].streng
+    assert mu.stellen("bic", "RECHNUNG NACHTRAG BESCHEID") == []
+    assert mu.finde_mandatsreferenz("Mandatsreferenz .....nnnnsan.. SEPA816626-520") == ["SEPA816626-520"]
+    assert mu.finde_mandatsreferenz("Mandatsreferenz:\nM-2024-556677") == ["M-2024-556677"]
+    assert mu.finde_kv_nummer("Krankenversichertennummer: A 123 456 789") == ["A 123 456 789"]
+
+
+def test_steuer_id_ueber_zeilenumbruch():
+    text = "Ihre Steuer-Identifikationsnummer 86 095\n742 719 gespeichert."
+    assert mu.finde_steuer_id(text) == ["86 095\n742 719"]
+
+
+def test_email_ocr_leerzeichen():
+    assert mu.finde_email("Von: Andreea Ionescu <ionescu854@gmx . de>") == ["ionescu854@gmx . de"]
+    assert mu.finde_email("nadeschda.pawlowa@ web.de") == ["nadeschda.pawlowa@ web.de"]
+    assert mu.finde_email("Treffen @ Büro morgen") == []
+
+
+# ---------------------------------------------------------------------- Kategorien und Schutzstufen (Abschnitt 9)
+def test_neue_kategorien_und_platzhalter():
+    eintraege = {k: (p, an) for k, _, p, _, an in mu.KATEGORIEN}
+    assert eintraege["beruf"] == ("[BERUF]", True) and eintraege["arbeitgeber"] == ("[ARBEITGEBER]", True)
+    assert eintraege["diagnose"] == ("[DIAGNOSE]", False) and eintraege["medikament"] == ("[MEDIKAMENT]", False)
+    assert eintraege["ort"] == ("[ORT]", True) and eintraege["international"][1] is True
+    assert all(len(e) == 5 for e in mu.KATEGORIEN)
+
+
+def test_profile_vertrag_abschnitt_9():
+    assert set(mu.PROFILE) == {"ausgewogen", "hoch", "maximal"} and mu.STANDARD_PROFIL == "hoch"
+    standard = {k for k, _, _, _, an in mu.KATEGORIEN if an}
+    hoch, ausgewogen, maximal = (set(mu.PROFILE[n]["aktive"]) for n in ("hoch", "ausgewogen", "maximal"))
+    assert hoch == standard, "Standard-Häkchen = Schutzstufe „hoch“ (Oberfläche erkennt sonst „benutzerdefiniert“)"
+    assert {"beruf", "arbeitgeber", "international"} <= hoch and not hoch & {"diagnose", "medikament", "datum"}
+    assert ausgewogen < hoch and not ausgewogen & {"beruf", "arbeitgeber", "international"}
+    assert maximal == hoch | {"diagnose", "medikament"}
+    assert mu.hinweis_kategorien("hoch", hoch) == {"diagnose", "medikament"}
+    assert mu.hinweis_kategorien("hoch", hoch | {"diagnose"}) == {"medikament"}
+    assert mu.hinweis_kategorien("maximal", maximal) == set()
+    assert mu.option("maximal", "alle_geburtsdaten") and not mu.option("hoch", "alle_geburtsdaten")
+    assert all(isinstance(p["beschreibung"], str) for p in mu.PROFILE.values())
+
+
+def test_wissens_kategorien_text_schnittstelle():
+    assert mu.finde_berufe("Beruf: Zahnärztin") == ["Zahnärztin"]
+    assert mu.finde_arbeitgeber("Arbeitgeber: Bäckerei Hofmeister") == ["Bäckerei Hofmeister"]
+    assert mu.finde_diagnosen("Diagnosen:\n- Lumboischialgie links (M54.4)") == ["Lumboischialgie links (M54.4)"]
+    assert mu.finde_medikamente("Medikation: Ibuprofen 600 mg bei Bedarf") == ["Ibuprofen 600 mg bei Bedarf"]
+    assert mu.finde_orte("St. Ingbert, 03.04.2025") == ["St. Ingbert"]
+    assert mu.finde_ausland("Prinsengracht 263, 1016 GV Amsterdam") == ["Prinsengracht 263", "1016 GV Amsterdam"]
+
+
+# ---------------------------------------------------------------------- PLZ/Ort: Folgewörter, Etikett am Zeilenende
+@pytest.mark.parametrize("text, erwartet", [
+    ("26122 Oldenburg Unfall Weserbergland KF-2016-876830", "26122 Oldenburg"),   # OCR-Tabellenzeile
+    ("03046 Cottbus BU R+V 1.210,25", "03046 Cottbus"),
+    ("82467 Garmisch-Partenkirchen Unfall Hanseatische BU", "82467 Garmisch-Partenkirchen"),
+    ("61352 Bad Homburg v. d. Höhe", "61352 Bad Homburg v. d. Höhe"),
+    ("51465 Bergisch Gladbach", "51465 Bergisch Gladbach"),
+    ("66386 St. Ingbert", "66386 St. Ingbert"),
+    ("60311 FRANKFURT AM MAIN", "60311 FRANKFURT AM MAIN"),
+    ("60311 Frankfurt Main", "60311 Frankfurt Main"),
+    ("06108 Halle (Saale)", "06108 Halle (Saale)"),
+    ("92637 Weiden i.d.OPf.", "92637 Weiden i.d.OPf."),
+    ("91207 Lauf a.d.Pegnitz", "91207 Lauf a.d.Pegnitz"),
+    ("67433 Neustadt an der Weinstraße", "67433 Neustadt an der Weinstraße"),
+    ("76829 Landau in der Pfalz", "76829 Landau in der Pfalz"),
+    ("06886 Lutherstadt Wittenberg", "06886 Lutherstadt Wittenberg"),
+    ("D 90402 Nürnberg", "D 90402 Nürnberg"),
+])
+def test_plz_ort_folgewoerter(text, erwartet):
+    assert mu.finde_plz_ort(text) == [erwartet]
+
+
+def test_vertrag_etikett_am_zeilenende_im_fliesstext():
+    assert mu.finde_vertragsnummern("Die Polizei (Polizeiinspektion Nürnberg-Süd, Aktenzeichen\n"
+                                    "VU/2024/99344) nahm den Unfall auf.") == ["VU/2024/99344"]
+    assert mu.finde_vertragsnummern("Kündigung meiner Privathaftpflichtversicherung, Versicherungsschein-Nr.\n"
+                                    "Ai HR-2022-251237\nSehr geehrte Damen und Herren,") == ["HR-2022-251237"]
+    # keine Jahreszahl, kein Datum, keine PLZ-Zeile
+    assert mu.finde_vertragsnummern("Bitte nennen Sie stets Ihre Vertragsnummer\n2025 wird alles anders.") == []
+    assert mu.finde_vertragsnummern("Bitte nennen Sie Ihre Kundennummer\n12345 Musterstadt") == []
+    assert mu.finde_vertragsnummern("Ihre Schadennummer\n01.02.2025 eingegangen") == []
