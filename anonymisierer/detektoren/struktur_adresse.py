@@ -31,7 +31,8 @@ import functools
 import re
 
 from . import REGISTER, Treffer, detektor, registrieren
-from .struktur import (lage, namen_spanne, ort_verlaengern, plz_ort_spannen, strasse_spanne, _muster, _wissen)
+from .struktur import (lage, namen_spanne, ort_verlaengern, plz_ort_kappen, plz_ort_spannen, strasse_spanne,
+                       _muster, _wissen)
 
 MM = 72 / 25.4
 
@@ -245,70 +246,15 @@ def _plz_ort_bereinigen(dok, t: Treffer):
     davor = text[max(0, t.start - 40):t.start].rsplit("\n", 1)[-1]
     if _REGISTER_DAVOR_RE.search(davor):
         return None
-    rest_start = t.start + m.end()
-    worte = list(re.finditer(r"[^\s]+", text[rest_start:t.ende]))
-    if not worte:
+    ende = plz_ort_kappen(text, t.start, t.ende)
+    if ende is None:
         return None
-    ende = t.ende
-    behalten = 0
-    for w in worte:
-        wort = w.group(0)
-        a = rest_start + w.start()
-        kern = wort.strip("(),.")
-        zwischen = text[t.start + m.end():a]
-        if "\t" in zwischen and behalten:
-            ende = rest_start + worte[behalten - 1].end()
-            break
-        if behalten == 0 and "\n" in zwischen and _ist_etikett_oder_allerwelt(kern):
-            return None                               # "16963\nVorstand": Ort in der Folgezeile ist ein Wort
-        if _ist_etikett(kern) and not _ortszusatz(kern):
-            if behalten == 0:
-                return None                           # "17205 USt-IdNr"
-            ende = rest_start + worte[behalten - 1].end()
-            break                                     # "32423 Minden Versicherungsnummer"
-        behalten += 1
     if ende == t.ende:
         zeile_ende = text.find("\n", ende)
         ende = ort_verlaengern(text, ende, zeile_ende if zeile_ende >= 0 else len(text))
     if ende != t.ende:
         return t._replace(ende=ende)
     return t
-
-
-_ORTSZUSATZ = frozenset({"am", "an", "der", "dem", "im", "in", "ob", "bei", "a.", "d.", "v.", "i.", "b.", "st.",
-                         "bad", "main", "oder", "saale", "havel", "lech", "neckar", "rhein", "donau", "höhe"})
-
-
-def _ortszusatz(wort: str) -> bool:
-    return wort.casefold() in _ORTSZUSATZ
-
-
-@functools.lru_cache(maxsize=16384)
-def _ist_etikett_oder_allerwelt(wort: str) -> bool:
-    if _ist_etikett(wort):
-        return True
-    if _wissen is None:
-        return False
-    titel = wort.title() if wort.isupper() else wort
-    try:
-        return _wissen.ist_allerweltswort(titel) and not _wissen.ist_nachname(titel)
-    except Exception:
-        return False
-
-
-@functools.lru_cache(maxsize=16384)
-def _ist_etikett(wort: str) -> bool:
-    """Feldbezeichner (Personen, Kennungen, Geburt, Kontakt, Vertragsdaten) – kein Ortsname."""
-    if not wort or not wort[0].isalpha():
-        return True
-    if _wissen is None:
-        return False
-    titel = wort.title() if wort.isupper() else wort
-    try:
-        return any(_wissen.index(f"etiketten_{art}").eintrag_fuer(titel)
-                   for art in ("person", "kennung", "datum_geburt", "kontakt", "vertragsdaten"))
-    except Exception:
-        return False
 
 
 def firmen_filter(dok, treffer: list, kategorie: str) -> list:

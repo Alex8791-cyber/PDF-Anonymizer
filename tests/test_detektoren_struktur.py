@@ -131,6 +131,25 @@ def test_namen_spanne(text, erwartet):
     assert sp and text[sp.start:sp.ende] == erwartet
 
 
+@pytest.mark.parametrize("text,erwartet", [
+    ("Katarzyna Kowalski, Dipl.-Ing. Jörg Ziegler", "Katarzyna Kowalski"),
+    ("Horst Biedermann, Liselotte Schmidt", "Horst Biedermann"),
+    ("Biedermann, Liselotte Schmidt", "Biedermann"),
+    ("Müller, Hans Peter", "Müller, Hans Peter"),
+    ("Schmidt-Brandt, Anna Lena", "Schmidt-Brandt, Anna Lena"),
+])
+def test_namen_spanne_aufzaehlungskomma(text, erwartet):
+    """Ein Komma zwischen "Vorname Nachname"-Paaren zählt Personen auf; "Nachname, Vorname(n)" bleibt."""
+    sp = st.namen_spanne(text, 0, len(text))
+    assert sp and text[sp.start:sp.ende] == erwartet
+
+
+def test_gremium_aufzaehlung_ergibt_einzelne_namen():
+    dok = seitenmodell.dokument_aus_text("Vorstand: Katarzyna Kowalski, Dipl.-Ing. Jörg Ziegler, Ursula Frank")
+    namen = [w for k, w in _treffer(dok, "struktur.etikett_wert") if k == "namen"]
+    assert namen == ["Katarzyna Kowalski", "Jörg Ziegler", "Ursula Frank"]
+
+
 @pytest.mark.parametrize("text", ["Sehr geehrte Damen", "Montag", "Kundenservice", "Versicherte Person",
                                   "Allianz Versicherungs-AG", "Ihr Beitragsservice", "LeaFR", "ERS"])
 def test_namen_spanne_gegenproben(text):
@@ -449,6 +468,25 @@ def test_muster_ohne_firmenanschriften(tmp_path):
 def test_muster_plzort_fehlgriffe_und_ortszusaetze(text, erwartet):
     dok = seitenmodell.dokument_aus_text(text)
     assert [dok.text[t.start:t.ende] for t in _detektor("muster.plzort")(dok, Kontext({"plzort"}))] == erwartet
+
+
+@pytest.mark.parametrize("text,erwartet", [
+    ("90762 Fürth\t\tPHV", "90762 Fürth"),                               # Zellgrenze (Tabelle im Scan)
+    ("82319 Starnberg\t\tLeben\nDebeka\t\tKF589934782", "82319 Starnberg"),
+    ("94032 Passau BU Spreewald LV-2016-468183", "94032 Passau"),        # Textschicht ohne Tabs
+    ("63739 Aschaffenburg Leben Debeka", "63739 Aschaffenburg"),
+    ("93047 Regensburg Kfz", "93047 Regensburg"),
+    ("60311 Frankfurt am Main", "60311 Frankfurt am Main"),
+    ("06108 Halle (Saale)", "06108 Halle (Saale)"),
+    ("53474 Bad Neuenahr-Ahrweiler", "53474 Bad Neuenahr-Ahrweiler"),
+    ("61348 Bad Homburg v. d. Höhe", "61348 Bad Homburg v. d. Höhe"),
+    ("74523 Schwäbisch Hall", "74523 Schwäbisch Hall"),
+    ("86899 Landsberg am Lech\t\tLeben", "86899 Landsberg am Lech"),
+    ("92637 Weiden i.d.OPf.", "92637 Weiden i.d.OPf."),
+    ("90402 NÜRNBERG", "90402 NÜRNBERG"),
+])
+def test_plz_ort_endet_an_zellgrenzen_und_fremden_woertern(text, erwartet):
+    assert [text[a:b] for a, b in st.plz_ort_spannen(text, 0, len(text))] == [erwartet]
 
 
 def test_adressblock_kunde(tmp_path):

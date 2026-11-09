@@ -852,6 +852,35 @@ class NamensSpanne(NamedTuple):
     komma: bool             # Form "Nachname, Vorname"
 
 
+def _wissen_frage(frage: str, wort: str) -> bool:
+    if _wissen is None:
+        return False
+    titel = wort.title() if wort.isupper() else wort
+    try:
+        return bool(getattr(_wissen, frage)(titel))
+    except Exception:
+        return False
+
+
+def _vorname_nachname_davor(text: str, woerter: list) -> bool:
+    """Steht vor einem Komma schon "Vorname Nachname" (zwei Namenswörter, das erste ein bekannter Vorname)?
+    Dann zählt das Komma Personen auf ("Katarzyna Kołodziej, Dipl.-Ing. Jörg Ziegler") und leitet keine
+    Form "Nachname, Vorname" ein."""
+    namen = [w for w in woerter if w[2] == "name"]
+    return len(namen) >= 2 and _wissen_frage("ist_vorname", text[namen[0][0]:namen[0][1]].split("-")[0])
+
+
+def _nachname_hinten(text: str, hinten: list) -> bool:
+    """Hinter dem Komma "Vorname Nachname" ("Biedermann, Liselotte Schmidt")? Dann ist das Komma ein
+    Aufzählungskomma: bei "Nachname, Vorname(n)" stehen hinter dem Komma nur Vornamen."""
+    namen = [text[a:b] for a, b, art in hinten if art == "name"]
+    if len(namen) < 2:
+        return False
+    letzter = namen[-1]
+    return _wissen_frage("ist_vorname", namen[0].split("-")[0]) and _wissen_frage("ist_nachname", letzter) \
+        and not _wissen_frage("ist_vorname", letzter.split("-")[0])
+
+
 def namen_spanne(text: str, pos: int, grenze: int, komma: bool = True, max_woerter: int = 6):
     """Name ab pos: Anreden/Titel vorn werden übersprungen (gehören nicht zur Spanne), dann groß
     geschriebene Wörter, Initialen, Partikel (von, van der …), höchstens ein Komma ("Nachname, Vorname"
@@ -908,6 +937,8 @@ def namen_spanne(text: str, pos: int, grenze: int, komma: bool = True, max_woert
         # Trenner
         if j < grenze and text[j] == "," and komma and komma_index is None \
                 and any(w[2] == "name" for w in woerter):
+            if _vorname_nachname_davor(text, woerter):
+                break                                # "Anna Weber, Dr. Jörg Ziegler": Aufzählung
             if j + 2 < grenze and text[j + 1] == " ":
                 n = _NAME_TOKEN_RE.match(text, j + 2, grenze)
                 if n and n.group(0)[0].isupper() and n.group(0).rstrip(".").casefold() not in FUNKTIONSWOERTER \
@@ -922,6 +953,9 @@ def namen_spanne(text: str, pos: int, grenze: int, komma: bool = True, max_woert
         break
     if komma_index is not None and not any(w[2] in ("name", "initiale") for w in woerter[komma_index:]):
         woerter = woerter[:komma_index]
+        komma_index = None
+    if komma_index is not None and _nachname_hinten(text, woerter[komma_index:]):
+        woerter = woerter[:komma_index]              # "Biedermann, Liselotte Schmidt": zwei Personen
         komma_index = None
     if woerter and woerter[-1][2] == "adel" and any(w[2] == "name" for w in woerter):
         woerter[-1] = (woerter[-1][0], woerter[-1][1], "name")      # "Max Graf": Nachname
@@ -1042,9 +1076,94 @@ def ort_verlaengern(text: str, ende: int, grenze: int) -> int:
     return m.end() if m else ende
 
 
+@functools.lru_cache(maxsize=16384)
+def ist_etikett_wort(wort: str) -> bool:
+    """Feldbezeichner (Personen, Kennungen, Geburt, Kontakt, Vertragsdaten) – kein Ortsname."""
+    if not wort or not wort[0].isalpha():
+        return True
+    if _wissen is None:
+        return False
+    titel = wort.title() if wort.isupper() else wort
+    try:
+        return any(_wissen.index(f"etiketten_{art}").eintrag_fuer(titel)
+                   for art in ("person", "kennung", "datum_geburt", "kontakt", "vertragsdaten"))
+    except Exception:
+        return False
+
+
+@functools.lru_cache(maxsize=16384)
+def ist_etikett_oder_allerwelt(wort: str) -> bool:
+    """Feldbezeichner oder Allerweltswort ("Leben", "Unfall", "Vorstand"), das kein Nachname ist."""
+    if ist_etikett_wort(wort):
+        return True
+    if _wissen is None:
+        return False
+    titel = wort.title() if wort.isupper() else wort
+    try:
+        return _wissen.ist_allerweltswort(titel) and not _wissen.ist_nachname(titel)
+    except Exception:
+        return False
+
+
+ORTSZUSATZ_WOERTER = frozenset({"am", "an", "der", "dem", "im", "in", "ob", "bei", "a.", "d.", "v.", "i.", "b.",
+                                "st.", "bad", "main", "oder", "saale", "havel", "lech", "neckar", "rhein", "donau",
+                                "höhe"})
+# Wörter, hinter denen der eigentliche Ortsname erst kommt ("Bad Homburg", "Schwäbisch Hall")
+_ORT_VORWORT_RE = re.compile(r"(?i)(?:bad|st\.?|sankt|neu|alt|groß|gross|klein|hohen|königs|markt|stadt|"
+                             r"hansestadt|lutherstadt|ostseebad|nordseebad|seebad|hann\.|[a-zäöü]+isch)$")
+_ORT_VERBINDER_RE = re.compile(r"(?:am|an|der|dem|den|im|in|ob|bei|vor|auf|unter|über|zu|zum|"
+                               r"(?:[a-zäöü]{1,2}\.){1,3})$")
+_PLZ_ANFANG_RE = re.compile(r"(?:(?:D|DE|A|AT|CH|L|FL)[-\s])?\d{4,5}")
+
+
+def plz_ort_kappen(text: str, s: int, e: int) -> int | None:
+    """Ende eines PLZ-Ort-Treffers text[s:e] kappen, wo der Ort sicher aufhört: an einer Zellgrenze (Tab)
+    oder einem Zeilenwechsel hinter dem ersten Ortswort, vor Wörtern mit Ziffern, Kürzeln ("BU", "PHV",
+    "Kfz") und – direkt hinter einem vollständigen Ortsnamen – vor Feldbezeichnern und Allerweltswörtern
+    ("63739 Aschaffenburg Leben", "32423 Minden Versicherungsnummer"). Ortszusätze ("am Main", "(Saale)",
+    "i.d.OPf.") und Vorwörter ("Bad Homburg") bleiben. None: das erste "Ortswort" ist selbst ein
+    Feldbezeichner ("17205 USt-IdNr") oder steht als Allerweltswort in der Folgezeile ("16963\\nVorstand")."""
+    m = _PLZ_ANFANG_RE.match(text, s, e)
+    if not m:
+        return e
+    worte = list(re.finditer(r"\S+", text[m.end():e]))
+    if not worte:
+        return None
+    basis = m.end()
+    erstes = worte[0].group(0)
+    kern = erstes.strip("(),.")
+    zwischen = text[basis:basis + worte[0].start()]
+    if "\n" in zwischen and ist_etikett_oder_allerwelt(kern):
+        return None                                   # "16963\nVorstand": Folgezeile ist kein Ort
+    if ist_etikett_wort(kern) and kern.casefold() not in ORTSZUSATZ_WOERTER:
+        return None                                   # "17205 USt-IdNr"
+    versal = kern.isupper()
+    ende = basis + worte[0].end()
+    offen = bool(_ORT_VORWORT_RE.match(kern))         # das nächste Wort gehört sicher zum Ort
+    for vorher, w in zip(worte, worte[1:]):
+        zwischen = text[basis + vorher.end():basis + w.start()]
+        if "\t" in zwischen or "\n" in zwischen:
+            break
+        tok = w.group(0)
+        kern = tok.strip("(),.")
+        if not kern or any(c.isdigit() for c in kern):
+            break
+        if _ORT_VERBINDER_RE.match(tok):              # "am", "an der", "i.d.", "v. d."
+            offen = True
+            continue
+        if not offen and not tok.startswith("("):
+            if len(kern) <= 3 and not (versal and kern.isupper()) or kern.isupper() and not versal:
+                break                                 # "BU", "PHV", "Kfz" hinter dem Ort
+            if ist_etikett_oder_allerwelt(kern) and kern.casefold() not in ORTSZUSATZ_WOERTER:
+                break                                 # "Aschaffenburg Leben", "Minden Versicherungsnummer"
+        offen = bool(_ORT_VORWORT_RE.match(kern))
+        ende = basis + w.end()
+    return ende
+
+
 def plz_ort_spannen(text: str, start: int, ende: int) -> list:
     """[(s, e)] von PLZ + Ort im Bereich (Muster der Wissensbasis, Spannen im Text; abgekürzte Ortszusätze
-    wie "i.d.OPf." gehören dazu)."""
+    wie "i.d.OPf." gehören dazu; der Ort endet an Zellgrenzen und vor Wörtern, die kein Ortsteil sind)."""
     aus = []
     if _muster is None:
         return aus
@@ -1056,8 +1175,14 @@ def plz_ort_spannen(text: str, start: int, ende: int) -> list:
             k = teil.find(t)
         if k < 0:
             continue
-        aus.append((start + k, ort_verlaengern(text, start + k + len(t), ende)))
         pos = k + len(t)
+        s = start + k
+        e = plz_ort_kappen(text, s, s + len(t))
+        if e is None:
+            continue
+        if e == s + len(t):
+            e = ort_verlaengern(text, e, ende)
+        aus.append((s, e))
     return aus
 
 
