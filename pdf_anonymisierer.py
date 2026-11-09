@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-PDF-Anonymisierer — Dokumente sicher für ChatGPT & Claude machen
-=================================================================
+PDF-Anonymisierer — Dokumente für ChatGPT & Claude pseudonymisieren
+===================================================================
 
 Zweck: PDFs sollen an KI-Dienste (ChatGPT, Claude …) gegeben werden
-können, ohne personenbezogene Daten preiszugeben. Das Programm findet
-automatisch:
+können, ohne direkte personenbezogene Daten preiszugeben. Das Programm
+findet automatisch:
 
   • Namen von Personen        (KI-Erkennung, deutsches Sprachmodell)
   • Adressen                  (Straße + Hausnummer, PLZ + Ort)
@@ -14,28 +14,29 @@ automatisch:
   • E-Mail-Adressen
   • Geburtsdaten              (Datumsangaben neben "geb." / "Geburtsdatum")
   • Vertrags-/Kunden-/Versicherungsschein-Nummern
-  • Sozialversicherungsnummern & Steuer-IDs
+  • Sozialversicherungsnummern, Steuer-IDs, Kindergeldnummern
   • Kfz-Kennzeichen
 
 Ersetzt wird mit lesbaren Platzhaltern wie [PERSON A], [IBAN],
 [ADRESSE] — so bleibt das Dokument für die KI verständlich
 ("Person A" bleibt im ganzen Dokument dieselbe Person!), aber ohne
-echte Daten. Der Text wird dabei WIRKLICH aus der PDF entfernt.
+die direkten Identifikatoren. Der Text wird dabei wirklich aus der PDF
+entfernt. Das Ergebnis ist eine Pseudonymisierung: Diagnosen, Beruf,
+Arbeitgeber, Beträge und andere Kontextangaben bleiben lesbar.
 
 WICHTIG: Vor dem Schwärzen zeigt das Programm eine Prüfliste aller
 Funde. Keine automatische Erkennung ist perfekt — der Blick auf die
-Liste (und stichprobenartig auf das Ergebnis) bleibt Pflicht!
+Liste (und auf das Ergebnis) bleibt Pflicht!
 
 Einmalige Vorbereitung: Installieren.bat doppelklicken
 Starten: Desktop-Verknüpfung "PDF-Anonymisierer"
 
 Dieses Skript ist nur der Startpunkt; die eigentliche Logik liegt im
-Paket "anonymisierer" (muster, namen, analyse, ocr, schwaerzung, gui).
+Paket "anonymisierer" (muster, namen, analyse, ocr, schwaerzung, dateien, gui).
 """
 
+import multiprocessing
 import sys
-import traceback
-from pathlib import Path
 
 # ----------------------------------------------------------------------
 # Windows-Feinschliff
@@ -43,20 +44,23 @@ from pathlib import Path
 if sys.platform == "win32":
     try:
         import ctypes
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # scharfe Darstellung
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # scharfe Darstellung; die Oberfläche skaliert selbst
     except Exception:
         pass
 
+# Fehlerprotokoll (ohne Konsole wären Abstürze unsichtbar). Das Modul braucht keine Fremdpakete.
+from anonymisierer import dateien as _dateien  # noqa: E402
+
 
 def _unbehandelter_fehler(typ, wert, tb):
-    """Fehler in Logdatei schreiben (ohne Konsole wären sie unsichtbar)."""
-    log = Path(__file__).with_name("fehler.log")
-    with open(log, "a", encoding="utf-8") as f:
-        f.write("".join(traceback.format_exception(typ, wert, tb)) + "\n")
+    """Fehler in die fehler.log schreiben (Ort: dateien.fehlerlog_pfad) und – falls möglich – melden."""
+    pfad = _dateien.fehler_protokollieren(typ, wert, tb)
     try:
         from tkinter import messagebox
+        ort = str(pfad) if pfad else "(Fehlerprotokoll konnte nicht geschrieben werden)"
         messagebox.showerror("Unerwarteter Fehler",
-                             f"Es ist ein Fehler aufgetreten.\nDetails stehen in:\n{log}")
+                             f"Es ist ein Fehler aufgetreten:\n{typ.__name__}: {str(wert)[:300]}\n\n"
+                             f"Details stehen in:\n{ort}")
     except Exception:
         pass
 
@@ -84,16 +88,24 @@ except ImportError:
 # Öffentliche Namen für Skripte und Tests, die das Startskript importieren
 from anonymisierer import __version__  # noqa: E402,F401
 from anonymisierer.analyse import analysiere_pdf, analysiere_text  # noqa: E402,F401
-from anonymisierer.dateien import sammle_pdfs  # noqa: E402,F401
+from anonymisierer.dateien import (einstellungen_laden, einstellungen_speichern,  # noqa: E402,F401
+                                   fehlerlog_pfad, oeffne_ordner, sammle_pdfs)
 from anonymisierer.gui import DND_VERFUEGBAR, AnonymisiererApp, main  # noqa: E402,F401
 from anonymisierer.muster import KATEGORIEN  # noqa: E402,F401
 from anonymisierer.namen import NAMEN_STOPPLISTE, finde_personen_ner, lade_ner  # noqa: E402,F401
-from anonymisierer.ocr import ist_scan_seite, ocr_textpage  # noqa: E402,F401
 from anonymisierer.schwaerzung import schwaerze_pdf  # noqa: E402,F401
+from anonymisierer import ocr as _ocr  # noqa: E402
+
+# OCR-Namen je nach Modulstand (alt: ist_scan_seite/ocr_textpage, neu: ocr_noetig/OcrDienst)
+for _name in ("ist_scan_seite", "ocr_textpage", "ocr_noetig", "OcrDienst", "_tessdata_finden"):
+    if hasattr(_ocr, _name):
+        globals()[_name] = getattr(_ocr, _name)
+del _name
 
 if DND_VERFUEGBAR:
     from anonymisierer.gui import TkinterDnD  # noqa: E402,F401
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()   # PyInstaller: Hilfsprozesse (OCR, Start-Methode "spawn")
     main()
