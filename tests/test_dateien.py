@@ -136,7 +136,7 @@ def test_fehlerlog_pfad_skriptbetrieb(monkeypatch, tmp_path):
 def test_fehler_protokollieren_schreibt_und_rotiert(monkeypatch, tmp_path):
     log = tmp_path / "logs" / "fehler.log"
     monkeypatch.setattr(dateien, "fehlerlog_pfad", lambda: log)
-    monkeypatch.setattr(dateien, "FEHLERLOG_MAX_BYTES", 300)
+    monkeypatch.setattr(dateien, "FEHLERLOG_MAX_BYTES", 50)  # kleiner als jeder Eintrag, unabhaengig von Pfadlaengen
     try:
         raise RuntimeError("Simulierter Fehler 4711")
     except RuntimeError:
