@@ -20,8 +20,13 @@ Regeln für den logischen Text (nur hier implementiert, für alle Nutzer identis
     ("Klein-Hoffmann"). Weiche Trennstriche (U+00AD) und Zeichen ohne Breite entfallen (verbunden[]).
   * Ligaturen (ﬀ ﬁ ﬂ ﬃ ﬄ ﬅ ﬆ) -> Einzelbuchstaben, alle auf dieselbe Glyphe abgebildet.
   * NBSP und andere Unicode-Leerzeichen -> " ", Unicode NFC (auch zerlegte Umlaute).
-  * OCR: Wörter in Zeilen gruppiert, Zeichen = anteilige Teilrechtecke der Wortbox, Wörter durch " ",
-    Zeilen durch "\\n"; OCR von Bildbereichen auf Textseiten als eigene Blöcke (quelle "bild").
+  * OCR: Wörter in Zeilen gruppiert (ocr.woerter_zu_zeilen, gerade gerückt), Zeichen = anteilige Teilrechtecke
+    der Wortbox in Leserichtung, Wörter durch " ", große Lücken (Tabellenzellen, "Etikett   Wert") wie bei
+    Textseiten durch "\\t\\t", Zeilen durch "\\n"; OCR von Bildbereichen auf Textseiten als eigene Blöcke
+    (quelle "bild").
+  * Durchsuchbarer Scan (Bild + unsichtbare Textebene): beide Lesungen stehen im Text (Erkennung auf beiden),
+    jedes Wort der Textebene ist mit den OCR-Wörtern derselben Bildstelle verknüpft – rechtecke() schwärzt
+    bei jedem Treffer Zeichen UND Bildpixel (_textebene_verknuepfen).
   * Formularfelder (Widgets, vor bake() gelesen): der eingebrannte Wert steht im Modell direkt hinter
     seinem sichtbaren Etikett (gleiche Zeile links vom Feld, sonst darüber); Kammfelder ergeben EIN
     Wort. Dokument.felder liefert Feldname, Etikett, Wert und die Stelle im Seitentext.
@@ -34,6 +39,7 @@ Koordinaten: Seite nach page.remove_rotation() (bei Seiten mit /Rotate also in d
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import unicodedata
 from array import array
@@ -566,6 +572,11 @@ class Seite:
         self.ocr_winkel = None                # erkannte Ausrichtung der Scan-Seite (Kontroll-OCR)
         self.ocr_woerter: int = 0             # Anzahl OCR-Wörter
         self.felder: list = []
+        # Durchsuchbarer Scan (unsichtbare Textebene + OCR derselben Bildstelle), siehe _textebene_verknuepfen:
+        self.bildstelle: dict = {}            # Glyphe der Textebene -> Bildbereich (verknüpfte OCR-Wörter)
+        self.textebene_partner: dict = {}     # OCR-Wort -> [Glyphenboxen der verknüpften Textebene]
+        self.textebene_abgleich = None        # Anteil der OCR-Wörter mit gleichlautendem Wort der Textebene
+        self.textebene_versatz = None         # (dx, dy) Textebene -> Bild in pt
         self._zeilen_start = [z.start for z in zeilen]
         self._fingerabdruck = None
 
@@ -601,7 +612,27 @@ class Seite:
 
         Textebene: Rechteck von 0,70 x Schriftgröße über bis 0,02 x Schriftgröße unter der Grundlinie
         (Nachbarzeilen bleiben heil); über Bildern die volle Box + 1 pt (Pixel werden mitgelöscht).
-        OCR: ganze Wortboxen der berührten Wörter + Rand (die Glyphenlage in der Box ist nur geschätzt)."""
+        OCR: ganze Wortboxen der berührten Wörter + Rand (die Glyphenlage in der Box ist nur geschätzt).
+        Durchsuchbarer Scan (Textebene und OCR verknüpft, _textebene_verknuepfen): Treffer der Textebene
+        schwärzen die Bildstelle ihrer OCR-Partner (erstes Rechteck) und die unsichtbaren Zeichen selbst
+        (weiteres, schmales Rechteck je Wort); Treffer der OCR zusätzlich die verknüpften unsichtbaren Zeichen.
+        So verschwinden immer beide – auch wenn die Textebene gegen das Bild versetzt oder nicht schräg ist.
+        Reicht die Stelle über eine Spaltengrenze ("\\t\\t"), bekommt jedes Spaltenstück eigene Rechtecke: ein
+        Rechteck über die Lücke träfe den Inhalt dazwischen (andere Spalte) und sein Platzhalter überdeckte
+        die Platzhalter der Nachbarn."""
+        ergebnis: list = []
+        stueck = start = max(0, start)
+        ende = min(ende, len(self.text))
+        for i in range(start, ende + 1):
+            if i < ende and self.text[i] != "\t":
+                continue
+            if self.text[stueck:i].strip():
+                ergebnis.extend(self._rechtecke_stueck(stueck, i))
+            stueck = i + 1
+        return ergebnis
+
+    def _rechtecke_stueck(self, start: int, ende: int) -> list:
+        """rechtecke() für ein Stück ohne Spaltengrenze."""
         gruppen: dict = {}
         for g in self.glyphen(start, ende):
             gruppen.setdefault(self.zeichen[g].zeile, []).append(g)
@@ -620,6 +651,12 @@ class Seite:
                 if r.is_empty:
                     continue
                 ergebnis.append((r, fitz.Rect(box), box.height / 1.6, None))
+                for w in sorted(woerter):
+                    for streifen, partner in self.textebene_partner.get(w, ()):
+                        ergebnis.append((fitz.Rect(streifen), fitz.Rect(partner), box.height / 1.6, None))
+                continue
+            if self.bildstelle and any(g in self.bildstelle for g in gs):
+                ergebnis.extend(self._rechtecke_textebene_scan(gs))
                 continue
             zs = [self.zeichen[g] for g in gs]
             sichtbar = [z for z in zs if not z.c.isspace() and _gueltig(z.rect)] or [z for z in zs if _gueltig(z.rect)]
@@ -642,6 +679,33 @@ class Seite:
                 r = fitz.Rect(box.x0 - 1, box.y0 - 1, box.x1 + 1, box.y1 + 1)
             ergebnis.append((r, fitz.Rect(box), groesse, grundlinie))
         return ergebnis
+
+    def _rechtecke_textebene_scan(self, gs: list) -> list:
+        """rechtecke() für Glyphen der unsichtbaren Textebene eines durchsuchbaren Scans (eine Zeile):
+        zuerst die Bildstelle (verknüpfte OCR-Wörter bzw. die um den Versatz verschobene Box), dann je Wort ein
+        schmaler Kernstreifen, der die unsichtbaren Zeichen entfernt, ohne Nachbarn zu berühren."""
+        sichtbar = [g for g in gs if not self.zeichen[g].c.isspace() and _gueltig(self.zeichen[g].rect)]
+        if not sichtbar:
+            return []
+        groesse = max(self.zeichen[g].groesse for g in sichtbar)
+        bild = _box_von(self.bildstelle[g] for g in sichtbar if g in self.bildstelle)
+        r = fitz.Rect(bild.x0 - OCR_RAND, bild.y0 - OCR_RAND, bild.x1 + OCR_RAND, bild.y1 + OCR_RAND)
+        ohne = [g for g in sichtbar if g not in self.bildstelle]
+        if ohne:        # nur teilweise verknüpft: die Textbox selbst gehört sicherheitshalber dazu
+            tb = _box_von(self.zeichen[g].rect for g in ohne)
+            r |= fitz.Rect(tb.x0 - 1, tb.y0 - 1, tb.x1 + 1, tb.y1 + 1)
+        r &= self.rect
+        aus = [] if r.is_empty else [(r, fitz.Rect(bild), min(groesse, bild.height / 1.2) or groesse, None)]
+        lauf: list = []
+        for g in sichtbar + [None]:
+            if lauf and (g is None or g != lauf[-1] + 1):
+                box = _box_von(self.zeichen[x].rect for x in lauf)
+                breite = box.width / len(lauf)
+                aus.append((_kernstreifen(box, breite), fitz.Rect(box), groesse, None))
+                lauf = []
+            if g is not None:
+                lauf.append(g)
+        return aus
 
     def freiraum(self, start: int, ende: int, rect) -> tuple:
         """(x1 des vorigen, x0 des nächsten Buchstabens/Ziffer bzw. OCR-Worts) in der Zeile der Stelle –
@@ -759,6 +823,132 @@ class Dokument:
 
 def _gueltig(r) -> bool:
     return r.x1 > r.x0 and r.y1 > r.y0 and -1e6 < r.x0 and r.x1 < 1e6 and -1e6 < r.y0 and r.y1 < 1e6
+
+
+def _kernstreifen(box, zeichenbreite: float | None = None):
+    """Schmaler Streifen in der Mitte einer Wortbox (unsichtbare Textebene): überdeckt jedes Zeichen des
+    Worts zu gut einem Drittel – apply_redactions entfernt Zeichen ab etwa einem Fünftel Überdeckung –,
+    berührt aber weder Nachbarwörter noch Nachbarzeilen."""
+    b = fitz.Rect(box)
+    breite = zeichenbreite if zeichenbreite and zeichenbreite > 0 else 0.5 * b.height
+    dx = min(1.5, 0.3 * breite)
+    dy = 0.25 * b.height
+    r = fitz.Rect(b.x0 + dx, b.y0 + dy, b.x1 - dx, b.y1 - dy)
+    return r if not r.is_empty else b
+
+
+# ----------------------------------------------------------------------
+# Durchsuchbare Scans: unsichtbare Textebene mit den OCR-Wörtern derselben Bildstelle verknüpfen
+# ----------------------------------------------------------------------
+VERKNUEPFUNG_SUCHE_PT = 30.0      # so weit dürfen Textebene und Bild höchstens auseinanderliegen
+VERKNUEPFUNG_MIN_PAARE = 3        # gleichlautende Wortpaare, die für eine Versatz-Schätzung nötig sind
+VERKNUEPFUNG_UEBERDECKUNG = 0.3   # Anteil der kleineren Box, ab dem verschobene Textbox und OCR-Box ein Paar sind
+
+
+def _vergleichswort(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKC", text).casefold() if c.isalnum())
+
+
+def _textebene_verknuepfen(seite: Seite) -> None:
+    """Durchsuchbarer Scan (Bild + unsichtbare Textebene einer fremden OCR, oder Text über einem Scan):
+    Jedes Wort der Textebene wird mit den OCR-Wörtern an derselben Bildstelle verknüpft. Die Textebene
+    liegt gegen das Bild versetzt (gemessen 1,5-4 pt) und ist bei schrägen Scans nicht mitgedreht; der
+    Versatz wird aus gleichlautenden Wortpaaren geschätzt (je Wort der nächstgelegene Paar-Versatz).
+    Ergebnis (für rechtecke()): bildstelle[Glyphe der Textebene] = Box der Partner-OCR-Wörter bzw. die
+    verschobene Textbox, textebene_partner[OCR-Wort] = [(Kernstreifen, Box) der Partner-Textwörter],
+    textebene_abgleich = Anteil der OCR-Wörter (ab 3 Zeichen) mit gleichlautendem Partner."""
+    tl = []                                   # (Glyphen, Box als Tupel, Vergleichswort)
+    abb, zeichen = seite.abbildung, seite.zeichen
+    for m in _NICHT_LEER_RE.finditer(seite.text):
+        gs = sorted({abb[i] for i in range(m.start(), m.end()) if abb[i] >= 0})
+        rects = [zeichen[g].rect for g in gs if zeichen[g].quelle == "text" and _gueltig(zeichen[g].rect)]
+        if not rects:
+            continue
+        gs = [g for g in gs if zeichen[g].quelle == "text" and _gueltig(zeichen[g].rect)]
+        box = (min(r.x0 for r in rects), min(r.y0 for r in rects), max(r.x1 for r in rects), max(r.y1 for r in rects))
+        tl.append((gs, box, _vergleichswort(m.group(0))))
+    if not tl or not seite.ocr_boxen:
+        return
+    ocr_text: dict = {}
+    for g, z in enumerate(zeichen):
+        wid = seite.wort_ids[g]
+        if wid >= 0 and z.quelle != "text":
+            ocr_text.setdefault(wid, []).append(z.c)
+    ocr = []
+    for wid, cs in ocr_text.items():
+        r = seite.ocr_boxen[wid]
+        ocr.append((wid, (r.x0, r.y0, r.x1, r.y1), _vergleichswort("".join(cs))))
+    if not ocr:
+        return
+    # Raster über die OCR-Wörter (Zeilen von 20 pt) für die Nachbarsuche
+    raster: dict = {}
+    for eintrag in ocr:
+        b = eintrag[1]
+        for k in range(int((b[1] - VERKNUEPFUNG_SUCHE_PT) // 20), int((b[3] + VERKNUEPFUNG_SUCHE_PT) // 20) + 1):
+            raster.setdefault(k, []).append(eintrag)
+
+    def nachbarn(box):
+        return raster.get(int(((box[1] + box[3]) / 2) // 20), ())
+
+    # 1) Versatz aus gleichlautenden, eindeutigen Paaren
+    paare = []                                # (Mittelpunkt Textebene, dx, dy)
+    for _, box, wort in tl:
+        if len(wort) < 3:
+            continue
+        mx, my = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        kand = [b for _, b, w in nachbarn(box) if w == wort
+                and abs((b[0] + b[2]) / 2 - mx) < VERKNUEPFUNG_SUCHE_PT
+                and abs((b[1] + b[3]) / 2 - my) < VERKNUEPFUNG_SUCHE_PT]
+        if len(kand) == 1:
+            b = kand[0]
+            paare.append((mx, my, (b[0] + b[2]) / 2 - mx, (b[1] + b[3]) / 2 - my))
+    gleich = sum(1 for _, _, w in ocr if len(w) >= 3)
+    if len(paare) < VERKNUEPFUNG_MIN_PAARE:
+        seite.textebene_abgleich = 0.0 if gleich else None
+        return
+    dxs = sorted(p[2] for p in paare)
+    dys = sorted(p[3] for p in paare)
+    seite.textebene_versatz = (dxs[len(dxs) // 2], dys[len(dys) // 2])
+    tl_woerter = {w for _, _, w in tl if len(w) >= 3}
+    if gleich:
+        seite.textebene_abgleich = sum(1 for _, _, w in ocr if len(w) >= 3 and w in tl_woerter) / gleich
+
+    # 2) Verknüpfen: Textbox um den nächstgelegenen Paar-Versatz verschieben, überlappende OCR-Wörter
+    paar_raster: dict = {}
+    for p in paare:
+        paar_raster.setdefault((int(p[0] // 150), int(p[1] // 150)), []).append(p)
+    for gs, box, _ in tl:
+        mx, my = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        kx, ky = int(mx // 150), int(my // 150)
+        nah = [p for dx_ in (-1, 0, 1) for dy_ in (-1, 0, 1) for p in paar_raster.get((kx + dx_, ky + dy_), ())]
+        naechstes = min(nah, key=lambda p: (p[0] - mx) ** 2 + (p[1] - my) ** 2) if nah else None
+        if naechstes is not None and (naechstes[0] - mx) ** 2 + (naechstes[1] - my) ** 2 <= 150.0 ** 2:
+            dx, dy = naechstes[2], naechstes[3]
+        else:
+            dx, dy = seite.textebene_versatz
+        v = (box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy)
+        flaeche_v = max((v[2] - v[0]) * (v[3] - v[1]), 1e-6)
+        partner = []
+        for wid, b, _ in nachbarn(v):
+            sx = min(v[2], b[2]) - max(v[0], b[0])
+            sy = min(v[3], b[3]) - max(v[1], b[1])
+            if sx <= 0 or sy <= 0:
+                continue
+            flaeche_b = max((b[2] - b[0]) * (b[3] - b[1]), 1e-6)
+            if sx * sy > VERKNUEPFUNG_UEBERDECKUNG * min(flaeche_v, flaeche_b):
+                partner.append((wid, b))
+        if partner:
+            bild = fitz.Rect(min(b[0] for _, b in partner), min(b[1] for _, b in partner),
+                             max(b[2] for _, b in partner), max(b[3] for _, b in partner))
+        else:
+            bild = fitz.Rect(v)
+        for g in gs:
+            seite.bildstelle[g] = bild
+        if partner:
+            box_r = fitz.Rect(box)
+            streifen = _kernstreifen(box_r, box_r.width / max(len(gs), 1))
+            for wid, _ in partner:
+                seite.textebene_partner.setdefault(wid, []).append((streifen, box_r))
 
 
 def _fingerabdruck_seite(text: str, zeichen: list) -> str:
@@ -954,30 +1144,115 @@ def woerter_zu_zeilen(woerter) -> list:
     return zeilen
 
 
+SPALTE_OCR = 1.0                  # Lücke zwischen OCR-Wörtern > 1,0 x Worthöhe (Median der Zeile) -> "\t\t"
+BLOCKSATZ_OCR = 1.5               # gleichmäßige Lücken bis 1,5 x Worthöhe sind Wortabstände (Blocksatz)
+
+
+def _ocr_ausrichtung(woerter) -> tuple:
+    """(winkel, schraeg) der OCR-Wörter (10-Tupel tragen beides; sonst wie ocr.woerter_zu_zeilen)."""
+    f = getattr(_ocr, "ausrichtung_der_woerter", None)
+    if f is None:
+        return 0, 0.0
+    try:
+        return f(woerter)
+    except Exception:
+        return 0, 0.0
+
+
+def _lesekasten(w, winkel: int, schraeg: float) -> tuple:
+    f = getattr(_ocr, "lesekasten", None)
+    if f is None or (not winkel and not schraeg):
+        return (min(w[0], w[2]), min(w[1], w[3]), max(w[0], w[2]), max(w[1], w[3]))
+    return f(w, winkel, schraeg)
+
+
+def _aus_lesekoordinaten(x: float, y: float, winkel: int, schraeg: float) -> tuple:
+    """Punkt in gerade gerückten Lesekoordinaten -> Seitenkoordinaten (Umkehrung von ocr.lesekasten)."""
+    if schraeg:
+        c, s = math.cos(math.radians(schraeg)), math.sin(math.radians(schraeg))
+        x, y = x * c - y * s, x * s + y * c
+    if winkel == 180:
+        return -x, -y
+    if winkel == 90:
+        return y, -x
+    if winkel == 270:
+        return -y, x
+    return x, y
+
+
+def _ocr_trenner(lese: list, texte=None) -> list:
+    """Trenner zwischen den Wörtern einer OCR-Zeile: Spaltentrenner bei großer Lücke (Tabellenzelle,
+    zweite Spalte eines Briefkopfs) wie bei Textseiten, sonst Leerzeichen. Gleichmäßige mittlere Lücken
+    zwischen mindestens drei Wörtern sind Blocksatz. Ein am "@" zerrissenes Wort ("anna.muster@ web.de",
+    Tesseract trennt dort oft) wird bei enger Lücke wieder verbunden."""
+    if len(lese) < 2:
+        return []
+    hoehen = sorted(max(b[3] - b[1], 0.5) for b in lese)
+    h = hoehen[len(hoehen) // 2]
+    luecken = [lese[j][0] - lese[j - 1][2] for j in range(1, len(lese))]
+    if (len(luecken) >= 2 and min(luecken) > 0 and max(luecken) <= BLOCKSATZ_OCR * h
+            and max(luecken) <= 1.5 * min(luecken) + 0.1 * h):
+        aus = [" "] * len(luecken)
+    else:
+        aus = [SPALTENTRENNER if luecke > SPALTE_OCR * h else " " for luecke in luecken]
+    if texte:
+        for j, luecke in enumerate(luecken):
+            links, rechts = str(texte[j]), str(texte[j + 1])
+            if luecke < ZUSAMMEN_AT * h and (links.endswith("@") or rechts.startswith("@")) \
+                    and len(links.strip("@")) and len(rechts.strip("@")):
+                aus[j] = ""
+    return aus
+
+
+ZUSAMMEN_AT = 0.5                 # "name@" + "web.de" mit Lücke unter 0,5 x Worthöhe: ein Wort
+
+
+def _ocr_zeichen(text: str, box, lese: tuple, winkel: int, schraeg: float) -> list:
+    """Anteilige Zeichenrechtecke eines OCR-Worts in Leserichtung (bei 180° beginnt das Wort rechts, bei
+    90° unten), bei Schräglage entlang der schrägen Grundlinie; jeweils auf die Wortbox beschnitten."""
+    n = len(text)
+    if not n:
+        return []
+    if not winkel and not schraeg:
+        breite = box.width / n
+        return [_rect(box.x0 + i * breite, box.y0, box.x0 + (i + 1) * breite, box.y1) for i in range(n)]
+    breite = (lese[2] - lese[0]) / n
+    aus = []
+    for i in range(n):
+        lx0, lx1 = lese[0] + i * breite, lese[0] + (i + 1) * breite
+        ecken = [_aus_lesekoordinaten(x, y, winkel, schraeg) for x in (lx0, lx1) for y in (lese[1], lese[3])]
+        r = _rect(min(e[0] for e in ecken), min(e[1] for e in ecken), max(e[0] for e in ecken),
+                  max(e[1] for e in ecken)) & box
+        aus.append(r if not r.is_empty else _rect(box.x0, box.y0, box.x1, box.y1))
+    return aus
+
+
 def _ocr_zeilen(woerter, quelle: str, block_start: int, ocr_boxen: list) -> list:
-    """Rohzeilen aus OCR-Wörtern; Blöcke über vertikale Lücken; Zeichen = anteilige Teilrechtecke."""
+    """Rohzeilen aus OCR-Wörtern (Zeilenbildung ocr.woerter_zu_zeilen in gerade gerückten Lesekoordinaten):
+    Blöcke über Lücken zwischen den Zeilen, Spaltentrenner "\\t\\t" bei großen Lücken in der Zeile,
+    Zeichen = anteilige Teilrechtecke der Wortbox in Leserichtung."""
     zeilen = []
     block = block_start
     vorige = None
+    winkel, schraeg = _ocr_ausrichtung(woerter)
     for gruppe in woerter_zu_zeilen(woerter):
         boxen = [_rect(min(w[0], w[2]), min(w[1], w[3]), max(w[0], w[2]), max(w[1], w[3])) for w in gruppe]
-        oben = min(b.y0 for b in boxen)
-        unten = max(b.y1 for b in boxen)
+        lese = [_lesekasten(w, winkel, schraeg) for w in gruppe]
+        oben = min(b[1] for b in lese)
+        unten = max(b[3] for b in lese)
         hoehe = max(unten - oben, 1.0)
         if vorige is not None and (oben - vorige[1] > 1.2 * hoehe or unten < vorige[0]):
             block += 1
         vorige = (oben, unten)
+        trenner = _ocr_trenner(lese, [w[4] for w in gruppe])
         inhalt = []
-        for j, (w, box) in enumerate(zip(gruppe, boxen)):
+        for j, (w, box, lk) in enumerate(zip(gruppe, boxen, lese, strict=True)):
             if j:
-                inhalt.append(" ")
+                inhalt.append(trenner[j - 1])
             wort_id = len(ocr_boxen)
             ocr_boxen.append(box)
             text = str(w[4])
-            n = len(text)
-            breite = box.width / n if n else box.width
-            for i, c in enumerate(text):
-                r = _rect(box.x0 + i * breite, box.y0, box.x0 + (i + 1) * breite, box.y1)
+            for c, r in zip(text, _ocr_zeichen(text, box, lk, winkel, schraeg), strict=True):
                 inhalt.append((c, r, box.y1, box.y1 - box.y0, wort_id))
         zeilen.append(_Rohzeile(block, inhalt, True, quelle))
     return zeilen
@@ -1102,7 +1377,10 @@ def _umbruch_passt(zeichen: list, einheiten: list, ende: int, folge: list) -> bo
     if g_ende < 0 or folge_g is None:
         return True
     letzte, naechste = zeichen[g_ende], zeichen[folge_g]
-    if not (letzte.horizontal and naechste.horizontal):
+    ocr = letzte.quelle != "text" and naechste.quelle != "text"
+    if ocr and letzte.block != naechste.block:
+        return False
+    if not ocr and not (letzte.horizontal and naechste.horizontal):
         return True
     k = ende - 1
     while k > 0 and einheiten[k - 1][0] != "\t":
@@ -1111,8 +1389,28 @@ def _umbruch_passt(zeichen: list, einheiten: list, ende: int, folge: list) -> bo
     if seg_g is None:
         return True
     groesse = letzte.groesse or 10.0
-    nx0 = naechste.rect.x0
-    return nx0 < letzte.rect.x0 and nx0 >= zeichen[seg_g].rect.x0 - max(3 * groesse, 30.0)
+    if not ocr:
+        nx0 = naechste.rect.x0
+        return nx0 < letzte.rect.x0 and nx0 >= zeichen[seg_g].rect.x0 - max(3 * groesse, 30.0)
+    # OCR-Zeilen (in Lesefolge, derselbe Block): dieselbe Regel entlang der Leserichtung der Zeile statt der
+    # Seiten-x-Achse – bei kopfstehenden Scans beginnt die Folgezeile auf der Seite RECHTS, bei seitlichen unten
+    zeile_g = next((g for ch, g in einheiten[:ende] if g >= 0 and not ch.isspace()), seg_g)
+
+    def mitte(r):
+        return (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
+    ax, ay = mitte(zeichen[zeile_g].rect)
+    bx, by = mitte(letzte.rect)
+    laenge = math.hypot(bx - ax, by - ay)
+    if laenge < 1.0:
+        return True
+    rx, ry = (bx - ax) / laenge, (by - ay) / laenge
+
+    def lage(r):
+        mx, my = mitte(r)
+        return (mx - ax) * rx + (my - ay) * ry
+    hoehe = letzte.rect.width if abs(ry) > abs(rx) else letzte.rect.height   # quer zur Leserichtung
+    t_folge = lage(naechste.rect)
+    return t_folge < laenge and t_folge >= lage(zeichen[seg_g].rect) - max(3 * hoehe, 30.0)
 
 
 def _zusammensetzen(zeilen: list) -> tuple:
@@ -1278,7 +1576,15 @@ def seite_aufbauen(seite, nr: int, ocr_woerter=None, ocr_quelle: str = "ocr", fe
     if ocr_woerter:
         block_start = max((z.block for z in zeilen), default=-1) + 1
         zeilen += _ocr_zeilen(ocr_woerter, ocr_quelle, block_start, ocr_boxen)
-    return _seite_aus_zeilen(nr, seite.rect, zeilen, bilder or [], ocr_boxen, felder_roh, etiketten)
+    m = _seite_aus_zeilen(nr, seite.rect, zeilen, bilder or [], ocr_boxen, felder_roh, etiketten)
+    if ocr_boxen and ocr_quelle == "ocr" and any(z.quelle == "text" for z in m.zeichen):
+        # Scan mit Textebene (durchsuchbarer Scan, Stempel-/Fußzeilentext): beide Lesungen verknüpfen,
+        # damit jeder Treffer Zeichen UND Bildpixel entfernt – egal in welcher Lesung er gefunden wurde
+        try:
+            _textebene_verknuepfen(m)
+        except Exception:
+            m.bildstelle, m.textebene_partner = {}, {}
+    return m
 
 
 # ----------------------------------------------------------------------
