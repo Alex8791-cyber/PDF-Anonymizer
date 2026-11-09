@@ -48,7 +48,7 @@ jobs:
 
       - name: Tests (Linux, mit virtuellem Display)
         if: runner.os == 'Linux'
-        run: xvfb-run -a -s "-screen 0 1600x1000x24" python -W ignore -m pytest -q tests/
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" python -W ignore -m pytest -q tests/
 
       - name: Tests (Windows)
         if: runner.os == 'Windows'
