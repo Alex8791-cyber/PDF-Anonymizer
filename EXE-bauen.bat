@@ -89,6 +89,8 @@ REM PyInstaller-Hooks; nur das Sprachmodell braucht --collect-all.
 "%PY%" -m PyInstaller --noconfirm --clean --onedir --windowed ^
     --name PDF-Anonymisierer ^
     --add-data "tessdata;tessdata" ^
+    --add-data "anonymisierer\daten;anonymisierer\daten" ^
+    --collect-submodules anonymisierer.detektoren ^
     --collect-all de_core_news_md ^
     --exclude-module spacy.tests ^
     --version-file werkzeuge\version_info.txt ^

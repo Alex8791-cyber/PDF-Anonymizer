@@ -386,6 +386,8 @@ def test_exe_bauen_flags():
     assert "--noconfirm" in text and "--clean" in text            # M-44
     assert '--add-data "tessdata;tessdata"' in text               # M-08, Windows-Trenner ;
     assert "--collect-all de_core_news_md" in text
+    assert '--add-data "anonymisierer\\daten;anonymisierer\\daten"' in text   # Wissensbasis (Wortlisten)
+    assert "--collect-submodules anonymisierer.detektoren" in text           # Detektoren werden dynamisch geladen
     assert "--collect-all tkinterdnd2" not in text                # Hooks vorhanden (M-44)
     assert "--exclude-module spacy.tests" in text
     assert "--version-file werkzeuge\\version_info.txt" in text   # M-27
