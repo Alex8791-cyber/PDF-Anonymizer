@@ -14,6 +14,7 @@ Scans mit /Rotate 90/180/270) gilt nach Analyse + Schwärzung:
 
 import re
 import shutil
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -196,8 +197,13 @@ def invarianten_pruefen(pdf: Path, ocr, immer=()):
     with fitz.open(erg["ausgabe"]) as aus:
         ausgabe = _PLATZHALTER_RE.sub(" ", "\n".join(s.get_text() for s in aus))
     modell = analyse["modell"]
+    # abgewählte Stellen (bewusst ausgelassen: NIE-Liste, mehrdeutig am Satzanfang …) dürfen stehen bleiben
+    erlaubt = Counter(" ".join(st["text"].split()).casefold() for f in funde for st in f["stellen"]
+                      if not st.get("an", True))
     for f in funde:
         for st in f["stellen"]:
+            if not st.get("an", True):
+                continue
             seite = modell.seiten[st["seite"]]
             glyphen = seite.glyphen(st["start"], st["ende"])
             if not glyphen or seite.zeichen[glyphen[0]].quelle != "text":
@@ -208,6 +214,9 @@ def invarianten_pruefen(pdf: Path, ocr, immer=()):
                         w[0].isupper() for w, s in zip(re.findall(r"[^\W_]+", m.group(0)), re.findall(r"[^\W_]+", text))
                         if s[0].isupper()):
                     continue        # Namen nur großgeschrieben (Vertrag: "klein"/"groß" bleiben)
+                if erlaubt[text.casefold()] > 0:
+                    erlaubt[text.casefold()] -= 1
+                    continue
                 raise AssertionError((pdf.name, f["kategorie"], text, m.group(0)))
     return analyse, erg
 

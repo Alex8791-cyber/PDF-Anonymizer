@@ -1206,3 +1206,27 @@ def test_pruefhelfer_ohne_poppler_und_qpdf(tmp_path, monkeypatch):
     assert "Musterfrau" in pdftotext(pdf)
     roh = qdf_rohbytes(pdf)
     assert "Musterfrau" in roh and "Ölmann" in roh
+
+
+def test_nie_huelle_ist_kein_rest_der_selbstkontrolle(tmp_path, monkeypatch):
+    """Ein Fundtext, der zusätzlich in einer NIE-Hülle steht ("Mustermann Bau GmbH"), bleibt dort stehen –
+    die Selbstkontrolle meldet das nicht als Rest, die Ausgabe ist "fertig" (vorher: _PRUEFEN-Fehlalarm)."""
+    from anonymisierer import namen as na
+    from anonymisierer.analyse import analysiere_pdf
+
+    def kandidaten(text):
+        aus = []
+        for name in ("Max Mustermann", "Mustermann"):
+            i = text.find(name if name != "Mustermann" else "Herr Mustermann")
+            if i >= 0:
+                i += 0 if name != "Mustermann" else 5
+                aus.append({"text": name, "start": i, "ende": i + len(name), "gruppe": None})
+        return aus
+    monkeypatch.setattr(na, "finde_personen", kandidaten)
+    pdf = textseite(tmp_path / "nie.pdf", ["Versicherungsnehmer: Max Mustermann", "Arbeitgeber: Mustermann Bau GmbH",
+                                          "Herr Mustermann hat angerufen."])
+    e = analysiere_pdf(pdf, {"namen"}, ["Mustermann Bau GmbH"], [])
+    out = schwaerze_pdf(pdf, e["funde"], modell=e["modell"], ziel_ordner=tmp_path / "aus")
+    assert out["reste"] == [] and out["status"] == "fertig", out["meldungen"]
+    text = volltext(out["ausgabe"])
+    assert "Mustermann Bau GmbH" in text and "Max Mustermann" not in text and "Herr Mustermann" not in text

@@ -203,6 +203,7 @@ _PERSONENKONTEXT_RE = re.compile(
 _WORT_DAVOR_RE = re.compile(r"([^\W\d_][\w'’\-]*)[\s,]*$")
 _WORT_DANACH_RE = re.compile(r"[\s,]*([^\W\d_][\w'’\-]*)")
 _KLEINWORT_RE = re.compile(r"(?<![\w])[a-zäöüß][a-zäöüß]{2,}(?![\w])")
+_ADRESSE_RE = re.compile(r"[^\s@]+@[^\s@]+|(?:https?://|www\.)\S+", re.IGNORECASE)
 
 
 def _name_zerlegen(name: str) -> tuple:
@@ -467,7 +468,11 @@ class _Kandidat(NamedTuple):
     art: int                       # 0 = Detektor, 1 = Weitergabe, 2 = Namensbestandteil
 
 
-def _fund_bauen(dok, schluessel, kategorie, stellen_global, quellen, sicherheit, anzeige, ersatz, hinweis):
+def _fund_bauen(dok, schluessel, kategorie, stellen_global, quellen, sicherheit, anzeige, ersatz, hinweis,
+                ausgelassen=()):
+    """Fund v2. `ausgelassen`: (start, ende, grund) bewusst nicht geschwärzter Vorkommen desselben Texts
+    (NIE-Liste, mehrdeutig am Satzanfang, fremdes Bindestrich-Wort) – sie erscheinen als abgewählte Stellen
+    (an: False, grund), damit Vorschau und Selbstkontrolle sie kennen und die Nutzerin sie anhaken kann."""
     stellen = []
     for s, e in stellen_global:
         for nr, ls, le in dok.lokal(s, e):
@@ -476,11 +481,23 @@ def _fund_bauen(dok, schluessel, kategorie, stellen_global, quellen, sicherheit,
     s0, e0 = stellen_global[0]
     erste = stellen[0] if stellen else None
     text = erste["text"] if erste else dok.text[s0:e0]
+    seiten = [] if dok.aus_text else sorted({st["seite"] + 1 for st in stellen})
+    anzahl = max(1, len(stellen))
+    for s, e, grund in ausgelassen:
+        for nr, ls, le in dok.lokal(s, e):
+            stellen.append({"seite": nr, "start": ls, "ende": le, "an": False, "grund": grund,
+                            "text": dok.seiten[nr].text[ls:le]})
+    if ausgelassen:
+        stellen.sort(key=lambda st: (st["seite"], st["start"]))
     return {"id": "", "kategorie": kategorie, "anzeige": anzeige, "text": text, "ersatz": ersatz,
-            "seiten": [] if dok.aus_text else sorted({st["seite"] + 1 for st in stellen}),
-            "anzahl": max(1, len(stellen)), "kontext": _kontext_text(dok.text, s0, e0),
+            "seiten": seiten, "anzahl": anzahl, "kontext": _kontext_text(dok.text, s0, e0),
             "stellen": stellen, "quellen": sorted(quellen), "sicherheit": round(float(sicherheit), 3),
             "hinweis": hinweis}
+
+
+GRUND_NIE = "NIE-Liste"
+GRUND_SATZANFANG = "mehrdeutiges Wort am Satzanfang"
+GRUND_KOMPOSITUM = "Teil eines fremden Bindestrich-Worts"
 
 
 def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch", kundenliste=None,
@@ -529,7 +546,9 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
                 if v[0] == k and v[3] is None:
                     varianten[i] = (v[0], v[1], v[2], t.gruppe)
     personen = _Personen(varianten)
-    kleinwoerter = {w for w in _KLEINWORT_RE.findall(text)} if namen_treffer else set()
+    # kleingeschriebene Wörter des Texts (Beleg für Mehrdeutigkeit) – ohne E-Mail-Adressen und URLs, dort ist
+    # alles klein ("a.krause@…" macht "Krause" nicht mehrdeutig)
+    kleinwoerter = set(_KLEINWORT_RE.findall(_ADRESSE_RE.sub(" ", text))) if namen_treffer else set()
     wissen = kontext.wissen
 
     def mehrdeutig(wort: str) -> bool:
@@ -539,19 +558,21 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
         liste = getattr(wissen, "ALLERWELTSWOERTER", None) if wissen is not None else None
         return bool(liste) and w in liste
 
-    def zulassen(s: int, e: int, wort: str) -> bool:
+    def ausschluss(s: int, e: int, wort: str):
         """Weitergabe eines einzelnen Namensworts: nicht als Teil eines fremden Bindestrich-Worts
         ("Kraftfahrt" in "Kraftfahrt-Versicherung"); mehrdeutige Wörter nicht am Satzanfang ohne
-        Personenkontext."""
+        Personenkontext. Liefert den Grund des Ausschlusses oder None."""
         kompositum = _bindestrich_wort(text, s, e)
         if kompositum is not None:
             andere = [p for p in kompositum.split("-") if p and _schluessel(p) != _schluessel(wort)]
             if (fund_schluessel(kompositum, "name") not in personen.zuordnung
                     and not any(_schluessel(p) in personen.namensteile for p in andere)):
-                return False
+                return GRUND_KOMPOSITUM
         if not mehrdeutig(wort):
-            return True
-        return not _satzanfang(text, s) or _personenkontext(text, s, e, personen.namensteile)
+            return None
+        if not _satzanfang(text, s) or _personenkontext(text, s, e, personen.namensteile):
+            return None
+        return GRUND_SATZANFANG
 
     # 3) Kandidaten: Detektor-Treffer, Weitergabe, Namensbestandteile
     kandidaten = []
@@ -576,21 +597,27 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
     for kategorie, roh in gesucht:
         nach_modus.setdefault(modus_fuer(kategorie), []).append(roh)
     vorkommen = {modus: ganzwort_stellen_viele(dok, texte, modus) for modus, texte in nach_modus.items()}
+    ausgelassen = []                        # (start, ende, Fund-Schlüssel, Grund)
     for (kategorie, roh), sicherheit in gesucht.items():
         modus = modus_fuer(kategorie)
         schl = schluessel_je_treffer[(kategorie, roh)]
         einzelwort = modus == "name" and len(roh.split()) == 1 and "," not in roh
         for s, e in vorkommen[modus].get(roh, ()):
             if kategorie != "begriff" and nie.umhuellt(s, e):
+                ausgelassen.append((s, e, schl, GRUND_NIE))
                 continue
-            if einzelwort and not zulassen(s, e, roh):
+            grund = ausschluss(s, e, roh) if einzelwort else None
+            if grund:
+                ausgelassen.append((s, e, schl, grund))
                 continue
             kandidaten.append(_Kandidat(s, e, kategorie, schl, "weitergabe", sicherheit, 1))
     if "namen" in set(aktive) and personen.bestandteile:
         teile = ganzwort_stellen_viele(dok, [teil for teil, _ in personen.bestandteile], "name")
         for teil, tkey in personen.bestandteile:
             for s, e in teile.get(teil, ()):
-                if nie.umhuellt(s, e) or not zulassen(s, e, teil):
+                grund = GRUND_NIE if nie.umhuellt(s, e) else ausschluss(s, e, teil)
+                if grund:
+                    ausgelassen.append((s, e, ("namen", tkey), grund))
                     continue
                 kandidaten.append(_Kandidat(s, e, "namen", ("namen", tkey), "bestandteil", 0.5, 2))
 
@@ -626,6 +653,23 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
         eintrag["quellen"] |= quellen
         eintrag["sicherheit"] = max(eintrag["sicherheit"], sicherheit)
         eintrag["arten"] |= arten
+    aus_je_fund: dict = {}
+    if ausgelassen:
+        belegte = sorted((s, e) for s, e, *_ in stellen)
+        anfaenge = [b[0] for b in belegte]
+        max_ende, m = [], -1
+        for _, e1 in belegte:
+            m = max(m, e1)
+            max_ende.append(m)
+        gesehen_aus = set()
+        for s, e, schl, grund in sorted(ausgelassen, key=lambda a: (a[0], a[1])):
+            if schl not in je_fund or (s, e) in gesehen_aus:
+                continue
+            i = bisect_right(anfaenge, e - 1)
+            if i and max_ende[i - 1] > s:
+                continue                      # liegt in einer Stelle, die ohnehin geschwärzt wird
+            gesehen_aus.add((s, e))
+            aus_je_fund.setdefault(schl, []).append((s, e, grund))
     funde = []
     namens_ersatz = personen.pseudonyme(
         [schl[1] for schl, eintrag in sorted(je_fund.items(), key=lambda x: x[1]["stellen"][0])
@@ -643,8 +687,12 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
             anzeige = _anzeige(kategorie)
             ersatz = _platzhalter(kategorie)
         funde.append(_fund_bauen(dok, schl, kategorie, sorted(eintrag["stellen"]), eintrag["quellen"],
-                                 eintrag["sicherheit"], anzeige, ersatz, hinweis))
-    funde.sort(key=lambda f: (f["stellen"][0]["seite"], f["stellen"][0]["start"]) if f["stellen"] else (0, 0))
+                                 eintrag["sicherheit"], anzeige, ersatz, hinweis, aus_je_fund.get(schl, ())))
+
+    def erste_an(f):
+        st = next((st for st in f["stellen"] if st.get("an", True)), None)
+        return (st["seite"], st["start"]) if st else (0, 0)
+    funde.sort(key=erste_an)
     for i, f in enumerate(funde, 1):
         f["id"] = f"f{i}"
     return funde

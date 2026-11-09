@@ -123,9 +123,10 @@ def _kandidaten_aus(text, *namen):
 
 
 def gedeckt(funde, text, teil, wort=None):
-    """Ist `wort` (Standard: der ganze `teil`) in jedem Vorkommen von `teil` von einer Stelle überdeckt?"""
+    """Ist `wort` (Standard: der ganze `teil`) in jedem Vorkommen von `teil` von einer angehakten Stelle
+    überdeckt? Bewusst ausgelassene Vorkommen stehen als abgewählte Stellen (an: False) im Fund."""
     wort = wort or teil
-    stellen = [(st["start"], st["ende"]) for f in funde for st in f["stellen"]]
+    stellen = [(st["start"], st["ende"]) for f in funde for st in f["stellen"] if st.get("an", True)]
     vorkommen = [m.start() + teil.index(wort) for m in re.finditer(re.escape(teil), text)]
     return bool(vorkommen) and all(any(s <= a and a + len(wort) <= e for s, e in stellen) for a in vorkommen)
 
@@ -150,7 +151,10 @@ def test_nie_liste_namen(monkeypatch):
     assert ("namen", "Sabine Schmidt") not in f and ("namen", "Peter Schmidt") in f and ("namen", "Schmidt") in f
     assert "Durch NIE-Liste freigegeben: Sabine Schmidt" in hinweise
     s = text.index("Sabine Schmidt")
-    assert not any(st["start"] < s + 14 and s < st["ende"] for x in funde for st in x["stellen"])
+    assert not any(st["start"] < s + 14 and s < st["ende"] for x in funde for st in x["stellen"] if st["an"])
+    # das Vorkommen in der Hülle ist sichtbar, aber abgewählt (Vorschau, Selbstkontrolle)
+    assert any(st["start"] == s + 7 and not st["an"] and st["grund"] == analyse.GRUND_NIE
+               for x in funde for st in x["stellen"])
     # Firmenname (kommt im Text nicht vor) gibt keinen Bestandteil frei
     f = paare(analysiere_text(text, {"namen"}, ["Schmidt Versicherungsmakler GmbH"], []))
     assert ("namen", "Schmidt") in f
@@ -975,3 +979,28 @@ def test_namen_inaktiv_und_detektorfehler_als_codes(tmp_path, monkeypatch):
     assert "NAMEN_INAKTIV" in codes and "Modell fehlt (Test)" in codes["NAMEN_INAKTIV"]["text"]
     assert "ERKENNUNG_FEHLER" in codes and "test.kaputt" in codes["ERKENNUNG_FEHLER"]["text"]
     assert [f["text"] for f in e["funde"]] == ["DE89 3704 0044 0532 0130 00"]
+
+
+def test_ausgelassene_vorkommen_sind_abgewaehlte_stellen(monkeypatch):
+    """Bewusst nicht geschwärzte Vorkommen eines Funds (mehrdeutig am Satzanfang, NIE-Hülle) stehen als
+    abgewählte Stellen mit Grund im Fund: sichtbar in der Vorschau, anhakbar, und die Selbstkontrolle hält
+    sie nicht für Reste. anzahl zählt nur die angehakten Stellen (EQ-18)."""
+    text = "Versicherungsnehmerin ist Petra Lange. Lange Zeit war unklar. Frau Lange zahlt."
+    monkeypatch.setattr(na, "finde_personen", lambda t: _kandidaten_aus(t, "Petra Lange"))
+    funde = analysiere_text(text, {"namen"}, [], [])
+    lange = next(f for f in funde if f["text"] == "Lange")
+    an = [st for st in lange["stellen"] if st["an"]]
+    aus = [st for st in lange["stellen"] if not st["an"]]
+    assert [text[st["start"]:st["ende"] + 5] for st in aus] == ["Lange Zeit"]
+    assert aus[0]["grund"] == analyse.GRUND_SATZANFANG and lange["anzahl"] == len(an) == 1
+    assert gedeckt(funde, text, "Frau Lange zahlt", "Lange")
+
+
+def test_kleinschreibung_in_mail_adressen_macht_namen_nicht_mehrdeutig(monkeypatch):
+    """"m.brenner@firma.de" ist kein Beleg, dass "Brenner" ein gewöhnliches Wort ist – "Brenner zahlt." am
+    Satzanfang wird geschwärzt (vorher: übersehen; Entwicklungs-Benchmark 001/027: Firmenname im Briefkopf)."""
+    text = "Versicherungsnehmer ist Max Brenner. Brenner zahlt. E-Mail: m.brenner@firma.de"
+    monkeypatch.setattr(na, "finde_personen", lambda t: _kandidaten_aus(t, "Max Brenner"))
+    funde = analysiere_text(text, {"namen", "email"}, [], [])
+    assert gedeckt(funde, text, "Brenner zahlt", "Brenner")
+    assert not any(not st["an"] for f in funde for st in f["stellen"])
