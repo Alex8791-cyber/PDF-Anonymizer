@@ -32,8 +32,14 @@ Was gemeldet wird (jede Regel liefert Stelle + Grund):
     Ziffern, die ein graues Schwärzungsrechteck berühren ("-WXV09-07": Wert mitten im Wort abgeschnitten).
   * Ort-Datum-Zeilen ("Tübingen, 14. Januar 2025": meist der Wohnort der Unterzeichnenden).
   * Formularfelder des Originals (von der Schwärzung übergeben), deren Wert in der Ausgabe noch lesbar ist.
-  * Scan-Seiten: unter der Grußformel Tinte, die die OCR nicht als Text gelesen hat (Unterschrift, von ihr
-    überschriebener Name) – Rechteck des Bereichs, "bitte ansehen".
+  * Scan-Seiten: dichte Tinte in Unterschriftsblöcken (unter der Grußformel – auch so, wie die OCR sie liest –,
+    über/neben "Unterschrift") und neben Personenangaben (hinter "Name:", neben einem Personen-Platzhalter), die
+    die OCR nicht VERLÄSSLICH gelesen hat: gar nicht, als Unterschriftszug (Wortkasten viel höher als die
+    Schrift), als Buchstabensalat – oder als Wort, das ein Name sein kann (dort macht die Lesung die Tinte nicht
+    harmlos: "DeLuca" unter "Mit freundlichen Grüßen", vom Unterschriftszug durchkreuzt). Bereiche in
+    Leserichtung (OCR-Ausrichtung 0/90/180/270°, Schräglage); Tinte relativ zum Papier (auch blasse
+    Kugelschreiber-Striche), Linien und Reste von Unter-/Durchstreichungen zählen nicht; Rechteck je Tintengruppe,
+    "bitte ansehen".
 Seitenverdacht (ohne Rechteck, „Seite selbst durchsehen“): eine Scan-Seite mit Tinte, aber ohne gelesene Wörter,
 eine kaum lesbare Scan-Seite (mehr als 20 % OCR-Bruchstücke wie "|", "\\", ".", Einzelzeichen – Fax, starke
 Kompression) und eine Scan-Seite, deren Lesung nach dem Maß der OCR unplausibel ist (Buchstabensalat einer
@@ -56,7 +62,9 @@ durchgereicht).
 from __future__ import annotations
 
 import datetime
+import difflib
 import re
+import unicodedata
 from pathlib import Path
 from typing import NamedTuple
 
@@ -1492,6 +1500,62 @@ class _Seitenpruefung:
                 continue                                # OCR-Bruchstück ("Dau", "MIRD", "Unfallherg")
             self.neu(s, e, "Rest neben Platzhalter", "rest")
 
+    def lesung_harmlos(self, s: int, e: int, lese_hoehe: float, uebliche_hoehe: float, fliesstext=False) -> bool:
+        """Macht die OCR-Lesung eines Worts (Textstelle s:e) seine Tinte unverdächtig? Für Unterschriftsblöcke und
+        Personenangaben auf Scans: Nein, wenn der Wortkasten viel höher ist als die übliche Schrift (ein
+        Unterschriftszug, als "Wort" gelesen), wenn die Lesung Bruchstück oder Buchstabensalat ist oder wenn das
+        Wort ein Name sein kann (großgeschriebener Name der Wissensbasis, auch mehrdeutig; unbekanntes
+        großgeschriebenes Wort) – an dieser Stelle steht eine Person. Ja für Platzhalter, NIE-Liste, abgewählte
+        Stellen, Wörter mit Ziffern (die prüfen die Textregeln), kleingeschriebene Wörter, Fließtext und
+        Grußformel (fliesstext=True: die Textregeln prüfen ihn mit Namenslisten und Kontext), Firmenzeilen,
+        häufige Wörter, Titel, Partikel, Etiketten, Hauptwörter; zusammengesetzte Wörter ("Kundenservice-Team"),
+        wenn jeder Teil harmlos ist."""
+        if self.ist_gesperrt(s, e):
+            return True
+        kern = self.text[s:e].strip("()[]{},;:.!?\"'„“”‚‘’«»|/\\-–")
+        if sum(c.isalnum() for c in kern) < 2:
+            return False
+        teile = [t for t in re.split(r"[-/]", kern) if t]
+        if lese_hoehe > WORT_HOEHE_MAX * uebliche_hoehe:
+            # viel höher als die Schrift: ein als "Wort" gelesener Unterschriftszug ("Dee") – es sei denn, die Lesung
+            # ist ein bekanntes Wort (Fax mit halber senkrechter Auflösung: hohe Wortkästen um gewöhnliche Wörter)
+            return bool(teile) and all(t.isalpha() and self._bekanntes_wort(t) for t in teile)
+        if any(c.isdigit() for c in kern):
+            return True
+        z = self.zeile(s)
+        if z is not None and self._org_zeile(z):
+            return True                                 # Firmenzeile ("Donau Leben AG", "… VVaG")
+        if _ocr_unsinn(kern) or not kern[:1].isalpha():
+            return False
+        buchstaben = [c.lower() for c in kern if c.isalpha()]
+        if len(buchstaben) >= 3 and not any(c in "aeiouyäöüéèáàóíú" for c in buchstaben):
+            return False                                # Buchstabensalat ("Dzrk")
+        if kern[:1].islower() or fliesstext:
+            return True
+        return bool(teile) and all(self._wort_harmlos(t) for t in teile)
+
+    def _bekanntes_wort(self, wort: str) -> bool:
+        """Wort der festen Listen – Funktions- und Kalenderwort, Anrede, Titel, akademischer Grad, häufiges Wort,
+        Partikel, Allowlist, Etikett – und kein Name der Wissensbasis."""
+        klein = wort.lower().rstrip(".")
+        if (klein in _STOPPWOERTER or klein in _KALENDERWOERTER or klein in _ANREDEN or klein in _ANREDE_ZUSATZ
+                or klein in _AKADEMISCH or klein in _TITEL_KURZ):
+            return True
+        vn, nn, vnm, nnm, aw, tit, allow, part = self.w.art(wort)
+        if (vn or nn) and not tit:
+            return False                                # Name der Wissensbasis – hier steht eine Person
+        return bool(tit or part or aw or allow or self.w.ist_etikett(wort))
+
+    def _wort_harmlos(self, wort: str) -> bool:
+        """Einzelwort ohne Ziffern: kein möglicher Name (siehe lesung_harmlos)? Bekanntes Wort, sonst – wenn es kein
+        Name der Wissensbasis ist – kleingeschrieben, Hauptwort-Endung oder zusammengesetztes Hauptwort."""
+        if self._bekanntes_wort(wort):
+            return True
+        vn, nn = self.w.art(wort)[:2]
+        if vn or nn:
+            return False
+        return bool(wort[:1].islower() or _NOMEN_ENDUNG.search(wort) or self._kompositum(wort))
+
     def _kompositum(self, w: str) -> bool:
         """Zusammengesetztes Hauptwort ("Bestandsliste", "Maklerbüro", "Unfallhergang")?"""
         for i in range(3, len(w) - 3):
@@ -1597,11 +1661,16 @@ def _felder_pruefen(pruefung: _Seitenpruefung, felder) -> None:
 
 
 def _seite_pruefen(m, wissen: _Wissen, platzhalter=(), nie=(), abgewaehlt=(), profil="hoch", felder=(),
-                   schwaerzungen=()) -> list:
+                   schwaerzungen=(), scan_seite=None) -> list:
+    """Alle Regeln einer Seite. scan_seite: die PDF-Seite einer Scan-Seite (OCR der ganzen Seite) – dann zusätzlich
+    die Tinte in Unterschriftsblöcken und neben Personenangaben (_unterschrift_pruefen; deren Verdacht steht vorn)."""
     pruefung = _Seitenpruefung(m, wissen, platzhalter, nie, abgewaehlt, profil, schwaerzungen)
     pruefung.pruefen()
     _felder_pruefen(pruefung, felder)
-    return [Verdacht(m.nr, s, e, m.text[s:e], grund, _rechtecke(m, s, e)) for s, e, grund in _zusammenfassen(pruefung)]
+    aus = [Verdacht(m.nr, s, e, m.text[s:e], grund, _rechtecke(m, s, e)) for s, e, grund in _zusammenfassen(pruefung)]
+    if scan_seite is not None:
+        aus = _unterschrift_pruefen(scan_seite, m, schwaerzungen, pruefung, aus) + aus
+    return aus
 
 
 def pruefe_text(text: str, platzhalter=None, nie=None, wissen=None, profil: str = "hoch",
@@ -1666,63 +1735,331 @@ def _schwaerzungsrechtecke(seite) -> list:
     return aus
 
 
+# ----------------------------------------------------------------------
+# Scan-Seiten: Tinte in Unterschriftsblöcken und neben Personenangaben
+# ----------------------------------------------------------------------
 _GRUSS_RE = re.compile(r"(?i)\bmit\s+(?:freundlichen|besten|herzlichen|lieben|vielen)\b|\b(?:freundliche|beste|viele|"
                        r"herzliche|liebe)n?\s+gr[üu](?:ß|ss)e|\bhochachtungsvoll\b|\bmfg\b")
+# Grußformeln für den unscharfen Vergleich mit OCR-Zeilen ("Mit freundlichen GrüBen", "Mlt freundllchen Grüßen")
+_GRUSS_FORMELN = ("mit freundlichen grüßen", "mit freundlichem gruß", "freundliche grüße", "mit besten grüßen",
+                  "beste grüße", "mit herzlichen grüßen", "herzliche grüße", "mit lieben grüßen", "liebe grüße",
+                  "mit vielen grüßen", "viele grüße", "mit kollegialen grüßen", "mit freundlichen kollegialen grüßen",
+                  "mit verbindlichen grüßen", "schöne grüße", "hochachtungsvoll", "mfg")
+# Unterschriftsfeld: das Hauptwort ("Unterschrift", "Unterschriften", "(Unterschrift Versicherungsnehmer)", wie die OCR
+# es liest: "Unterschrlft", "Unterschritt") – nicht das Verb ("bitte unterschreiben")
+_UNTERSCHRIFT_ETIKETT_RE = re.compile(r"(?i)(?<![a-zäöüß])unter\s?schr[il1|!í][fſt]t?(?:en)?(?![a-zäöüß])")
 GRUND_UNTERSCHRIFT = "Unterschrift/Name unter der Grußformel nicht lesbar – bitte ansehen"
+GRUND_UNTERSCHRIFTSFELD = "Unterschrift/Name am Unterschriftsfeld nicht lesbar – bitte ansehen"
+GRUND_PERSONENTINTE = "Schrift neben einer Personenangabe nicht verlässlich lesbar – bitte ansehen"
+UNTERSCHRIFT_ZEILEN = 6        # so viele Zeilenhöhen unter der Grußformel gehören zum Unterschriftsblock
+UNTERSCHRIFT_BREITE = 300      # … ab 15 pt links der Grußformel so breit (pt, in Leserichtung)
+TINTE_DPI = 72                 # Auflösung der Tintenprüfung (1 Pixel = 1 pt)
+TINTE_DUNKEL = 110             # Grauwert, unter dem ein Pixel sicher Tinte ist (Kern eines Strichs) – gezählt wird …
+TINTE_ABSTAND_PAPIER = 60      # … jedes Pixel, das um so viel dunkler ist als das Papier (Median der Seite), höchstens
+TINTE_DUNKEL_MAX = 180         #     bis zu diesem Grauwert (graue Schwärzungsrechtecke 235 nie): dünne, blasse Striche
+                               #     (Kugelschreiber) zählen so mit; eine Zelle braucht aber auch ein Kernpixel – der
+                               #     helle Rand erklärter Wörter jenseits ihres OCR-Kastens zählt nicht
+LINIE_DICKE = 4                # Rest einer geraden Linie (Unter-/Durchstreichung zwischen erklärten Wörtern): höchstens
+LINIE_STEIGUNG = 0.09          # so viele Pixel stark und höchstens ~5° geneigt
+TINTE_ZELLE = 6                # Zellen (Pixel) für die Tintendichte
+TINTE_MIN_PIXEL = 5            # nicht erklärte Tintenpixel, ab denen eine Zelle zählt
+TINTE_MIN_ZELLEN = 4           # so viele zusammenhängende Zellen sind ein Verdacht (Punkte, Striche nicht)
+LINIE_MIN_PIXEL = 40           # dunkle Läufe ab dieser Länge (waagerecht/senkrecht) sind Linien, keine Schrift
+WORT_HOEHE_MAX = 1.8           # OCR-Wortkasten höher als 1,8 x die übliche Worthöhe: Unterschriftszug, keine Schrift
+                               # (außer die Lesung ist ein bekanntes Wort – Fax: hohe Kästen um gewöhnliche Wörter)
 
 
-def _unterschrift_pruefen(seite, m, schwaerzungen) -> list:
-    """Scan-Seite: Tinte unter der Grußformel, die die OCR nicht als Text gelesen hat (Unterschrift, von ihr
-    überschriebener Name) – die Texterkennung kann dort nichts prüfen, also selbst ansehen."""
-    treffer = list(_GRUSS_RE.finditer(m.text))
-    if not treffer:
+def _falten_buchstaben(text: str) -> str:
+    """Kleinbuchstaben a-z ohne Diakritika (ß -> ss) – für den unscharfen Vergleich von OCR-Zeilen."""
+    t = unicodedata.normalize("NFKD", (text or "").replace("ß", "ss").replace("ẞ", "ss").lower())
+    return "".join(c for c in t if "a" <= c <= "z")
+
+
+_GRUSS_GEFALTET = tuple(_falten_buchstaben(f) for f in _GRUSS_FORMELN)
+
+
+def ist_grussformel(zeile: str) -> bool:
+    """Ist die Zeile eine Grußformel – auch so, wie die OCR sie liest ("Mit freundlichen GrüBen", "Mlt freundllchen
+    Grüßen")? Richtig geschrieben überall in der Zeile (_GRUSS_RE); unscharf nur als eigene, kurze Zeile: ohne
+    Satz- und Leerzeichen, Diakritika gefaltet, zu mindestens 82 % gleich einer Formel."""
+    if _GRUSS_RE.search(zeile or ""):
+        return True
+    t = _falten_buchstaben(zeile)
+    if len(t) < 3:
+        return False
+    return any(0.75 * len(f) <= len(t) <= len(f) + 4 and difflib.SequenceMatcher(None, t, f).ratio() >= 0.82
+               for f in _GRUSS_GEFALTET)
+
+
+def _ist_fliesstext(zeile: str) -> bool:
+    """Fließtext (mindestens zwei kleingeschriebene Wörter ab drei Buchstaben, "Verletzt wurde niemand."): seine
+    Wörter prüfen die Textregeln mit Namenslisten und Kontext – großgeschriebene Wörter am Satzanfang sind hier
+    keine Namen. Ein Unterschriftsblock ("i. A. Martina Schulz", "V. De Luca") ist kein Fließtext."""
+    return sum(1 for w in re.findall(r"[^\W\d_]{3,}", zeile or "") if w[0].islower()) >= 2
+
+
+def _wortstellen(m) -> list:
+    """[(start, ende, Wortkasten)] der OCR-Wörter des Seitenmodells in Textfolge (Lesefolge)."""
+    stellen: dict = {}
+    for i, g in enumerate(m.abbildung):
+        if g < 0 or i >= len(m.text) or m.wort_ids[g] < 0:
+            continue
+        wid = m.wort_ids[g]
+        s, e = stellen.get(wid, (i, i + 1))
+        stellen[wid] = (min(s, i), max(e, i + 1))
+    return sorted((s, e, fitz.Rect(m.ocr_boxen[wid])) for wid, (s, e) in stellen.items())
+
+
+def _lesekasten(r, winkel: int, schraeg: float):
+    """Rechteck in gerade gerückten Lesekoordinaten (Leserichtung +x, Zeilen untereinander +y)."""
+    return fitz.Rect(_ocr.lesekasten((r.x0, r.y0, r.x1, r.y1), winkel, schraeg))
+
+
+def _aus_lesekasten(r, winkel: int, schraeg: float):
+    """Rechteck in Lesekoordinaten -> umschließendes Rechteck in Seitenkoordinaten."""
+    ecken = [sm._aus_lesekoordinaten(x, y, winkel, schraeg) for x in (r.x0, r.x1) for y in (r.y0, r.y1)]
+    return fitz.Rect(min(e[0] for e in ecken), min(e[1] for e in ecken),
+                     max(e[0] for e in ecken), max(e[1] for e in ecken))
+
+
+_LINIENLAUF_RE = re.compile(rb"\x01{%d,}" % LINIE_MIN_PIXEL)
+
+
+def _linienpixel(daten, breite: int, hoehe: int, dunkel: int = TINTE_DUNKEL) -> bytearray:
+    """Pixel langer dunkler Läufe (waagerecht oder senkrecht ab LINIE_MIN_PIXEL): Unterschriftslinien, Rahmen,
+    Tabellenlinien – keine Schrift. Läufe über bytes.translate + regulären Ausdruck (schnell genug für ganze
+    Seiten)."""
+    bits = bytes(daten).translate(bytes(1 if i < dunkel else 0 for i in range(256)))
+    linie = bytearray(breite * hoehe)
+    for y in range(hoehe):
+        for t in _LINIENLAUF_RE.finditer(bits, y * breite, (y + 1) * breite):
+            linie[t.start():t.end()] = b"\x01" * (t.end() - t.start())
+    for x in range(breite):
+        for t in _LINIENLAUF_RE.finditer(bits[x::breite]):
+            for k in range(t.start(), t.end()):
+                linie[k * breite + x] = 1
+    return linie
+
+
+def _linienrest(pixel) -> bool:
+    """Ist eine Tintengruppe der Rest einer geraden Linie – eine Unter- oder Durchstreichung, deren Stücke zwischen
+    erklärten Wörtern stehen bleiben? Dünn (je Spalte bzw. Zeile höchstens LINIE_DICKE Pixel) und gerade (höchstens
+    ~5° geneigt). Schrift hat dickere Stellen (Grundstriche), ein Unterschriftszug schwingt auf und ab."""
+    xs = [x for x, _ in pixel]
+    ys = [y for _, y in pixel]
+    breite, hoehe = max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+    for lang, kurz, quer in ((breite, hoehe, xs), (hoehe, breite, ys)):
+        if lang >= 2 * TINTE_ZELLE and kurz <= LINIE_DICKE + LINIE_STEIGUNG * lang:
+            dicke: dict = {}
+            for k in quer:
+                dicke[k] = dicke.get(k, 0) + 1
+            if max(dicke.values()) <= LINIE_DICKE:
+                return True
+    return False
+
+
+class _Seitenbild:
+    """Graubild einer Seite bei TINTE_DPI – einmal je Seite gerendert, die Bereiche werden daraus geschnitten."""
+
+    def __init__(self, seite):
+        self.rect = fitz.Rect(seite.rect)
+        try:
+            pix = seite.get_pixmap(dpi=TINTE_DPI, colorspace=fitz.csGRAY, alpha=False)
+            self.breite, self.hoehe, self.daten = pix.width, pix.height, pix.samples
+        except Exception:
+            self.breite, self.hoehe, self.daten = 0, 0, b""
+        self.sx = self.breite / self.rect.width if self.rect.width else 0.0
+        self.sy = self.hoehe / self.rect.height if self.rect.height else 0.0
+        probe = sorted(self.daten[::7]) if self.daten else [255]
+        papier = probe[len(probe) // 2]
+        self.dunkel = max(TINTE_DUNKEL, min(TINTE_DUNKEL_MAX, papier - TINTE_ABSTAND_PAPIER))
+        self._linie = None
+
+    def ausschnitt(self, bereich):
+        """(Pixel, Linienmaske, Breite, Höhe, Bereich in Seitenkoordinaten genau auf Pixelgrenzen) oder None. Die
+        Linien werden auf der ganzen Seite gesucht (einmal je Seite): eine Tabellenlinie, die einen kleinen Bereich nur
+        kurz quert, ist dort als Linie erkannt."""
+        if not self.breite or not self.hoehe:
+            return None
+        x0 = max(0, int((bereich.x0 - self.rect.x0) * self.sx))
+        y0 = max(0, int((bereich.y0 - self.rect.y0) * self.sy))
+        x1 = min(self.breite, int((bereich.x1 - self.rect.x0) * self.sx + 0.999))
+        y1 = min(self.hoehe, int((bereich.y1 - self.rect.y0) * self.sy + 0.999))
+        if x1 - x0 < TINTE_ZELLE or y1 - y0 < TINTE_ZELLE:
+            return None
+        if self._linie is None:
+            self._linie = _linienpixel(self.daten, self.breite, self.hoehe, self.dunkel)
+        zeilen = range(y0, y1)
+        daten = b"".join(self.daten[y * self.breite + x0:y * self.breite + x1] for y in zeilen)
+        linie = bytearray(b"".join(self._linie[y * self.breite + x0:y * self.breite + x1] for y in zeilen))
+        genau = fitz.Rect(self.rect.x0 + x0 / self.sx, self.rect.y0 + y0 / self.sy,
+                          self.rect.x0 + x1 / self.sx, self.rect.y0 + y1 / self.sy)
+        return daten, linie, x1 - x0, y1 - y0, genau
+
+
+def _tintengruppen(bild: _Seitenbild, bereich, erklaert) -> list:
+    """Dichte, nicht erklärte Tinte im Bereich (Seitenkoordinaten): Rechteck je zusammenhängender Gruppe von
+    Tintenzellen (Zellen mit höchstens einer leeren Zelle dazwischen gehören zusammen); Gruppen unter
+    TINTE_MIN_ZELLEN Zellen (Punkte, Staub, ein einzelnes Komma) und Reste gerader Linien (_linienrest) zählen
+    nicht. Tinte: dunkler als bild.dunkel (relativ zum Papier, auch blasse Striche)."""
+    teil = bild.ausschnitt(fitz.Rect(bereich) & bild.rect)
+    if teil is None:
         return []
-    anker = m.zeile_von(treffer[-1].end() - 1)
-    if anker is None or anker.rect is None:
-        return []
-    hoehe = max(anker.rect.height, 8.0)
-    bereich = fitz.Rect(anker.rect.x0 - 15, anker.rect.y1 + 1, anker.rect.x0 + 300, anker.rect.y1 + 1 + 5 * hoehe)
-    bereich &= seite.rect
-    if bereich.is_empty or bereich.width < 20 or bereich.height < 10:
-        return []
-    try:
-        pix = seite.get_pixmap(clip=bereich, dpi=72, colorspace=fitz.csGRAY, alpha=False)
-    except Exception:
-        return []
-    breite, hoehe_px, daten = pix.width, pix.height, pix.samples
-    sx, sy = breite / bereich.width, hoehe_px / bereich.height
-    erklaert = bytearray(breite * hoehe_px)
-    boxen = [fitz.Rect(r) for r in schwaerzungen]
-    for g, z in enumerate(m.zeichen):
-        r = m.ocr_boxen[m.wort_ids[g]] if m.wort_ids[g] >= 0 else z.rect
-        if r.intersects(bereich):
-            boxen.append(fitz.Rect(r) + (-1.5, -1.5, 1.5, 1.5))
-    for r in boxen:
-        x0 = max(0, int((r.x0 - bereich.x0) * sx))
-        x1 = min(breite, int((r.x1 - bereich.x0) * sx) + 1)
-        y0 = max(0, int((r.y0 - bereich.y0) * sy))
-        y1 = min(hoehe_px, int((r.y1 - bereich.y0) * sy) + 1)
-        for y in range(y0, y1):
-            erklaert[y * breite + x0:y * breite + x1] = b"\x01" * max(0, x1 - x0)
-    zelle = 6
+    daten, maske, breite, hoehe, bereich = teil          # maske: Linien der Seite, dazu unten das Erklärte
+    sx, sy = bild.sx, bild.sy
+    dunkel = bild.dunkel
+    for r in erklaert:
+        r = fitz.Rect(r) + (-1.5, -1.5, 1.5, 1.5)
+        if not r.intersects(bereich):
+            continue
+        x0, x1 = max(0, int((r.x0 - bereich.x0) * sx)), min(breite, int((r.x1 - bereich.x0) * sx) + 1)
+        y0, y1 = max(0, int((r.y0 - bereich.y0) * sy)), min(hoehe, int((r.y1 - bereich.y0) * sy) + 1)
+        if x1 > x0:
+            voll = b"\x01" * (x1 - x0)
+            for y in range(y0, y1):
+                maske[y * breite + x0:y * breite + x1] = voll
     zellen: dict = {}
-    for y in range(hoehe_px):
-        zeile = daten[y * breite:(y + 1) * breite]
-        lauf = 0
+    kern: set = set()
+    for y in range(hoehe):
         for x in range(breite):
-            dunkel = zeile[x] < 110
-            lauf = lauf + 1 if dunkel else 0
-            if dunkel and not erklaert[y * breite + x] and lauf < 40:      # lange Linien sind Rahmen
-                k = (x // zelle, y // zelle)
-                zellen[k] = zellen.get(k, 0) + 1
-    tinte = [k for k, n in zellen.items() if n >= 5]
-    if len(tinte) < 4:
+            i = y * breite + x
+            if daten[i] < dunkel and not maske[i]:
+                k = (x // TINTE_ZELLE, y // TINTE_ZELLE)
+                zellen.setdefault(k, []).append((x, y))
+                if daten[i] < TINTE_DUNKEL:
+                    kern.add(k)
+    offen = {k for k, p in zellen.items() if len(p) >= TINTE_MIN_PIXEL and k in kern}
+    gruppen = []
+    while offen:
+        stapel = [offen.pop()]
+        gruppe = list(stapel)
+        while stapel:
+            cx, cy = stapel.pop()
+            for dx in range(-2, 3):
+                for dy in range(-2, 3):
+                    k = (cx + dx, cy + dy)
+                    if k in offen:
+                        offen.remove(k)
+                        gruppe.append(k)
+                        stapel.append(k)
+        if len(gruppe) >= TINTE_MIN_ZELLEN and not _linienrest([p for k in gruppe for p in zellen[k]]):
+            gruppen.append(fitz.Rect(min(k[0] for k in gruppe) * TINTE_ZELLE / sx + bereich.x0,
+                                     min(k[1] for k in gruppe) * TINTE_ZELLE / sy + bereich.y0,
+                                     (max(k[0] for k in gruppe) + 1) * TINTE_ZELLE / sx + bereich.x0,
+                                     (max(k[1] for k in gruppe) + 1) * TINTE_ZELLE / sy + bereich.y0) & bereich)
+    return sorted(gruppen, key=lambda r: (r.y0, r.x0))
+
+
+def _unterschrift_pruefen(seite, m, schwaerzungen, pruefung=None, gemeldet=()) -> list:
+    """Scan-Seite: dichte Tinte in Unterschriftsblöcken und neben Personenangaben, die die OCR nicht VERLÄSSLICH
+    gelesen hat – die Texterkennung kann dort nichts prüfen, also selbst ansehen.
+
+    Bereiche (in Lesekoordinaten – Ausrichtung und Schräglage aus den OCR-Wörtern wie im Seitenmodell –, also auch
+    auf gedrehten und schrägen Scans richtig): unter jeder Grußformel (UNTERSCHRIFT_ZEILEN Zeilenhöhen,
+    UNTERSCHRIFT_BREITE breit), über und rechts neben "Unterschrift", rechts hinter einem Personen-Etikett mit
+    Doppelpunkt ("Name:", "Kontoinhaber:") und links/rechts neben einem Personen-Platzhalter.
+    Erklärt ist Tinte unter Schwärzungsrechtecken, der Textebene (Platzhalter), schon gemeldeten Verdachtsstellen
+    (`gemeldet`) und unter OCR-Wörtern, deren Lesung sie unverdächtig macht (_Seitenpruefung.lesung_harmlos).
+    Rückgabe: je Bereich mit Tinte ein Verdacht (start -1) mit einem Rechteck je Tintengruppe."""
+    stellen = _wortstellen(m)
+    if not stellen:
         return []
-    x0 = min(k[0] for k in tinte) * zelle / sx + bereich.x0
-    y0 = min(k[1] for k in tinte) * zelle / sy + bereich.y0
-    x1 = (max(k[0] for k in tinte) + 1) * zelle / sx + bereich.x0
-    y1 = (max(k[1] for k in tinte) + 1) * zelle / sy + bereich.y0
-    return [Verdacht(m.nr, -1, -1, "Unterschriftsbereich", GRUND_UNTERSCHRIFT, [fitz.Rect(x0, y0, x1, y1)])]
+    if pruefung is None:
+        pruefung = _Seitenpruefung(m, _Wissen(_wissen_laden()), schwaerzungen=schwaerzungen)
+    text = m.text
+    woerter = [(b.x0, b.y0, b.x1, b.y1, text[s:e]) for s, e, b in stellen]
+    winkel, schraeg = _ocr.ausrichtung_der_woerter(woerter)
+    lese = [_lesekasten(b, winkel, schraeg) for _, _, b in stellen]
+    hoehen = sorted(r.height for r, (s, e, _) in zip(lese, stellen) if sum(c.isalnum() for c in text[s:e]) >= 2)
+    if not hoehen:
+        return []
+    ueblich = max(hoehen[len(hoehen) // 2], 4.0)
+    # Zeilen in Lesekoordinaten: Wörter in üblicher Schrifthöhe (ein als Wort gelesener Unterschriftszug in derselben
+    # Zeile verschöbe sonst den Bereich), sonst alle Wörter der Zeile; Grußformel- und Fließtextzeilen
+    zeilen: dict = {}
+    alle: dict = {}
+    for (s, e, _), r in zip(stellen, lese):
+        z = m.zeile_von(s)
+        if z is None:
+            continue
+        alle[z.id] = (z, r if z.id not in alle else alle[z.id][1] | r)
+        if r.height <= WORT_HOEHE_MAX * ueblich:
+            zeilen[z.id] = (z, r if z.id not in zeilen else zeilen[z.id][1] | r)
+    for zid, eintrag in alle.items():
+        zeilen.setdefault(zid, eintrag)
+    gruss = {zid for zid, (z, _) in zeilen.items() if ist_grussformel(text[z.start:z.ende])}
+
+    def gleiche_hoehe(a, b) -> bool:
+        return min(a.y1, b.y1) - max(a.y0, b.y0) >= 0.5 * min(a.height, b.height)
+
+    # Fließtext je sichtbarer Zeile: das Seitenmodell trennt eine Zeile an großen Lücken (Platzhalter, Spalten) –
+    # "Oberfranken, Aktenzeichen" | [VERTRAGS-NR] | "nahm den Unfall auf." ist EINE Fließtextzeile
+    fliesstext = set()
+    for zid, (z, r) in zeilen.items():
+        reihe = " ".join(text[y.start:y.ende] for y, ry in zeilen.values() if gleiche_hoehe(r, ry))
+        if _ist_fliesstext(reihe):
+            fliesstext.add(zid)
+    bereiche = []
+    index = pruefung.w.index("person")
+    for zid, (z, r) in sorted(zeilen.items(), key=lambda t: t[1][0].start):
+        h = max(min(r.height, 1.3 * ueblich), 8.0)
+        inhalt = text[z.start:z.ende]
+        if zid in gruss:
+            bereiche.append((fitz.Rect(r.x0 - 15, r.y1 + 1, r.x0 + UNTERSCHRIFT_BREITE,
+                                       r.y1 + 1 + UNTERSCHRIFT_ZEILEN * h), GRUND_UNTERSCHRIFT))
+            continue
+        if _UNTERSCHRIFT_ETIKETT_RE.search(inhalt) and len(inhalt.split()) <= 8 and zid not in fliesstext:
+            bereiche.append((fitz.Rect(r.x0 - 30, r.y0 - 2.5 * h, r.x1 + 150, r.y0 - 0.5), GRUND_UNTERSCHRIFTSFELD))
+            bereiche.append((fitz.Rect(r.x1 + 1, r.y0 - 0.3 * h, r.x1 + 250, r.y1 + 0.3 * h), GRUND_UNTERSCHRIFTSFELD))
+            continue
+        try:
+            treffer = index.finde(inhalt) if index is not None else []
+        except Exception:
+            treffer = []
+        for v in treffer:
+            nach = inhalt[v.ende:v.ende + 3]
+            if not nach.lstrip(" ").startswith(":") or (v.start > 0 and inhalt[v.start - 1].isalnum()):
+                continue
+            pos = z.start + v.ende + nach.find(":")
+            g = m.abbildung[pos] if pos < len(m.abbildung) else -1
+            if g < 0:
+                continue
+            k = _lesekasten(m.zeichen[g].rect, winkel, schraeg)
+            bereiche.append((fitz.Rect(k.x1 + 1, r.y0 - 0.2 * h, k.x1 + 250, r.y1 + 0.2 * h), GRUND_PERSONENTINTE))
+    for s, e, rand in pruefung.platzhalter_boxen():
+        if not _PERSONEN_PLATZHALTER_RE.match(text[s:e]):
+            continue
+        r = _lesekasten(fitz.Rect(rand), winkel, schraeg)
+        b = pruefung.box(s, e)                            # Zeile des Platzhaltertexts (das graue Rechteck kann
+        t = _lesekasten(fitz.Rect(b), winkel, schraeg) if b is not None else r   # mehrere Zeilen hoch sein)
+        h = max(min(t.height, 1.3 * ueblich), 8.0)
+        mitte = (t.y0 + t.y1) / 2
+        bereiche.append((fitz.Rect(r.x0 - 2.5 * h, mitte - 0.7 * h, r.x0 - 1, mitte + 0.7 * h), GRUND_PERSONENTINTE))
+        bereiche.append((fitz.Rect(r.x1 + 1, mitte - 0.7 * h, r.x1 + 2.5 * h, mitte + 0.7 * h), GRUND_PERSONENTINTE))
+    if not bereiche:
+        return []
+    erklaert = [fitz.Rect(r) for r in schwaerzungen]
+    erklaert += [fitz.Rect(r) for v in gemeldet or () for r in (v.rechtecke or [])]
+    erklaert += [z.rect for g, z in enumerate(m.zeichen) if m.wort_ids[g] < 0]          # Textebene: Platzhalter
+    for (s, e, b), r in zip(stellen, lese):
+        z = m.zeile_von(s)
+        zid = z.id if z is not None else None
+        if pruefung.lesung_harmlos(s, e, r.height, ueblich, fliesstext=zid in gruss or zid in fliesstext):
+            erklaert.append(b)
+    verdacht, bekannt, gesehen = [], [], set()
+    bild = _Seitenbild(seite)
+    for bereich, grund in bereiche:
+        schluessel = tuple(round(x) for x in bereich)
+        if schluessel in gesehen:
+            continue
+        gesehen.add(schluessel)
+        gruppen = _tintengruppen(bild, _aus_lesekasten(bereich, winkel, schraeg), erklaert)
+        neu = [g for g in gruppen if not any(abs(g & b) > 0.5 * abs(g) for b in bekannt)]
+        if neu:
+            bekannt += neu
+            text_v = "Unterschriftsbereich" if grund != GRUND_PERSONENTINTE else "Personenangabe"
+            verdacht.append(Verdacht(m.nr, -1, -1, text_v, grund, neu))
+    return verdacht
 
 
 def _tintenanteil(seite) -> float:
@@ -1851,10 +2188,9 @@ def restrisiko_pruefen(ausgabe_pfad, ocr=None, platzhalter=None, profil: str = "
                 elif modus == "seite" and _lesung_unplausibel(woerter):
                     verdacht.append(Verdacht(nr, -1, -1, f"Seite {nr + 1}", GRUND_SEITE_UNPLAUSIBEL, []))
             m = sm.seite_aufbauen(seite, nr, ocr_woerter=woerter, ocr_quelle=quelle)
-            if modus == "seite":
-                verdacht += _unterschrift_pruefen(seite, m, schwaerzungen)
             verdacht += _seite_pruefen(m, w, platzhalter or (), nie or (), abgewaehlt_je_seite.get(nr, ()), profil,
-                                       felder_je_seite.get(nr, ()), schwaerzungen)
+                                       felder_je_seite.get(nr, ()), schwaerzungen,
+                                       scan_seite=seite if modus == "seite" else None)
     finally:
         doc.close()
     return verdacht

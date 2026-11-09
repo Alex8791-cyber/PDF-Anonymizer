@@ -6,6 +6,9 @@
   Kanäle. Die Qualitätsgrenzen liegen knapp unter den zuletzt gemessenen Werten – eine Verschlechterung
   der Erkennung oder Schwärzung lässt den Test scheitern. Wer die Erkennung verbessert, zieht die Grenzen
   hier nach (Messwerte stehen im Kommentar).
+* Selbstprüfung der Bewertung: Null-Anonymisierer (Ausgabe = Original: jeder zu schwärzende Eintrag ein Leck
+  an seiner Stelle) und Orakel (perfekte Schwärzung, auch mit Platzhaltertext wie das Programm: Recall 100 %,
+  Über-Schwärzung 0); Pixelvergleich, Über-Schwärzung und Fehlalarme an kleinen Beispielen.
 
 Alle erzeugten Dateien landen im tmp_path.
 """
@@ -26,17 +29,21 @@ from werkzeuge.benchmark.satz import m
 
 ANZAHL_CI = 12
 SEED_CI = 1
-# Gemessen am 2026-11-09 auf Commit 4e4a769 (Linux, PyMuPDF 2.1, de_core_news_md 3.8.0, ohne
-# Tesseract-Kommandozeile): recall_kern 0,7231 (269/372), Über-Schwärzung 0,0417 (9/216).
-# Spielraum für Abweichungen zwischen Plattformen (Schriften, OCR-Build): ~2,3 Prozentpunkte
-# (≈ 8 Einträge) bzw. ~2,3 Prozentpunkte (≈ 5 Einträge).
+# Gemessen am 2026-11-09 auf 4408edc + Paket restrisiko-messung (Linux, PyMuPDF 2.1, de_core_news_md 3.8.0, ohne
+# Tesseract-Kommandozeile; Pixelvergleich ohne Platzhaltertinte und auf der eigenen Zeile, Über-Schwärzung nach
+# Lage/eigenständigen Vorkommen): recall_kern 0,9973 (371/372), Über-Schwärzung 0,0 (0/216). Die beiden Grenzen
+# stammen noch vom Stand 4e4a769 (0,7231 bzw. 0,0417) und lassen weiten Spielraum für Plattform-Abweichungen
+# (Windows: Schriften, OCR-Build) – nachziehen, sobald die Windows-Werte zum neuen Stand vorliegen.
 MIN_RECALL_KERN = 0.70
 MAX_UEBERSCHWAERZUNG = 0.065
-# Restrisiko-Prüfung (Vertrag Abschnitt 7), gemessen am 2026-11-09 (Linux): 0 Dokumente mit stillem Leck,
-# Verdachtsabdeckung 0,973 (73/75; die 2 fehlenden sind reine Pixelreste), 0,0 Fehlverdacht je Seite, 10 von 12
-# Ausgaben _PRUEFEN. Spielraum für Plattform-Abweichungen (Schriften, OCR-Build).
+# Restrisiko-Prüfung (Vertrag Abschnitt 7), gemessen am 2026-11-09 auf demselben Stand (Linux): 0 Dokumente mit
+# stillem Leck; 1 Kern-Leck (kein reiner Pixelrest), abgedeckt vom Verdacht im Unterschriftsblock ("V. De Luca" in
+# 007_kuendigung_DeLuca, vom Unterschriftszug durchkreuzt); 0,429 Fehlverdacht je Seite (6 von 12 Verdachtsstellen,
+# darunter eine echte Unterschrift ohne gedruckten Namen); 6 von 12 Ausgaben _PRUEFEN (5 ohne Kern-Leck).
+# Vorher (4408edc, alte Bewertung): 2 Kern-Lecks, keines abgedeckt – ">= 0,90" war eine Quote über 2 Einträge.
 MAX_DOKUMENTE_STILLES_LECK = 1
 MIN_VERDACHTSABDECKUNG = 0.90
+MIN_LECKS_FUER_QUOTE = 10      # darunter ist eine Quote bedeutungslos: JEDES Leck braucht einen Verdacht
 MAX_FEHLVERDACHT_JE_SEITE = 1.0
 
 
@@ -186,8 +193,17 @@ def test_benchmark_laeuft_und_haelt_qualitaetsgrenzen(ci_korpus, tmp_path):
     assert rr["dokumente_mit_stillem_leck"] <= MAX_DOKUMENTE_STILLES_LECK, (
         f"stille Lecks in {rr['dokumente_still']}: "
         f"{[(x['dokument'], x['text']) for x in rr['nicht_abgedeckt'] if not x['ausgabe_pruefen']][:15]}")
-    assert rr["verdachtsabdeckung"] >= MIN_VERDACHTSABDECKUNG, (
-        f"Verdachtsabdeckung {rr['verdachtsabdeckung']}: {[(x['dokument'], x['text']) for x in rr['nicht_abgedeckt']]}")
+    # Verdachtsabdeckung über die Kern-Lecks, die nicht nur Pixelreste sind (nur_pixelrest: kein Wort mehr als zur
+    # Hälfte lesbar). Bei wenigen solchen Lecks wäre eine Quote bedeutungslos (2 Einträge: 50 % oder 100 %) – dann
+    # muss JEDES von einem Verdacht abgedeckt sein; ab MIN_LECKS_FUER_QUOTE gilt die Quote.
+    n = rr["kern_lecks_ohne_pixelrest"]
+    ohne_verdacht = [(x["dokument"], x["text"]) for x in rr["nicht_abgedeckt"] if not x.get("nur_pixelrest")]
+    if n < MIN_LECKS_FUER_QUOTE:
+        assert rr["kern_lecks_ohne_pixelrest_abgedeckt"] == n, (
+            f"{n - rr['kern_lecks_ohne_pixelrest_abgedeckt']} von {n} Kern-Lecks ohne Verdacht: {ohne_verdacht}")
+    else:
+        assert rr["verdachtsabdeckung_ohne_pixelrest"] >= MIN_VERDACHTSABDECKUNG, (
+            f"Verdachtsabdeckung ohne Pixelreste {rr['verdachtsabdeckung_ohne_pixelrest']}: {ohne_verdacht}")
     assert rr["fehlverdacht_je_seite"] <= MAX_FEHLVERDACHT_JE_SEITE, rr["fehlverdacht_liste"][:15]
     assert "## Restrisiko" in (tmp_path / "ergebnis" / "bericht.md").read_text(encoding="utf-8")
 
@@ -227,6 +243,168 @@ def test_restrisiko_kennzahlen_aus_dokumenten():
     v = bewertung.verdacht_serialisieren(Verdacht(0, 1, 5, "Text", "Grund", [fitz.Rect(1, 2, 3, 4)]))
     assert v == {"seite": 0, "start": 1, "ende": 5, "text": "Text", "grund": "Grund", "rechtecke": [[1.0, 2.0, 3.0, 4.0]]}
     json.dumps(v)
+
+
+# ----------------------------------------------------------------------
+# Pixelvergleich: Platzhaltertinte, eigene Zeile
+# ----------------------------------------------------------------------
+def _scan_mit_zwei_zeilen(pfad):
+    """Scan-Seite (Bild): oben "Umzugs zum 31.12.", darunter "54290 Trier"; Wortrechteck von "Trier" wie bei
+    Schräglage bis in die Zeile darüber vergrößert. Liefert (pdf, Wortrechteck, Rechteck der Glyphen)."""
+    import pymupdf as fitz
+    vorlage = fitz.open()
+    s = vorlage.new_page(width=300, height=200)
+    s.insert_text((40, 80), "Umzugs zum 31.12. gilt", fontsize=12, fontname="helv")
+    s.insert_text((40, 94), "54290 Trier", fontsize=12, fontname="helv")
+    glyphen = next(fitz.Rect(w[:4]) for w in s.get_text("words") if w[4] == "Trier")
+    pix = s.get_pixmap(dpi=200, colorspace=fitz.csGRAY)
+    doc = fitz.open()
+    p = doc.new_page(width=300, height=200)
+    p.insert_image(p.rect, stream=pix.tobytes("png"))
+    doc.save(pfad)
+    doc.close()
+    vorlage.close()
+    return pfad, [glyphen.x0, glyphen.y0 - 7, glyphen.x1, glyphen.y1, "Trier"], glyphen
+
+
+def test_pixelvergleich_ohne_platzhaltertinte_und_auf_der_eigenen_zeile(tmp_path):
+    """Die Schwärzung legt ein graues Rechteck über "Trier" und schreibt den Platzhalter "[PLZ ORT]" hinein: dessen
+    Tinte ist kein Original, und die Tinte der Zeile darüber gehört nicht zum Wort – der Wert gilt als entfernt.
+    Streng bleibt der Vergleich: unverändert (Ausgabe = Original) ist das Wort voll sichtbar; ein Klammertext, der
+    schon im Original steht, wird nicht entfernt."""
+    import pymupdf as fitz
+    original, wort, glyphen = _scan_mit_zwei_zeilen(tmp_path / "o.pdf")
+    with fitz.open(original) as d:
+        s = d[0]
+        s.draw_rect(glyphen + (-1, -1, 1, 1), color=None, fill=(0.92, 0.92, 0.92))
+        s.insert_text((glyphen.x0, glyphen.y1 - 3), "[PLZ ORT]", fontsize=9, fontname="helv")
+        d.save(tmp_path / "a.pdf")
+    eng = [glyphen.x0, glyphen.y0, glyphen.x1, glyphen.y1, "Trier"]
+    with fitz.open(original) as do, fitz.open(tmp_path / "a.pdf") as da:
+        go, ga = bewertung._graubild(do[0]), bewertung._graubild(da[0])
+        ohne, entfernt = bewertung.graubild_ohne_platzhalter(tmp_path / "a.pdf", 0, do[0])
+        assert entfernt == 1
+        # früher (Bild mit Platzhalter, ganzes Rechteck): mindestens ein Teil-Leck
+        assert bewertung.wort_sichtbarkeit(go, ga, wort, zuschnitt=False) >= bewertung.TEILWEISE_SCHWELLE
+        # jeder Fehler für sich: Platzhaltertinte (enges Rechteck) und Tinte der Zeile darüber (weites Rechteck)
+        assert bewertung.wort_sichtbarkeit(go, ga, eng, zuschnitt=False) > 0.1
+        assert bewertung.wort_sichtbarkeit(go, ohne, eng, zuschnitt=False) < 0.02
+        assert bewertung.wort_sichtbarkeit(go, ohne, wort, zuschnitt=False) >= bewertung.TEILWEISE_SCHWELLE
+        # beides behoben: entfernt
+        assert bewertung.wort_sichtbarkeit(go, ohne, wort) < 0.05
+        # Null-Anonymisierer: Ausgabe = Original -> voll sichtbar, nichts entfernt
+        gleich, n = bewertung.graubild_ohne_platzhalter(original, 0, do[0])
+        assert n == 0 and bewertung.wort_sichtbarkeit(go, gleich, wort) == 1.0
+    # Klammertext im Original bleibt im Vergleichsbild
+    doc = fitz.open()
+    seite = doc.new_page(width=200, height=100)
+    seite.insert_text((20, 50), "Anlage [1] beachten", fontsize=11)
+    doc.save(tmp_path / "k.pdf")
+    with fitz.open(tmp_path / "k.pdf") as d:
+        assert bewertung.platzhalter_rechtecke(d[0], d[0]) == []
+        assert len(bewertung.platzhalter_rechtecke(d[0])) == 1
+    doc.close()
+
+
+def test_eigene_zeile_schneidet_nachbarzeilen_ab():
+    import numpy as np
+    tinte = np.zeros((20, 30), dtype=bool)
+    tinte[1:4, 2:20] = True            # Unterlängen der Zeile darüber
+    tinte[7:14, 0:30] = True           # eigene Zeile (durch die Mitte)
+    tinte[17:19, 5:9] = True           # Oberlänge der Zeile darunter
+    eigen = bewertung.eigene_zeile(tinte)
+    assert eigen[7:14].all() and not eigen[:5].any() and not eigen[15:].any()
+    schraeg = np.zeros((20, 32), dtype=bool)
+    for x in range(32):                # schräge eigene Zeile: wandert über die Breite um 6 Pixel
+        schraeg[5 + x // 6:11 + x // 6, x] = True
+    assert bewertung.eigene_zeile(schraeg).sum() == schraeg.sum()
+
+
+# ----------------------------------------------------------------------
+# Über-Schwärzung: eigenständig und an der Stelle; Fehlalarme nur angehakter Funde
+# ----------------------------------------------------------------------
+def test_eigenstaendige_vorkommen():
+    z = bewertung.eigenstaendig_zaehlen
+    assert z("BU BU-2018-848343 BU/96/8657146 (BU), BU.", "BU") == 3
+    assert z("Wohn-\ngebäude und Wohngebäude", "Wohngebäude") == 2
+    assert z("Herr Müller-Lüdenscheidt", "Müller") == 0
+    assert z("Vertrag 47.897.336.2", "897") == 0
+    assert z("ŞAHIN und Sahin", "Şahin") == 2
+
+
+def test_behaltenes_wort_in_geschwaerzter_kennung_ist_keine_ueberschwaerzung(tmp_path):
+    """"BU" (Sparte, zu behalten) steckt auch in der geschwärzten Kennung "BU-2018-848343": deren Schwärzung senkt
+    die Rohzahl, ist aber keine Über-Schwärzung. Wird das eigenständige "BU" geschwärzt, fehlt es."""
+    import pymupdf as fitz
+
+    def seite(pfad, zeile):
+        doc = fitz.open()
+        s = doc.new_page(width=300, height=100)
+        s.insert_text((20, 50), zeile, fontsize=11, fontname="helv")
+        woerter = s.get_text("words")
+        doc.save(pfad)
+        doc.close()
+        return woerter
+
+    woerter = seite(tmp_path / "o.pdf", "Sparte BU   Vertrag BU-2018-848343")
+    seite(tmp_path / "a.pdf", "Sparte BU   Vertrag [VERTRAGS-NR]")
+    seite(tmp_path / "b.pdf", "Sparte [ ]   Vertrag [VERTRAGS-NR]")
+    bu = next(w for w in woerter if w[4] == "BU")
+    e = {"text": "BU", "seite": 1, "kanal": "text", "woerter": [list(bu[:5])]}
+    original = bewertung.Kanaele(tmp_path / "o.pdf")
+    aus = bewertung.Kanaele(tmp_path / "a.pdf")
+    nadel = bewertung.Gefaltet("BU")
+    assert original.gefaltet("text", 1).zaehle(nadel) == 2 and aus.gefaltet("text", 1).zaehle(nadel) == 1
+    assert bewertung._behalten_pruefen(e, nadel, original, aus, [])["status"] == "erhalten"
+    weg = bewertung.Kanaele(tmp_path / "b.pdf")
+    assert bewertung._behalten_pruefen(e, nadel, original, weg, [])["status"] == "fehlt"
+
+
+def test_fund_aktiv():
+    assert bewertung.fund_aktiv({"text": "x"})                                    # ältere Funde ohne Stellen
+    assert bewertung.fund_aktiv({"stellen": [{"an": False}, {"an": True}]})
+    assert not bewertung.fund_aktiv({"stellen": [{"an": False}, {"an": False}]})   # nur angeboten
+
+
+class _AngebotPruefling(bewertung.NullAnonymisierer):
+    """Null-Anonymisierer mit zwei Funden ohne PII-Bezug: einer angehakt, einer nur angeboten (Stelle abgewählt)."""
+
+    def analysiere_pdf(self, pdf, *args, **kwargs):
+        return {"funde": [{"kategorie": "sonstiges", "text": "Zzyzx-Angehakt", "stellen": [{"an": True}]},
+                          {"kategorie": "gesundheit", "text": "Zzyzx-Angeboten", "stellen": [{"an": False}]}],
+                "warnungen": [], "fehler": None, "ocr_cache": {}}
+
+
+def test_fehlalarme_nur_angehakte_funde(ci_korpus, tmp_path):
+    ordner, wahrheiten = ci_korpus
+    text_dok = next(w["dokument"] for w in wahrheiten if "scan" not in w["merkmale"])
+    e = bewertung.bewerte_korpus(ordner, tmp_path / "e", cli_ocr=False, melde=None, nur=[text_dok],
+                                 pipeline=_AngebotPruefling())
+    g = e["gesamt"]
+    assert g["funde"] == 2 and g["funde_aktiv"] == 1 and g["fehlalarme"] == 1 and g["fehlalarm_quote"] == 1.0
+    assert [f["text"] for f in e["dokumente"][0]["fehlalarme"]] == ["Zzyzx-Angehakt"]
+
+
+# ----------------------------------------------------------------------
+# Selbstprüfung der Bewertung (Null-Anonymisierer, Orakel)
+# ----------------------------------------------------------------------
+@braucht_ocr
+def test_selbstpruefung_der_bewertung(ci_korpus, tmp_path):
+    """Die Bewertung selbst: Ausgabe = Original muss JEDEN zu schwärzenden Eintrag als Leck an seiner Stelle zeigen
+    und alles zu Behaltende als erhalten; das Orakel (perfekte Schwärzung aus der Wahrheit, auch mit Platzhaltertext
+    im grauen Rechteck wie das Programm) muss Recall 100 % und Über-Schwärzung 0 ergeben. Auf den Scans (Pixel,
+    Platzhaltertinte), dem Formular (Feldwerte) und einem Brief mit Nebenkanälen."""
+    ordner, wahrheiten = ci_korpus
+    nur = [w["dokument"] for w in wahrheiten if "scan" in w["merkmale"] or "formular" in w["merkmale"]]
+    nur += [w["dokument"] for w in wahrheiten if "metadaten" in w["merkmale"]][:1]
+    e = bewertung.selbstpruefung(ordner, tmp_path / "selbst", melde=None, nur=nur)
+    null = e["null_anonymisierer"]
+    assert null["schwaerzen"] > 50 and null["leck"] == null["schwaerzen"], null["nicht_leck"][:10]
+    assert null["nicht_am_ort"] == [] and null["behalten_erhalten"] == null["behalten"], null
+    for name in ("orakel", "orakel_platzhalter"):
+        assert e[name]["recall_kern"] == 1.0 and e[name]["recall_erweitert"] == 1.0, e[name]["nicht_entfernt"][:10]
+        assert e[name]["ueberschwaerzung"] == 0.0, e[name]["ueberschwaerzt"]
+    assert (tmp_path / "selbst" / "selbstpruefung.json").exists()
 
 
 def test_tesseract_kommandozeile_mit_einem_openmp_thread(tmp_path, monkeypatch):

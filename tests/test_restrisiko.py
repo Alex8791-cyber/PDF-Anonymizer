@@ -397,6 +397,162 @@ def test_unterschrift_unter_der_grussformel_auf_scan(tmp_path):
     assert restrisiko_pruefen(pdf2, ocr=OcrAttrappe(), ocr_modus={0: "seite"}, ocr_woerter={0: woerter2}) == []
 
 
+def _scan_brief(pfad, rotate=0, gedreht=0, schraeg=0.0, strich=True, lesung="falsch", firma=False):
+    """Scan eines Briefschlusses wie im CI-Korpus (007_kuendigung_DeLuca): Grußformel, Unterschriftszug quer durch
+    den gedruckten Namen "V. De Luca", Anlagenzeile. rotate: /Rotate der Scan-Seite (Bild gegenläufig gespeichert,
+    Anzeige aufrecht); gedreht: Bild um 90/180° gedreht OHNE /Rotate (die OCR liest dann in dieser Ausrichtung);
+    schraeg: Schräglage in Grad. lesung "falsch": die OCR liest den Zug als hohes Wort "Dee" und den durchkreuzten
+    Namen als "DeLuca" (wie im CI-Korpus); "keine": im Unterschriftsblock liest sie nichts. firma: statt Zug und
+    Name eine Firmenzeile und eine Abteilung (harmlose Lesung). Liefert (pdf, OCR-Wörter in Seitenkoordinaten nach
+    remove_rotation in Lesefolge, Rechteck des Namens)."""
+    vorlage = fitz.open()
+    s = vorlage.new_page()
+    y = 100
+    for z in ["Sehr geehrte Damen und Herren,", "vielen Dank für Ihre Nachricht vom Montag.",
+              "Bitte bestätigen Sie den Eingang.", "Mit freundlichen Grüßen"]:
+        s.insert_text((60, y), z, fontsize=12, fontname="helv")
+        y += 20
+    name_y = y + 24
+    if firma:
+        s.insert_text((60, name_y - 10), "Donau Leben AG", fontsize=12, fontname="helv")
+        s.insert_text((60, name_y + 8), "Kundenservice", fontsize=12, fontname="helv")
+    else:
+        s.insert_text((62, name_y), "V. De Luca", fontsize=12, fontname="helv")
+    if strich and not firma:
+        form = s.new_shape()
+        for k in range(5):
+            form.draw_bezier((58 + 22 * k, name_y - 2), (66 + 22 * k, name_y - 26), (74 + 22 * k, name_y + 10),
+                             (80 + 22 * k, name_y - 6))
+        form.finish(color=(0.05, 0.1, 0.45), width=1.4)
+        form.commit()
+    s.insert_text((60, name_y + 26), "Anlage: Kopie Personalausweis", fontsize=11, fontname="helv")
+    woerter = [tuple(w[:5]) for w in s.get_text("words")]
+    zoom = 150 / 72
+    matrix = fitz.Matrix(zoom, zoom).prerotate(schraeg + gedreht - rotate)
+    pix = s.get_pixmap(matrix=matrix, colorspace=fitz.csGRAY, alpha=False)
+    doc = fitz.open()
+    p = doc.new_page(width=pix.width / zoom, height=pix.height / zoom)
+    p.insert_image(p.rect, stream=pix.tobytes("png"))
+    if rotate:
+        p.set_rotation(rotate)
+    drehung = p.rotation_matrix
+
+    def kasten(r):
+        ecken = [fitz.Point((q.x - pix.x) / zoom, (q.y - pix.y) / zoom) * drehung
+                 for q in (fitz.Point(e) * matrix for e in (r.tl, r.tr, r.bl, r.br))]
+        return (min(e.x for e in ecken), min(e.y for e in ecken), max(e.x for e in ecken), max(e.y for e in ecken))
+
+    namen = [w for w in woerter if w[4] in ("V.", "De", "Luca")]
+    name = fitz.Rect(kasten(fitz.Rect(namen[0][:4]))) if namen else None
+    for w in namen[1:]:
+        name |= fitz.Rect(kasten(fitz.Rect(w[:4])))
+    ocr = []
+    for w in woerter:
+        if w[4] in ("V.", "De"):
+            continue
+        if w[4] == "Luca":
+            if lesung == "falsch":
+                zug = fitz.Rect(56, name_y - 26, 170, name_y + 10)
+                ocr.append(kasten(zug) + ("Dee",))
+                ocr.append(kasten(fitz.Rect(namen[1][:4]) | fitz.Rect(w[:4])) + ("DeLuca",))
+            continue
+        ocr.append(kasten(fitz.Rect(w[:4])) + (w[4],))
+    vorlage.close()
+    doc.save(pfad)
+    doc.close()
+    return Path(pfad), ocr, name
+
+
+@pytest.mark.parametrize("lage", [dict(), dict(rotate=90), dict(rotate=180), dict(rotate=270), dict(gedreht=180),
+                                  dict(gedreht=90), dict(schraeg=2.5), dict(rotate=90, schraeg=-1.5)],
+                         ids=["0", "rotate90", "rotate180", "rotate270", "kopfstehend", "quer", "schraeg",
+                              "rotate90_schraeg"])
+@pytest.mark.parametrize("lesung", ["falsch", "keine"])
+def test_unterschriftsblock_mit_durchkreuztem_namen_auf_scan(tmp_path, lage, lesung):
+    """Der vom Unterschriftszug durchkreuzte Name unter der Grußformel (CI-Korpus 007_kuendigung_DeLuca): die OCR
+    liest den Zug als hohes "Wort" und den Namen als unbekanntes "DeLuca" – oder dort gar nichts. Beides ist keine
+    verlässliche Lesung: Verdacht MIT Rechteck auf dem Namen, auf gedrehten und schrägen Scans genauso (Bereich in
+    Leserichtung)."""
+    pdf, ocr, name = _scan_brief(tmp_path / "u.pdf", lesung=lesung, **lage)
+    verdacht = restrisiko_pruefen(pdf, ocr=OcrAttrappe({0: ocr}), ocr_modus={0: "seite"}, winkel={0: 0})
+    v = [x for x in verdacht if x.grund == restrisiko.GRUND_UNTERSCHRIFT]
+    assert v and v[0].start == -1, verdacht
+    assert any(fitz.Rect(r).intersects(name) for r in v[0].rechtecke), (v[0].rechtecke, name)
+    # das Rechteck bleibt im Unterschriftsblock (keine ganze Seite, nicht der Brieftext darüber)
+    with fitz.open(pdf) as d:
+        flaeche = abs(d[0].rect)
+    assert sum(abs(fitz.Rect(r)) for r in v[0].rechtecke) < 0.05 * flaeche
+
+
+@pytest.mark.parametrize("lage", [dict(), dict(rotate=90), dict(gedreht=180)], ids=["0", "rotate90", "kopfstehend"])
+def test_unterschriftsblock_mit_harmloser_lesung_bleibt_unverdaechtig(tmp_path, lage):
+    """Firmenzeile und Abteilung unter der Grußformel, verlässlich gelesen: kein Verdacht."""
+    pdf, ocr, _ = _scan_brief(tmp_path / "f.pdf", firma=True, **lage)
+    assert restrisiko_pruefen(pdf, ocr=OcrAttrappe({0: ocr}), ocr_modus={0: "seite"}, winkel={0: 0}) == []
+
+
+def test_unterschriftsblock_geschwaerzt_bleibt_unverdaechtig(tmp_path):
+    """Name geschwärzt (graues Rechteck + Platzhalter auf der Textebene wie von der Schwärzung), ohne Zug: der
+    Personen-Platzhalter und sein Rechteck erklären die Tinte – kein Verdacht."""
+    pdf, ocr, name = _scan_brief(tmp_path / "g.pdf", strich=False, lesung="keine")
+    with fitz.open(pdf) as d:
+        s = d[0]
+        s.draw_rect(name + (-2, -2, 2, 2), color=None, fill=restrisiko.FUELLFARBE)
+        s.insert_text((name.x0, name.y1 - 2), "[PERSON A]", fontsize=8, fontname="helv")
+        d.save(tmp_path / "g2.pdf")
+    verdacht = restrisiko_pruefen(tmp_path / "g2.pdf", ocr=OcrAttrappe({0: ocr}), ocr_modus={0: "seite"},
+                                  platzhalter=["[PERSON A]"])
+    assert verdacht == [], verdacht
+
+
+def test_grussformel_auch_wie_die_ocr_sie_liest():
+    for zeile in ("Mit freundlichen Grüßen", "Mit freundlichen GrüBen", "Mlt freundllchen Grüßen,", "MfG",
+                  "Freundliche Griiße", "mit freundlichem Gruss", "Hochachtungsvoll", "Viele Grüße aus Köln"):
+        assert restrisiko.ist_grussformel(zeile), zeile
+    for zeile in ("Mit freundlicher Unterstützung", "Herzlichen Glückwunsch", "Kündigung", "Freundin"):
+        assert not restrisiko.ist_grussformel(zeile), zeile
+
+
+def _scan_formular(pfad, wert="kritzel"):
+    """Scan einer Formularzeile "Name:" mit handschriftlichem Wert (Kritzel, den die OCR nicht liest) oder mit
+    Platzhalter (wert="platzhalter": graues Rechteck + "[PERSON A]" wie von der Schwärzung)."""
+    vorlage = fitz.open()
+    s = vorlage.new_page()
+    s.insert_text((60, 100), "Antrag auf Leistungen aus der Unfallversicherung", fontsize=12, fontname="helv")
+    s.insert_text((60, 140), "Name:", fontsize=12, fontname="helv")
+    s.insert_text((60, 170), "Bitte vollständig ausfüllen und unterschreiben.", fontsize=12, fontname="helv")
+    woerter = [tuple(w[:5]) for w in s.get_text("words")]
+    if wert == "kritzel":
+        form = s.new_shape()
+        for k in range(4):
+            form.draw_bezier((110 + 20 * k, 138), (116 + 20 * k, 124), (124 + 20 * k, 146), (130 + 20 * k, 134))
+        form.finish(color=(0.1, 0.1, 0.4), width=1.3)
+        form.commit()
+    pix = s.get_pixmap(dpi=150, colorspace=fitz.csGRAY)
+    doc = fitz.open()
+    p = doc.new_page(width=s.rect.width, height=s.rect.height)
+    p.insert_image(p.rect, stream=pix.tobytes("png"))
+    if wert == "platzhalter":
+        p.draw_rect(fitz.Rect(108, 128, 170, 143), color=None, fill=restrisiko.FUELLFARBE)
+        p.insert_text((112, 139), "[PERSON A]", fontsize=8, fontname="helv")
+    vorlage.close()
+    doc.save(pfad)
+    doc.close()
+    return Path(pfad), woerter
+
+
+def test_ungelesene_schrift_hinter_personen_etikett_auf_scan(tmp_path):
+    """Hinter "Name:" steht Handschrift, die die OCR nicht liest: Verdacht mit Rechteck auf dem Wert. Steht dort
+    der Platzhalter der Schwärzung, bleibt die Seite unverdächtig."""
+    pdf, woerter = _scan_formular(tmp_path / "k.pdf")
+    verdacht = restrisiko_pruefen(pdf, ocr=OcrAttrappe({0: woerter}), ocr_modus={0: "seite"})
+    v = [x for x in verdacht if x.grund == restrisiko.GRUND_PERSONENTINTE]
+    assert v and any(fitz.Rect(r).intersects(fitz.Rect(115, 126, 190, 146)) for r in v[0].rechtecke), verdacht
+    pdf2, woerter2 = _scan_formular(tmp_path / "p.pdf", wert="platzhalter")
+    assert restrisiko_pruefen(pdf2, ocr=OcrAttrappe({0: woerter2}), ocr_modus={0: "seite"},
+                              platzhalter=["[PERSON A]"]) == []
+
+
 def test_formularfeld_des_originals(tmp_path):
     pdf = pdf_mit_zeilen(tmp_path / "f.pdf", ["Ort:", "", "Frankfurt am Main"])
     with fitz.open(pdf) as doc:
