@@ -949,3 +949,29 @@ def test_tabellenzelle_nachname_komma_vorname(monkeypatch):
     assert not any("Hamburg" in t or "Berlin" in t for t in funde)
     stellen = {text[s["start"]:s["ende"]] for f in funde.values() for s in f["stellen"]}
     assert "Hahn, Annika" in stellen
+
+
+def test_namen_inaktiv_und_detektorfehler_als_codes(tmp_path, monkeypatch):
+    """Gutachten KQ-08/KQ-16: ohne Sprachmodell meldet die Analyse NAMEN_INAKTIV; ein abstürzender Detektor
+    wird als ERKENNUNG_FEHLER gemeldet, die übrigen Detektoren liefern trotzdem ihre Funde."""
+    from anonymisierer import detektoren
+
+    def kaputt(dok, kontext):
+        raise RuntimeError("absichtlich")
+    detektoren.registrieren("test.kaputt", {"iban"}, detektoren.ALLE_PROFILE, kaputt)
+    try:
+        monkeypatch.setattr(analyse, "lade_ner", lambda: None)
+        monkeypatch.setattr(analyse, "ner_fehler", lambda: "Modell fehlt (Test)")
+        monkeypatch.setattr(na, "finde_personen", lambda t: [])
+        pdf = tmp_path / "m.pdf"
+        doc = fitz.open()
+        doc.new_page().insert_text((50, 72), "IBAN DE89 3704 0044 0532 0130 00", fontsize=11)
+        doc.save(pdf)
+        doc.close()
+        e = analysiere_pdf(pdf, {"namen", "iban"}, [], [])
+    finally:
+        detektoren.entfernen("test.kaputt")
+    codes = {m["code"]: m for m in e["meldungen"]}
+    assert "NAMEN_INAKTIV" in codes and "Modell fehlt (Test)" in codes["NAMEN_INAKTIV"]["text"]
+    assert "ERKENNUNG_FEHLER" in codes and "test.kaputt" in codes["ERKENNUNG_FEHLER"]["text"]
+    assert [f["text"] for f in e["funde"]] == ["DE89 3704 0044 0532 0130 00"]
