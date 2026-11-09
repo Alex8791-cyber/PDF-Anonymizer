@@ -610,8 +610,9 @@ def test_github_action_rechte_zeitlimits_screenshots_und_exe_job():
         assert "-rs" in s["run"], "Begründungen übersprungener Tests gehören in den Bericht"
         assert "PDF_ANONYMISIERER_SCREENSHOTS" in s.get("env", {})
     upload = [s for s in schritte if str(s.get("uses", "")).startswith("actions/upload-artifact")]
-    assert len(upload) == 1 and upload[0]["if"] == "always()"
-    assert "screenshots" in upload[0]["with"]["path"]
+    assert len(upload) == 2 and all(u["if"] == "always()" for u in upload)
+    assert any("screenshots" in u["with"]["path"] for u in upload)
+    assert any("bericht" in u["with"]["path"] for u in upload), "Benchmark-Bericht als Artefakt sichern"
 
     exe = daten["jobs"]["exe"]
     assert exe["runs-on"] == "windows-latest" and exe["needs"] == "pytest"

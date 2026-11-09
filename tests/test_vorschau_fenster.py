@@ -275,7 +275,9 @@ def test_seiten_blaettern_und_zoom(app, umgebung, monkeypatch):
     assert str(fenster.zurueck_knopf.cget("state")) == "disabled"
     # Zoom auf Fensterbreite
     soll = fenster.canvas.winfo_width() - 2 * vorschau_fenster.RAND - 4
-    assert abs(fenster._bild.width() - soll) <= 3
+    # Das Bild füllt die Breite; unter Windows nimmt die senkrechte Bildlaufleiste nach dem ersten
+    # Zeichnen bis zu ~20 px weg, deshalb darf es etwas schmaler sein, aber nie breiter.
+    assert -3 <= soll - fenster._bild.width() <= 25
     fenster.fenster.event_generate("<Next>")
     app.root.update()
     assert fenster.seite == 1 and fenster.seiten_label.cget("text") == "Seite 2 / 3"

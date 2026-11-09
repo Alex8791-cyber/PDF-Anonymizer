@@ -12,6 +12,8 @@ Alle erzeugten Dateien landen im tmp_path.
 
 import datetime
 import json
+from pathlib import Path
+import os
 import random
 
 import pytest
@@ -146,6 +148,15 @@ def test_generator_ist_deterministisch(tmp_path, ci_korpus):
 def test_benchmark_laeuft_und_haelt_qualitaetsgrenzen(ci_korpus, tmp_path):
     ordner, wahrheiten = ci_korpus
     ergebnis = bewertung.bewerte_korpus(ordner, tmp_path / "ergebnis", cli_ocr=False, melde=None)
+    # In der CI den vollständigen Bericht sichern (auch wenn die Prüfungen unten scheitern), damit
+    # plattformabhängige Abweichungen (z. B. Windows) nachvollziehbar sind.
+    ziel = os.environ.get("PDF_ANONYMISIERER_BERICHT")
+    if ziel:
+        import shutil
+        import sys
+        ablage = Path(ziel) / f"benchmark_{sys.platform}"
+        shutil.copytree(tmp_path / "ergebnis", ablage, dirs_exist_ok=True)
+        shutil.copytree(ordner, ablage / "korpus", dirs_exist_ok=True)
     assert (tmp_path / "ergebnis" / "ergebnis.json").exists()
     assert "recall_kern" in (tmp_path / "ergebnis" / "bericht.md").read_text(encoding="utf-8")
     g = ergebnis["gesamt"]

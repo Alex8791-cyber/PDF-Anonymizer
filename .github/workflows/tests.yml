@@ -81,6 +81,7 @@ jobs:
         timeout-minutes: 25
         env:
           PDF_ANONYMISIERER_SCREENSHOTS: ${{ runner.temp }}/screenshots
+          PDF_ANONYMISIERER_BERICHT: ${{ runner.temp }}/bericht
         run: xvfb-run -a -s "-screen 0 1920x1080x24" python -W ignore -m pytest -q -rs --timeout=300 --timeout-method=thread --durations=15 tests/
 
       - name: Tests (Windows)
@@ -88,6 +89,7 @@ jobs:
         timeout-minutes: 25
         env:
           PDF_ANONYMISIERER_SCREENSHOTS: ${{ runner.temp }}/screenshots
+          PDF_ANONYMISIERER_BERICHT: ${{ runner.temp }}/bericht
         run: python -W ignore -m pytest -v -rs --timeout=300 --timeout-method=thread --durations=15 tests/
 
       - name: Layout-Screenshots sichern
@@ -96,6 +98,15 @@ jobs:
         with:
           name: layout-screenshots-${{ matrix.os }}
           path: ${{ runner.temp }}/screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Benchmark-Bericht sichern
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-bericht-${{ matrix.os }}
+          path: ${{ runner.temp }}/bericht/
           if-no-files-found: ignore
           retention-days: 14
 
