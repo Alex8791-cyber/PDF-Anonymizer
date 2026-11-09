@@ -32,6 +32,12 @@ SEED_CI = 1
 # (≈ 8 Einträge) bzw. ~2,3 Prozentpunkte (≈ 5 Einträge).
 MIN_RECALL_KERN = 0.70
 MAX_UEBERSCHWAERZUNG = 0.065
+# Restrisiko-Prüfung (Vertrag Abschnitt 7), gemessen am 2026-11-09 (Linux): 0 Dokumente mit stillem Leck,
+# Verdachtsabdeckung 0,973 (73/75; die 2 fehlenden sind reine Pixelreste), 0,0 Fehlverdacht je Seite, 10 von 12
+# Ausgaben _PRUEFEN. Spielraum für Plattform-Abweichungen (Schriften, OCR-Build).
+MAX_DOKUMENTE_STILLES_LECK = 1
+MIN_VERDACHTSABDECKUNG = 0.90
+MAX_FEHLVERDACHT_JE_SEITE = 1.0
 
 
 # ----------------------------------------------------------------------
@@ -174,3 +180,50 @@ def test_benchmark_laeuft_und_haelt_qualitaetsgrenzen(ci_korpus, tmp_path):
     assert g["ueberschwaerzung"] <= MAX_UEBERSCHWAERZUNG, (
         f"Über-Schwärzung {g['ueberschwaerzung']:.4f} > {MAX_UEBERSCHWAERZUNG}: "
         f"{[(u['dokument'], u['text']) for u in ergebnis['ueberschwaerzt']]}")
+    # Kein stilles Leck: was die Erkennung verpasst, meldet die Restrisiko-Prüfung (Ausgabe _PRUEFEN)
+    rr = ergebnis["restrisiko"]
+    assert all(d["status_ausgabe"] in ("fertig", "pruefen") for d in ergebnis["dokumente"])
+    assert rr["dokumente_mit_stillem_leck"] <= MAX_DOKUMENTE_STILLES_LECK, (
+        f"stille Lecks in {rr['dokumente_still']}: "
+        f"{[(x['dokument'], x['text']) for x in rr['nicht_abgedeckt'] if not x['ausgabe_pruefen']][:15]}")
+    assert rr["verdachtsabdeckung"] >= MIN_VERDACHTSABDECKUNG, (
+        f"Verdachtsabdeckung {rr['verdachtsabdeckung']}: {[(x['dokument'], x['text']) for x in rr['nicht_abgedeckt']]}")
+    assert rr["fehlverdacht_je_seite"] <= MAX_FEHLVERDACHT_JE_SEITE, rr["fehlverdacht_liste"][:15]
+    assert "## Restrisiko" in (tmp_path / "ergebnis" / "bericht.md").read_text(encoding="utf-8")
+
+
+def test_restrisiko_kennzahlen_aus_dokumenten():
+    """Stille Lecks, Abdeckung, Fehlverdacht und _PRUEFEN ohne Leck aus bewerteten Dokumenten (ohne Pipeline)."""
+    def eintrag(i, status, text, kategorie="namen", umfang="kern", reste=(), pixel=None):
+        return {"id": f"e{i}", "text": text, "kategorie": kategorie, "seite": 1, "erwartung": "schwaerzen",
+                "umfang": umfang, "kanal": "text", "status": status, "reste": [list(r) for r in reste],
+                "pixel": pixel, "bemerkung": ""}
+    wahr = [{"id": "e1", "woerter": [[100, 100, 150, 110, "Mustermann"]]},
+            {"id": "e2", "woerter": [[100, 200, 160, 210, "2520868691"]]},
+            {"id": "e3", "woerter": [[100, 300, 140, 310, "Erika"]]}]
+    still = {"dokument": "a.pdf", "seiten": 1, "status_ausgabe": "fertig", "verdacht": [], "reste_verdacht": [],
+             "eintraege": [eintrag(1, "leck", "Mustermann"), eintrag(2, "entfernt", "2520868691", "vertrag")]}
+    gemeldet = {"dokument": "b.pdf", "seiten": 2, "status_ausgabe": "pruefen", "reste_verdacht": [],
+                "verdacht": [{"seite": 0, "start": 5, "ende": 15, "text": "2520868691", "grund": "Ziffernfolge",
+                              "rechtecke": [[101, 201, 159, 209]]},
+                             {"seite": 1, "start": 0, "ende": 4, "text": "Bonn", "grund": "Ort",
+                              "rechtecke": [[10, 10, 30, 20]]}],
+                "eintraege": [eintrag(1, "entfernt", "Mustermann"), eintrag(2, "leck", "2520868691", "vertrag"),
+                              eintrag(3, "teilweise", "Erika", reste=[("erika", "pixel")], pixel=[["Erika", 0.4]])]}
+    leer = {"dokument": "c.pdf", "seiten": 1, "status_ausgabe": "pruefen", "verdacht": [], "reste_verdacht": [],
+            "eintraege": [eintrag(1, "entfernt", "Mustermann")]}
+    for d in (still, gemeldet, leer):
+        bewertung.verdacht_bewerten(d, d["eintraege"], wahr)
+    assert gemeldet["verdacht"][0]["trifft"] is True and gemeldet["verdacht"][1]["trifft"] is False
+    rr = bewertung.restrisiko_kennzahlen([still, gemeldet, leer])
+    assert rr["stille_lecks"] == 1 and rr["dokumente_still"] == ["a.pdf"]
+    assert rr["kern_lecks"] == 3 and rr["kern_lecks_abgedeckt"] == 1 and rr["verdachtsabdeckung"] == round(1 / 3, 4)
+    assert rr["kern_lecks_ohne_pixelrest"] == 2 and rr["verdachtsabdeckung_ohne_pixelrest"] == 0.5
+    assert rr["fehlverdacht"] == 1 and rr["fehlverdacht_je_seite"] == 0.25
+    assert rr["ausgaben_pruefen"] == 2 and rr["pruefen_ohne_leck"] == 1 and rr["pruefen_ohne_leck_dokumente"] == ["c.pdf"]
+    # Verdacht (NamedTuple des Programms) wird JSON-tauglich
+    from anonymisierer.restrisiko import Verdacht
+    import pymupdf as fitz
+    v = bewertung.verdacht_serialisieren(Verdacht(0, 1, 5, "Text", "Grund", [fitz.Rect(1, 2, 3, 4)]))
+    assert v == {"seite": 0, "start": 1, "ende": 5, "text": "Text", "grund": "Grund", "rechtecke": [[1.0, 2.0, 3.0, 4.0]]}
+    json.dumps(v)
