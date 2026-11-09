@@ -25,10 +25,11 @@ from anonymisierer.analyse import analysiere_pdf
 from anonymisierer.muster import KATEGORIEN
 from anonymisierer.ocr import OcrDienst
 from anonymisierer.schwaerzung import schwaerze_pdf
-from conftest import _modell_vorhanden, braucht_ocr
+from conftest import _modell_vorhanden, braucht_ocr, schrift_mit_zeichen
 
 DATEN = Path(__file__).parent / "daten"
 DEJAVU = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+SCHRIFT_ESZETT = schrift_mit_zeichen("ẞßÄÖÜäöü")   # Linux: DejaVu Sans, Windows: Arial/Segoe UI
 STANDARD = {k for k, _, _, _, an in KATEGORIEN if an}
 MIT_MODELL = _modell_vorhanden()
 AKTIVE = STANDARD if MIT_MODELL else STANDARD - {"namen"}
@@ -125,7 +126,7 @@ def versalien(pfad):
     doc = fitz.open()
     _seite(doc, ["Versicherungsnehmerin: MONIKA GROẞ", "Sehr geehrte Frau Monika Groß,", "Frau GROSS, Herr Groß",
                  "Der Großteil der Beiträge ist groß. JEAN-PIERRE DUBOIS ist Zeuge, Herr Dubois bestätigt."],
-           fontname="F0", fontfile=str(DEJAVU) if DEJAVU.exists() else None)
+           fontname="F0", fontfile=str(SCHRIFT_ESZETT))
     doc.save(pfad)
     doc.close()
 
@@ -232,6 +233,8 @@ def test_invarianten_testdaten(tmp_path, name):
 def test_invarianten_erzeugte_dokumente(tmp_path, art):
     if art in ("ligaturen",) and not DEJAVU.exists():
         pytest.skip("DejaVuSans fehlt")
+    if art == "versalien" and SCHRIFT_ESZETT is None:
+        pytest.skip("keine installierte Schrift mit Versal-ß (ẞ)")
     pdf = tmp_path / f"{art}.pdf"
     ERZEUGT[art](pdf)
     analyse, erg = invarianten_pruefen(pdf, KeinOcr())
