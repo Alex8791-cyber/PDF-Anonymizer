@@ -29,7 +29,8 @@ Funde. Keine automatische Erkennung ist perfekt — der Blick auf die
 Liste (und auf das Ergebnis) bleibt Pflicht!
 
 Einmalige Vorbereitung: Installieren.bat doppelklicken
-Starten: Desktop-Verknüpfung "PDF-Anonymisierer"
+Starten: Desktop-Verknüpfung "PDF-Anonymisierer" (ein zweiter Start meldet nur,
+dass das Programm schon läuft)
 
 Dieses Skript ist nur der Startpunkt; die eigentliche Logik liegt im
 Paket "anonymisierer" (muster, namen, analyse, ocr, schwaerzung, dateien, gui).
@@ -94,13 +95,12 @@ from anonymisierer.gui import DND_VERFUEGBAR, AnonymisiererApp, main  # noqa: E4
 from anonymisierer.muster import KATEGORIEN  # noqa: E402,F401
 from anonymisierer.namen import NAMEN_STOPPLISTE, finde_personen_ner, lade_ner  # noqa: E402,F401
 from anonymisierer.schwaerzung import schwaerze_pdf  # noqa: E402,F401
-from anonymisierer import ocr as _ocr  # noqa: E402
+from anonymisierer.ocr import OcrDienst, _tessdata_finden, ocr_noetig  # noqa: E402,F401
 
-# OCR-Namen je nach Modulstand (alt: ist_scan_seite/ocr_textpage, neu: ocr_noetig/OcrDienst)
-for _name in ("ist_scan_seite", "ocr_textpage", "ocr_noetig", "OcrDienst", "_tessdata_finden"):
-    if hasattr(_ocr, _name):
-        globals()[_name] = getattr(_ocr, _name)
-del _name
+try:   # nur noch für ältere Prüfskripte (Regression), entfällt mit der neuen OCR-Schicht
+    from anonymisierer.ocr import ist_scan_seite  # noqa: E402,F401
+except ImportError:
+    pass
 
 if DND_VERFUEGBAR:
     from anonymisierer.gui import TkinterDnD  # noqa: E402,F401

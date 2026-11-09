@@ -224,3 +224,165 @@ def test_startskript_fehlerhaken_schreibt_log(monkeypatch, tmp_path):
         pa._unbehandelter_fehler(*sys.exc_info())
     assert "KeyError" in log.read_text(encoding="utf-8")
     assert gezeigt and str(log) in gezeigt[0][1]
+
+
+# ----------------------------------------------------------------------
+# GR-11: Zwischendateien der Schwärzung
+# ----------------------------------------------------------------------
+def test_zwischendateien_sind_nie_eingabe(tmp_path):
+    _leere_pdf(tmp_path / "ziel" / "a.pdf")
+    _leere_pdf(tmp_path / "ziel" / "anonym_01.pdf")
+    _leere_pdf(tmp_path / "ziel" / ".anonym_tmp_12345_ausgabe.pdf")
+    assert dateien.ist_zwischendatei(Path("x/.anonym_tmp_12345_a.pdf"))
+    assert dateien.ist_ausgabedatei(Path("x/.anonym_tmp_12345_ausgabe.pdf"))
+    assert not dateien.ist_zwischendatei(Path("x/anonym_tmp.pdf"))
+    bericht = dateien.sammle_pdfs_bericht([str(tmp_path / "ziel")])
+    assert bericht["pdfs"] == [tmp_path / "ziel" / "a.pdf"]
+    assert bericht["zwischendateien"] == [tmp_path / "ziel" / ".anonym_tmp_12345_ausgabe.pdf"]
+    assert bericht["ausgaben"] == [tmp_path / "ziel" / "anonym_01.pdf"]
+    # auch einzeln übergeben keine Eingabe (anders als echte Ausgaben, die man nachschwärzen darf)
+    einzeln = dateien.sammle_pdfs_bericht([str(tmp_path / "ziel" / ".anonym_tmp_12345_ausgabe.pdf")])
+    assert einzeln["pdfs"] == [] and len(einzeln["zwischendateien"]) == 1
+
+
+def test_verwaiste_zwischendateien_werden_aufgeraeumt(tmp_path, monkeypatch):
+    import os
+    import time
+    tot = tmp_path / ".anonym_tmp_2147480000_ausgabe.pdf"           # Prozess gibt es nicht
+    eigen = tmp_path / f".anonym_tmp_{os.getpid()}_ausgabe.pdf"      # dieser Prozess: bleibt
+    eltern = os.getppid()                                           # lebt sicher (startete pytest)
+    lebend_jung = tmp_path / f".anonym_tmp_{eltern}_a.pdf"          # Prozess lebt, Datei jung -> bleibt
+    lebend_alt = tmp_path / f".anonym_tmp_{eltern}_b.pdf"           # Prozess lebt, aber > 1 h alt -> weg
+    andere = tmp_path / "anonym_01.pdf"
+    for p in (tot, eigen, lebend_jung, lebend_alt, andere):
+        p.write_bytes(b"%PDF")
+    alt = time.time() - 2 * 3600
+    os.utime(lebend_alt, (alt, alt))
+    entfernt = dateien.zwischendateien_aufraeumen(tmp_path)
+    assert sorted(entfernt) == sorted([tot, lebend_alt])
+    assert eigen.exists() and lebend_jung.exists() and andere.exists()
+    assert dateien.zwischendateien_aufraeumen(tmp_path / "gibt_es_nicht") == []
+
+
+def test_prozess_lebt():
+    import os
+    assert dateien.prozess_lebt(os.getpid())
+    assert not dateien.prozess_lebt(2147480000)
+    assert not dateien.prozess_lebt(0)
+
+
+# ----------------------------------------------------------------------
+# GR-10: Einzelinstanz-Sperre
+# ----------------------------------------------------------------------
+def test_instanz_sperre_im_selben_prozess(tmp_path):
+    pfad = tmp_path / "konfig" / "instanz.lock"
+    erste = dateien.instanz_sperren(pfad)
+    assert erste is not None and erste.aktiv
+    assert dateien.instanz_sperren(pfad) is None
+    erste.freigeben()
+    erste.freigeben()                                          # zweimal freigeben schadet nicht
+    zweite = dateien.instanz_sperren(pfad)
+    assert zweite is not None and zweite.aktiv
+    zweite.freigeben()
+
+
+def test_instanz_sperre_ueber_prozesse_und_nach_absturz(tmp_path):
+    """Hält ein anderer Prozess die Sperre, startet keine zweite Instanz; stirbt er (Absturz, Task beenden),
+    gibt das Betriebssystem die Sperre frei – keine tote Sperrdatei."""
+    import subprocess
+    import time
+    pfad = tmp_path / "instanz.lock"
+    wurzel = Path(dateien.__file__).resolve().parent.parent
+    kind = subprocess.Popen(
+        [sys.executable, "-c", "import sys, time; sys.path.insert(0, sys.argv[1]); "
+                               "from anonymisierer import dateien; s = dateien.instanz_sperren(sys.argv[2]); "
+                               "print('gesperrt' if s and s.aktiv else 'frei', flush=True); time.sleep(60)",
+         str(wurzel), str(pfad)], stdout=subprocess.PIPE, text=True)
+    try:
+        assert kind.stdout.readline().strip() == "gesperrt"
+        assert dateien.instanz_sperren(pfad) is None
+    finally:
+        kind.kill()
+        kind.wait(10)
+    for _ in range(50):
+        sperre = dateien.instanz_sperren(pfad)
+        if sperre is not None:
+            break
+        time.sleep(0.1)
+    assert sperre is not None and sperre.aktiv
+    sperre.freigeben()
+
+
+def test_instanz_sperre_ohne_schreibrecht_blockiert_nicht(tmp_path):
+    datei_statt_ordner = tmp_path / "datei"
+    datei_statt_ordner.write_text("x")
+    sperre = dateien.instanz_sperren(datei_statt_ordner / "instanz.lock")
+    assert sperre is not None and not sperre.aktiv              # Programm startet trotzdem
+    sperre.freigeben()
+
+
+# ----------------------------------------------------------------------
+# KQ-14 / KQ-10: Fehlerprotokoll ohne Kundenordner, Schreibprobe nur einmal
+# ----------------------------------------------------------------------
+def test_fehlerprotokoll_enthaelt_keine_ordnernamen(monkeypatch, tmp_path):
+    log = tmp_path / "fehler.log"
+    monkeypatch.setattr(dateien, "fehlerlog_pfad", lambda: log)
+    try:
+        raise PermissionError(13, "Permission denied", "/home/makler/Kunden/Mustermann_Max/anonymisiert/anonym_02.pdf")
+    except PermissionError:
+        dateien.fehler_protokollieren(*sys.exc_info())
+    inhalt = log.read_text(encoding="utf-8")
+    assert "anonym_02.pdf" in inhalt and "Mustermann_Max" not in inhalt and "/home/makler" not in inhalt
+    assert "test_dateien.py" in inhalt                             # Quelldatei bleibt für die Fehlersuche
+    for text, erwartet in (
+            (r"'C:\\Users\\Jörg Müller\\Kunden\\Meier Anna\\x.pdf'", "'…\\x.pdf'"),
+            ("(/tmp/Kunden/Max Mustermann/anonymisiert): [Errno 17]", "(…/anonymisiert): [Errno 17]"),
+            ("Seite 1/2 und/oder 3/4", "Seite 1/2 und/oder 3/4")):
+        assert dateien.pfade_kuerzen(text) == erwartet
+
+
+def test_schreibprobe_der_projektwurzel_nur_einmal(monkeypatch, tmp_path):
+    aufrufe = []
+    echt = dateien.tempfile.NamedTemporaryFile
+
+    def zaehlend(*a, **k):
+        aufrufe.append(k.get("dir"))
+        return echt(*a, **k)
+    monkeypatch.setattr(dateien.tempfile, "NamedTemporaryFile", zaehlend)
+    monkeypatch.setattr(dateien, "_SCHREIBPROBEN", {})
+    for _ in range(3):
+        assert dateien._beschreibbar(tmp_path)
+    assert len(aufrufe) == 1
+
+
+# ----------------------------------------------------------------------
+# CSV-Vorschau (Kundenliste)
+# ----------------------------------------------------------------------
+def test_csv_vorschau_kodierung_und_trennzeichen(tmp_path):
+    utf8 = tmp_path / "utf8.csv"
+    utf8.write_text("Name;Ort\nJörg Müller;Köln\n\nÄnne Groß;Fürth\n", encoding="utf-8-sig")
+    v = dateien.csv_vorschau(utf8)
+    assert v["trennzeichen"] == ";" and v["kodierung"] == "utf-8-sig"
+    assert v["zeilen"] == [["Name", "Ort"], ["Jörg Müller", "Köln"], ["Änne Groß", "Fürth"]]
+    ansi = tmp_path / "ansi.csv"
+    ansi.write_bytes("Name,Ort\nJörg Müller,Köln\n".encode("cp1252"))
+    v = dateien.csv_vorschau(ansi)
+    assert v["trennzeichen"] == "," and v["kodierung"] == "cp1252" and v["zeilen"][1] == ["Jörg Müller", "Köln"]
+    tab = tmp_path / "tab.txt"
+    tab.write_text("a\tb\n" + "".join(f"{i}\t{i}\n" for i in range(20)), encoding="utf-8")
+    assert dateien.csv_vorschau(tab, max_zeilen=3)["zeilen"] == [["a", "b"], ["0", "0"], ["1", "1"]]
+    assert len(dateien.csv_vorschau(tab, max_zeilen=None)["zeilen"]) == 21
+    xlsx = tmp_path / "liste.xlsx"
+    xlsx.write_bytes(b"PK\x03\x04\x00\x00binary")
+    import pytest
+    with pytest.raises(ValueError):
+        dateien.csv_vorschau(xlsx)
+
+
+def test_startskript_exportiert_explizit():
+    """KQ-07: keine dynamische Export-Schleife mehr, die Vertragsnamen werden ausdrücklich importiert."""
+    import pdf_anonymisierer as pa
+    for name in ("OcrDienst", "ocr_noetig", "_tessdata_finden"):
+        assert hasattr(pa, name), name
+    quelle = Path(pa.__file__).read_text(encoding="utf-8")
+    assert "globals()[" not in quelle
