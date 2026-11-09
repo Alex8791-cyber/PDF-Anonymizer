@@ -4,11 +4,14 @@ Die Oberfläche erkennt die echten Funktionen per hasattr/try-Import und nimmt d
 die Engine sie noch nicht hat (und in Tests). Jede Attrappe hält die Vertragsschnittstelle ein, tut aber nur
 das Nötigste:
   - PROFILE: Schutzstufen aus den vorhandenen Kategorien abgeleitet (muster.PROFILE ersetzt sie)
-  - seite_bild / vorschau_daten: Seitenbild und Wörter per PyMuPDF (vorschau.py ersetzt sie)
+  - seite_bild / vorschau_daten: Seitenbild per PyMuPDF (aus dem Speicher, ohne offenen Datei-Handle);
+    Wörter und Fundstellen aus dem Seitenmodell der Analyse (ergebnis["modell"], Vertrag Abschnitt 1), wenn es
+    eins gibt – sonst eigene PyMuPDF-Wörter (vorschau.py ersetzt sie)
   - freigeben / verwerfen: _PRUEFEN entfernen bzw. Ausgabe löschen, _zuordnung.txt nachführen
     (schwaerzung.freigeben/verwerfen ersetzen sie); als_pruefen_markieren emuliert freigabe_erforderlich
     für eine Engine ohne diesen Parameter
-  - restrisiko_pruefen: liefert [] (restrisiko.py ersetzt sie)
+  - restrisiko_pruefen: liefert [] (restrisiko.py ersetzt sie); reste_als_verdacht macht die Reste der
+    Selbstkontrolle (nur Text) in der Ausgabe als Verdacht mit Lage sichtbar (bleibt auch mit restrisiko.py)
   - Kundenliste: zählt nur Kunden, speichert nur die Anzahl, erkennt nichts (kundenliste.py ersetzt sie)
   - meldungen_aus_texten: leitet Meldungs-Codes (12.6) aus den Warnungstexten einer alten Engine ab
 """
@@ -175,6 +178,23 @@ def seiten_modell(pdf_pfad, seite_nr0: int) -> dict:
     if seite_nr0 in eintrag["seiten"]:
         return eintrag["seiten"][seite_nr0]
     seite = eintrag["doc"][seite_nr0]
+    text, woerter = _text_und_woerter(seite)
+    bilder = []
+    try:
+        for info in seite.get_image_info():
+            r = fitz.Rect(info["bbox"]) & seite.rect
+            if not r.is_empty:
+                bilder.append(r)
+    except Exception:
+        pass
+    modell = {"text": text, "woerter": woerter, "seitenrect": fitz.Rect(seite.rect), "bilder": bilder}
+    eintrag["seiten"][seite_nr0] = modell
+    return modell
+
+
+def _text_und_woerter(seite) -> tuple[str, list]:
+    """Wörter einer PyMuPDF-Seite in Lesereihenfolge als (Rect, text, start, ende) und der Text dazu (Wörter
+    derselben Zeile durch " ", Zeilen durch "\\n" getrennt)."""
     teile, woerter, pos, letzte = [], [], 0, None
     for w in seite.get_text("words"):
         zeile = (w[5], w[6])
@@ -185,17 +205,7 @@ def seiten_modell(pdf_pfad, seite_nr0: int) -> dict:
         woerter.append((fitz.Rect(w[:4]), w[4], pos, pos + len(w[4])))
         pos += len(w[4])
         letzte = zeile
-    bilder = []
-    try:
-        for info in seite.get_image_info():
-            r = fitz.Rect(info["bbox"]) & seite.rect
-            if not r.is_empty:
-                bilder.append(r)
-    except Exception:
-        pass
-    modell = {"text": "".join(teile), "woerter": woerter, "seitenrect": fitz.Rect(seite.rect), "bilder": bilder}
-    eintrag["seiten"][seite_nr0] = modell
-    return modell
+    return "".join(teile), woerter
 
 
 def _kern(wort: str) -> str:
@@ -277,13 +287,87 @@ def _mit_ocr_woertern(modell: dict, ocr_woerter) -> dict:
     return dict(modell, text="".join(teile), woerter=woerter)
 
 
+def modell_seite(ergebnis: dict, seite_nr0: int):
+    """Seite des Seitenmodells der Engine (ergebnis["modell"], Vertrag Abschnitt 1), wenn sie alles hat, was die
+    Vorschau braucht (text, woerter(), rechtecke()); sonst None (dann zeigt die Vorschau das Seitenmodell der
+    Attrappe). Mit dem Modell der Engine sieht die Vorschau genau die Stellen und Rechtecke, die die Schwärzung
+    benutzt, und ein Klick auf ein Wort liefert Offsets, die die Schwärzung als manuelle Stelle annimmt."""
+    seiten = getattr(ergebnis.get("modell"), "seiten", None) if isinstance(ergebnis, dict) else None
+    try:
+        seite = seiten[seite_nr0] if seiten is not None and 0 <= seite_nr0 < len(seiten) else None
+    except (TypeError, IndexError, KeyError):
+        return None
+    if seite is None or not isinstance(getattr(seite, "text", None), str):
+        return None
+    if not (callable(getattr(seite, "woerter", None)) and callable(getattr(seite, "rechtecke", None))):
+        return None
+    return seite
+
+
+def _ganzwort_im_modell(seite, fundtext: str, kategorie: str, woerter) -> list[tuple[int, int]]:
+    """Alle Vorkommen eines Fundtexts auf einer Seite des Engine-Modells: mit dem Vergleicher der Engine
+    (seitenmodell.ganzwort_stellen, Vertrag Abschnitt 1) – derselbe, mit dem die Schwärzung Funde ohne
+    „stellen“ sucht –, sonst per Wortfolgen-Suche auf den Wörtern des Modells."""
+    try:
+        from . import seitenmodell as _sm
+    except ImportError:
+        _sm = None
+    if _sm is not None and hasattr(_sm, "ganzwort_stellen"):
+        modus = "begriff" if kategorie == "begriff" else "name"
+        if hasattr(_sm, "modus_fuer"):
+            try:
+                modus = _sm.modus_fuer(kategorie)
+            except Exception:
+                pass
+        try:
+            return [(int(s), int(e)) for s, e in _sm.ganzwort_stellen(seite, fundtext, modus)]
+        except Exception:
+            pass
+    return [(s, e) for s, e, _ in stellen_suchen(woerter, fundtext)]
+
+
+def _vorschau_daten_modell(ergebnis: dict, seite, seite_nr0: int) -> dict:
+    """vorschau_daten aus dem Seitenmodell der Engine: Wörter und Offsets der Engine, je Fundstelle die
+    Schwärzungsrechtecke aus Seite.rechtecke() – jede Stelle einzeln (stelle_index gesetzt)."""
+    woerter = [(fitz.Rect(w[0]), str(w[1]), int(w[2]), int(w[3])) for w in seite.woerter()]
+    laenge = len(seite.text)
+    stellen = []
+    for index, fund in enumerate(ergebnis.get("funde") or []):
+        fund_id = fund.get("id") or f"#{index}"
+        eigene = fund.get("stellen")
+        if eigene:
+            for si, stelle in enumerate(eigene):
+                if stelle.get("seite") != seite_nr0:
+                    continue
+                try:
+                    start, ende = int(stelle["start"]), int(stelle["ende"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if not 0 <= start < ende <= laenge:
+                    continue                  # ungültige Stelle: die Vorschau nennt den Fund „ohne Markierung“
+                for teil in seite.rechtecke(start, ende):
+                    stellen.append((fitz.Rect(teil[0]), fund_id, si, bool(stelle.get("an", True))))
+        else:
+            for start, ende in _ganzwort_im_modell(seite, str(fund.get("text", "")), fund.get("kategorie", ""),
+                                                   woerter):
+                for teil in seite.rechtecke(start, ende):
+                    stellen.append((fitz.Rect(teil[0]), fund_id, None, True))
+    return {"woerter": woerter, "stellen": stellen, "bilder": [fitz.Rect(b) for b in getattr(seite, "bilder", [])],
+            "seitenrect": fitz.Rect(getattr(seite, "rect", fitz.Rect())), "quelle": "modell"}
+
+
 def vorschau_daten(ergebnis: dict, seite_nr0: int) -> dict:
     """Vertrag Abschnitt 8: {"woerter": [(rect, text, start, ende)], "stellen": [(rect, fund_id, stelle_index,
-    an)], "bilder": [rect], "seitenrect": rect}.
+    an)], "bilder": [rect], "seitenrect": rect} (+ "quelle": "modell" | "attrappe").
+    Hat die Analyse ein Seitenmodell der Engine geliefert (modell_seite), kommen Wörter, Offsets und Rechtecke
+    daraus – genau das, was die Schwärzung benutzt. Sonst eigenes Seitenmodell per PyMuPDF:
     Funde ohne "stellen" (alte Engine) werden per Wortfolgen-Suche gezeigt (stelle_index None = ganzer Fund).
     Funde mit "stellen" werden über die Offsets abgebildet – aber nur, wenn der Text an diesen Offsets im
-    Seitenmodell der Attrappe wirklich der Fund ist. Stammen die Offsets aus dem Seitenmodell der Engine
+    Seitenmodell der Attrappe wirklich der Fund ist. Stammen die Offsets aus einem anderen Seitenmodell
     (anderer Text), wird nicht geraten: dann zeigt die Suche den ganzen Fund (stelle_index None)."""
+    seite = modell_seite(ergebnis, seite_nr0)
+    if seite is not None:
+        return _vorschau_daten_modell(ergebnis, seite, seite_nr0)
     modell = _mit_ocr_woertern(seiten_modell(ergebnis["datei"], seite_nr0),
                                (ergebnis.get("ocr_cache") or {}).get(seite_nr0))
     stellen = []
@@ -291,19 +375,26 @@ def vorschau_daten(ergebnis: dict, seite_nr0: int) -> dict:
         fund_id = fund.get("id") or f"#{index}"
         eigene = fund.get("stellen")
         hier = [(si, st) for si, st in enumerate(eigene or []) if st.get("seite") == seite_nr0]
-        soll = _vergleichstext(fund.get("text", ""))
+        # jede Stelle mit ihrem eigenen Text vergleichen (Varianten wie „MUSTERMANN“, „Mustermanns“)
         passend = bool(hier) and all(
-            _vergleichstext(modell["text"][int(st["start"]):int(st["ende"])]) == soll for _, st in hier)
+            _vergleichstext(modell["text"][int(st["start"]):int(st["ende"])])
+            == _vergleichstext(st.get("text") or fund.get("text", "")) for _, st in hier)
         if passend:
             for si, stelle in hier:
                 for r in rechtecke_fuer(modell["woerter"], int(stelle["start"]), int(stelle["ende"])):
                     stellen.append((r, fund_id, si, bool(stelle.get("an", True))))
         elif not eigene or hier:
-            for _, _, rects in stellen_suchen(modell["woerter"], fund.get("text", "")):
-                for r in rects:
-                    stellen.append((r, fund_id, None, True))
+            texte = [fund.get("text", "")] + [st.get("text") for _, st in hier if st.get("text")]
+            gesehen = set()
+            for text in texte:
+                for start, ende, rects in stellen_suchen(modell["woerter"], text):
+                    if (start, ende) in gesehen:
+                        continue
+                    gesehen.add((start, ende))
+                    for r in rects:
+                        stellen.append((r, fund_id, None, True))
     return {"woerter": modell["woerter"], "stellen": stellen, "bilder": modell["bilder"],
-            "seitenrect": modell["seitenrect"]}
+            "seitenrect": modell["seitenrect"], "quelle": "attrappe"}
 
 
 def ausgabe_vorschau(ausgabe_pfad, verdacht, seite_nr0: int, zoom: float) -> dict:
@@ -327,6 +418,53 @@ def verdacht_feld(verdacht, name, standard=None):
 def restrisiko_pruefen(ausgabe_pfad, ocr=None, platzhalter=None, profil="hoch", nie=None, wissen=None) -> list:
     """Attrappe der Restrisiko-Prüfung (Vertrag Abschnitt 7): meldet nichts."""
     return []
+
+
+GRUND_RESTE = "Selbstkontrolle: Fundtext in der Ausgabe noch lesbar"
+GRUND_RESTE_OHNE_LAGE = ("Selbstkontrolle: Fundtext in der Ausgabe noch lesbar – Lage unbekannt (z. B. Scan), "
+                         "Seiten selbst durchsehen")
+
+
+def reste_als_verdacht(ausgabe_pfad, reste, vorhandene=()) -> list[dict]:
+    """Die Selbstkontrolle der Schwärzung meldet Fundtexte, die in der Ausgabe noch auffindbar sind („reste“,
+    nur als Text). Hier werden sie auf den Seiten der Ausgabe gesucht und als Verdacht (Form wie Vertrag
+    Abschnitt 7, als dict) geliefert, damit die Vorschau sie orange zeigt und „Nachschwärzen“ sie erfasst –
+    nichts Unsicheres bleibt unsichtbar. Ein Rest ohne Fundort auf der Textebene (z. B. nur per OCR gelesen)
+    kommt ohne Rechtecke in die Liste. Stellen, die ein Verdacht der Engine schon abdeckt („vorhandene“),
+    werden nicht doppelt gemeldet. Öffnet die Ausgabe aus dem Speicher (threadsicher, ohne Zwischenspeicher)."""
+    texte = list(dict.fromkeys(str(r).strip() for r in reste or [] if str(r).strip()))
+    if not texte:
+        return []
+    belegt: dict[int, list] = {}
+    for v in vorhandene or []:
+        seite = verdacht_feld(v, "seite")
+        if seite is not None:
+            belegt.setdefault(int(seite), []).extend(fitz.Rect(r) for r in verdacht_feld(v, "rechtecke") or [])
+    doc = fitz.open(stream=Path(ausgabe_pfad).read_bytes(), filetype="pdf")
+    try:
+        seiten = []
+        for seite in doc:
+            try:
+                seite.remove_rotation()
+            except Exception:
+                pass
+            seiten.append(_text_und_woerter(seite)[1])
+    finally:
+        doc.close()
+    verdacht = []
+    for text in texte:
+        gefunden = False
+        for nr, woerter in enumerate(seiten):
+            for start, ende, rects in stellen_suchen(woerter, text):
+                gefunden = True
+                if any(r.intersects(b) for r in rects for b in belegt.get(nr, [])):
+                    continue
+                verdacht.append({"seite": nr, "start": start, "ende": ende, "text": text, "grund": GRUND_RESTE,
+                                 "rechtecke": rects})
+        if not gefunden:
+            verdacht.append({"seite": None, "start": -1, "ende": -1, "text": text, "grund": GRUND_RESTE_OHNE_LAGE,
+                             "rechtecke": []})
+    return verdacht
 
 
 # ----------------------------------------------------------------------

@@ -1663,6 +1663,15 @@ class AnonymisiererApp:
         for fenster in list(self.vorschauen.values()):
             fenster.schliessen(benachrichtigen=False)
         self.vorschauen.clear()
+        self._vorschau_dateien_freigeben()
+
+    @staticmethod
+    def _vorschau_dateien_freigeben(pfad: Path | None = None):
+        """Zwischengespeicherte PDF-Dokumente der Vorschau (Attrappe und Vorschau-Modul der Engine) freigeben –
+        vor dem Umbenennen/Löschen einer Ausgabe (unter Windows verhindert ein offener Handle beides)."""
+        attrappen.cache_leeren(pfad)
+        from .vorschau_fenster import engine_zwischenspeicher_leeren
+        engine_zwischenspeicher_leeren()
 
     def naechste_zu_pruefen(self, nach: Path | None = None) -> Path | None:
         """Nächste Datei (in Listenreihenfolge nach „nach“), deren Ausgabe noch freigegeben werden muss."""
@@ -1679,7 +1688,7 @@ class AnonymisiererApp:
         if self.laeuft or not eintrag or eintrag.get("pfad") is None:
             return None
         alt = Path(eintrag["pfad"])
-        attrappen.cache_leeren(alt)
+        self._vorschau_dateien_freigeben(alt)
         try:
             neu = Path(freigeben(alt))
         except Exception as fehler:
@@ -1700,7 +1709,7 @@ class AnonymisiererApp:
         if self.laeuft or not eintrag or eintrag.get("pfad") is None:
             return False
         alt = Path(eintrag["pfad"])
-        attrappen.cache_leeren(alt)
+        self._vorschau_dateien_freigeben(alt)
         try:
             verwerfen(alt)
         except Exception as fehler:
@@ -1733,6 +1742,12 @@ class AnonymisiererApp:
                 if self.manuell_hinzufuegen(pdf, markierung) is not None:
                     neue += 1
         if not neue:
+            fenster = self.vorschauen.get(pdf)
+            self._dialog("warning", "Nachschwärzen nicht möglich",
+                         "Für die markierten Stellen ist keine Lage auf der Seite bekannt (z. B. Text aus "
+                         "einem Scan). Bitte in „Geplante Schwärzung“ einen Rahmen um die Stelle ziehen oder "
+                         "den Text in die IMMER-Liste eintragen und erneut schwärzen.",
+                         eltern=fenster.fenster if fenster is not None and fenster.existiert() else None)
             return False
         return self.schwaerzen(nur=[pdf], ersetzt=Path(eintrag["pfad"]))
 
@@ -2148,6 +2163,10 @@ class AnonymisiererApp:
         if self.instanz_sperre is not None:
             self.instanz_sperre.freigeben()
             self.instanz_sperre = None
+        try:
+            self._vorschau_dateien_freigeben()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Namenserkennung vorladen (PERF-09)
@@ -2554,6 +2573,7 @@ class AnonymisiererApp:
                         ergebnis["fehler"] = _fehlertext_verstaendlich(ergebnis["fehler"])
                     if freigabe and not freigabe_engine:
                         self._freigabe_emulieren(ergebnis)
+                    self._reste_verorten(ergebnis)
                 except Exception as fehler:
                     log = dateien.fehler_protokollieren(*sys.exc_info())
                     if erster_fehler is None and not isinstance(fehler, OSError):
@@ -2572,6 +2592,19 @@ class AnonymisiererApp:
             self._ocr_schliessen(ocr)
             self._im_hauptthread(self._schwaerzen_fertig, auftraege, ergebnisse, abbruch.is_set(), fehler_intern,
                                  erster_fehler, ersetzt)
+
+    @staticmethod
+    def _reste_verorten(ergebnis: dict):
+        """Reste der Selbstkontrolle (nur Text) in der Ausgabe suchen: die Vorschau zeigt sie dann orange wie einen
+        Verdacht und „Nachschwärzen“ erfasst sie (läuft im Arbeits-Thread)."""
+        ausgabe = ergebnis.get("ausgabe")
+        if not ergebnis["reste"] or ergebnis["fehler"] or ausgabe is None or not Path(ausgabe).exists():
+            return
+        try:
+            ergebnis["_reste_verdacht"] = attrappen.reste_als_verdacht(ausgabe, ergebnis["reste"],
+                                                                       ergebnis.get("verdacht") or [])
+        except Exception:
+            dateien.fehler_protokollieren(*sys.exc_info())
 
     @staticmethod
     def _freigabe_emulieren(ergebnis: dict):
@@ -2655,7 +2688,8 @@ class AnonymisiererApp:
             status = e.get("_status") or self._ausgabe_status(e)
             if status in ("fehler", "keine") and ersetzt is not None:
                 continue                                  # Nachschwärzen gescheitert: alte Ausgabe bleibt gültig
-            self.ausgaben[pdf] = {"pfad": e["ausgabe"], "status": status, "verdacht": list(e.get("verdacht") or []),
+            verdacht = list(e.get("verdacht") or []) + list(e.get("_reste_verdacht") or [])
+            self.ausgaben[pdf] = {"pfad": e["ausgabe"], "status": status, "verdacht": verdacht,
                                   "ergebnis": e, "grund": self._grund(e, status)}
             self._ausgabe_zeile_setzen(pdf)
         geschrieben = [(pdf, e) for pdf, e in ergebnisse
@@ -2747,7 +2781,7 @@ class AnonymisiererApp:
             fenster = self.vorschauen.get(pdf)
             if e["ausgabe"] is not None and Path(e["ausgabe"]).exists() and not e["fehler"]:
                 try:
-                    attrappen.cache_leeren(ersetzt)
+                    self._vorschau_dateien_freigeben(ersetzt)
                     verwerfen(ersetzt)
                     self._log(f"ℹ {self._anzeigename(pdf)}: nachgeschwärzt → {e['ausgabe'].name} "
                               f"(alte Ausgabe {ersetzt.name} verworfen).", "ok")

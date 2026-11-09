@@ -10,7 +10,10 @@ Nach dem Schwärzen („nachher“) zeigt es die AUSGABE mit den Verdachtsstelle
 und bietet „Freigeben“, „Nachschwärzen“ und „Verwerfen“.
 
 Seitenbild und Wortpositionen kommen aus der Engine (vorschau.seite_bild/vorschau_daten), sobald es sie gibt
-und die Analyse ein Seitenmodell geliefert hat – sonst aus gui_attrappen (PyMuPDF).
+und die Analyse ein Seitenmodell geliefert hat. Ohne Vorschau-Modul (oder wenn es scheitert) nimmt
+gui_attrappen das Seitenmodell der Analyse direkt (Seite.woerter/rechtecke, Vertrag Abschnitt 1) – die Vorschau
+zeigt dann ebenfalls genau die Stellen der Schwärzung – und nur ohne Seitenmodell eigene PyMuPDF-Wörter.
+Die Ausgabe (nachher) wird immer aus dem Speicher gezeichnet, damit sie umbenannt und gelöscht werden kann.
 """
 
 import base64
@@ -52,6 +55,27 @@ def _engine_hat(name: str) -> bool:
     return _engine_vorschau is not None and hasattr(_engine_vorschau, name)
 
 
+_ENGINE_FEHLER: set[str] = set()
+
+
+def _engine_fehler(name: str):
+    """Fehler im Vorschau-Modul der Engine: einmal je Funktion in fehler.log, die Vorschau macht mit der Attrappe
+    weiter (dasselbe Seitenmodell, wenn die Analyse eins geliefert hat) – kein Absturz des Fensters."""
+    if name not in _ENGINE_FEHLER:
+        _ENGINE_FEHLER.add(name)
+        dateien.fehler_protokollieren(*sys.exc_info())
+
+
+def engine_zwischenspeicher_leeren():
+    """Vorbereitete Dokumente im Vorschau-Modul der Engine freigeben (offene Datei-Handles: unter Windows ließe
+    sich eine Datei sonst nicht umbenennen oder löschen)."""
+    if _engine_hat("zwischenspeicher_leeren"):
+        try:
+            _engine_vorschau.zwischenspeicher_leeren()
+        except Exception:
+            _engine_fehler("zwischenspeicher_leeren")
+
+
 def _vergroessert(rect, rand=1.0) -> fitz.Rect:
     r = fitz.Rect(rect)
     return fitz.Rect(r.x0 - rand, r.y0 - rand, r.x1 + rand, r.y1 + rand)
@@ -72,11 +96,35 @@ def vorher_quelle_engine(app, pdf: Path) -> bool:
             and ergebnis.get("modell") is not None)
 
 
+MODELL_QUELLEN = ("engine", "modell")      # Vorschau-Daten, deren Offsets zum Seitenmodell der Engine gehören
+
+
 def vorschau_daten_holen(app, pdf: Path, seite_nr0: int) -> dict:
+    """vorschau_daten einer Seite mit Herkunft im Schlüssel "quelle": "engine" (Vorschau-Modul der Engine),
+    "modell" (Seitenmodell der Analyse über die Attrappe) oder "attrappe" (eigene PyMuPDF-Wörter). Scheitert das
+    Vorschau-Modul der Engine, übernimmt die Attrappe – die Herkunft sagt dann ehrlich, woher die Offsets sind."""
     ergebnis = app.analyse_ergebnisse[pdf]
     if vorher_quelle_engine(app, pdf):
-        return _engine_vorschau.vorschau_daten(ergebnis, seite_nr0)
-    return attrappen.vorschau_daten(ergebnis, seite_nr0)
+        try:
+            daten = dict(_engine_vorschau.vorschau_daten(ergebnis, seite_nr0))
+            daten["quelle"] = "engine"
+            return daten
+        except Exception:
+            _engine_fehler("vorschau_daten")
+    daten = attrappen.vorschau_daten(ergebnis, seite_nr0)
+    daten.setdefault("quelle", "attrappe")
+    return daten
+
+
+def offsets_vom_modell(app, pdf: Path, daten: dict | None = None) -> bool:
+    """Gehören die Offsets der Vorschau-Wörter zum Seitenmodell der Engine (Vorschau-Modul der Engine oder das
+    Seitenmodell aus der Analyse, Vertrag Abschnitte 1 und 8)? Nur dann wird ein angeklicktes Wort eine manuelle
+    STELLE (Offsets, die die Schwärzung annimmt) – sonst wird es als Bereich (Rechteck) geschwärzt."""
+    if pdf not in app.analyse_ergebnisse:
+        return False
+    if daten is None:
+        daten = vorschau_daten_holen(app, pdf, 0)
+    return daten.get("quelle") in MODELL_QUELLEN
 
 
 def verdacht_zu_markierungen(app, pdf: Path, verdacht) -> list[dict]:
@@ -88,16 +136,21 @@ def verdacht_zu_markierungen(app, pdf: Path, verdacht) -> list[dict]:
     text = str(attrappen.verdacht_feld(verdacht, "text", "") or "")
     if seite is None or not rechtecke:
         return []
-    if app.kann_manuelle_stellen() and vorher_quelle_engine(app, pdf):
-        daten = vorschau_daten_holen(app, pdf, int(seite))
-        woerter = sorted((w for w in daten["woerter"] if any(_ueberlappt(w[0], r) for r in rechtecke)),
-                         key=lambda w: w[2])
+    daten = vorschau_daten_holen(app, pdf, int(seite)) if app.kann_manuelle_stellen() else None
+    if daten is not None and offsets_vom_modell(app, pdf, daten):
+        alle = sorted(daten["woerter"], key=lambda w: w[2])
+        # Wörter unter dem Verdacht; direkt aufeinander folgende Wörter (kein anderes Wort dazwischen, egal wie
+        # viel Leerraum das Seitenmodell zwischen ihnen hat) werden EINE Stelle
         laeufe: list[list] = []
-        for w in woerter:
-            if laeufe and w[2] - laeufe[-1][-1][3] <= 1:
+        letzter = None
+        for i, w in enumerate(alle):
+            if not any(_ueberlappt(w[0], r) for r in rechtecke):
+                continue
+            if laeufe and letzter == i - 1:
                 laeufe[-1].append(w)
             else:
                 laeufe.append([w])
+            letzter = i
         if laeufe:
             return [{"art": "stelle", "seite": int(seite), "start": lauf[0][2], "ende": lauf[-1][3],
                      "rechtecke": attrappen.rechtecke_zusammenfassen([w[0] for w in lauf]),
@@ -279,6 +332,8 @@ class VorschauFenster:
     def schliessen(self, benachrichtigen: bool = True):
         if benachrichtigen and self.app.vorschauen.get(self.pdf) is self:
             self.app.vorschau_geschlossen(self.pdf)
+        if not any(f is not self for f in self.app.vorschauen.values()):
+            engine_zwischenspeicher_leeren()           # letzte Vorschau zu: vorbereitete Dokumente freigeben
         if self._zeichnen_geplant is not None:
             try:
                 self.fenster.after_cancel(self._zeichnen_geplant)
@@ -443,12 +498,14 @@ class VorschauFenster:
         self.markierungen_zeichnen()
 
     def _bild_holen(self, datei: Path, nr: int, zoom: float):
-        if self.modus == "vorher":
-            if vorher_quelle_engine(self.app, self.pdf):
+        """Seitenbild: vorher das Original (Engine, wenn sie Vorschau und Seitenmodell hat), nachher die AUSGABE
+        immer aus dem Speicher (Attrappe) – ein offener Datei-Handle würde unter Windows „Freigeben“ (Umbenennen)
+        und „Verwerfen“ (Löschen) verhindern."""
+        if self.modus == "vorher" and vorher_quelle_engine(self.app, self.pdf):
+            try:
                 return _engine_vorschau.seite_bild(datei, nr, zoom)
-            return attrappen.seite_bild(datei, nr, zoom)
-        if _engine_hat("seite_bild"):
-            return _engine_vorschau.seite_bild(datei, nr, zoom)
+            except Exception:
+                _engine_fehler("seite_bild")
         return attrappen.seite_bild(datei, nr, zoom)
 
     def _canvas_geaendert(self, ereignis):
@@ -709,7 +766,7 @@ class VorschauFenster:
         """Nicht erkanntes Wort schwärzen: als manuelle Stelle (Engine mit Seitenmodell), sonst als manueller
         Bereich (Wortrechteck), sonst überall im Dokument (IMMER-Begriff für diesen Lauf)."""
         rect, text, start, ende = wort[0], wort[1], wort[2], wort[3]
-        if self.app.kann_manuelle_stellen() and vorher_quelle_engine(self.app, self.pdf):
+        if self.app.kann_manuelle_stellen() and offsets_vom_modell(self.app, self.pdf, self.daten()):
             self.app.manuell_hinzufuegen(self.pdf, {"art": "stelle", "seite": self.seite, "start": start,
                                                     "ende": ende, "rechtecke": [fitz.Rect(rect)], "text": text})
             self.status(f"„{text}“ wird an dieser Stelle geschwärzt (Klick darauf nimmt es zurück).")
