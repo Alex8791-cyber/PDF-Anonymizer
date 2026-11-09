@@ -366,6 +366,26 @@ def test_ungelesene_scan_seite_ist_seitenverdacht(tmp_path):
     assert restrisiko_pruefen(pdf, ocr=None, ocr_modus={0: "seite"})[0].grund == restrisiko.GRUND_SEITE_UNGELESEN
 
 
+def test_unplausible_lesung_einer_scan_seite_ist_seitenverdacht(tmp_path):
+    """Eine verdrehte Seite liest die OCR als wortähnlichen Buchstabensalat. Liest die Kontroll-OCR mit derselben
+    (falschen) Ausrichtung wie die Analyse, greift keine Regel verlässlich – dann ist die Seite selbst der
+    Verdacht (Maß und Schwellen der OCR, aufrecht gelesene Seiten bleiben unverdächtig)."""
+    pdf, woerter = _scan(tmp_path / "scan.pdf", ["Sehr geehrte Damen und Herren,",
+                                                 "wir bestätigen den Eingang Ihrer Unterlagen.",
+                                                 "Mit freundlichen Grüßen"])
+    salat = ["youyseN", "uuewlesjsnyy", "Bunjiamuy", "uaBunjne", "Japuas", "ualeyq", "yalsıa", "Bunzıaq",
+             "ualyıaz", "ayosyuy", "Bunpuaz", "ıɐsnɐɥ", "ɹǝʇuıɥ", "ʇɥɔıu"]
+    gedreht = [(*w[:4], salat[i % len(salat)]) for i, w in enumerate(woerter)]
+    assert len(gedreht) >= 10
+    verdacht = restrisiko_pruefen(pdf, ocr=OcrAttrappe({0: gedreht}), ocr_modus={0: "seite"}, winkel={0: 0})
+    seite = [v for v in verdacht if v.grund == restrisiko.GRUND_SEITE_UNPLAUSIBEL]
+    assert [(v.seite, v.start, v.rechtecke) for v in seite] == [(0, -1, [])], verdacht
+    # aufrecht gelesen: kein Seitenverdacht; wenige Wörter (Stempel, Seitenzahl) werden nicht bewertet
+    aufrecht = restrisiko_pruefen(pdf, ocr=OcrAttrappe({0: woerter}), ocr_modus={0: "seite"})
+    assert not [v for v in aufrecht if v.start == -1], aufrecht
+    assert not restrisiko._lesung_unplausibel(gedreht[:5])
+
+
 def test_unterschrift_unter_der_grussformel_auf_scan(tmp_path):
     pdf, woerter = _scan(tmp_path / "u.pdf", ["Vielen Dank für Ihre Nachricht.", "Mit freundlichen Grüßen"],
                          unterschrift=True)

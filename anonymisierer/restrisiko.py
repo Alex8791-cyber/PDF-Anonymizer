@@ -35,8 +35,9 @@ Was gemeldet wird (jede Regel liefert Stelle + Grund):
   * Scan-Seiten: unter der Grußformel Tinte, die die OCR nicht als Text gelesen hat (Unterschrift, von ihr
     überschriebener Name) – Rechteck des Bereichs, "bitte ansehen".
 Seitenverdacht (ohne Rechteck, „Seite selbst durchsehen“): eine Scan-Seite mit Tinte, aber ohne gelesene Wörter,
-und eine kaum lesbare Scan-Seite (mehr als 20 % OCR-Bruchstücke wie "|", "\\", ".", Einzelzeichen – Fax, starke
-Kompression): dort kann die Prüfung nicht verlässlich lesen, also muss ein Mensch hinsehen.
+eine kaum lesbare Scan-Seite (mehr als 20 % OCR-Bruchstücke wie "|", "\\", ".", Einzelzeichen – Fax, starke
+Kompression) und eine Scan-Seite, deren Lesung nach dem Maß der OCR unplausibel ist (Buchstabensalat einer
+verdrehten Seite, Handschrift): dort kann die Prüfung nicht verlässlich lesen, also muss ein Mensch hinsehen.
 Nie Verdacht: Platzhaltertext ([PERSON A], [GESCHWÄRZT] …), die NIE-Liste der Nutzerin und bewusst abgewählte
 Stellen (Entscheidung der Nutzerin). Die Prüfung ist in jeder Schutzstufe gleich empfindlich (profil wird nur
 durchgereicht).
@@ -64,6 +65,7 @@ try:
 except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
     import fitz
 
+from . import ocr as _ocr
 from . import seitenmodell as sm
 
 OCR_DPI = sm.OCR_DPI
@@ -80,6 +82,8 @@ GRUND_SEITE_UNGELESEN = ("Scan-Seite konnte nicht gelesen werden (keine Texterke
                          "durchsehen")
 GRUND_SEITE_RAUSCHEN = ("Scan-Seite ist kaum lesbar (viele OCR-Bruchstücke) – nicht erkannte Angaben möglich, "
                         "Seite selbst durchsehen")
+GRUND_SEITE_UNPLAUSIBEL = ("Scan-Seite ist nicht verlässlich lesbar (Texterkennung liefert Buchstabensalat – Seite "
+                           "verdreht, Handschrift oder unleserlich) – Seite selbst durchsehen")
 
 
 class Verdacht(NamedTuple):
@@ -1743,6 +1747,17 @@ def _rauschanteil(woerter: list) -> float:
     return rausch / len(woerter)
 
 
+def _lesung_unplausibel(woerter) -> bool:
+    """Ist die OCR-Lesung einer Scan-Seite Buchstabensalat (verdrehte Seite, Handschrift, unleserlich)?
+    Maß und Schwellen der OCR selbst (anonymisierer.ocr: Anteil "starker" Wörter – häufige Wörter, Daten,
+    Beträge …; aufrechte Seiten 0,12-0,60, verdrehte 0,00-0,02): ab MIN_TOKENS_WARNUNG Wörtern unplausibel,
+    wenn die OCR die Lesung nicht als plausibel gelten ließe. Nötig, weil die Kontroll-OCR der Ausgabe mit der
+    Ausrichtung des Originals liest und das selbst nicht meldet – hat schon die Analyse die Seite nicht lesen
+    können, liest die Prüfung sonst denselben Salat, und keine Regel greift verlässlich."""
+    bewertung = _ocr._lesung_bewerten([w[4] for w in woerter])
+    return bewertung["tokens"] >= _ocr.MIN_TOKENS_WARNUNG and not _ocr._plausibel(bewertung)
+
+
 def _ohne_platzhalter(woerter: list, boxen: list) -> list:
     """OCR-Wörter ohne die mitgelesenen Platzhalter (Wortmitte im Platzhalter oder halb überdeckt)."""
     if not boxen:
@@ -1833,6 +1848,8 @@ def restrisiko_pruefen(ausgabe_pfad, ocr=None, platzhalter=None, profil: str = "
                 elif modus == "seite" and len(woerter) >= SCAN_RAUSCHEN_MIN_WOERTER \
                         and _rauschanteil(woerter) > SCAN_RAUSCHEN_MAX:
                     verdacht.append(Verdacht(nr, -1, -1, f"Seite {nr + 1}", GRUND_SEITE_RAUSCHEN, []))
+                elif modus == "seite" and _lesung_unplausibel(woerter):
+                    verdacht.append(Verdacht(nr, -1, -1, f"Seite {nr + 1}", GRUND_SEITE_UNPLAUSIBEL, []))
             m = sm.seite_aufbauen(seite, nr, ocr_woerter=woerter, ocr_quelle=quelle)
             if modus == "seite":
                 verdacht += _unterschrift_pruefen(seite, m, schwaerzungen)
