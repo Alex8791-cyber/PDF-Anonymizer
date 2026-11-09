@@ -284,7 +284,9 @@ def test_ps1_wird_mit_bom_geschrieben(tmp_path):
     ps1 = v.schreibe_ps1(tmp_path)
     roh = ps1.read_bytes()
     assert roh.startswith(b"\xef\xbb\xbf"), "PowerShell 5.1 braucht UTF-8 mit BOM (M-26)"
-    assert roh[3:].decode("utf-8") == v.PS1_TEXT
+    inhalt = roh[3:].decode("utf-8")
+    assert "\r\n" in inhalt, "Zeilenenden muessen CRLF sein (Windows PowerShell)"
+    assert inhalt.replace("\r\n", "\n") == v.PS1_TEXT.replace("\r\n", "\n")
 
 
 @pytest.mark.parametrize("pfad", KNIFFLIGE_PFADE)

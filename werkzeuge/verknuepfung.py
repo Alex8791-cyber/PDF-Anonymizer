@@ -93,7 +93,9 @@ def umgebung(ziel: Path, skript: Path, ordner: Path, lnk: Path, icon: Path | Non
 def schreibe_ps1(ordner: Path) -> Path:
     """Schreibt das PowerShell-Skript als UTF-8 MIT BOM (sonst liest PowerShell 5.1 es als ANSI)."""
     ps1 = Path(ordner) / "pdf_anonymisierer_verknuepfung.ps1"
-    ps1.write_text(PS1_TEXT, encoding="utf-8-sig")
+    # Immer CRLF (Windows-PowerShell-Standard), unabhängig vom Betriebssystem, auf dem geschrieben wird
+    with open(ps1, "w", encoding="utf-8-sig", newline="\r\n") as f:
+        f.write(PS1_TEXT)
     return ps1
 
 
