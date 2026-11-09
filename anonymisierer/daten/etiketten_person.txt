@@ -3,6 +3,7 @@
 # Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
 # Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
 # Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+Abschleppdienst
 Absender
 Absender(in)
 Absender/-in
@@ -15,6 +16,8 @@ Adressat(in)
 Adressat/-in
 Adressat/in
 Adressatin
+Agenturinhaber
+Agenturinhaberin
 Angaben zum Fahrer
 Angaben zum Unfallgegner
 Angaben zum Versicherungsnehmer
@@ -56,8 +59,14 @@ Arbeitnehmer(in)
 Arbeitnehmer/-in
 Arbeitnehmer/in
 Arbeitnehmerin
+Arbeitnehmername
 Arzt
+Arzt/Ärztin
+Arzt/Therapeut
 Ärztin
+Aufsichtsrat
+Aufsichtsratsvorsitzende
+Aufsichtsratsvorsitzender
 Auftraggeber
 Auftraggeber(in)
 Auftraggeber/-in
@@ -70,16 +79,21 @@ Aussteller/in
 Ausstellerin
 Auszubildende
 Auszubildender
+Autohaus
+Autowerkstatt
+Bäckerei
 Bearbeiter
 Bearbeiter(in)
 Bearbeiter/-in
 Bearbeiter/in
 Bearbeiterin
+bearbeitet von
 Begünstigte
 Begünstigter
 behandelnde Ärzte
 behandelnde Ärztin
 behandelnder Arzt
+Behandelnder Arzt/Therapeut
 Behandler
 Behandler(in)
 Behandler/-in
@@ -90,6 +104,7 @@ Beifahrer(in)
 Beifahrer/-in
 Beifahrer/in
 Beifahrerin
+Beirat
 Beitragszahler
 Beitragszahler(in)
 Beitragszahler/-in
@@ -132,6 +147,8 @@ Darlehensnehmer/in
 Darlehensnehmerin
 Datenschutzbeauftragte
 Datenschutzbeauftragter
+Depotinhaber
+Depotinhaberin
 Ehefrau
 Ehegatte
 Ehegattin
@@ -168,13 +185,16 @@ Erblasser(in)
 Erblasser/-in
 Erblasser/in
 Erblasserin
+Ergotherapie
 Ersteller
 Ersteller(in)
 Ersteller/-in
 Ersteller/in
 Erstellerin
+erstellt von
 Erziehungsberechtigte
 Erziehungsberechtigter
+Fa.
 Facharzt
 Fachärztin
 Fahrer
@@ -202,8 +222,10 @@ Familienname
 Family name
 Firma/Name
 First name
+Friseursalon
 frühere Namen
 früherer Name
+Führungskraft
 Full name
 Fußgänger
 Fußgänger(in)
@@ -211,6 +233,11 @@ Fußgänger/-in
 Fußgänger/in
 Fußgängerin
 Geburtsname
+Gefahrperson
+Gemeinschaftspraxis
+Generalagentur
+Generalbevollmächtigte
+Generalbevollmächtigter
 Geschädigte
 Geschädigter
 Geschäftsführer
@@ -218,6 +245,10 @@ Geschäftsführer(in)
 Geschäftsführer/-in
 Geschäftsführer/in
 Geschäftsführerin
+Geschäftsführung
+Geschäftsleitung
+Gesellschafter
+Gesellschafterin
 gesetzliche Vertreter
 gesetzliche Vertreterin
 gesetzlicher Vertreter
@@ -233,6 +264,7 @@ Gutachter
 Gutachter(in)
 Gutachter/-in
 Gutachter/in
+Gutachterbüro
 Gutachterin
 Halter
 Halter(in)
@@ -241,6 +273,7 @@ Halter/in
 Halterin
 Hausarzt
 Hausärztin
+Hausarztpraxis
 Hausmeister
 Hausmeister(in)
 Hausmeister/-in
@@ -251,6 +284,7 @@ Hausverwalter(in)
 Hausverwalter/-in
 Hausverwalter/in
 Hausverwalterin
+Hausverwaltung
 Hebamme
 Heilpraktiker
 Heilpraktiker(in)
@@ -270,6 +304,9 @@ Ihr Betreuer
 Ihre Ansprechpartnerin
 Ihre Beraterin
 Ihre Betreuerin
+Immobilienbüro
+Ingenieurbüro
+Inh.
 Inhaber
 Inhaber(in)
 Inhaber/-in
@@ -284,11 +321,15 @@ Insolvenzverwalter/in
 Insolvenzverwalterin
 Insured
 Insured person
+Kanzlei
+Karteninhaber
+Karteninhaberin
 Käufer
 Käufer(in)
 Käufer/-in
 Käufer/in
 Käuferin
+Kfz-Werkstatt
 Kind
 Kind 1
 Kind 2
@@ -301,17 +342,21 @@ Kontoinhaber(in)
 Kontoinhaber/-in
 Kontoinhaber/in
 Kontoinhaberin
+Kreditkarteninhaber
 Kreditnehmer
 Kreditnehmer(in)
 Kreditnehmer/-in
 Kreditnehmer/in
 Kreditnehmerin
 Kunde
+Kundenberater
+Kundenberaterin
 Kundenbetreuer
 Kundenbetreuer(in)
 Kundenbetreuer/-in
 Kundenbetreuer/in
 Kundenbetreuerin
+Kundenname
 Kundin
 Last name
 Lebensgefährte
@@ -326,12 +371,16 @@ Leistungsempfänger(in)
 Leistungsempfänger/-in
 Leistungsempfänger/in
 Leistungsempfängerin
+Leistungserbringer
+Logopädie
 Mädchenname
 Makler
 Makler(in)
 Makler/-in
 Makler/in
+Maklerbüro
 Maklerin
+Malerbetrieb
 Mandant
 Mandant(in)
 Mandant/-in
@@ -342,6 +391,7 @@ Melder(in)
 Melder/-in
 Melder/in
 Melderin
+Metzgerei
 Mieter
 Mieter(in)
 Mieter/-in
@@ -357,10 +407,13 @@ Mitarbeiter(in)
 Mitarbeiter/-in
 Mitarbeiter/in
 Mitarbeiterin
+Mitarbeitername
 Miterbe
 Miterbin
 Mitreisende
 Mitreisender
+Mitschuldner
+Mitschuldnerin
 Mitversicherte
 mitversicherte Person
 mitversicherte Personen
@@ -379,13 +432,18 @@ Nachlassverwalterin
 Nachname
 Nachname, Vorname
 Name
+Name der Kundin
+Name der Mitarbeiterin
 Name der versicherten Person
+Name des Arbeitnehmers
 Name des Ehepartners
 Name des Fahrers
 Name des Geschädigten
 Name des Halters
 Name des Kindes
 Name des Kontoinhabers
+Name des Kunden
+Name des Mitarbeiters
 Name des Patienten
 Name des Unfallgegners
 Name des Versicherten
@@ -393,9 +451,13 @@ Name des Versicherungsnehmers
 Name des Zeugen
 Name und Anschrift
 Name und Vorname
+Name VN
+Name VP
 Name, Anschrift
 Name, Vorname
 Name/Firma
+Notar
+Notarin
 Notfallkontakt
 Partner
 Partner(in)
@@ -406,6 +468,7 @@ Patient
 Patient(in)
 Patient/-in
 Patient/in
+Patientenname
 Patientin
 Person
 Personalien
@@ -420,6 +483,8 @@ Pfleger(in)
 Pfleger/-in
 Pfleger/in
 Pflegerin
+Physiotherapie
+Physiotherapiepraxis
 Policyholder
 Prämienzahler
 Prämienzahler(in)
@@ -436,6 +501,12 @@ Radfahrer(in)
 Radfahrer/-in
 Radfahrer/in
 Radfahrerin
+Rechnungsaussteller
+Rechnungsausstellerin
+Rechnungssteller
+Rechnungsstellerin
+Rechtsanwalt
+Rechtsanwältin
 Reisende
 Reisender
 Rentenempfänger
@@ -449,8 +520,11 @@ Sachbearbeiter(in)
 Sachbearbeiter/-in
 Sachbearbeiter/in
 Sachbearbeiterin
+Sachbearbeitung
 Sachverständige
+Sachverständigenbüro
 Sachverständiger
+Sanitätshaus
 Schadenmelder
 Schadenmelder(in)
 Schadenmelder/-in
@@ -461,6 +535,7 @@ Schädiger(in)
 Schädiger/-in
 Schädiger/in
 Schädigerin
+Schreinerei
 Schuldner
 Schuldner(in)
 Schuldner/-in
@@ -481,6 +556,8 @@ Spender(in)
 Spender/-in
 Spender/in
 Spenderin
+Steuerberater
+Steuerberaterin
 Student
 Student(in)
 Student/-in
@@ -495,6 +572,7 @@ Testamentsvollstreckerin
 Therapeut
 Therapeut(in)
 Therapeut/-in
+Therapeut/Arzt
 Therapeut/in
 Therapeutin
 Tierhalter
@@ -523,6 +601,8 @@ Unfallverursacher(in)
 Unfallverursacher/-in
 Unfallverursacher/in
 Unfallverursacherin
+Unfallzeuge
+Unfallzeugin
 Untermieter
 Untermieter(in)
 Untermieter/-in
@@ -532,6 +612,8 @@ Unterschrift
 Unterschrift der versicherten Person
 Unterschrift des Antragstellers
 Unterschrift des Versicherungsnehmers
+Unterzeichnende
+Unterzeichnender
 Unterzeichner
 Unterzeichner(in)
 Unterzeichner/-in
@@ -543,6 +625,8 @@ Verfasser(in)
 Verfasser/-in
 Verfasser/in
 Verfasserin
+Verfügungsberechtigte
+Verfügungsberechtigter
 Verkäufer
 Verkäufer(in)
 Verkäufer/-in
@@ -560,7 +644,9 @@ Vermittler/in
 Vermittlerin
 Versicherte
 versicherte Person
+Versichertenname
 Versicherter
+Versicherungsbüro
 Versicherungsmakler
 Versicherungsmakler(in)
 Versicherungsmakler/-in
@@ -573,11 +659,14 @@ Versicherungsnehmer/in
 Versicherungsnehmerin
 Verstorbene
 Verstorbener
+vertreten durch
 Vertreter
 Vertreter(in)
 Vertreter/-in
 Vertreter/in
 Vertreterin
+Vertretungsberechtigte
+Vertretungsberechtigter
 Verursacher
 Verursacher(in)
 Verursacher/-in
@@ -588,6 +677,7 @@ Verwalter(in)
 Verwalter/-in
 Verwalter/in
 Verwalterin
+Verwaltungsrat
 VN
 Vollmachtgeber
 Vollmachtgeber(in)
@@ -597,14 +687,26 @@ Vollmachtgeberin
 vollständiger Name
 Vor- und Nachname
 Vor- und Zuname
+Vorgesetzte
+Vorgesetzter
 Vormund
 Vorname
 Vorname und Name
 Vorname, Name
 Vornamen
+Vorsitz Aufsichtsrat
+Vorsitzende des Aufsichtsrats
+Vorsitzende des Vorstands
+Vorsitzender des Aufsichtsrates
+Vorsitzender des Aufsichtsrats
+Vorsitzender des Vorstands
 Vorstand
+Vorstände
+Vorstandsvorsitzende
+Vorstandsvorsitzender
 VP
 Waise
+Werkstatt
 Witwe
 Witwer
 Zahlungsempfänger
@@ -616,7 +718,9 @@ Zahlungspflichtige
 Zahlungspflichtiger
 Zahnarzt
 Zahnärztin
+Zahnarztpraxis
 Zeuge
+Zeuge/Zeugin
 Zeugen
 Zeugin
 zu versichernde Person
