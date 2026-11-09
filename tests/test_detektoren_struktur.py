@@ -489,6 +489,21 @@ def test_plz_ort_endet_an_zellgrenzen_und_fremden_woertern(text, erwartet):
     assert [text[a:b] for a, b in st.plz_ort_spannen(text, 0, len(text))] == [erwartet]
 
 
+def test_muster_anschrift_als_stellen_nie_ueber_spaltentrenner():
+    """Die Muster liefern Stellen; ein anderswo gefundener Text wird nicht über Spaltentrenner hinweg
+    wiedergesucht ("82319 Starnberg Leben" in der Textschicht, "82319 Starnberg | Leben" in der Tabelle)."""
+    text = "Kundin: 82319 Starnberg Leben\nBestand:\n82319 Starnberg\t\tLeben\t\tDebeka\n"
+    dok = seitenmodell.dokument_aus_text(text)
+    orte = [dok.text[t.start:t.ende] for t in _detektor("muster.plzort")(dok, Kontext({"plzort"}))]
+    assert orte == ["82319 Starnberg", "82319 Starnberg"]
+    for text, erwartet in (("Rehazentrum Am Kurpark\t\t946,21\t\t662,34", []),
+                           ("Rehazentrum Am Kurpark 946,21 EUR", []),
+                           ("Hauptstraße 12a\t\tTelefon", ["Hauptstraße 12a"])):
+        dok = seitenmodell.dokument_aus_text(text)
+        strassen = [dok.text[t.start:t.ende] for t in _detektor("muster.strasse")(dok, Kontext({"strasse"}))]
+        assert strassen == erwartet, text
+
+
 def test_adressblock_kunde(tmp_path):
     dok = _modell(_pdf(tmp_path / "brief.pdf", _versichererbrief()))
     werte = _treffer(dok, "struktur.adressblock")

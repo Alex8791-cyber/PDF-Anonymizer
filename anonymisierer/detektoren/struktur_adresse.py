@@ -11,8 +11,9 @@ Sitz, Vorstand, USt-IdNr.), eine Web-Adresse oder eine Organisation der Erlaubni
 (Herrn, Frau, Familie) dabeisteht. Kundenanschriften gehen IMMER weg.
 
 Umsetzung: »muster.strasse« und »muster.plzort« werden mit ersetzt=True neu registriert – dieselben
-Muster (der bisher registrierte Detektor wird aufgerufen), danach entfallen Treffer in Firmenkontext
-und offensichtliche Fehlgriffe ("HRB 16963 / Vorstand" ist keine PLZ mit Ort). Unbekannte Firmen-
+Muster, aber als Stellen (muster.stellen; keine Stelle über einen Spaltentrenner, dazu die zeilenweise
+Lesart; ohne Stellen-Schnittstelle der bisher registrierte Detektor), danach entfallen Treffer in
+Firmenkontext und offensichtliche Fehlgriffe ("HRB 16963 / Vorstand" ist keine PLZ mit Ort). Unbekannte Firmen-
 anschriften (Firmenhinweis, aber keine Organisation der Erlaubnisliste) bleiben stehen und werden als
 Vorschlag in dok.struktur_vorschlaege vermerkt, damit die Oberfläche sie zeigen kann.
 
@@ -30,6 +31,7 @@ from __future__ import annotations
 import functools
 import re
 
+from ..seitenmodell import SPALTENTRENNER
 from . import REGISTER, Treffer, detektor, registrieren
 from .struktur import (lage, namen_spanne, ort_verlaengern, plz_ort_kappen, plz_ort_spannen, strasse_spanne,
                        _muster, _wissen)
@@ -299,6 +301,42 @@ def _filter_detektor(alt, kategorie: str):
     return erkennen
 
 
+_BETRAG_DANACH_RE = re.compile(r"[,.]\d")
+
+
+def _zeilenweise(text: str) -> str | None:
+    """Text mit jeder Tabellenzelle auf eigener Zeile (Spaltentrenner -> Leerzeichen + Umbruch, längentreu)."""
+    if SPALTENTRENNER not in text:
+        return None
+    return text.replace(SPALTENTRENNER, " " * (len(SPALTENTRENNER) - 1) + "\n")
+
+
+def _stellen_detektor(kategorie: str, alt):
+    """Muster »kategorie« als Stellen (muster.stellen) statt als wiedergesuchte Fundtexte: Stellen über einen
+    Spaltentrenner zählen nicht (sie verschlucken Nachbarzellen), dazu die zeilenweise Lesart – wie bei den
+    übrigen Mustern (detektoren/muster_spans.py). Ohne Stellen-Schnittstelle (z. B. Muster in Tests ersetzt)
+    gilt der bisherige Detektor `alt`."""
+    def erkennen(dok, kontext):
+        funktion = next((e[3] for e in getattr(_muster, "KATEGORIEN", ()) if e[0] == kategorie), None)
+        if _muster is None or not hasattr(_muster, "stellen") or kategorie not in getattr(_muster, "SPANNEN", {}) \
+                or getattr(funktion, "kategorie", None) != kategorie:
+            return list(alt(dok, kontext) or []) if alt is not None else []
+        text = dok.text
+        gesehen = {}
+        for lesart in (text, _zeilenweise(text)):
+            if lesart is None:
+                continue
+            for st in _muster.stellen(kategorie, lesart, nur_streng=True):
+                if st.ende <= st.start or SPALTENTRENNER in text[st.start:st.ende]:
+                    continue
+                if kategorie == "strasse" and _BETRAG_DANACH_RE.match(text, st.ende):
+                    continue                          # "Am Kurpark 946,21": Betrag, keine Hausnummer
+                gesehen.setdefault((st.start, st.ende), st)
+        return [Treffer(s, e, kategorie, f"muster.{kategorie}", st.sicherheit if st.sicherheit is not None else 0.75)
+                for (s, e), st in sorted(gesehen.items())]
+    return erkennen
+
+
 def _rueckfall_detektor(kategorie: str):
     """Falls kein Muster-Detektor registriert ist: muster.finde_* über den Vergleicher verorten."""
     from ..seitenmodell import ganzwort_stellen
@@ -323,7 +361,7 @@ def _neu_registrieren():
         if getattr(funktion, "__name__", "").endswith("_ohne_firmen"):
             continue                                  # schon umhüllt (erneuter Import)
         registrieren(name, alt.kategorien if alt else {kategorie}, alt.profile if alt else None,
-                     _filter_detektor(funktion, kategorie), ersetzt=True)
+                     _filter_detektor(_stellen_detektor(kategorie, funktion), kategorie), ersetzt=True)
 
 
 _neu_registrieren()
