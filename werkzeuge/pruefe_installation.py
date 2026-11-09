@@ -12,12 +12,15 @@ from __future__ import annotations
 import importlib
 import os
 import platform
+import re
 import struct
 import sys
+import sysconfig
 from importlib import metadata
 from pathlib import Path
 
 PROGRAMM_ORDNER = Path(__file__).resolve().parent.parent
+REQUIREMENTS = PROGRAMM_ORDNER / "requirements.txt"
 PAKETE = ("pymupdf", "spacy", "tkinterdnd2", "de_core_news_md")
 
 
@@ -26,6 +29,53 @@ def _version(paket: str) -> str | None:
         return metadata.version(paket)
     except metadata.PackageNotFoundError:
         return None
+
+
+def _tupel(version: str) -> tuple[int, ...]:
+    """'1.24.10' -> (1, 24, 10); Zusätze wie 'rc1' oder '.post1' zählen nicht."""
+    return tuple(int(x) for x in re.findall(r"\d+", version)[:3])
+
+
+def versionsgrenzen(datei: Path = REQUIREMENTS) -> dict[str, tuple[str, tuple | None, tuple | None]]:
+    """{paket: (Angabe, Untergrenze, Obergrenze)} aus requirements.txt – nur Zeilen wie 'name>=a,<b'.
+    Für das per URL gebundene Sprachmodell gilt die Haupt-/Nebenversion aus dem Dateinamen."""
+    grenzen: dict[str, tuple[str, tuple | None, tuple | None]] = {}
+    try:
+        zeilen = datei.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return grenzen
+    for zeile in zeilen:
+        zeile = zeile.split("#", 1)[0].strip()
+        url = re.fullmatch(r"([\w.-]+)\s*@\s*\S+?-(\d+)\.(\d+)\.\d+-py3-none-any\.whl", zeile)
+        if url:
+            haupt, neben = int(url.group(2)), int(url.group(3))
+            grenzen[url.group(1).lower()] = (f"{haupt}.{neben}.x", (haupt, neben), (haupt, neben + 1))
+            continue
+        m = re.fullmatch(r"([\w.-]+)\s*((?:(?:>=|<)\s*[\d.]+\s*,?\s*)+)", zeile)
+        if not m:
+            continue
+        unten = oben = None
+        for op, ver in re.findall(r"(>=|<)\s*([\d.]+)", m.group(2)):
+            if op == ">=":
+                unten = _tupel(ver)
+            else:
+                oben = _tupel(ver)
+        grenzen[m.group(1).lower()] = (m.group(2).replace(" ", ""), unten, oben)
+    return grenzen
+
+
+def versions_probleme(versionen: dict[str, str | None], datei: Path = REQUIREMENTS) -> list[str]:
+    """Pakete, deren installierte Version nicht zu requirements.txt passt (fehlende meldet pakete_bericht)."""
+    probleme = []
+    for paket, (angabe, unten, oben) in versionsgrenzen(datei).items():
+        version = versionen.get(paket)
+        if not version:
+            continue
+        t = _tupel(version)
+        if (unten and t < unten) or (oben and t >= oben):
+            probleme.append(f"Paket {paket} {version} passt nicht zu requirements.txt ({angabe}) – "
+                            "Installieren.bat erneut ausführen.")
+    return probleme
 
 
 def _importierbar(modul: str) -> tuple[bool, str]:
@@ -47,9 +97,14 @@ def python_bericht() -> tuple[list[str], list[str]]:
     if bits != 64:
         probleme.append("32-Bit-Python: für PyMuPDF/spaCy gibt es keine passenden Pakete – "
                         "bitte 64-Bit-Python (x64) installieren.")
-    if platform.machine().upper().startswith("ARM"):
-        probleme.append("ARM64-Prozessor: PyMuPDF gibt es nur in einer älteren Version, "
-                        "spaCy ggf. gar nicht – ARM64 wird nicht unterstützt.")
+    if sysconfig.get_platform().endswith("arm64"):
+        if sys.version_info[:2] < (3, 11):
+            probleme.append("ARM64-Python 3.10: dafür gibt es kein spaCy-Paket – "
+                            "Python 3.11 oder neuer installieren (Installieren.bat nimmt 3.12).")
+        zeilen.append("Hinweis:       ARM64 ist ungetestet; die Pakete gibt es für ARM64-Python 3.11 bis "
+                      "3.15 (PyMuPDF dort 1.28.x).")
+    elif platform.machine().upper().startswith("ARM"):
+        zeilen.append("Hinweis:       ARM64-Prozessor mit x64-Python (Emulation unter Windows 11) – ungetestet.")
     if not (3, 10) <= sys.version_info[:2] < (3, 16):
         probleme.append(f"Python {platform.python_version()} wird nicht unterstützt (nötig: 3.10 bis 3.15).")
     pip = _version("pip")
@@ -61,11 +116,13 @@ def python_bericht() -> tuple[list[str], list[str]]:
 
 def pakete_bericht() -> tuple[list[str], list[str]]:
     zeilen, probleme = [], []
+    versionen = {}
     for paket in PAKETE:
-        version = _version(paket)
+        version = versionen[paket] = _version(paket)
         zeilen.append(f"{paket + ':':<20}{version or 'FEHLT'}")
         if version is None:
             probleme.append(f"Paket {paket} fehlt – Installieren.bat ausführen.")
+    probleme += versions_probleme(versionen)
     import warnings
     warnings.simplefilter("ignore")
     for modul in ("fitz", "spacy", "tkinter", "tkinterdnd2"):

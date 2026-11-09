@@ -25,4 +25,6 @@ Hinweis (nicht Teil der Lizenz): Diese Lizenz gilt für den eigenen Code des
 Projekts. Mitgelieferte bzw. beim Bau einer EXE gebündelte Drittkomponenten
 (insbesondere PyMuPDF/MuPDF unter AGPL-3.0 und die Tesseract-Sprachdatei
 unter Apache-2.0) stehen unter ihren eigenen Lizenzen – siehe
-THIRD_PARTY_NOTICES.md.
+THIRD_PARTY_NOTICES.md. Den vollständigen AGPL-3.0-Text enthält
+licenses/AGPL-3.0.txt (auch in der EXE-Version: Unterordner "licenses" neben
+dieser Datei).

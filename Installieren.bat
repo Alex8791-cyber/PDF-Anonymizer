@@ -24,6 +24,10 @@ if not exist "requirements.txt" goto fehler_unvollstaendig
 if not exist "tessdata\deu.traineddata" goto fehler_unvollstaendig
 if not exist "pdf_anonymisierer.py" goto fehler_unvollstaendig
 
+REM Offline-Weg fuer das Sprachmodell: Liegt diese Datei im Programmordner, wird das
+REM Modell daraus installiert - ohne github.com. Der Name passt zur Adresse in
+REM requirements.txt (tests\test_auslieferung.py prueft das).
+set "MODELL_WHL=de_core_news_md-3.8.0-py3-none-any.whl"
 set "PY="
 set "UNGEEIGNET="
 set "ARCH=%PROCESSOR_ARCHITECTURE%"
@@ -36,7 +40,7 @@ if defined PY goto python_ok
 
 echo       Kein passendes Python gefunden.
 echo       Installiere Python 3.12 automatisch ^(nur fuer dieses Benutzerkonto, kein Admin noetig^) ...
-if /i "%ARCH%"=="ARM64" echo       HINWEIS: ARM64-Prozessor erkannt - PyMuPDF/spaCy gibt es dafuer kaum; es wird trotzdem versucht.
+if /i "%ARCH%"=="ARM64" echo       HINWEIS: ARM64-Prozessor erkannt - ungetestet; die Pakete gibt es auch fuer ARM64, die Installation wird versucht.
 where winget >nul 2>&1
 if errorlevel 1 goto fehler_kein_winget
 winget install --id Python.Python.3.12 -e --scope user --custom "InstallLauncherAllUsers=0" --accept-source-agreements --accept-package-agreements --disable-interactivity
@@ -57,9 +61,9 @@ echo [2/5] Pruefe Rechner ^(64-Bit, Prozessor, pip^) ...
 "%PY%" -c "import platform,sys;sys.exit(4 if platform.machine().upper().startswith('ARM') else 0)"
 if errorlevel 4 (
     echo       HINWEIS: ARM64-Prozessor ^(z. B. Snapdragon / Surface Pro X^) erkannt.
-    echo       Dafuer gibt es PyMuPDF nur in einer aelteren Version und spaCy
-    echo       eventuell gar nicht. ARM64 wird nicht unterstuetzt - es wird
-    echo       trotzdem versucht; bei Fehlern ist das die Ursache.
+    echo       Fuer ARM64 gibt es alle Pakete als fertige Wheels ^(Python 3.11 bis 3.15,
+    echo       PyMuPDF 1.28^). Getestet ist das Programm auf ARM64 aber nicht - bei
+    echo       Problemen die EXE-Version nutzen ^(laeuft unter Windows 11 in der x64-Emulation^).
 )
 "%PY%" -m pip --version >nul 2>&1
 if errorlevel 1 "%PY%" -m ensurepip --default-pip >nul 2>&1
@@ -68,17 +72,41 @@ if errorlevel 1 goto fehler_kein_pip
 
 REM --- Schritt 3: Pakete installieren ---------------------------
 echo [3/5] Installiere Pakete ^(PyMuPDF, spaCy, tkinterdnd2, deutsches Sprachmodell^) ...
-echo       Beim ersten Mal werden ca. 300 MB geladen - das dauert einige Minuten.
+REM Vorab-Pruefung: Ist schon alles in passender Version installiert, laeuft pip gar nicht
+REM erst. pip wuerde das Sprachmodell (Paket per URL, 44 MB) sonst bei JEDEM Lauf neu laden
+REM und ohne Zugang zu github.com scheitern - obwohl alles installiert ist.
+REM Die Versionsgrenzen muessen zu requirements.txt passen (tests\test_auslieferung.py).
+"%PY%" -W ignore -c "import fitz, spacy, tkinterdnd2, de_core_news_md, re, sys; from importlib.metadata import version as v; t = lambda n: tuple(int(x) for x in re.findall(r'\d+', v(n))[:3]); sys.exit(0 if (1,24,10) <= t('pymupdf') < (3,) and (3,8) <= t('spacy') < (3,9) and (3,8) <= t('de_core_news_md') < (3,9) and t('tkinterdnd2') >= (0,4) else 1)" >nul 2>&1
+if not errorlevel 1 (
+    echo       Pakete und Sprachmodell sind schon in passender Version installiert -
+    echo       kein Download noetig.
+    goto pakete_ok
+)
+if exist "%MODELL_WHL%" (
+    echo       Datei %MODELL_WHL% im Programmordner gefunden:
+    echo       das Sprachmodell wird daraus installiert, ohne github.com.
+    goto pakete_einzeln
+)
+echo       Beim ersten Mal werden ca. 170 MB geladen - das dauert einige Minuten.
 echo       Nur fertige Pakete ^(--only-binary^): es wird nichts aus Quelltext gebaut.
 "%PY%" -m pip install --only-binary=:all: --disable-pip-version-check -r requirements.txt
 if not errorlevel 1 goto pakete_ok
 
 echo.
-echo       Das hat nicht geklappt. Zweiter Versuch: erst die Pakete, dann das
-echo       Sprachmodell ueber spaCy ^(falls nur der GitHub-Download blockiert war^) ...
-"%PY%" -m pip install --only-binary=:all: --disable-pip-version-check "pymupdf>=1.24,<3" "spacy>=3.8,<3.9" "tkinterdnd2>=0.4"
+echo       Das hat nicht geklappt. Zweiter Versuch: erst die Pakete einzeln von PyPI,
+echo       dann das Sprachmodell ueber "spacy download". Achtung: auch das laedt von
+echo       github.com - es hilft bei einer Stoerung, nicht bei gesperrtem github.com.
+:pakete_einzeln
+"%PY%" -m pip install --only-binary=:all: --disable-pip-version-check "pymupdf>=1.24.10,<3" "spacy>=3.8,<3.9" "tkinterdnd2>=0.4"
 if errorlevel 1 goto fehler_pakete
+if exist "%MODELL_WHL%" goto modell_offline
 "%PY%" -m spacy download de_core_news_md
+if errorlevel 1 goto fehler_modell
+goto pakete_ok
+
+:modell_offline
+REM --no-index: pip sucht nur in diesem Ordner (--find-links .), nicht im Internet.
+"%PY%" -m pip install --only-binary=:all: --disable-pip-version-check --no-index --find-links . de_core_news_md
 if errorlevel 1 goto fehler_modell
 
 :pakete_ok
@@ -101,7 +129,7 @@ echo ============================================================
 echo   Starten: Doppelklick auf "PDF-Anonymisierer" auf dem Desktop
 echo            oder auf "Starten.bat" in diesem Ordner.
 echo   Wird dieser Ordner spaeter verschoben: Installieren.bat einfach
-echo   noch einmal ausfuehren ^(geht dann schnell^).
+echo   noch einmal ausfuehren ^(geht dann schnell, ohne Download^).
 echo.
 echo   Das Programm wird jetzt einmal gestartet ...
 set "PYW=%PY:python.exe=pythonw.exe%"
@@ -151,9 +179,10 @@ call :pruefe_kandidat "%~1"
 goto :eof
 
 :pruefe_kandidat
-REM Geeignet = Python 3.10 bis 3.15, 64-Bit, mit tkinter.
+REM Geeignet = Python 3.10 bis 3.15, 64-Bit, mit tkinter. Ein ARM64-Python erst ab 3.11:
+REM fuer ARM64 mit Python 3.10 gibt es kein spaCy-Paket (dann wird 3.12 installiert).
 if not exist "%~1" goto :eof
-"%~1" -c "import sys,struct,tkinter;sys.exit(0 if (3,10)<=sys.version_info[:2]<(3,16) and struct.calcsize('P')==8 else 1)" >nul 2>&1
+"%~1" -c "import sys,struct,sysconfig,tkinter;arm=sysconfig.get_platform().endswith('arm64');sys.exit(0 if (3,11 if arm else 10)<=sys.version_info[:2]<(3,16) and struct.calcsize('P')==8 else 1)" >nul 2>&1
 if errorlevel 1 (
     echo       Ueberspringe "%~1" ^(zu alt/zu neu, 32-Bit oder ohne tkinter^).
     set "UNGEEIGNET=1"
@@ -224,8 +253,10 @@ echo     -^> Verbindung pruefen und Installieren.bat erneut starten.
 echo   - Firmen-Proxy oder TLS-Pruefung ^("CERTIFICATE_VERIFY_FAILED", "ProxyError"^)
 echo     -^> IT bitten, pypi.org, files.pythonhosted.org und github.com freizugeben,
 echo        oder die fertige EXE-Version nutzen ^(siehe README, "Weitergabe"^).
-echo   - ARM64-Geraet oder 32-Bit-Python ^("No matching distribution found"^)
-echo     -^> unterstuetzt wird nur 64-Bit-Windows auf x64-Prozessoren.
+echo   - "No matching distribution found": meist erreicht pip pypi.org nicht ^(Proxy,
+echo     siehe oben^); seltener fehlt fuer dieses Python bzw. diesen Prozessor ein
+echo     fertiges Paket ^(z. B. ARM64 mit Python 3.10^)
+echo     -^> Python 3.12 ^(64-Bit^) installieren oder die EXE-Version nutzen.
 echo   - Keine Schreibrechte / Virenscanner greift ein ^("PermissionError", "Access is denied"^)
 echo     -^> Ordner z. B. nach Dokumente verschieben und erneut starten.
 echo   Fuer Rueckfragen: "%PY%" werkzeuge\pruefe_installation.py ausfuehren
@@ -236,16 +267,21 @@ exit /b 1
 :fehler_modell
 echo.
 echo ============================================================
-echo   FEHLER: Das deutsche Sprachmodell konnte nicht geladen werden.
+echo   FEHLER: Das deutsche Sprachmodell konnte nicht installiert werden.
 echo ============================================================
 echo   Ohne Sprachmodell gibt es KEINE Namenserkennung - Personennamen blieben
 echo   im Dokument stehen. Deshalb ist die Installation NICHT abgeschlossen.
-echo   Das Modell kommt von github.com. Haeufige Ursachen:
-echo   - github.com ist im Firmennetz gesperrt
-echo     -^> einmalig ueber ein anderes Netz ^(z. B. Handy-Hotspot^) installieren.
-echo   - Firmen-Proxy / TLS-Pruefung ^("CERTIFICATE_VERIFY_FAILED"^)
+echo   Das Modell kommt von github.com ^(auch "spacy download" laedt von dort^).
+echo   Abhilfe, wenn github.com im Firmennetz gesperrt ist:
+echo   a^) einmalig ueber ein anderes Netz ^(z. B. Handy-Hotspot^) installieren, ODER
+echo   b^) Offline-Weg: an einem anderen Rechner die Datei
+echo      %MODELL_WHL% ^(44 MB^) laden - die Adresse steht
+echo      in requirements.txt in der Zeile "de_core_news_md @ ..." -, die Datei
+echo      unveraendert in DIESEN Ordner legen und Installieren.bat erneut starten.
+echo      Das Modell wird dann ohne Internet aus der Datei installiert.
+echo   Firmen-Proxy / TLS-Pruefung ^("CERTIFICATE_VERIFY_FAILED"^)
 echo     -^> IT fragen oder die fertige EXE-Version nutzen ^(siehe README^).
-echo   Danach Installieren.bat erneut starten ^(bereits Installiertes wird nicht neu geladen^).
+echo   Bereits installierte Pakete bleiben erhalten und werden nicht neu geladen.
 pause
 exit /b 1
 

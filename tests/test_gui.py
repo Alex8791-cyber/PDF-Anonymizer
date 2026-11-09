@@ -377,6 +377,33 @@ def test_layout_schwaerzen_knopf_und_protokoll_immer_sichtbar(anzeige, skalierun
         pumpe(root, timeout=0.3)
         root.update_idletasks()
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        # Screenshot VOR den Prüfungen, damit auch ein scheiterndes oder übersprungenes Layout im
+        # CI-Artefakt landet. Unter Windows gibt es kein scrot: dort fotografiert PowerShell das Fenster.
+        bild = _screenshot_ordner(tmp_path_factory) / f"layout_{anzeige}_{skalierung}.png"
+        _screenshot(root, display, bild)
+        if sys.platform == "win32" and os.environ.get("PDF_ANONYMISIERER_SCREENSHOTS"):
+            root.update()
+            x, y, b, h = root.winfo_rootx(), root.winfo_rooty(), root.winfo_width(), root.winfo_height()
+            try:
+                subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                                "Add-Type -AssemblyName System.Drawing; "
+                                f"$b = New-Object System.Drawing.Bitmap({b}, {h}); "
+                                f"[System.Drawing.Graphics]::FromImage($b).CopyFromScreen({x}, {y}, 0, 0, $b.Size); "
+                                "$b.Save($env:PDFANON_BILD, [System.Drawing.Imaging.ImageFormat]::Png)"],
+                               env=dict(os.environ, PDFANON_BILD=str(bild)), capture_output=True, timeout=60)
+            except (OSError, subprocess.SubprocessError):
+                pass                                    # ohne Screenshot weiterprüfen
+        # "standard" ist der echte Bildschirm bei 100/125/150 %. Windows bietet eine Skalierung nur an,
+        # wenn danach mindestens 720 Bildzeilen bleiben (125 % ab 900, 150 % ab 1080 Zeilen; Microsoft,
+        # "DPI-related APIs and registry settings"). Auf Bildschirmen unter 1366x768 (GitHub-Windows-
+        # Runner: oft 1024x768) gibt es eine solche Kombination auf echten Geräten nicht – dann wird
+        # übersprungen. Ab 1366x768 wird nie übersprungen, und kleine Laptops prüft zusätzlich der Fall
+        # "1366x768" (Xvfb) mit allen drei Skalierungen.
+        prozent = 25 * round(skalierung * 3)        # tk scaling 4/3 = Windows 100 %
+        if anzeige == "standard" and (sw < 1366 or sh < 768) and sh * 100 < 720 * prozent:
+            pytest.skip(f"Bildschirm {sw}x{sh} ist kleiner als 1366x768, und Windows bietet dort keine "
+                        f"{prozent}-%-Skalierung an (nach Skalierung blieben weniger als 720 Bildzeilen) – "
+                        f"das Szenario gibt es auf echten Geräten nicht")
         fenster_h, fenster_w = root.winfo_height(), root.winfo_width()
         assert fenster_w <= sw and fenster_h <= sh - 60, "Fenster passt nicht auf den Bildschirm"
         assert root.minsize() == gui.FENSTER_MINDESTMASS
@@ -408,7 +435,6 @@ def test_layout_schwaerzen_knopf_und_protokoll_immer_sichtbar(anzeige, skalierun
             oben, unten = lage(app.analyse_knopf)
             assert 0 <= oben and unten <= fenster_h, \
                 f"Analysieren-Knopf bei FHD/100 % nicht ohne Scrollen sichtbar ({oben}..{unten} von {fenster_h})"
-        _screenshot(root, display, _screenshot_ordner(tmp_path_factory) / f"layout_{anzeige}_{skalierung}.png")
     finally:
         try:
             root.destroy()
