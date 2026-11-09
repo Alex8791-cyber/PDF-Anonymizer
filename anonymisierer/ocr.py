@@ -99,6 +99,10 @@ MIN_TOKENS_SUCHE = 4          # weniger Wörter bei 0°: nichts, was sich auszur
 MIN_TOKENS_WARNUNG = 10       # erst ab so vielen Wörtern wird "unplausibel" gemeldet
 DREHUNG_FAKTOR = 2.0          # eine Drehung gewinnt nur mit >= 2-facher Quote von 0° ...
 DREHUNG_VORSPRUNG = 0.03      # ... und mindestens 3 Prozentpunkten Vorsprung
+PROBE2_DPI = 200              # zweite Probenstufe, wenn keine 100-dpi-Probe plausibel ist, die Seite aber Text
+                              # trägt: kleine Schrift (Tabellen, 8-9 pt) ist bei 100 dpi unlesbar, und PSM 6 liest
+                              # Tabellen auch richtig herum nicht – gemessen: kopfstehende/seitliche Bestandslisten
+                              # blieben ungedreht (0 von 73 Einträgen lesbar); die Stufe liest mit PSM 3 und 200 dpi
 PROBE_DPI = 100               # Ausrichtungsproben (nur wenn 0° bei voller Auflösung nicht klar ist): bei 100 dpi
                               # liegt die richtige Ausrichtung gemessen bei 0,30-0,62, jede falsche <= 0,04; eine
                               # Probe kostet 0,1-4 s statt 5-13 s Buchstabensalat bei 300 dpi, und Fotos mit
@@ -944,10 +948,13 @@ def _ocr_worker(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_p
             s = float(schraeg_je_lage[lage] or 0.0)  # (180° ändert die Steigung der Zeilen nicht)
             return s if abs(s) >= SCHRAEG_KORREKTUR_AB else 0.0
 
-        def lesen(winkel, aufloesung, probe=False):
+        def lesen(winkel, aufloesung, probe=False, aufteilung=False):
             t0 = time.perf_counter()
             zaehler: dict = {}
-            if probe or seitenaufteilung["psm"] == 6:
+            if probe and aufteilung and seitenaufteilung["psm"] != 6:
+                korr = 0.0                          # Probe mit Seitenaufteilung (zweite Probenstufe)
+                woerter = _ocr_durchlauf(seite, aufloesung, clip_rect, winkel, sprache, tessdata_voll, False, zaehler)
+            elif probe or seitenaufteilung["psm"] == 6:
                 korr = 0.0 if probe else korrektur(winkel)
                 woerter = _ocr_durchlauf(seite, aufloesung, clip_rect, winkel - korr, sprache, tessdata,
                                          analyse["hintergrund"] and not probe, zaehler)
@@ -997,11 +1004,43 @@ def _ocr_worker(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_p
                     if naechster is None:
                         break
                     proben[naechster] = dict(lesen(naechster, probe_dpi, probe=True)[1], klein_erlaubt=seite_kurz)
+                null = (woerter, bewertung, plausibel_gelesen)        # volle 0°-Lesung
                 winkel = _ausrichtung_waehlen(proben)
                 plausibel_gelesen = _plausibel(proben[winkel]) or (winkel == 0 and plausibel_gelesen)
+
+                def drehung_lesen(drehung):
+                    """Volle Lesung in der gewählten Drehung – sie zählt nur, wenn sie selbst plausibel oder
+                    deutlich besser als 0° ist (eine 100-dpi-Probe kann zufällig Wörter "treffen")."""
+                    w_d, b_d = lesen(drehung, dpi)
+                    if _plausibel(b_d) or b_d["quote"] >= null[1]["quote"] + DREHUNG_VORSPRUNG:
+                        return w_d, b_d, _plausibel(b_d)
+                    return None
+
                 if winkel != 0:
-                    woerter, bewertung = lesen(winkel, dpi)
-                    plausibel_gelesen = plausibel_gelesen or _plausibel(bewertung)
+                    gelesen = drehung_lesen(winkel)
+                    if gelesen is None:
+                        winkel = 0
+                        woerter, bewertung, plausibel_gelesen = null
+                    else:
+                        woerter, bewertung = gelesen[0], gelesen[1]
+                        plausibel_gelesen = plausibel_gelesen or gelesen[2]
+                if (winkel == 0 and not plausibel_gelesen and probe_dpi < PROBE2_DPI <= dpi
+                        and (bewertung["tokens"] >= MIN_TOKENS_WARNUNG or viel_tinte)):
+                    # Zweite Stufe: Text ist da, aber keine Probe ergab eine plausible Lesung – kleine Schrift oder
+                    # Tabelle. Proben mit Seitenaufteilung bei PROBE2_DPI, Vergleich mit der vollen 0°-Lesung
+                    # (ebenfalls Seitenaufteilung); 180° zuerst, Abbruch bei klarer Lesung.
+                    proben2: dict = {0: bewertung}
+                    for drehung in (180, 90, 270):
+                        proben2[drehung] = lesen(drehung, PROBE2_DPI, probe=True, aufteilung=True)[1]
+                        if _klar(proben2[drehung]):
+                            break
+                    winkel2 = _ausrichtung_waehlen(proben2)
+                    if winkel2 != 0:
+                        gelesen = drehung_lesen(winkel2)
+                        if gelesen is not None:
+                            winkel = winkel2
+                            woerter, bewertung = gelesen[0], gelesen[1]
+                            plausibel_gelesen = _plausibel(proben2[winkel2]) or gelesen[2]
         schraeg = float(schraeg_je_lage.get(winkel % 180) or 0.0)
         korr = float(seitenaufteilung.get("korrektur") or 0.0)
         # 10-Tupel: Ausrichtung und die TATSÄCHLICH herausgedrehte Schräglage – nur dann sind die Wortkästen

@@ -1029,6 +1029,20 @@ def test_seitenaufteilung_liest_schraege_tabellenzeilen(tmp_path, dienst):
     assert all(len(w) == 10 and w[8] == 0 for w in erg["woerter"]), "10-Tupel mit Ausrichtung und Korrektur"
 
 
+@braucht_ocr
+@pytest.mark.parametrize("drehung,soll", [(180.8, 180), (270.5, 90)])
+def test_kopfstehende_und_seitliche_tabelle_werden_erkannt(tmp_path, dienst, drehung, soll):
+    """Kleine Schrift (9 pt) einer Bestandsliste: die 100-dpi-Proben mit PSM 6 fanden keine Ausrichtung
+    (Tabelle blieb kopfstehend/seitlich, nichts lesbar). Die zweite Probenstufe (200 dpi, Seitenaufteilung)
+    findet sie; eine zufällig "plausible" 100-dpi-Probe zählt nur, wenn die volle Lesung sie bestätigt."""
+    pdf = tabellen_scan(tmp_path / f"tabelle_{soll}.pdf", winkel=drehung)
+    erg = dienst.ergebnis(pdf, 0)
+    assert erg["winkel"] == soll, erg["lesungen"]
+    text = woerter_zu_text(erg["woerter"], erg["winkel"])
+    assert sum(1 for n in TABELLE_NAMEN if n in text) >= 10, text
+    assert not erg["unplausibel"]
+
+
 def test_schraeglage_schaetzen_synthetisch():
     np = pytest.importorskip("numpy")
     import math
