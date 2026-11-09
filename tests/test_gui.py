@@ -262,9 +262,10 @@ def fake_schwaerzung(aufrufe: list, treffer_null=(), fehler_fuer: dict | None = 
 
 
 def fake_schwaerzung_neu(aufrufe: list, verdacht_fuer: dict | None = None, meldungen: list | None = None,
-                         treffer_null=(), warnung_bei_null: str | None = None):
+                         treffer_null=(), warnung_bei_null: str | None = None, reste_fuer: dict | None = None):
     """schwaerze_pdf-Attrappe mit der Signatur aus Phase 2 (modell, manuelle_bereiche, manuelle_stellen,
-    freigabe_erforderlich, profil); liefert status/verdacht/meldungen."""
+    freigabe_erforderlich, profil); liefert status/verdacht/meldungen (und auf Wunsch „reste“ der
+    Selbstkontrolle – die Ausgabe ist eine Kopie, die Reste stehen also wirklich darin)."""
     def schwaerze_pdf(pdf_pfad, funde, melde=None, fortschritt=None, abbruch=None, ocr=None, ocr_cache=None,
                       ziel_ordner=None, modell=None, manuelle_bereiche=None, manuelle_stellen=None,
                       freigabe_erforderlich=False, profil="hoch"):
@@ -283,7 +284,8 @@ def fake_schwaerzung_neu(aufrufe: list, verdacht_fuer: dict | None = None, meldu
                 ergebnis["warnungen"].append(warnung_bei_null)
             return ergebnis
         verdacht = list((verdacht_fuer or {}).get(pdf_pfad.name, []))
-        pruefen = bool(freigabe_erforderlich or verdacht)
+        reste = list((reste_fuer or {}).get(pdf_pfad.name, []))
+        pruefen = bool(freigabe_erforderlich or verdacht or reste)
         ordner = Path(ziel_ordner) if ziel_ordner else pdf_pfad.parent / "anonymisiert"
         ordner.mkdir(parents=True, exist_ok=True)
         ausgabe = _freie_ausgabe(ordner, pruefen)
@@ -293,7 +295,7 @@ def fake_schwaerzung_neu(aufrufe: list, verdacht_fuer: dict | None = None, meldu
         anzahl = len(funde) + sum(len(v) for v in (manuelle_bereiche or {}).values()) + \
             sum(len(v) for v in (manuelle_stellen or {}).values())
         ergebnis.update(ausgabe=ausgabe, treffer=anzahl, stellen_geschwaerzt=anzahl, verdacht=verdacht,
-                        status="pruefen" if pruefen else "fertig")
+                        status="pruefen" if pruefen else "fertig", reste=reste)
         return ergebnis
     return schwaerze_pdf
 

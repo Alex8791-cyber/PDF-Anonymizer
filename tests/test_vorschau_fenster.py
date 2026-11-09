@@ -7,7 +7,9 @@ Vertragsstände und einmal mit der echten Engine. Helfer und Fixtures stammen au
 """
 
 import os
+import re
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import fitz
@@ -616,3 +618,253 @@ def test_einstellung_aendern_laesst_zu_pruefende_ausgabe_sichtbar(app, umgebung,
     assert not fenster_b.existiert() and b not in app.vorschauen
     assert str(fenster_a.nachschwaerzen_knopf.cget("state")) == "disabled"   # ohne Analyse nicht möglich
     assert str(fenster_a.freigeben_knopf.cget("state")) == "normal"
+
+
+# ----------------------------------------------------------------------
+# Seitenmodell der Engine in der Vorschau (Vertrag Abschnitte 1, 8, 10)
+# ----------------------------------------------------------------------
+class FakeSeite:
+    """Seite in Vertragsform (Abschnitt 1: text, rect, bilder, woerter(), rechtecke()) aus PyMuPDF-Wörtern – mit
+    absichtlich ANDEREM Text als die Attrappe (Vorspann, doppelte Leerzeichen): so zeigen die Tests, dass Offsets
+    und Rechtecke der Vorschau aus dem Modell der Engine kommen, nicht aus der Attrappe."""
+
+    VORSPANN = "§§\n"
+
+    def __init__(self, seite, nr):
+        self.nr = nr
+        self.rect = fitz.Rect(seite.rect)
+        self.bilder = []
+        teile, self._woerter, pos, letzte = [self.VORSPANN], [], len(self.VORSPANN), None
+        for w in seite.get_text("words"):
+            zeile = (w[5], w[6])
+            if letzte is not None:
+                trenner = "  " if zeile == letzte else "\n"
+                teile.append(trenner)
+                pos += len(trenner)
+            teile.append(w[4])
+            self._woerter.append((fitz.Rect(w[:4]), w[4], pos, pos + len(w[4])))
+            pos += len(w[4])
+            letzte = zeile
+        self.text = "".join(teile)
+
+    def woerter(self):
+        return list(self._woerter)
+
+    def rechtecke(self, start, ende):
+        """Je Zeile (Schwärzungsrechteck, volle Box, Größe, Grundlinie) – das Schwärzungsrechteck ist hier
+        sichtbar kleiner als die Box, damit erkennbar ist, welches die Vorschau zeigt."""
+        boxen = attrappen.rechtecke_zusammenfassen([w[0] for w in self._woerter if w[2] < ende and w[3] > start])
+        return [(fitz.Rect(r.x0, r.y0 + 1, r.x1, r.y1 - 1), fitz.Rect(r), 9.0, r.y1) for r in boxen]
+
+
+def _fake_modell(pdf: Path):
+    with fitz.open(pdf) as doc:
+        return SimpleNamespace(pfad=pdf, fingerabdruck="fake", seiten=[FakeSeite(s, i) for i, s in enumerate(doc)])
+
+
+def _stellen_im_modell(modell, text: str) -> list[dict]:
+    muster = re.compile(r"\s+".join(map(re.escape, text.split())))
+    return [{"seite": s.nr, "start": m.start(), "ende": m.end(), "an": True, "text": m.group(0)}
+            for s in modell.seiten for m in muster.finditer(s.text)]
+
+
+def fake_analyse_modell(funde_je_datei: dict):
+    """analysiere_pdf-Attrappe der Phase 2 mit Seitenmodell (Vertrag Abschnitt 1) und Stellen darin."""
+    def analysiere_pdf(pdf_pfad, aktive, whitelist, immer_schwaerzen, melde=None, fortschritt=None,
+                       abbruch=None, ocr=None, profil="hoch", kundenliste=None, lauf=None):
+        modell = _fake_modell(pdf_pfad)
+        funde = []
+        for i, f in enumerate(funde_je_datei.get(pdf_pfad.name, [])):
+            stellen = _stellen_im_modell(modell, f["text"])
+            funde.append(dict(f, id=f"f{i + 1}", stellen=stellen, anzahl=len(stellen)))
+        return {"datei": pdf_pfad, "funde": funde, "warnungen": [], "hinweise": [], "fehler": None,
+                "seiten": len(modell.seiten), "ocr_seiten": 0, "ocr_cache": {}, "modell": modell, "meldungen": [],
+                "profil": profil}
+    return analysiere_pdf
+
+
+def test_vorschau_nutzt_das_seitenmodell_der_engine(app, umgebung, monkeypatch):
+    """Liefert die Analyse ein Seitenmodell (Vertrag Abschnitt 1), zeigt die Vorschau genau dessen Stellen mit den
+    Schwärzungsrechtecken – jede Stelle einzeln schaltbar, auch ohne Vorschau-Modul der Engine –, und ein Klick
+    auf ein nicht erkanntes Wort wird eine manuelle Stelle mit den Offsets DES MODELLS (so nimmt die Schwärzung
+    sie an, Vertrag Abschnitt 5)."""
+    monkeypatch.setattr(vorschau_fenster, "_engine_vorschau", None)       # Engine ohne Vorschau-Modul
+    tmp = umgebung["tmp"]
+    pdf = pdf_schreiben(tmp / "a.pdf", text=ZWEIMAL)
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse_modell({"a.pdf": [FUND_NAME, FUND_TEL]}))
+    aufrufe = []
+    monkeypatch.setattr(gui, "schwaerze_pdf", fake_schwaerzung_neu(aufrufe))
+    analysiere(app, [pdf])
+    modell = app.analyse_ergebnisse[pdf]["modell"]
+    seite = modell.seiten[0]
+    assert attrappen.seiten_modell(pdf, 0)["text"] != seite.text          # andere Offsets als die Attrappe
+    fenster = oeffne(app, pdf)
+    assert fenster.daten()["quelle"] == "modell" and vorschau_fenster.offsets_vom_modell(app, pdf)
+    assert not vorschau_fenster.vorher_quelle_engine(app, pdf)            # kein Vorschau-Modul der Engine nötig
+    name = app.analyse_ergebnisse[pdf]["funde"][0]
+    assert len(name["stellen"]) == 2
+    markiert = sorted((si, r) for r, i, si in fenster.fund_stellen() if i == 0)
+    assert [si for si, _ in markiert] == [0, 1]                           # jede Stelle einzeln
+    for si, r in markiert:
+        st = name["stellen"][si]
+        assert r == seite.rechtecke(st["start"], st["ende"])[0][0]       # Schwärzungsrechteck des Modells
+    assert fenster.ohne_markierung() == []
+
+    klicke(fenster, mitte(markiert[1][1]))                                # nur die zweite Stelle aus
+    assert [s["an"] for s in name["stellen"]] == [True, False] and app._zustand(f"{pdf}::0") == "teil"
+    allianz = next(w for w in seite.woerter() if w[1] == "Allianz")
+    klicke(fenster, mitte(allianz[0]))                                    # nicht erkanntes Wort
+    (mid, eintrag), = app.manuell[pdf].items()
+    assert eintrag["art"] == "stelle" and (eintrag["start"], eintrag["ende"]) == (allianz[2], allianz[3])
+    assert seite.text[eintrag["start"]:eintrag["ende"]] == "Allianz"
+    # „überall in diesem Dokument schwärzen“: Fund ohne Stellen, im Modell gesucht und markiert
+    lv = next(w for w in seite.woerter() if w[1].startswith("Lebensversicherungs"))
+    menue = dict(fenster.kontextmenue_eintraege(mitte(lv[0])))
+    menue["„Lebensversicherungs-AG“ überall in diesem Dokument schwärzen"]()
+    neu = len(app.analyse_ergebnisse[pdf]["funde"]) - 1
+    assert [(si, r) for r, i, si in fenster.fund_stellen() if i == neu] == \
+        [(None, seite.rechtecke(lv[2], lv[3])[0][0])]
+
+    starte_lauf(app, app.schwaerzen)
+    gesendet = aufrufe[0]
+    assert gesendet["modell"] is modell
+    assert gesendet["manuelle_stellen"] == {0: [(allianz[2], allianz[3], "[GESCHWÄRZT]")]}
+    assert gesendet["manuelle_bereiche"] is None
+    assert [s["an"] for s in gesendet["funde"][0]["stellen"]] == [True, False]
+    assert gesendet["funde"][-1]["text"] == "Lebensversicherungs-AG" and "stellen" not in gesendet["funde"][-1]
+
+
+def test_verdacht_mit_seitenmodell_wird_manuelle_stelle(app, umgebung, monkeypatch):
+    """Nachschwärzen mit Seitenmodell: die Wörter unter dem Verdacht werden manuelle Stellen (Modell-Offsets)."""
+    monkeypatch.setattr(vorschau_fenster, "_engine_vorschau", None)
+    tmp = umgebung["tmp"]
+    pdf = pdf_schreiben(tmp / "a.pdf")
+    v = _verdacht_fuer(pdf, "Max Mustermann")
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse_modell({"a.pdf": [FUND_TEL]}))
+    monkeypatch.setattr(gui, "schwaerze_pdf", fake_schwaerzung_neu([]))
+    analysiere(app, [pdf])
+    seite = app.analyse_ergebnisse[pdf]["modell"].seiten[0]
+    (stelle,) = vorschau_fenster.verdacht_zu_markierungen(app, pdf, v)
+    assert stelle["art"] == "stelle" and seite.text[stelle["start"]:stelle["ende"]] == "Max  Mustermann,"
+
+
+def test_attrappe_reste_als_verdacht(tmp_path):
+    pdf = pdf_schreiben(tmp_path / "a.pdf")
+    (v,) = attrappen.reste_als_verdacht(pdf, ["0171 2345678"])
+    assert v["seite"] == 0 and len(v["rechtecke"]) == 1 and v["grund"] == attrappen.GRUND_RESTE
+    assert attrappen.reste_als_verdacht(pdf, ["0171 2345678", "0171 2345678"]) == [v]        # einmal je Text
+    abgedeckt = Verdacht(0, 0, 0, "0171", "Ziffernfolge", [fitz.Rect(v["rechtecke"][0])])
+    assert attrappen.reste_als_verdacht(pdf, ["0171 2345678"], [abgedeckt]) == []         # nicht doppelt
+    (ohne,) = attrappen.reste_als_verdacht(pdf, ["Gibt es hier nicht"])
+    assert ohne["seite"] is None and ohne["rechtecke"] == [] and "Lage unbekannt" in ohne["grund"]
+    assert attrappen.reste_als_verdacht(pdf, []) == []
+
+
+def test_reste_der_selbstkontrolle_erscheinen_als_verdacht(app, umgebung, monkeypatch, dialoge):
+    """Meldet die Selbstkontrolle noch auffindbare Fundtexte („reste“, nur Text), zeigt die Vorschau sie orange an
+    ihrer Stelle in der Ausgabe, und „Nachschwärzen“ erfasst sie; ein Rest ohne Lage steht in der Liste und
+    bekommt beim Nachschwärzen einen ehrlichen Hinweis statt stillem Nichts."""
+    tmp = umgebung["tmp"]
+    a = pdf_schreiben(tmp / "a.pdf")
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse_neu({"a.pdf": [FUND_TEL, FUND_MAIL]}))
+    aufrufe = []
+    monkeypatch.setattr(gui, "schwaerze_pdf", fake_schwaerzung_neu(
+        aufrufe, reste_fuer={"a.pdf": ["max.mustermann@example.de", "Text nur im Scan"]}))
+    analysiere(app, [a])
+    starte_lauf(app, app.schwaerzen)
+    eintrag = app.ausgaben[a]
+    assert eintrag["status"] == "pruefen" and "2 Fundtext(e) noch auffindbar" in eintrag["grund"]
+    mit_lage, ohne_lage = eintrag["verdacht"]
+    assert mit_lage["seite"] == 0 and mit_lage["text"] == "max.mustermann@example.de" and mit_lage["rechtecke"]
+    assert ohne_lage["seite"] is None and ohne_lage["rechtecke"] == []
+    fenster = oeffne(app, a, modus="nachher")
+    assert fenster.verdacht_liste.size() == 2
+    assert fenster.verdacht_liste.get(0).startswith("S. 1:") and fenster.verdacht_liste.get(1).startswith("S. ?:")
+    assert [fenster.canvas.itemcget(i, "outline") for i in markierungen(fenster, "verdacht")] == \
+        [vorschau_fenster.FARBE_VERDACHT]
+    assert str(fenster.nachschwaerzen_knopf.cget("state")) == "normal"
+
+    fenster.verdacht_liste.selection_clear(0, "end")                     # nur den Rest ohne Lage
+    fenster.verdacht_liste.selection_set(1)
+    fenster.nachschwaerzen()
+    assert not app.laeuft and dialoge.liste[-1][1] == "Nachschwärzen nicht möglich"
+
+    fenster.verdacht_liste.selection_clear(0, "end")                     # jetzt den Rest mit Lage
+    fenster.verdacht_liste.selection_set(0)
+    vorher = app.laeufe_beendet
+    fenster.nachschwaerzen()
+    assert pumpe(app.root, lambda: app.laeufe_beendet > vorher, timeout=30)
+    pumpe(app.root, timeout=0.2)
+    (bereich,) = aufrufe[-1]["manuelle_bereiche"][0]
+    assert fitz.Rect(bereich).contains(fitz.Rect(mit_lage["rechtecke"][0]))
+
+
+def test_vorschau_mit_seitenmodell_der_echten_engine(app, umgebung, dialoge):
+    """Echte Engine: liefert sie ein Seitenmodell (Phase 2), zeigt die Vorschau jede Fundstelle einzeln, und ein
+    angeklicktes Wort wird als manuelle Stelle geschwärzt. Mit einer Engine ohne Seitenmodell: übersprungen
+    (der Test greift also automatisch, sobald die neue Engine integriert ist)."""
+    tmp = umgebung["tmp"]
+    pdf = pdf_schreiben(tmp / "echt" / "Vertrag.pdf")
+    app.kategorie_vars["namen"].set(False)
+    analysiere(app, [pdf])
+    ergebnis = app.analyse_ergebnisse[pdf]
+    if attrappen.modell_seite(ergebnis, 0) is None:
+        pytest.skip("Engine liefert noch kein Seitenmodell (Vertrag Abschnitt 1)")
+    fenster = oeffne(app, pdf)
+    assert vorschau_fenster.offsets_vom_modell(app, pdf) and fenster.ohne_markierung() == []
+    mit_stellen = {i for i, f in enumerate(ergebnis["funde"]) if f.get("stellen")}
+    assert mit_stellen and all(si is not None for _, i, si in fenster.fund_stellen() if i in mit_stellen)
+    geehrter = next(w for w in fenster.daten()["woerter"] if w[1] == "geehrter")
+    klicke(fenster, mitte(geehrter[0]))
+    (_, eintrag), = app.manuell[pdf].items()
+    assert eintrag["art"] == "stelle"
+    dialoge.antwort = False
+    starte_lauf(app, app.schwaerzen, timeout=120)
+    ausgabe = app.ausgaben[pdf]["pfad"]
+    with fitz.open(ausgabe) as doc:
+        text = doc[0].get_text()
+    assert "geehrter" not in text and "DE89 3704" not in text and "Sehr" in text
+    assert int(app.ausgaben[pdf]["ergebnis"].get("stellen_nicht_lokalisiert") or 0) == 0
+
+
+def test_vorschau_modul_der_engine_scheitert_attrappe_uebernimmt(app, umgebung, monkeypatch, dialoge):
+    """Scheitert das Vorschau-Modul der Engine, zeichnet die Vorschau mit dem Seitenmodell weiter (ein Eintrag in
+    fehler.log, kein Fehlerdialog); die Ausgabe (nachher) wird nie über die Engine geöffnet – ein offener
+    Datei-Handle würde unter Windows Freigeben/Verwerfen verhindern –, und vor dem Freigeben gibt die Engine ihre
+    vorbereiteten Dokumente frei."""
+    aufrufe = {"bild": 0, "daten": 0, "leeren": 0}
+
+    def kaputt_bild(*a, **k):
+        aufrufe["bild"] += 1
+        raise RuntimeError("Vorschau-Modul kaputt")
+
+    def kaputt_daten(*a, **k):
+        aufrufe["daten"] += 1
+        raise RuntimeError("Vorschau-Modul kaputt")
+
+    def leeren():
+        aufrufe["leeren"] += 1
+
+    monkeypatch.setattr(vorschau_fenster, "_engine_vorschau", SimpleNamespace(
+        seite_bild=kaputt_bild, vorschau_daten=kaputt_daten, zwischenspeicher_leeren=leeren))
+    monkeypatch.setattr(vorschau_fenster, "_ENGINE_FEHLER", set())
+    tmp = umgebung["tmp"]
+    pdf = pdf_schreiben(tmp / "a.pdf", text=ZWEIMAL)
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse_modell({"a.pdf": [FUND_NAME]}))
+    monkeypatch.setattr(gui, "schwaerze_pdf", fake_schwaerzung_neu([]))
+    analysiere(app, [pdf])
+    fenster = oeffne(app, pdf)
+    assert fenster._bild is not None and aufrufe["bild"] >= 1 and aufrufe["daten"] >= 1
+    assert sorted(si for _, i, si in fenster.fund_stellen() if i == 0) == [0, 1]
+    log = umgebung["fehlerlog"].read_text(encoding="utf-8")
+    assert log.count("RuntimeError: Vorschau-Modul kaputt") == 2         # je Funktion einmal, nicht je Seite
+    assert not [d for d in dialoge.liste if d[0] == "error"]
+    dialoge.antwort = True
+    starte_lauf(app, app.schwaerzen)
+    bild_vorher = aufrufe["bild"]
+    fenster.modus_wechseln("nachher")
+    pumpe(app.root, timeout=0.2)
+    assert fenster._bild is not None and aufrufe["bild"] == bild_vorher  # Ausgabe nur aus dem Speicher
+    leeren_vorher = aufrufe["leeren"]
+    fenster.freigeben()
+    assert aufrufe["leeren"] > leeren_vorher and app.ausgaben[pdf]["status"] == "fertig"
