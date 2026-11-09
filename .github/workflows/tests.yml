@@ -3,10 +3,16 @@ name: Tests
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
+  workflow_dispatch:
+
+# Der Workflow liest nur das Repository; er schreibt nichts zurück.
+permissions:
+  contents: read
 
 concurrency:
-  group: tests-${{ github.ref }}
+  group: tests-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -20,6 +26,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     env:
       PYTHONUTF8: "1"
+      PYTHONFAULTHANDLER: "1"
       # Mitgelieferte deutsche OCR-Sprachdatei aus dem Repository
       TESSDATA_PREFIX: ${{ github.workspace }}/tessdata
     steps:
@@ -33,23 +40,162 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
-      - name: Systempakete fuer Linux (virtuelles Display und Tk)
+      - name: Systempakete fuer Linux (virtuelles Display, Tk, Screenshots)
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends xvfb tk
+          sudo apt-get install -y --no-install-recommends xvfb tk scrot
 
       - name: Pakete installieren (nur fertige Wheels, kein Quellbau)
+        timeout-minutes: 15
         run: |
-          python -m pip install --only-binary=:all: -r requirements.txt -r requirements-dev.txt
+          python -m pip install --only-binary=:all: -r requirements.txt -r requirements-dev.txt pyyaml
 
       - name: Installation pruefen
+        timeout-minutes: 5
         run: python werkzeuge/pruefe_installation.py
+
+      # GitHub-Windows-Runner laufen oft nur mit 1024x768. Die Aufloesung wird protokolliert und,
+      # wo das Cmdlet vorhanden ist, auf 1920x1080 gestellt. Bleibt sie klein, ueberspringt der
+      # Layout-Test nur die Skalierungen, die Windows auf so einem Bildschirm gar nicht anbietet
+      # (Begruendung steht im Testbericht, pytest -rs).
+      - name: Bildschirmaufloesung (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          "Vorher:  $([System.Windows.Forms.Screen]::PrimaryScreen.Bounds)"
+          if (Get-Command Set-DisplayResolution -ErrorAction SilentlyContinue) {
+            Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          } else {
+            "Set-DisplayResolution gibt es auf diesem Runner nicht - Aufloesung bleibt."
+          }
+          "Nachher: $([System.Windows.Forms.Screen]::PrimaryScreen.Bounds)"
+          python -c "import tkinter as tk; r = tk.Tk(); print('Tk sieht', r.winfo_screenwidth(), 'x', r.winfo_screenheight(), '- tk scaling', r.tk.call('tk', 'scaling')); r.destroy()"
 
       - name: Tests (Linux, mit virtuellem Display)
         if: runner.os == 'Linux'
-        run: xvfb-run -a -s "-screen 0 1920x1080x24" python -W ignore -m pytest -q tests/
+        timeout-minutes: 25
+        env:
+          PDF_ANONYMISIERER_SCREENSHOTS: ${{ runner.temp }}/screenshots
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" python -W ignore -m pytest -q -rs tests/
 
       - name: Tests (Windows)
         if: runner.os == 'Windows'
-        run: python -W ignore -m pytest -q tests/
+        timeout-minutes: 25
+        env:
+          PDF_ANONYMISIERER_SCREENSHOTS: ${{ runner.temp }}/screenshots
+        run: python -W ignore -m pytest -q -rs tests/
+
+      - name: Layout-Screenshots sichern
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: layout-screenshots-${{ matrix.os }}
+          path: ${{ runner.temp }}/screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Baut die Windows-EXE genau so wie der Makler: mit EXE-bauen.bat (gleiche PyInstaller-Flags,
+  # Lizenzdateien, ZIP). Nur von Hand (Actions -> Tests -> "Run workflow") und fuer Versions-Tags v*.
+  exe:
+    name: EXE bauen (windows-latest)
+    needs: pytest
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Pakete installieren (wie Installieren.bat, dazu PyInstaller)
+        timeout-minutes: 15
+        run: |
+          python -m pip install --only-binary=:all: -r requirements.txt -r requirements-dev.txt
+
+      # .python_pfad.txt zeigt - wie nach Installieren.bat - auf das Python dieses Laufs.
+      # "< NUL" beantwortet das "pause" am Ende der Batchdatei.
+      - name: EXE-bauen.bat
+        shell: cmd
+        timeout-minutes: 30
+        run: |
+          python -c "import sys; open('.python_pfad.txt', 'w', encoding='utf-8').write(sys.executable)"
+          call EXE-bauen.bat < NUL
+          if errorlevel 1 exit /b 1
+
+      - name: Bundle und ZIP pruefen (OCR-Sprachdatei, Sprachmodell, Lizenztexte)
+        id: pruefung
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $ordner = "dist\PDF-Anonymisierer"
+          $pflicht = "PDF-Anonymisierer.exe", "_internal\tessdata\deu.traineddata", "LICENSE.txt",
+                     "THIRD_PARTY_NOTICES.md", "README.md", "licenses\AGPL-3.0.txt"
+          foreach ($datei in $pflicht) {
+            if (-not (Test-Path (Join-Path $ordner $datei))) { throw "Fehlt im Programmordner: $datei" }
+          }
+          $modell = Get-ChildItem "$ordner\_internal\de_core_news_md" -Recurse -Filter config.cfg -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $modell) { throw "Sprachmodell de_core_news_md fehlt im Programmordner" }
+          "Sprachmodell: $($modell.DirectoryName)"
+          if (-not (Select-String -Path "$ordner\licenses\AGPL-3.0.txt" -SimpleMatch "GNU AFFERO GENERAL PUBLIC LICENSE" -Quiet)) {
+            throw "licenses\AGPL-3.0.txt enthaelt nicht den AGPL-Text"
+          }
+          $zip = Get-ChildItem dist -Filter "PDF-Anonymisierer-*-windows-x64.zip" | Select-Object -First 1
+          if (-not $zip) { throw "ZIP fehlt in dist" }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archiv = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          try { $eintraege = $archiv.Entries | ForEach-Object { $_.FullName -replace '\\', '/' } } finally { $archiv.Dispose() }
+          foreach ($datei in $pflicht) {
+            $name = "PDF-Anonymisierer/" + ($datei -replace '\\', '/')
+            if ($eintraege -notcontains $name) { throw "Fehlt in der ZIP: $name" }
+          }
+          "{0}: {1:N0} MB, {2} Eintraege; Ordner {3:N0} MB" -f $zip.Name, ($zip.Length / 1MB), $eintraege.Count,
+            ((Get-ChildItem $ordner -Recurse -File | Measure-Object Length -Sum).Sum / 1MB)
+          "zipname=$($zip.BaseName)" >> $env:GITHUB_OUTPUT
+
+      - name: Rauchtest - EXE startet, zeigt ihr Fenster und schreibt keine fehler.log
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $logs = (Join-Path $env:LOCALAPPDATA "PDF-Anonymisierer\fehler.log"), "dist\PDF-Anonymisierer\fehler.log"
+          $logs | ForEach-Object { Remove-Item $_ -ErrorAction SilentlyContinue }
+          $exe = (Resolve-Path "dist\PDF-Anonymisierer\PDF-Anonymisierer.exe").Path
+          $p = Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $titel = ""
+          for ($i = 0; $i -lt 60 -and -not $p.HasExited; $i++) {
+            Start-Sleep -Seconds 1
+            $p.Refresh()
+            if ($p.MainWindowTitle) { $titel = $p.MainWindowTitle; break }
+          }
+          Start-Sleep -Seconds 5
+          $laeuft = -not $p.HasExited
+          if ($laeuft) { Stop-Process -Id $p.Id -Force }
+          "Fenstertitel: '$titel'"
+          foreach ($log in $logs) {
+            if (Test-Path $log) { Get-Content $log; throw "Die EXE hat beim Start eine fehler.log geschrieben ($log)." }
+          }
+          if (-not $laeuft) { throw "Die EXE hat sich beim Start beendet (Exit-Code $($p.ExitCode))." }
+          if ($titel -notlike "PDF-Anonymisierer*") {
+            "::warning::Kein Fenster 'PDF-Anonymisierer ...' erkannt (Titel: '$titel') - Screenshot/Log pruefen."
+          }
+
+      - name: ZIP als Artefakt hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pruefung.outputs.zipname }}
+          path: dist/${{ steps.pruefung.outputs.zipname }}.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

@@ -88,8 +88,12 @@ Bitte vor dem Einsatz lesen – das sind die Grenzen des Werkzeugs:
   nicht geschwärzt (außer dem Bildbereich direkt unter einem erkannten Text).
 - **Ungewöhnliche Schreibweisen** – seltene Namen, Namen in Großbuchstaben mitten im
   Fließtext, ausländische Adressformate oder sehr schlechte Scans können durchrutschen.
-- **Andere Kennnummern** – Krankenversichertennummer, Fahrzeug-Identnummer,
-  Ausweisnummer u. Ä. werden nicht gesondert erkannt (ggf. über „IMMER schwärzen“).
+- **Nummern ohne Beschriftung** – Ausweis-/Pass-/Führerscheinnummern, SEPA-Mandatsreferenzen,
+  BIC und USt-IdNr. werden nur hinter einem Etikett gefunden („Ausweis-Nr.“, „Mandatsreferenz“,
+  „BIC“, „USt-IdNr.“ …; die BIC auch direkt neben einer IBAN). Steht so eine Nummer ohne
+  Beschriftung im Text, bleibt sie stehen – ebenso hausinterne Nummern ohne festes Format
+  (ggf. über „IMMER schwärzen“). Krankenversicherten-, Fahrzeug-Ident- und Kreditkartennummern,
+  IBAN und Steuer-ID werden dagegen auch ohne Etikett an ihrem Aufbau erkannt (siehe Tabelle).
 
 Bei Scans gilt zusätzlich: Seiten mit sehr wenig erkennbarem Text werden ausdrücklich
 als Warnung gemeldet („blinder Fleck“) statt still übersprungen. Das Ergebnis solcher
@@ -97,10 +101,15 @@ Seiten muss von Hand geprüft werden.
 
 ## Voraussetzungen
 
-- Windows 10 oder 11, **64-Bit (x64)**. ARM64-Geräte (Snapdragon, Surface Pro X) werden
-  nicht unterstützt; 32-Bit-Windows ebenfalls nicht.
+- Windows 10 oder 11, **64-Bit (x64)**. 32-Bit-Windows geht nicht (für spaCy gibt es keine
+  32-Bit-Pakete). ARM64-Geräte (Snapdragon, Surface Pro X) sind **ungetestet**: Für
+  ARM64-Python 3.11 bis 3.15 gibt es inzwischen alle Pakete fertig (PyMuPDF dort 1.28.x),
+  `Installieren.bat` versucht die Installation; die EXE-Version läuft unter Windows 11 in der
+  x64-Emulation.
 - Python 3.10 bis 3.15 – wird vom Installationsskript automatisch mitinstalliert
   (Python 3.12, nur für das eigene Benutzerkonto, keine Administratorrechte nötig).
+  Mit Python 3.11 bis 3.14 kommt PyMuPDF 2.x, mit 3.10 und 3.15 PyMuPDF 1.28.x; verlangt wird
+  mindestens PyMuPDF 1.24.10 (die Testsuite läuft mit 1.24.10, 1.28.2 und 2.1).
 - Etwa 1 GB freier Speicher (Sprachmodell und Bibliotheken), Internet nur während der
   Installation.
 - Für eingescannte PDFs ist **keine** zusätzliche Software nötig: Die Texterkennung
@@ -123,22 +132,31 @@ Seiten muss von Hand geprüft werden.
    - Erscheint **„Der Computer wurde durch Windows geschützt“** (SmartScreen): auf
      **„Weitere Informationen“** und dann **„Trotzdem ausführen“** klicken.
    - Das schwarze Fenster offen lassen, bis **„Fertig“** erscheint. Beim ersten Mal
-     dauert es einige Minuten (ca. 300 MB Download).
+     dauert es einige Minuten (ca. 170 MB Download, dazu ggf. 25 MB für Python).
 4. Das Skript erledigt in **einem** Lauf:
    1. Python finden oder installieren (Python 3.12 über den Windows-Paketmanager
       `winget`; ohne Administratorrechte),
    2. Rechner prüfen (64-Bit, Prozessor),
    3. Pakete installieren (PyMuPDF, spaCy, tkinterdnd2 und das deutsche Sprachmodell
-      aus `requirements.txt`),
+      aus `requirements.txt`) – sind sie schon in passender Version da, wird nichts geladen,
    4. Installation prüfen,
    5. Desktop-Verknüpfung **„PDF-Anonymisierer“** anlegen.
 
    Jeder Schritt wird geprüft. Geht etwas schief, nennt das Skript die wahrscheinliche
-   Ursache (kein Internet, Firmen-Proxy, ARM64, fehlende Rechte …) und es erscheint
-   **kein** „Fertig“.
+   Ursache (kein Internet, Firmen-Proxy, gesperrtes github.com, fehlende Rechte …) und es
+   erscheint **kein** „Fertig“.
 5. Starten: Doppelklick auf die Desktop-Verknüpfung oder auf **`Starten.bat`** im
    Programmordner. Wird der Ordner später verschoben, einfach `Installieren.bat` noch
    einmal ausführen (geht dann schnell, es wird nichts erneut heruntergeladen).
+
+**Ohne Zugang zu github.com (Offline-Weg für das Sprachmodell):** Das deutsche Sprachmodell
+kommt von github.com, das manche Firmennetze sperren. Dann entweder die Installation einmalig
+über ein anderes Netz laufen lassen (z. B. Handy-Hotspot) oder an einem anderen Rechner die
+Datei `de_core_news_md-3.8.0-py3-none-any.whl` (44 MB) laden –
+<https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl>
+–, sie unverändert in den Programmordner neben `Installieren.bat` legen und `Installieren.bat`
+erneut starten. Das Modell wird dann aus der Datei installiert, die übrigen Pakete kommen wie
+gewohnt von pypi.org.
 
 Für Büros, in denen Python nicht installiert werden darf oder das Internet gefiltert
 ist, gibt es die [EXE-Version](#weitergabe-an-kollegen-die-exe-version).
@@ -197,13 +215,17 @@ und das Protokoll warnt.
 ## Weitergabe an Kollegen: die EXE-Version
 
 `EXE-bauen.bat` erzeugt mit PyInstaller einen eigenständigen Programmordner
-`dist\PDF-Anonymisierer\` (mit `PDF-Anonymisierer.exe`, Sprachmodell und
-OCR-Sprachdatei) und packt ihn als `dist\PDF-Anonymisierer-<Version>-windows-x64.zip`.
+`dist\PDF-Anonymisierer\` (mit `PDF-Anonymisierer.exe`, Sprachmodell, OCR-Sprachdatei und
+Lizenztexten) und packt ihn als `dist\PDF-Anonymisierer-<Version>-windows-x64.zip`.
 Empfänger brauchen **weder Python noch Tesseract** – nur den entpackten Ordner.
 
 - Den Bau macht ein Rechner, auf dem `Installieren.bat` gelaufen ist (x64-Windows).
   Das Skript prüft vorher, dass Sprachmodell und Sprachdatei vorhanden sind – eine EXE
-  ohne Namenserkennung wird nicht gebaut.
+  ohne Namenserkennung wird nicht gebaut. Fehlt nur PyInstaller, wird nur das nachgeladen
+  (`requirements-dev.txt`), nicht erneut das Sprachmodell.
+- Alternativ baut die GitHub-Action die EXE mit genau diesem Skript: unter „Actions“ →
+  „Tests“ → „Run workflow“ oder automatisch für jeden Versions-Tag `v…`. Die ZIP liegt dann
+  als Artefakt beim Lauf (vorher geprüft: Sprachmodell, Sprachdatei, Lizenztexte, Probestart).
 - Weitergabe über **Netzlaufwerk, OneDrive/SharePoint oder USB**. Per E-Mail geht es
   nicht: Outlook blockiert `.exe`-Dateien, auch in ZIP-Archiven, und die Datei ist für
   Mail-Anhänge ohnehin zu groß (mehrere hundert MB).
@@ -221,24 +243,27 @@ Empfänger brauchen **weder Python noch Tesseract** – nur den entpackten Ordne
 - Die EXE läuft auf 64-Bit-Windows (x64); auf ARM64-Geräten nur unter Windows 11 in der
   x64-Emulation. Die Versionsnummer steht im Fenstertitel und in den Dateieigenschaften
   der EXE.
-- Lizenz bei Weitergabe: Der Ordner enthält PyMuPDF (AGPL-3.0). Innerhalb des eigenen
-  Unternehmens ist das unkritisch; bei Weitergabe an Dritte `THIRD_PARTY_NOTICES.md`
-  und den Link zu diesem Repository mitgeben (siehe [Lizenz](#lizenz)).
+- Lizenz bei Weitergabe: Der Ordner enthält PyMuPDF/MuPDF (AGPL-3.0). `EXE-bauen.bat` legt
+  `LICENSE.txt`, `THIRD_PARTY_NOTICES.md`, `README.md` und den vollständigen AGPL-Text
+  (`licenses\AGPL-3.0.txt`) in den Ordner – sie sind damit in der ZIP und bleiben beim
+  Weitergeben dabei (nicht herauslöschen). Innerhalb des eigenen Unternehmens ist das
+  unkritisch; bei Weitergabe an Dritte zusätzlich den Link zu diesem Repository mitgeben
+  (siehe [Lizenz](#lizenz)).
 
 ## Problemlösung
 
 | Symptom | Ursache und Abhilfe |
 |---|---|
-| `Installieren.bat` meldet „Pakete konnten nicht installiert werden“ | Die eigentliche pip-Meldung steht darüber. **Kein Internet** → Verbindung prüfen. **`CERTIFICATE_VERIFY_FAILED` / `ProxyError`** → Firmen-Proxy oder TLS-Prüfung; IT bitten, `pypi.org`, `files.pythonhosted.org` und `github.com` freizugeben, oder die EXE-Version nutzen. **`No matching distribution found`** → ARM64-Gerät oder 32-Bit-Python (nicht unterstützt). **`PermissionError` / `Access is denied`** → Ordner z. B. nach `Dokumente` verschieben, Virenscanner prüfen. |
-| „Sprachmodell konnte nicht geladen werden“ | Das Modell kommt von `github.com`. Im Firmennetz gesperrt → einmalig über ein anderes Netz (Hotspot) installieren oder die EXE-Version nutzen. Ohne Modell gibt es keine Namenserkennung, deshalb bricht die Installation hier bewusst ab. |
+| `Installieren.bat` meldet „Pakete konnten nicht installiert werden“ | Die eigentliche pip-Meldung steht darüber. **Kein Internet** → Verbindung prüfen. **`CERTIFICATE_VERIFY_FAILED` / `ProxyError`** → Firmen-Proxy oder TLS-Prüfung; IT bitten, `pypi.org`, `files.pythonhosted.org` und `github.com` freizugeben, oder die EXE-Version nutzen. **`No matching distribution found`** → meist erreicht pip `pypi.org` nicht (Proxy, siehe davor); seltener gibt es für dieses Python bzw. diesen Prozessor kein fertiges Paket (z. B. ARM64 mit Python 3.10) → Python 3.12 (64-Bit) installieren oder die EXE-Version nutzen. **`PermissionError` / `Access is denied`** → Ordner z. B. nach `Dokumente` verschieben, Virenscanner prüfen. |
+| „Sprachmodell konnte nicht installiert werden“ | Das Modell kommt von `github.com` – auch der zweite Versuch über `spacy download`. Im Firmennetz gesperrt → einmalig über ein anderes Netz (Hotspot) installieren, den [Offline-Weg](#installation-windows) nutzen (Datei `de_core_news_md-3.8.0-py3-none-any.whl` in den Programmordner legen) oder die EXE-Version nutzen. Ohne Modell gibt es keine Namenserkennung, deshalb bricht die Installation hier bewusst ab; schon installierte Pakete werden beim nächsten Lauf nicht neu geladen. |
 | „Python konnte nicht automatisch installiert werden“ | `winget` fehlt oder ist gesperrt, oder `python` ist nur der Store-Alias von Windows. Python 3.12 (64-Bit) von [python.org](https://www.python.org/downloads/windows/) installieren (Haken „Add python.exe to PATH“), dann `Installieren.bat` erneut starten. Den Store-Alias schaltet man unter Einstellungen → Apps → Erweiterte App-Einstellungen → „Aliase für die App-Ausführung“ aus. |
 | Keine Desktop-Verknüpfung, obwohl alles andere lief | PowerShell ist durch Firmenrichtlinien eingeschränkt. Programm über `Starten.bat` starten (Rechtsklick → „Senden an“ → „Desktop (Verknüpfung erstellen)“). |
 | Doppelklick auf die Verknüpfung – nichts passiert | Ordner verschoben oder Python aktualisiert. `Installieren.bat` erneut ausführen, oder `Starten.bat` benutzen. Steht in `fehler.log` etwas? (siehe unten) |
-| Programm meldet „Namenserkennung inaktiv“ | Sprachmodell fehlt. `Installieren.bat` erneut ausführen; in der EXE-Version eine neue EXE anfordern. |
-| OCR liest Scans auf Englisch / Umlaute falsch | Die Datei `tessdata\deu.traineddata` fehlt im Programmordner (muss mit entpackt werden). |
+| Protokoll meldet „Namenserkennung inaktiv“ oder „Namenserkennung konnte nicht geladen werden“ | Sprachmodell fehlt oder ist beschädigt. Skript-Version: `Installieren.bat` erneut ausführen. EXE-Version: den kompletten Programmordner neu entpacken bzw. eine neue ZIP anfordern – der Ordner `_internal` gehört dazu. |
+| OCR liest Scans auf Englisch / Umlaute falsch | Die deutsche Sprachdatei fehlt: in der Skript-Version `tessdata\deu.traineddata` im Programmordner, in der EXE-Version `_internal\tessdata\deu.traineddata`. Den Ordner vollständig (neu) entpacken. |
 | Fenster zu groß für den Bildschirm | Das Fenster passt sich der Bildschirmgröße an und ist ab ca. 640 × 520 Pixel nutzbar; bei sehr kleinen Bildschirmen startet es maximiert. |
-| `fehler.log` finden | Liegt neben `pdf_anonymisierer.py` (bzw. neben der EXE), wenn der Ordner beschreibbar ist, sonst unter `%LOCALAPPDATA%\PDF-Anonymisierer\fehler.log`. Der Fehlerdialog nennt den genauen Pfad. |
-| Für Rückfragen | `python werkzeuge\pruefe_installation.py` im Programmordner ausführen und die Ausgabe mitschicken (Python-Version, Pakete, Sprachdatei, Log-Pfad). |
+| `fehler.log` finden | Skript-Version: neben `pdf_anonymisierer.py`, wenn der Ordner beschreibbar ist, sonst `%LOCALAPPDATA%\PDF-Anonymisierer\fehler.log`. EXE-Version: immer `%LOCALAPPDATA%\PDF-Anonymisierer\fehler.log`, nie neben der EXE. Der Fehlerdialog und Hilfe → „Über PDF-Anonymisierer“ nennen den genauen Pfad. |
+| Für Rückfragen | Skript-Version: `python werkzeuge\pruefe_installation.py` im Programmordner ausführen und die Ausgabe mitschicken (Python-Version, Pakete und ob ihre Versionen zu `requirements.txt` passen, Sprachdatei, Log-Pfad). EXE-Version: den Text aus Hilfe → „Über PDF-Anonymisierer“ und die `fehler.log` mitschicken. |
 
 ## Technik
 
@@ -269,7 +294,9 @@ python -m pytest -q tests/
 
 Unter Linux braucht die OCR die Sprachdaten (`TESSDATA_PREFIX` auf den Ordner `tessdata`
 setzen) und die Oberflächentests ein Display (`xvfb-run`). Die GitHub-Action
-`.github/workflows/tests.yml` führt die Tests auf Ubuntu und Windows aus.
+`.github/workflows/tests.yml` führt die Tests auf Ubuntu und Windows aus (Layout-Screenshots
+als Artefakt) und baut auf Wunsch bzw. für Versions-Tags `v…` die Windows-EXE mit
+`EXE-bauen.bat`.
 Versionsnummer: `anonymisierer/__init__.py` (`__version__`), gespiegelt in
 `werkzeuge/version_info.txt` und `CHANGELOG.md`.
 
@@ -284,11 +311,13 @@ Enthaltene bzw. beim EXE-Bau gebündelte Komponenten haben eigene Lizenzen, Deta
 - **PyMuPDF / MuPDF** (Artifex): **AGPL-3.0** oder kommerzielle Lizenz. Eine
   weitergegebene EXE enthält PyMuPDF und wird damit insgesamt unter AGPL-Bedingungen
   weitergegeben: Empfänger haben Anspruch auf den Quelltext (dieses öffentliche
-  Repository erfüllt das) und auf den Lizenztext. Firmeninterne Nutzung löst keine
-  Pflichten aus; bei kommerzieller Weitergabe an Dritte die Artifex-Lizenz prüfen.
+  Repository erfüllt das) und auf den Lizenztext (`licenses/AGPL-3.0.txt`, liegt auch der
+  EXE-ZIP bei). Firmeninterne Nutzung löst keine Pflichten aus; bei kommerzieller
+  Weitergabe an Dritte die Artifex-Lizenz prüfen.
 - **Tesseract-Sprachdatei** `tessdata/deu.traineddata` (tessdata_fast): Apache-2.0.
 - **spaCy** und das Modell **de_core_news_md**: MIT.
-- **tkinterdnd2** / TkDND: MIT.
+- **tkinterdnd2**: MIT; die darin enthaltene Tk-Erweiterung **TkDND**: BSD-artige Lizenz im
+  Stil von Tcl/Tk.
 
 Hinweis zur Historie: Der erste Commit enthielt eine Apache-2.0-LICENSE, die danach
 gelöscht wurde; die README nannte MIT. Seit Version 0.2.0 liegt der MIT-Text als

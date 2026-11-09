@@ -4,6 +4,58 @@ Alle nennenswerten Änderungen am PDF-Anonymisierer. Das Format folgt
 [Keep a Changelog](https://keepachangelog.com/de/1.1.0/); die Versionsnummer steht in
 `anonymisierer/__init__.py`.
 
+## [Unreleased]
+
+Auslieferung und Dokumentation nach dem Review „Auslieferung/Doku“ (AD-01 … AD-08):
+
+### Installation und EXE (`Installieren.bat`, `EXE-bauen.bat`, `requirements.txt`)
+- **Kein erneuter 44-MB-Download mehr:** Eine Vorab-Prüfung (Importe plus Versionsgrenzen wie
+  in `requirements.txt`) überspringt pip, wenn alles in passender Version installiert ist.
+  Vorher lud pip das per URL eingebundene Sprachmodell bei jedem Lauf neu und scheiterte ohne
+  github.com – auch beim zweiten Lauf nach dem Verschieben des Ordners und bei jedem EXE-Bau.
+  `EXE-bauen.bat` prüft Laufzeitpakete und PyInstaller getrennt: Fehlt nur PyInstaller, wird
+  nur `requirements-dev.txt` installiert.
+- **Offline-Weg für das Sprachmodell:** Liegt `de_core_news_md-3.8.0-py3-none-any.whl` im
+  Programmordner, installiert `Installieren.bat` das Modell daraus (`--no-index`), ohne
+  github.com; die Fehlermeldung erklärt den Weg. Ehrlicher Hinweis, dass auch
+  `spacy download` von github.com lädt.
+- **PyMuPDF-Untergrenze 1.24.10** (vorher 1.24): `Page.remove_rotation()` gibt es erst ab
+  1.24.3, `Document.bake()`/`apply_redactions(text=…)` ab 1.24.2, und bis 1.24.9 liest die OCR
+  seitlich gedrehte Scans nicht (mit Schatten-Installationen geprüft: 1.24.3 und 1.24.9 – ein
+  Test rot, 1.24.10, 1.28.2 und 2.1 – alle 382 Tests grün). Gleiche Grenzen in beiden
+  Batch-Dateien; `werkzeuge/pruefe_installation.py` meldet Versionen, die nicht zu
+  `requirements.txt` passen.
+- **Lizenztexte in der EXE-ZIP:** `EXE-bauen.bat` legt `LICENSE.txt`, `THIRD_PARTY_NOTICES.md`,
+  `README.md` und den vollständigen AGPL-3.0-Text (`licenses/AGPL-3.0.txt`, neu im Repository –
+  das PyMuPDF-Wheel enthält nur einen Einzeiler) in den Programmordner und bricht ab, wenn das
+  nicht gelingt.
+- **ARM64:** Für ARM64-Python 3.11 bis 3.15 gibt es inzwischen alle Pakete als fertige Wheels
+  (mit pip für `win_arm64` aufgelöst); Hinweistexte sagen jetzt „ungetestet“ statt „nicht
+  unterstützt“, ein ARM64-Python 3.10 (ohne spaCy-Pakete) wird übersprungen, und
+  „No matching distribution found“ wird nicht mehr pauschal mit ARM64 erklärt.
+
+### GitHub-Action (`.github/workflows/tests.yml`)
+- `permissions: contents: read`, Zeitlimits für Jobs und Schritte, Windows-Bildschirmauflösung
+  im Protokoll (Versuch, sie auf 1920×1080 zu stellen), Layout-Screenshots beider Systeme als
+  Artefakt, Begründungen übersprungener Tests im Bericht (`-rs`).
+- Neuer Job **`exe`** (windows-latest; von Hand oder für Tags `v*`): führt `EXE-bauen.bat` aus,
+  prüft OCR-Sprachdatei, Sprachmodell, Lizenztexte und ZIP-Inhalt, startet die EXE probeweise
+  (Fenster da, keine `fehler.log`) und lädt die ZIP als Artefakt hoch.
+- Layout-Test: Auf Bildschirmen unter 1366×768 (Windows-Runner: oft 1024×768) werden nur die
+  Skalierungen übersprungen, die Windows dort gar nicht anbietet (mindestens 720 Bildzeilen
+  nach Skalierung); ab 1366×768 und im 1366×768-Szenario prüft der Test unverändert.
+
+### Dokumentation
+- README: „Was NICHT erkannt wird“ behauptete fälschlich, Versicherten-, Fahrzeug-Ident- und
+  Ausweisnummern würden nicht erkannt; jetzt steht dort, welche Nummern nur mit Etikett gefunden
+  werden. `fehler.log` der EXE liegt immer unter `%LOCALAPPDATA%\PDF-Anonymisierer`; Hinweise
+  für EXE-Empfänger (`_internal`, Rückfragen), Offline-Weg, Downloadgröße (ca. 170 MB),
+  PyMuPDF-Reihe je Python-Version.
+- `THIRD_PARTY_NOTICES.md`: TkDND 2.10.3 (BSD-artige Lizenz) statt „2.9.x, MIT-ähnlich“,
+  PyMuPDF ab 1.24.10 (MuPDF 1.24.9) statt „MuPDF 1.26–1.28“, Abhängigkeiten von PyMuPDF 2.x
+  (onnxruntime u. a. nur bei pip, psutil/PyYAML auch in der EXE), Copyright-Vermerke der
+  MIT-Komponenten, Ort des AGPL-Texts.
+
 ## [0.2.0] – 2026-11-09
 
 Ergebnis eines Audits mit 70 bestätigten Befunden (Erkennung, Schwärzung/OCR,
