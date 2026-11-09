@@ -1,9 +1,9 @@
 """Detektor-Register: jede Erkennungsregel ist eine Funktion f(dok, kontext) -> list[Treffer].
 
 Ein Detektor wird mit dem Dekorator @detektor(name, kategorien, profile) registriert. Alle Module dieses
-Pakets werden beim Import automatisch geladen (pkgutil.iter_modules) – neue Detektoren brauchen KEINE
-Änderung an dieser Datei. Register-Namen sind eindeutig; ein späteres Modul darf einen Namen mit
-ersetzt=True überschreiben (Module werden alphabetisch geladen).
+Pakets werden beim Import automatisch geladen (pkgutil.iter_modules); ein NEUES Modul gehört zusätzlich in
+_BEKANNTE_MODULE (Rückfall für die EXE, tests/test_detektoren_register.py prüft das). Register-Namen sind
+eindeutig; ein späteres Modul darf einen Namen mit ersetzt=True überschreiben (Module werden alphabetisch geladen).
 
     Treffer(start, ende, kategorie, quelle, sicherheit, gruppe)   Offsets im Dokument.text (global)
     Kontext(aktive, profil, nie, immer, wissen, kundenliste, lauf)
@@ -138,7 +138,10 @@ def alle_treffer(dok, kontext: Kontext, fehler: list | None = None) -> list:
 # ----------------------------------------------------------------------
 # Automatisches Laden aller Module des Pakets
 # ----------------------------------------------------------------------
-_BEKANNTE_MODULE = ("klassisch",)   # Rückfall, falls iter_modules (z. B. in einer EXE) nichts liefert
+# ALLE Module dieses Pakets – Rückfall, falls iter_modules (z. B. in einer EXE) nichts liefert. Ein neues Modul
+# gehört auch hierher; tests/test_detektoren_register.py hält die Liste deckungsgleich mit dem Paketordner.
+_BEKANNTE_MODULE = ("klassisch", "kundenabgleich", "muster_spans", "struktur", "struktur_adresse", "struktur_brief",
+                    "struktur_formular", "struktur_tabelle", "wissen_kontext", "wissen_namen")
 
 
 def _automatisch_laden():
@@ -150,7 +153,10 @@ def _automatisch_laden():
         try:
             importlib.import_module(f"{__name__}.{name}")
         except ModuleNotFoundError as e:
-            if e.name != f"{__name__}.{name}":
+            if e.name == f"{__name__}.{name}":   # das Modul selbst fehlt: unvollständig gebaute EXE/Installation
+                LADEFEHLER.append(f"Erkennungsmodul »{name}« fehlt in diesem Programmordner (unvollständig "
+                                  "gebaut oder installiert)")
+            else:
                 LADEFEHLER.append(f"Erkennungsmodul »{name}« konnte nicht geladen werden: {e}")
         except Exception as e:
             LADEFEHLER.append(f"Erkennungsmodul »{name}« konnte nicht geladen werden: {type(e).__name__}: {e}")

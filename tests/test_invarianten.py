@@ -25,10 +25,9 @@ from anonymisierer.analyse import analysiere_pdf
 from anonymisierer.muster import KATEGORIEN
 from anonymisierer.ocr import OcrDienst
 from anonymisierer.schwaerzung import schwaerze_pdf
-from conftest import _modell_vorhanden, braucht_ocr, schrift_mit_zeichen
+from conftest import _modell_vorhanden, braucht_ocr, schrift_mit_zeichen, textebene_angleichen
 
 DATEN = Path(__file__).parent / "daten"
-DEJAVU = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
 SCHRIFT_ESZETT = schrift_mit_zeichen("ẞßÄÖÜäöü")   # Linux: DejaVu Sans, Windows: Arial/Segoe UI
 STANDARD = {k for k, _, _, _, an in KATEGORIEN if an}
 MIT_MODELL = _modell_vorhanden()
@@ -97,10 +96,14 @@ def tabelle(pfad):
     doc.close()
 
 
+LIGATUR_ZEILEN = ["Versicherungsnehmerin: Frau Steﬃ Hoﬀmann", "Ehemann: Herr Raﬀael Pfeiﬀer",
+                  "Die Auﬂage ist oﬀen; Steﬃ Hoﬀmann unterschreibt."]
+SCHRIFT_LIGATUREN = schrift_mit_zeichen("".join(LIGATUR_ZEILEN))   # Linux: DejaVu Sans, Windows: z. B. Calibri
+
+
 def ligaturen(pfad):
     doc = fitz.open()
-    _seite(doc, ["Versicherungsnehmerin: Frau Steﬃ Hoﬀmann", "Ehemann: Herr Raﬀael Pfeiﬀer",
-                 "Die Auﬂage ist oﬀen; Steﬃ Hoﬀmann unterschreibt."], fontname="F0", fontfile=str(DEJAVU))
+    _seite(doc, LIGATUR_ZEILEN, fontname="F0", fontfile=str(SCHRIFT_LIGATUREN))
     doc.save(pfad)
     doc.close()
 
@@ -195,8 +198,10 @@ def invarianten_pruefen(pdf: Path, ocr, immer=()):
     # Z2
     assert erg["reste"] == [], (pdf.name, erg["reste"])
     # Z2': unabhängige Nachkontrolle über die Textebene (OCR-Stellen prüft die Kontroll-OCR in Z2)
+    # Textebene angeglichen: Windows-Schriften liefern NBSP statt Leerzeichen und weiche/geschützte Trennstriche
+    # statt Bindestrichen – sonst fände die Nachkontrolle "51-633867" in der Ausgabe nie (conftest)
     with fitz.open(erg["ausgabe"]) as aus:
-        ausgabe = _PLATZHALTER_RE.sub(" ", "\n".join(s.get_text() for s in aus))
+        ausgabe = _PLATZHALTER_RE.sub(" ", textebene_angleichen("\n".join(s.get_text() for s in aus)))
     modell = analyse["modell"]
     # abgewählte Stellen (bewusst ausgelassen: NIE-Liste, mehrdeutig am Satzanfang …) dürfen stehen bleiben
     erlaubt = Counter(" ".join(st["text"].split()).casefold() for f in funde for st in f["stellen"]
@@ -231,8 +236,8 @@ def test_invarianten_testdaten(tmp_path, name):
 
 @pytest.mark.parametrize("art", sorted(ERZEUGT))
 def test_invarianten_erzeugte_dokumente(tmp_path, art):
-    if art in ("ligaturen",) and not DEJAVU.exists():
-        pytest.skip("DejaVuSans fehlt")
+    if art == "ligaturen" and SCHRIFT_LIGATUREN is None:
+        pytest.skip("keine installierte Schrift mit den Ligaturen ﬀ, ﬃ, ﬂ")
     if art == "versalien" and SCHRIFT_ESZETT is None:
         pytest.skip("keine installierte Schrift mit Versal-ß (ẞ)")
     pdf = tmp_path / f"{art}.pdf"
@@ -263,20 +268,27 @@ def test_invarianten_scans_mit_rotate(tmp_path, dienst, rotate):
         assert rest not in kontrolle, (rotate, rest, kontrolle)
 
 
+WINDOWS_ZEILEN = ["Versicherungsnehmerin: Frau Noémie\xa0Bonnet",
+                  "Kundennummer: 51\xad633867",
+                  "Telefon 0421 3498\xad936, Mobil 0171\u20112345678",
+                  "E-Mail a.krause@schwarzwald\xadversicherung.de",
+                  "IBAN DE89\xa03704\xa00044\xa00532\xa00130\xa000"]
+# Linux: DejaVu Sans; Windows: Arial/Segoe UI – deren Textebene liefert zusätzlich NBSP statt Leerzeichen und
+# weiche bzw. geschützte Trennstriche statt Bindestrichen (gemeinsame Glyphen, s. conftest)
+SCHRIFT_WINDOWS = schrift_mit_zeichen("".join(WINDOWS_ZEILEN))
+
+
 def windows_sonderzeichen(pfad):
     """Vertrag 12.7: Textauslesung wie auf dem Windows-Runner – NBSP statt Leerzeichen, sichtbarer weicher
     Trennstrich (U+00AD) statt Bindestrich, U+2011 in Nummern."""
     doc = fitz.open()
-    _seite(doc, ["Versicherungsnehmerin: Frau Noémie Bonnet",
-                 "Kundennummer: 51­633867",
-                 "Telefon 0421 3498­936, Mobil 0171‑2345678",
-                 "E-Mail a.krause@schwarzwald­versicherung.de",
-                 "IBAN DE89 3704 0044 0532 0130 00"], fontname="F0", fontfile=str(DEJAVU))
+    _seite(doc, WINDOWS_ZEILEN, fontname="F0", fontfile=str(SCHRIFT_WINDOWS))
     doc.save(pfad)
     doc.close()
 
 
-@pytest.mark.skipif(not DEJAVU.exists(), reason="DejaVuSans fehlt")
+@pytest.mark.skipif(SCHRIFT_WINDOWS is None,
+                    reason="keine installierte Schrift mit NBSP, weichem Trennstrich (U+00AD) und U+2011")
 def test_windows_sonderzeichen_werden_erkannt_und_geschwaerzt(tmp_path):
     pdf = tmp_path / "windows.pdf"
     windows_sonderzeichen(pdf)

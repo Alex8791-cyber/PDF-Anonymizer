@@ -16,11 +16,10 @@ from anonymisierer.detektoren import Kontext, alle_treffer
 from anonymisierer.detektoren import wissen_kontext as wk
 from anonymisierer.detektoren import wissen_namen as wn
 from anonymisierer.seitenmodell import dokument_aus_text
-from conftest import braucht_modell
+from conftest import braucht_modell, schrift_mit_zeichen, textebene_angleichen
 
 STANDARD = {k for k, _, _, _, an in muster.KATEGORIEN if an}
 LIBERATION = Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf")
-DEJAVU = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
 
 
 def _namen(text):
@@ -251,7 +250,13 @@ def test_windows_sonderzeichen_im_reinen_text():
         assert any(wert == " ".join(t.split()) for t in texte), (wert, texte)
 
 
-@pytest.mark.skipif(not DEJAVU.exists(), reason="DejaVuSans fehlt")
+# Schrift mit é, NBSP, weichem Trennstrich und U+2011: Linux DejaVu Sans, Windows Arial/Segoe UI (deren Textebene
+# liefert für Leerzeichen und Trennstriche je nach Schrift andere Codepunkte – genau das soll hier mitlaufen)
+SCHRIFT_WINDOWS = schrift_mit_zeichen("".join(WINDOWS_ZEILEN))
+
+
+@pytest.mark.skipif(SCHRIFT_WINDOWS is None,
+                    reason="keine installierte Schrift mit NBSP, weichem Trennstrich (U+00AD) und U+2011")
 @braucht_modell
 def test_windows_sonderzeichen_pdf_vollstaendig_geschwaerzt(tmp_path):
     from anonymisierer.schwaerzung import schwaerze_pdf
@@ -259,7 +264,7 @@ def test_windows_sonderzeichen_pdf_vollstaendig_geschwaerzt(tmp_path):
     doc = fitz.open()
     seite = doc.new_page()
     for i, zeile in enumerate(WINDOWS_ZEILEN):
-        seite.insert_text((50, 80 + 18 * i), zeile, fontsize=11, fontname="F0", fontfile=str(DEJAVU))
+        seite.insert_text((50, 80 + 18 * i), zeile, fontsize=11, fontname="F0", fontfile=str(SCHRIFT_WINDOWS))
     doc.save(pdf)
     doc.close()
     erg = analysiere_pdf(pdf, STANDARD, [], [])
@@ -269,7 +274,7 @@ def test_windows_sonderzeichen_pdf_vollstaendig_geschwaerzt(tmp_path):
         assert wert in gefunden or any(wert in g for g in gefunden), (wert, gefunden)
     aus = schwaerze_pdf(pdf, erg["funde"], ziel_ordner=tmp_path / "aus", modell=erg["modell"])
     with fitz.open(aus["ausgabe"]) as d:
-        rest = "".join(s.get_text() for s in d).replace(" ", " ").replace("­", "-").replace("‑", "-")
+        rest = textebene_angleichen("".join(s.get_text() for s in d))
     for wert in ("Bonnet", "633867", "3498", "krause", "0532", "2345678"):
         assert wert not in rest, (wert, rest)
 

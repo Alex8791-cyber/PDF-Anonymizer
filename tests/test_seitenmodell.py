@@ -15,9 +15,10 @@ import pymupdf as fitz
 from anonymisierer import detektoren, seitenmodell as sm
 from anonymisierer.detektoren import Kontext, Treffer
 from anonymisierer.seitenmodell import dokument_aus_text, ganzwort_stellen
+from conftest import schrift_mit_zeichen
 
 DATEN = Path(__file__).parent / "daten"
-DEJAVU = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+SCHRIFT_LIGATUREN = schrift_mit_zeichen("ﬀﬃ")   # Linux: DejaVu Sans, Windows: z. B. Calibri
 
 
 def baue(pfad: Path) -> sm.Dokument:
@@ -52,9 +53,10 @@ def texte(dok, stellen):
 # ----------------------------------------------------------------------
 # Zeichenregeln: Ligaturen, NFC, Leerzeichen, Silbentrennung
 # ----------------------------------------------------------------------
-@pytest.mark.skipif(not DEJAVU.exists(), reason="DejaVuSans fehlt")
+@pytest.mark.skipif(SCHRIFT_LIGATUREN is None, reason="keine installierte Schrift mit den Ligaturen ﬀ, ﬃ")
 def test_ligaturen_werden_aufgeloest_und_zeigen_auf_dieselbe_glyphe(tmp_path):
-    pdf = textseite(tmp_path / "lig.pdf", ["Frau Steﬃ Hoﬀmann und Herr Pfeiﬀer"], fontname="F0", fontfile=str(DEJAVU))
+    pdf = textseite(tmp_path / "lig.pdf", ["Frau Steﬃ Hoﬀmann und Herr Pfeiﬀer"], fontname="F0",
+                    fontfile=str(SCHRIFT_LIGATUREN))
     dok = baue(pdf)
     seite = dok.seiten[0]
     assert "Steffi Hoffmann" in seite.text and "Pfeiffer" in seite.text
@@ -569,24 +571,35 @@ def test_normalisiere_text_regeln_und_abbildung():
         "schwarzwald-versicherung 3-4 Tel-0421 1"
 
 
-@pytest.mark.skipif(not DEJAVU.exists(), reason="DejaVuSans fehlt")
+WINDOWS_ZEILEN = ["Versicherungsnehmerin Noémie\xa0Bonnet",
+                  "Kundennummer 51\xad633867, Telefon 0421 3498\xad936",
+                  "a.krause@schwarzwald\xadversicherung.de, Mobil 0171\u20112345678",
+                  "Zeitraum 3–4 Wochen, Abzug \u22125 EUR",
+                  "Versicherungs\xad", "nehmer Klein\xad", "Hoffmann"]
+# Linux: DejaVu Sans; Windows: Arial/Segoe UI – deren Textebene liefert NBSP statt Leerzeichen und weiche bzw.
+# geschützte Trennstriche statt Bindestrichen (gemeinsame Glyphen, s. conftest); der Seitentext gleicht das an
+SCHRIFT_WINDOWS = schrift_mit_zeichen("".join(WINDOWS_ZEILEN))
+
+
+@pytest.mark.skipif(SCHRIFT_WINDOWS is None,
+                    reason="keine installierte Schrift mit NBSP, weichem Trennstrich (U+00AD), U+2011 und U+2212")
 def test_windows_sonderzeichen_im_seitentext(tmp_path):
-    pdf = textseite(tmp_path / "win.pdf", ["Versicherungsnehmerin Noémie Bonnet",
-                                           "Kundennummer 51­633867, Telefon 0421 3498­936",
-                                           "a.krause@schwarzwald­versicherung.de, Mobil 0171‑2345678",
-                                           "Zeitraum 3–4 Wochen, Abzug −5 EUR",
-                                           "Versicherungs­", "nehmer Klein­", "Hoffmann"],
-                    fontname="F0", fontfile=str(DEJAVU))
+    pdf = textseite(tmp_path / "win.pdf", WINDOWS_ZEILEN, fontname="F0", fontfile=str(SCHRIFT_WINDOWS))
     dok = baue(pdf)
     t = dok.text
     for erwartet in ("Noémie Bonnet", "51-633867", "0421 3498-936", "a.krause@schwarzwald-versicherung.de",
                      "0171-2345678", "3-4 Wochen", "Versicherungsnehmer Klein-Hoffmann"):
         assert erwartet in t, (erwartet, t)
     assert "−5 EUR" in t                      # Minus nicht zwischen Ziffern: unverändert
-    # sichtbarer weicher Trennstrich zeigt auf seine Glyphe (wird mitgeschwärzt)
+    # sichtbarer weicher Trennstrich zeigt auf seine Glyphe (wird mitgeschwärzt). Legt die Schrift ihn mit anderen
+    # Strichen auf EINE Glyphe (Windows-Schriften), liefert die Textebene für diese Glyphe nur einen der Codepunkte
+    # (MuPDF: den höchsten, z. B. U+2011) – entscheidend ist, dass der Bindestrich auf genau diese Glyphe zeigt.
     s = dok.seiten[0]
     i = t.index("51-633867") + 2
-    assert s.abbildung[i] >= 0 and s.zeichen[s.abbildung[i]].c == "­"
+    assert s.abbildung[i] >= 0, "weicher Trennstrich ohne Glyphe im Seitentext"
+    c = s.zeichen[s.abbildung[i]].c
+    schrift = fitz.Font(fontfile=str(SCHRIFT_WINDOWS))
+    assert len(c) == 1 and schrift.has_glyph(ord(c)) == schrift.has_glyph(0xAD), (c, SCHRIFT_WINDOWS)
 
 
 def test_rueckfall_detektoren_sind_reihenfolge_unabhaengig(register, monkeypatch):
