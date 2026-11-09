@@ -453,3 +453,56 @@ def test_klassische_detektoren_sind_registriert():
     namen = {e.name for e in detektoren.REGISTER}
     assert {"ner", "immer", "muster.iban", "muster.telefon", "klassisch.formularfeld"} <= namen
     assert not detektoren.LADEFEHLER
+
+
+# ----------------------------------------------------------------------
+# Vorschau-Engine (Vertrag Abschnitt 8): Koordinaten aus demselben Modell
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("rotate", [0, 90])
+def test_vorschau_daten_und_seitenbild_passen_zum_modell(tmp_path, rotate):
+    from anonymisierer import vorschau
+    from anonymisierer.analyse import analysiere_pdf
+    doc = fitz.open()
+    seite = doc.new_page()
+    seite.insert_text((60, 100), "Versicherungsnehmer: Max Mustermann", fontsize=12)
+    seite.insert_text((60, 130), "IBAN DE89 3704 0044 0532 0130 00", fontsize=12)
+    if rotate:
+        seite.set_rotation(rotate)
+    pdf = tmp_path / f"v{rotate}.pdf"
+    doc.save(pdf)
+    doc.close()
+    e = analysiere_pdf(pdf, {"iban"}, [], ["Max Mustermann"])
+    daten = vorschau.vorschau_daten(e, 0)
+    assert daten["seitenrect"] == e["modell"].seiten[0].rect
+    ids = {f["id"] for f in e["funde"]}
+    assert {s[1] for s in daten["stellen"]} == ids and all(s[3] is True for s in daten["stellen"])
+    assert all(daten["seitenrect"].contains(s[0]) for s in daten["stellen"])
+    woerter = {w[1]: w for w in daten["woerter"]}
+    text = e["modell"].seiten[0].text
+    assert "Mustermann" in woerter and text[woerter["Mustermann"][2]:woerter["Mustermann"][3]] == "Mustermann"
+    png, faktor = vorschau.seite_bild(pdf, 0, 1.5)
+    assert png[:4] == b"\x89PNG" and faktor == 1.5
+    bild = fitz.Pixmap(png)
+    assert abs(bild.width - daten["seitenrect"].width * 1.5) <= 1
+    assert abs(bild.height - daten["seitenrect"].height * 1.5) <= 1
+    # Unter einer Fundstelle liegen dunkle Pixel (Text an derselben Stelle wie im Modell)
+    r = next(s[0] for s in daten["stellen"])
+    if r.width >= r.height:
+        punkte = [(r.x0 + r.width * t, r.y0 + r.height / 2) for t in (0.1, 0.3, 0.5, 0.7, 0.9)]
+    else:
+        punkte = [(r.x0 + r.width / 2, r.y0 + r.height * t) for t in (0.1, 0.3, 0.5, 0.7, 0.9)]
+    werte = [min(bild.pixel(int(x * 1.5) + dx, int(y * 1.5) + dy)[0] for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+             for x, y in punkte]
+    assert min(werte) < 128, werte
+    vorschau.zwischenspeicher_leeren()
+
+
+def test_ausgabe_vorschau_mit_verdacht(tmp_path):
+    from collections import namedtuple
+
+    from anonymisierer import vorschau
+    pdf = textseite(tmp_path / "aus.pdf", ["Text"])
+    Verdacht = namedtuple("Verdacht", "seite start ende text grund rechtecke")
+    v = [Verdacht(0, 0, 4, "Text", "Test", [fitz.Rect(50, 60, 80, 72)]), Verdacht(1, 0, 1, "x", "andere Seite", [])]
+    aus = vorschau.ausgabe_vorschau(pdf, v, 0, 1.0)
+    assert aus["bild"][:4] == b"\x89PNG" and len(aus["verdacht"]) == 1 and aus["verdacht"][0]["grund"] == "Test"

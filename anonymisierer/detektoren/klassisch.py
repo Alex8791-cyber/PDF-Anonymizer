@@ -11,10 +11,11 @@ direkt liefern (gleiche Register-Namen mit ersetzt=True, oder dieses Modul wird 
 
 from __future__ import annotations
 
+import bisect
 import re
 
 from .. import muster, namen
-from ..seitenmodell import ganzwort_stellen, ganzwort_stellen_viele, modus_fuer
+from ..seitenmodell import SPALTENTRENNER, ganzwort_stellen, ganzwort_stellen_viele, modus_fuer
 from . import ALLE_PROFILE, Treffer, detektor, registrieren
 
 # Sicherheit je Kategorie (1 = Prüfziffer, sonst Heuristik)
@@ -53,12 +54,29 @@ def _muster_detektor(schluessel: str):
         sicherheit = SICHERHEIT.get(schluessel, 0.7)
         texte = [t for t in dict.fromkeys(x.strip() for x in funktion(dok.text) if x and x.strip()) if len(t) >= 2]
         treffer = []
+        pruefen = _PLAUSIBEL.get(schluessel)
         for stellen in _vorkommen(dok, texte, modus).values():
             for s, e in stellen:
-                treffer.append(Treffer(s, e, schluessel, quelle, sicherheit))
+                if pruefen is None or pruefen(dok.text, s, e):
+                    treffer.append(Treffer(s, e, schluessel, quelle, sicherheit))
         return treffer
     erkennen.__name__ = f"muster_{schluessel}"
     return erkennen
+
+
+_BETRAG_DANACH_RE = re.compile(r"[,.]\d")
+
+
+def _strasse_plausibel(text: str, s: int, e: int) -> bool:
+    """Eine Hausnummer steht nicht in einer anderen Tabellenspalte ("Rehazentrum Am Kurpark | 946,21")
+    und ist kein Betrag ("Am Kurpark 946,21") – sonst würde Kontext (Einrichtung, Betrag) geschwärzt."""
+    if SPALTENTRENNER in text[s:e]:
+        return False
+    return not _BETRAG_DANACH_RE.match(text, e)
+
+
+# Zusatzprüfung je Kategorie für Stellen der Muster: (Dokumenttext, start, ende) -> bool
+_PLAUSIBEL = {"strasse": _strasse_plausibel}
 
 
 for _schluessel, _anzeige, _platzhalter, _f, _an in muster.KATEGORIEN:
@@ -107,11 +125,107 @@ def _komma_phantome_entfernen(text: str, kandidaten: list) -> list:
     return aus
 
 
+# Spaltenköpfe und Tabellenwörter, die die KI in einer einzelnen Zelle gern für Personen hält
+_ZELLEN_KEINE_NAMEN = frozenset({
+    "betrag", "beträge", "netto", "brutto", "gesamt", "gesamtbetrag", "summe", "zwischensumme", "saldo",
+    "kfz", "tarif", "tarife", "beitrag", "beiträge", "erstattung", "leistung", "leistungen", "position",
+    "menge", "preis", "einzelpreis", "gesamtpreis", "anzahl", "zeitraum", "datum", "status", "bemerkung",
+    "bemerkungen", "rabatt", "steuer", "mwst", "zahlbetrag", "rechnung", "vertrag", "sparte", "produkt",
+    "deckung", "laufzeit", "beginn", "ablauf", "prämie", "gebühr", "gebühren", "kosten", "art", "typ",
+    "name", "vorname", "nachname", "anschrift", "ort", "plz", "straße", "telefon", "kennzeichen",
+    "fälligkeit", "zahlung", "zahlungen", "eingang", "ausgang", "soll", "haben", "konto", "nummer"})
+
+
+def _zellentext(text: str) -> str | None:
+    """Nur die Tabellenzeilen (mit Spaltenlücken "\\t"), jede Zelle als eigene Zeile; alle übrigen Zeichen
+    durch Leerzeichen ersetzt – gleiche Länge, also gleiche Offsets wie der Dokumenttext."""
+    if "\t" not in text:
+        return None
+    teile = []
+    for zeile in text.split("\n"):
+        teile.append(zeile.replace("\t", "\n") if "\t" in zeile else " " * len(zeile))
+    return "\n".join(teile)
+
+
+def _zellen_kandidaten(text: str, kandidaten: list) -> list:
+    """Zweiter Durchgang der Namenserkennung über die einzelnen Tabellenzellen. Das Seitenmodell hält eine
+    Tabellenzeile zusammen (Spalten durch Tabulatoren getrennt, Vertrag Abschnitt 1); die Kurzzeilen-Erkennung
+    sieht dann nur noch lange Zeilen und übersieht Namen in Zellen wie "Physiotherapie Santoro".
+    Ergänzt nur Stellen, die sich mit keinem Kandidaten des ersten Durchgangs überschneiden."""
+    zellen = _zellentext(text)
+    if zellen is None:
+        return []
+    # Bereiche des ersten Durchgangs (sortiert, mit laufendem Maximum der Enden) und seine Namen als Text:
+    # "Physiotherapie Zieliński" in einer Zelle ist kein neuer Name, wenn "Zieliński" schon erkannt ist
+    belegt = sorted((int(k.get("start", -1)), int(k.get("ende", -1))) for k in kandidaten)
+    anfaenge = [b[0] for b in belegt]
+    max_ende, m = [], -1
+    for _, e1 in belegt:
+        m = max(m, e1)
+        max_ende.append(m)
+    bekannt = {" ".join(str(k.get("text", "")).split()).casefold() for k in kandidaten}
+    aus = []
+    for k in namen.finde_personen(zellen):
+        s, e = int(k.get("start", -1)), int(k.get("ende", -1))
+        if not (0 <= s < e <= len(text)) or text[s:e] != k.get("text"):
+            continue
+        i = bisect.bisect_left(anfaenge, e)
+        if i and max_ende[i - 1] > s:
+            continue                                   # überschneidet einen Kandidaten des ersten Durchgangs
+        woerter = k["text"].casefold().split()
+        if not woerter or all(w.strip(".,;:()") in _ZELLEN_KEINE_NAMEN for w in woerter):
+            continue
+        if len(woerter) > 1 and any(" ".join(woerter[a:b]) in bekannt
+                                    for a in range(len(woerter)) for b in range(a + 1, len(woerter) + 1)):
+            continue
+        if len(woerter) == 1 and k["text"].isupper() and len(k["text"]) <= 3:
+            continue                                   # "RLV", "PKV": Abkürzungen, keine Namen
+        aus.append(dict(k, quelle="ner.zelle"))
+    if aus:
+        bestaetigt = _zellen_namen_bestaetigen({k["text"] for k in aus})
+        if bestaetigt is not None:
+            aus = [k for k in aus if k["text"] in bestaetigt]
+    return aus
+
+
+_VORLAGE_PERSON = "Ich habe heute mit {} gesprochen."
+_VORLAGE_WORTART = "Das ist {}."
+
+
+def _zellen_namen_bestaetigen(texte: set):
+    """Gegenprobe für Namen aus einzelnen Zellen (dort fehlt der KI der Satzzusammenhang, sie hält dann auch
+    "Familientarif" oder "Betrag" für Personen): bestätigt, wenn die KI den Text in einem neutralen Satz als
+    Person erkennt ODER als Eigennamen einordnet. Liefert die bestätigten Texte; None ohne Sprachmodell
+    (dann gelten alle)."""
+    nlp = namen.lade_ner()
+    if nlp is None:
+        return None
+    texte = sorted(texte)
+    ok = set()
+    try:
+        vorn = len(_VORLAGE_PERSON.split("{}")[0])
+        for t, d in zip(texte, nlp.pipe([_VORLAGE_PERSON.format(t) for t in texte], batch_size=64)):
+            if any(e.label_ == "PER" and e.start_char < vorn + len(t) and e.end_char > vorn for e in d.ents):
+                ok.add(t)
+        rest = [t for t in texte if t not in ok]
+        vorn = len(_VORLAGE_WORTART.split("{}")[0])
+        for t, d in zip(rest, nlp.pipe([_VORLAGE_WORTART.format(t) for t in rest], batch_size=64)):
+            woerter = [tok for tok in d if vorn <= tok.idx < vorn + len(t) and tok.is_alpha
+                       and tok.text.casefold() not in namen.PARTIKEL]
+            if woerter and all(tok.pos_ == "PROPN" for tok in woerter):
+                ok.add(t)
+    except Exception:
+        return None
+    return ok
+
+
 @detektor("ner", {"namen"})
 def namen_erkennen(dok, kontext):
-    """KI-Namenserkennung (spaCy) plus Regeln für Briefe, Formulare und Tabellen (namen.finde_personen)."""
+    """KI-Namenserkennung (spaCy) plus Regeln für Briefe, Formulare und Tabellen (namen.finde_personen);
+    Tabellenzellen zusätzlich einzeln."""
     text = dok.text
     kandidaten = list(namen.finde_personen(text))
+    kandidaten += _zellen_kandidaten(text, kandidaten)
     if "plzort" in kontext.aktive:
         kandidaten = _ohne_ortsnamen(text, kandidaten)
     kandidaten = _komma_phantome_entfernen(text, kandidaten)
@@ -119,10 +233,12 @@ def namen_erkennen(dok, kontext):
     for k in kandidaten:
         s, e = int(k.get("start", -1)), int(k.get("ende", -1))
         gruppe = k.get("gruppe")
+        quelle = k.get("quelle", "ner")
+        sicherheit = 0.5 if quelle == "ner.zelle" else 0.6
         if not (0 <= s < e <= len(text)) or text[s:e] != k["text"]:
             # Position fehlt oder passt nicht: alle Ganzwort-Stellen des Namens
             for s2, e2 in ganzwort_stellen(dok, k["text"], "name"):
-                treffer.append(Treffer(s2, e2, "namen", "ner", 0.6, gruppe))
+                treffer.append(Treffer(s2, e2, "namen", quelle, sicherheit, gruppe))
             continue
         # Die KI schneidet Namen gelegentlich mitten im Wort ab ("Olumid|e"): auf ganze Wörter erweitern,
         # damit nie ein Wortrest stehen bleibt
@@ -133,7 +249,7 @@ def namen_erkennen(dok, kontext):
             e += 1
         if (s, e) != (s0, e0) and gruppe == k["text"]:
             gruppe = text[s:e]
-        treffer.append(Treffer(s, e, "namen", "ner", 0.6, gruppe))
+        treffer.append(Treffer(s, e, "namen", quelle, sicherheit, gruppe))
     return treffer
 
 

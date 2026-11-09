@@ -228,6 +228,54 @@ def _nebenkanal_hinweis(zaehler: dict) -> str:
     return "Entfernt bzw. eingebrannt: " + ", ".join(teile) + "."
 
 
+def _nebenkanaele_bereinigen(lauf, doc, zaehler: dict) -> str:
+    """Nebenkanäle entfernen: anonymisierer/nebenkanaele.py, falls vorhanden (Gutachten S-05/S-06/S-11/S-14),
+    sonst die eingebaute Bereinigung. Liefert den Hinweistext."""
+    if _nebenkanaele is not None and hasattr(_nebenkanaele, "nebenkanaele_entfernen"):
+        try:
+            try:
+                neu = _nebenkanaele.nebenkanaele_entfernen(doc, dict(zaehler))
+            except TypeError:                       # ältere Signatur ohne Zähler
+                neu = _nebenkanaele.nebenkanaele_entfernen(doc)
+            for k, v in (neu or {}).items():
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    zaehler[k] = max(int(zaehler.get(k, 0) or 0), int(v))
+                elif k not in zaehler or v:
+                    zaehler[k] = v
+            hinweis_fn = getattr(_nebenkanaele, "nebenkanal_hinweis", None)
+            return hinweis_fn(zaehler) if hinweis_fn else _nebenkanal_hinweis(zaehler)
+        except Exception as e:
+            lauf.melden("warnung", "NEBENKANAL_ENTFERNT",
+                        f"Nebenkanäle (Anmerkungen, Metadaten …) konnten nicht vollständig entfernt werden ({e}) – "
+                        f"Rückfall auf die einfache Bereinigung.")
+            if not lauf.beschnitt_lokal:
+                _beschnitt_nachholen(lauf, doc)
+    _nebenkanaele_entfernen(doc, zaehler)
+    return _nebenkanal_hinweis(zaehler)
+
+
+def _beschnitt_nachholen(lauf, doc) -> None:
+    """Rückfall, wenn das Nebenkanal-Modul scheitert: Inhalte außerhalb des Beschnitts (S-05) hier entfernen,
+    denn die Seitenschleife hat sie dem Modul überlassen."""
+    lauf.beschnitt_lokal = True
+    for nr in range(len(doc)):
+        seite = doc[nr]
+        try:
+            rechtecke = _beschnitt_rechtecke(seite)
+            if not rechtecke:
+                continue
+            for r in rechtecke:
+                seite.add_redact_annot(r, fill=False)
+            seite.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS,
+                                   graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
+                                   text=fitz.PDF_REDACT_TEXT_REMOVE)
+            lauf.beschnitt_seiten.append(nr + 1)
+        except Exception as e:
+            lauf.melden("fehler", "NEBENKANAL_ENTFERNT",
+                        f"Seite {nr + 1}: Inhalte außerhalb des sichtbaren Seitenbereichs konnten nicht entfernt "
+                        f"werden ({e}).", nr)
+
+
 def _beschnitt_rechtecke(seite) -> list:
     """Rechtecke außerhalb des sichtbaren Seitenbereichs (CropBox), in denen laut Bounding-Box-Protokoll
     Inhalt liegt: unsichtbar für Betrachter und Textextraktion, aber lesbar für andere Werkzeuge
@@ -727,9 +775,21 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
 
     # 4) Anwenden (Text UND Bildpixel), Teilreste prüfen, Platzhalter schreiben, Kollateralschaden prüfen
     if bereits:
+        bild_vorher = None
+        if _bilder is not None and hasattr(_bilder, "bildzustand") and hasattr(_bilder, "nach_schwaerzung"):
+            try:
+                bild_vorher = _bilder.bildzustand(seite)
+            except Exception:
+                bild_vorher = None
         seite.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS,
                                graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
                                text=fitz.PDF_REDACT_TEXT_REMOVE)
+        if bild_vorher is not None:
+            try:
+                lauf.bilder_neu_kodiert += int(_bilder.nach_schwaerzung(doc, seite, bild_vorher) or 0)
+            except Exception as e:
+                lauf.melden("hinweis", "BILDER_UNGEPRUEFT", f"Geschwärzte Bilder auf Seite {nr + 1} konnten nicht "
+                                                            f"neu komprimiert werden ({e}) – die Datei wird größer.", nr)
         if getroffen_text:
             _glyphreste_pruefen(lauf, nr, seite, m, getroffen_text)
         for r, text, fs, grundlinie in platzhalter:
@@ -737,13 +797,14 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
                 lauf.ohne_platzhalter += 1
         if woerter_vorher:
             _kollateral_pruefen(lauf, nr, seite, woerter_vorher, bereits)
-        try:
-            for info in seite.get_image_info(xrefs=True):
-                xref = info.get("xref") or 0
-                if xref > 0 and any(fitz.Rect(info["bbox"]).intersects(r) for r in bereits):
-                    lauf.bild_xrefs.add(xref)
-        except Exception:
-            pass
+        if bild_vorher is None:
+            try:
+                for info in seite.get_image_info(xrefs=True):
+                    xref = info.get("xref") or 0
+                    if xref > 0 and any(fitz.Rect(info["bbox"]).intersects(r) for r in bereits):
+                        lauf.bild_xrefs.add(xref)
+            except Exception:
+                pass
         if modus == "seite":
             lauf.scan_seiten_seit_speichern += 1
     lauf.rects_je_seite[nr] = bereits
@@ -919,6 +980,16 @@ def _selbstkontrolle(lauf: _Lauf, ausgabe: Path) -> list:
     pruef_funde = [f for f in lauf.funde
                    if f.get("text") and (not f.get("stellen") or any(st.get("an", True) for st in f["stellen"]))]
     nadeln = {id(f): (modus_fuer(f.get("kategorie", "")), _nadeln(f, lauf)) for f in pruef_funde}
+    vorab = getattr(lauf.ocr, "vorab", None)
+    if vorab is not None:
+        # Kontroll-OCR aller Scan-Seiten mit Treffern parallel einreihen (Gutachten PERF-05)
+        seiten = [nr for nr, modus in lauf.ocr_modus.items()
+                  if modus == "seite" and (lauf.rects_je_seite.get(nr) or lauf.kategorien_je_seite.get(nr))]
+        if seiten:
+            try:
+                vorab(ausgabe, seiten, OCR_DPI, winkel={nr: lauf.winkel(nr) for nr in seiten})
+            except Exception:
+                pass
     kontrolle = fitz.open(ausgabe)
     try:
         for nr in range(len(kontrolle)):
@@ -1069,28 +1140,8 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
     _planen(lauf, plan, dok, stellen_manuell, bereiche)
     lauf.abbruch_pruefen()
 
-    # 4) Nebenkanäle (nach dem Modell: Anmerkungen sind eingebrannt)
-    if _nebenkanaele is not None and hasattr(_nebenkanaele, "nebenkanaele_entfernen"):
-        try:
-            neu = _nebenkanaele.nebenkanaele_entfernen(doc) or {}
-            for k, v in neu.items():
-                if isinstance(v, (int, float)) and not isinstance(v, bool):
-                    zaehler[k] = max(int(zaehler.get(k, 0) or 0), int(v))
-                elif k not in zaehler:
-                    zaehler[k] = v
-            lauf.beschnitt_lokal = False
-            hinweis_fn = getattr(_nebenkanaele, "nebenkanal_hinweis", None)
-            hinweis = hinweis_fn(zaehler) if hinweis_fn else _nebenkanal_hinweis(zaehler)
-        except Exception as e:
-            lauf.melden("warnung", "NEBENKANAL_ENTFERNT",
-                        f"Nebenkanäle (Anmerkungen, Metadaten …) konnten nicht vollständig entfernt werden ({e}) – "
-                        f"Rückfall auf die einfache Bereinigung.")
-            _nebenkanaele_entfernen(doc, zaehler)
-            hinweis = _nebenkanal_hinweis(zaehler)
-    else:
-        _nebenkanaele_entfernen(doc, zaehler)
-        hinweis = _nebenkanal_hinweis(zaehler)
-    lauf.melden("hinweis", "NEBENKANAL_ENTFERNT", hinweis)
+    # 4) Inhalte außerhalb des Beschnitts: das Nebenkanal-Modul (falls vorhanden) entfernt sie selbst
+    lauf.beschnitt_lokal = not (_nebenkanaele is not None and hasattr(_nebenkanaele, "nebenkanaele_entfernen"))
 
     # 5) Seiten
     versteckt = vorbereitung.get("versteckt", {})
@@ -1109,6 +1160,9 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
     doc = lauf.doc
     ergebnis["treffer"] = lauf.treffer
     ergebnis["stellen_geschwaerzt"] = lauf.stellen_geschwaerzt
+
+    # 5a) Nebenkanäle – nach allen Schwärzungen, vor dem Speichern (Vertrag des Moduls nebenkanaele)
+    lauf.melden("hinweis", "NEBENKANAL_ENTFERNT", _nebenkanaele_bereinigen(lauf, doc, zaehler))
 
     # 6) Nicht lokalisierte Funde/Stellen
     # Funde ohne Stellen (alte Aufrufer), deren Text nirgends vorkommt: Warnung wie bisher. Stellen der

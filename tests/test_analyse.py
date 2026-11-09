@@ -827,3 +827,87 @@ def test_analyse_laufzeit_skaliert_linear(monkeypatch):
     assert len(gross) == 4 * len(klein) == 6000
     assert (t2 - t1) < 7 * max(t1 - t0, 0.05), (t1 - t0, t2 - t1)
     assert t2 - t1 < 30
+
+
+# ----------------------------------------------------------------------
+# Tabellenzellen: zweiter Namens-Durchgang je Zelle, Straßen nicht über Spaltenlücken
+# (Entwicklungs-Benchmark 006_leistungsabrechnung: "Physiotherapie Santoro" übersehen,
+#  "Am Kurpark | 946,21" als Straße geschwärzt)
+# ----------------------------------------------------------------------
+def _kurzzeilen_ki(namen_je_zeile):
+    """Ersatz für namen.finde_personen, der wie die Kurzzeilen-Erkennung nur auf EIGENEN kurzen Zeilen
+    Namen findet: {zeileninhalt: [name, ...]}."""
+    def finde(text):
+        aus, pos = [], 0
+        for zeile in text.split("\n"):
+            for name in namen_je_zeile.get(zeile.strip(), []):
+                s = pos + zeile.index(name)
+                aus.append({"text": name, "start": s, "ende": s + len(name), "gruppe": None})
+            pos += len(zeile) + 1
+        return aus
+    return finde
+
+
+def test_namen_in_tabellenzellen_zweiter_durchgang(monkeypatch):
+    monkeypatch.setattr(na, "lade_ner", lambda: None)          # ohne Gegenprobe der KI (eigener Test unten)
+    monkeypatch.setattr(na, "finde_personen", _kurzzeilen_ki({
+        "Physiotherapie Santoro": ["Santoro"], "Betrag": ["Betrag"],
+        "Physiotherapie Zieliński": ["Physiotherapie Zieliński"],
+        "Behandlung bei Zieliński": ["Zieliński"]}))
+    text = ("Behandlung bei Zieliński\n"
+            "Datum\t\tLeistungserbringer\t\tBetrag\n"
+            "02.03.2025\t\tPhysiotherapie Santoro\t\t1022,88\n"
+            "02.05.2025\t\tPhysiotherapie Zieliński\t\t1796,41\n")
+    funde = analysiere_text(text, {"namen"}, [], [])
+    texte = {f["text"]: f for f in funde}
+    assert "Santoro" in texte and "ner.zelle" in texte["Santoro"]["quellen"]
+    assert "Betrag" not in texte                                   # Spaltenkopf, kein Name
+    assert "Zieliński" in texte and "Physiotherapie Zieliński" not in texte
+    assert all("Physiotherapie" not in text[s["start"]:s["ende"]] for f in funde for s in f["stellen"])
+    # ohne Spaltenlücken läuft kein zweiter Durchgang
+    aufrufe = []
+    monkeypatch.setattr(na, "finde_personen", lambda t: aufrufe.append(t) or [])
+    analysiere_text("Physiotherapie Santoro 1022,88", {"namen"}, [], [])
+    assert len(aufrufe) == 1
+
+
+def test_zellentext_behaelt_offsets():
+    from anonymisierer.detektoren import klassisch
+    text = "Kopf\nA\t\tB C\tD\nFließtext ohne Spalten\n\f\nX\t\tY"
+    z = klassisch._zellentext(text)
+    assert len(z) == len(text)
+    for i, c in enumerate(text):
+        if c not in "\t" and z[i].strip():
+            assert z[i] == c
+    assert z.split("\n")[1:5] == ["A", "", "B C", "D"]
+    assert klassisch._zellentext("ohne Tabulator") is None
+
+
+@pytest.mark.parametrize("text, erwartet", [
+    ("Rehazentrum Am Kurpark\t\t946,21\t\t662,34", []),          # Hausnummer in anderer Spalte
+    ("Rehazentrum Am Kurpark 946,21 EUR", []),                    # Betrag, keine Hausnummer
+    ("Anschrift: Am Kurpark 9, 12345 Berlin", ["Am Kurpark 9"]),
+    ("Hauptstraße 12a\t\tTelefon", ["Hauptstraße 12a"]),
+])
+def test_strasse_nicht_ueber_spaltenluecken_oder_betraege(text, erwartet):
+    funde = analysiere_text(text, {"strasse"}, [], [])
+    assert sorted(f["text"] for f in funde if f["kategorie"] == "strasse") == erwartet
+
+
+def test_zellen_namen_abkuerzungen_verworfen(monkeypatch):
+    monkeypatch.setattr(na, "lade_ner", lambda: None)
+    monkeypatch.setattr(na, "finde_personen", _kurzzeilen_ki({"RLV Komfort 2024": ["RLV"], "HUONG": ["HUONG"]}))
+    funde = analysiere_text("Tarif:\t\tRLV Komfort 2024\nName\t\tHUONG\n", {"namen"}, [], [])
+    assert {f["text"] for f in funde} == {"HUONG"}
+
+
+@braucht_modell
+def test_zellen_namen_gegenprobe_der_ki():
+    """Gegenprobe im neutralen Satz: Namen bleiben, Spaltenköpfe/Formular-Etiketten fallen heraus."""
+    from anonymisierer.detektoren import klassisch
+    namen_ = {"Santoro", "Petra", "Zeynep", "Tschirner", "Giovanni", "Liselotte", "Silke von Schönau"}
+    woerter = {"Familientarif", "Schlüsselverlust", "Betrag", "Gesamtbetrag", "Physiotherapie", "Hundehalter"}
+    ok = klassisch._zellen_namen_bestaetigen(namen_ | woerter)
+    assert ok is not None
+    assert namen_ <= ok, namen_ - ok
+    assert not (woerter & ok), woerter & ok

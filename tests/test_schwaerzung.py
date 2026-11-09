@@ -1090,3 +1090,25 @@ def test_fremdmodule_nebenkanaele_und_bilder_werden_genutzt(tmp_path, monkeypatc
     e = schwaerze_pdf(pdf, [fund(NAME)], ocr=FakeDienst({0: woerter}), ocr_cache={0: woerter})
     assert aufrufe.get("neben") and aufrufe.get("bilder"), aufrufe
     assert "Nebenkanäle bereinigt (Modul)." in e["hinweise"]
+
+
+def test_beschnitt_wird_entfernt_wenn_nebenkanal_modul_scheitert(tmp_path, monkeypatch):
+    """Die Seitenschleife überlässt Inhalte außerhalb der CropBox dem Nebenkanal-Modul; scheitert es,
+    werden sie trotzdem entfernt (S-05) und die Warnung steht in den Meldungen."""
+    class Kaputt:
+        @staticmethod
+        def nebenkanaele_entfernen(doc, zaehler=None):
+            raise RuntimeError("defekt")
+    monkeypatch.setattr(schwaerzung, "_nebenkanaele", Kaputt)
+    doc = fitz.open()
+    s = doc.new_page()
+    s.insert_text((50, 80), f"Versicherungsnehmer {NAME}", fontsize=11)
+    s.insert_text((50, 800), "Unten: Erika Musterfrau, IBAN " + IBAN, fontsize=11)
+    s.set_cropbox(fitz.Rect(0, 0, 595, 700))
+    pdf = tmp_path / "crop_kaputt.pdf"
+    doc.save(pdf)
+    doc.close()
+    e = schwaerze_pdf(pdf, [fund(NAME)], ocr=FakeDienst())
+    assert "Musterfrau" not in pdftotext(e["ausgabe"]) and "Musterfrau" not in qdf_rohbytes(e["ausgabe"])
+    assert any(m["code"] == "NEBENKANAL_ENTFERNT" and m["art"] == "warnung" and "defekt" in m["text"]
+               for m in e["meldungen"])

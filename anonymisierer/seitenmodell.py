@@ -887,17 +887,15 @@ def woerter_zu_zeilen(woerter) -> list:
     fremd = getattr(_ocr, "woerter_zu_zeilen", None)
     if fremd is not None and fremd is not woerter_zu_zeilen:
         try:
-            zeilen = fremd(woerter)
-            return [sorted(z, key=lambda w: w[0]) for z in zeilen if z]
+            return [list(z) for z in fremd(woerter) if z]      # Lesefolge (auch gedrehte Scans) beibehalten
         except Exception:
             pass
     if all(len(w) >= 8 for w in woerter):
+        # Zeilen und Wortfolge der OCR (Lesefolge, auch bei gedrehten Scans)
         gruppen: dict = {}
         for w in woerter:
             gruppen.setdefault((w[5], w[6]), []).append(w)
-        zeilen = [sorted(g, key=lambda w: (w[7], w[0])) for g in gruppen.values()]
-        zeilen.sort(key=lambda z: (min((w[1] + w[3]) / 2 for w in z), z[0][0]))
-        return zeilen
+        return [sorted(gruppen[k], key=lambda w: w[7]) for k in sorted(gruppen)]
     mitten = sorted({round((w[1] + w[3]) / 2, 1) for w in woerter})
     hoehen = sorted(max(w[3] - w[1], 1.0) for w in woerter)
     toleranz = hoehen[len(hoehen) // 2] * 0.5
@@ -1504,12 +1502,13 @@ def _melden(liste, meldungen, art, code, text, seite=None):
 
 
 def _ocr_holen(dienst, pfad, nr, clip=None):
-    """(Wörter, Warnung, Winkel, Plausibilität) vom OCR-Dienst. Bevorzugt das vollständige Ergebnis
-    (8-Tupel mit Zeilennummern der OCR), sonst woerter() (5-Tupel)."""
+    """(Wörter, Warnung, Winkel, Plausibilität, Meldungen des Dienstes) vom OCR-Dienst. Bevorzugt das
+    vollständige Ergebnis (8-Tupel mit Zeilennummern der OCR), sonst woerter() (5-Tupel)."""
     ergebnis_fn = getattr(dienst, "ergebnis", None)
     if ergebnis_fn is not None:
         e = ergebnis_fn(pfad, nr, OCR_DPI, clip) if clip is not None else ergebnis_fn(pfad, nr, OCR_DPI)
-        return list(e.get("woerter") or []), e.get("warnung"), e.get("winkel"), e.get("plausibel")
+        return (list(e.get("woerter") or []), e.get("warnung"), e.get("winkel"), e.get("plausibel"),
+                e.get("meldungen"))
     if clip is not None:
         try:
             woerter, warnung = dienst.woerter(pfad, nr, OCR_DPI, clip=clip)
@@ -1520,7 +1519,31 @@ def _ocr_holen(dienst, pfad, nr, clip=None):
             woerter, warnung = dienst.woerter(pfad, nr, OCR_DPI)
         except TypeError:
             woerter, warnung = dienst.woerter(pfad, nr)
-    return list(woerter or []), warnung, None, None
+    return list(woerter or []), warnung, None, None, None
+
+
+def _ocr_warnung_melden(warnungen, meldungen, warnung, plausibel, anzahl, dienst_meldungen, nr):
+    """Warnung des Dienstes als Text in die Warnungen (wie bisher) und strukturiert in die Meldungen –
+    mit den Codes des Dienstes, sonst grob eingeordnet."""
+    if warnungen is not None and warnung and warnung not in warnungen:
+        warnungen.append(warnung)
+    if meldungen is None:
+        return
+    if dienst_meldungen:
+        for m in dienst_meldungen:
+            if isinstance(m, dict) and m.get("code"):
+                meldungen.append({"art": m.get("art", "warnung"), "code": m["code"], "text": m.get("text", ""),
+                                  "seite": m.get("seite", nr)})
+        return
+    if not warnung:
+        return
+    if "unplausibel" in warnung or (plausibel is not None and plausibel < 0.4 and anzahl >= 5):
+        code = "OCR_UNPLAUSIBEL"
+    elif "gedreht" in warnung and "fehlgeschlagen" not in warnung:
+        code = "OCR_GELESEN"
+    else:
+        code = "OCR_FEHLER"
+    meldungen.append({"art": "warnung", "code": code, "text": warnung, "seite": nr})
 
 
 def dokument_aufbauen(doc, pfad, ocr=None, ocr_cache=None, melde=None, fortschritt=None, abbruch=None,
@@ -1545,13 +1568,25 @@ def dokument_aufbauen(doc, pfad, ocr=None, ocr_cache=None, melde=None, fortschri
     felder = []
     ocr_fehlt_gemeldet = False
     gesamt = len(doc)
+    entscheidungen: dict = {}
+    vorab = getattr(ocr, "vorab", None)
+    if vorab is not None and pfad is not None:
+        # Scan-Seiten parallel einreihen (Gutachten PERF-05); ergebnis() wartet dann nur noch
+        for nr in range(gesamt):
+            entscheidungen[nr] = ocr_entscheidung(doc[nr])
+        offen = [nr for nr, m in entscheidungen.items() if m == "seite" and nr not in ocr_cache]
+        if offen:
+            try:
+                vorab(pfad, offen, OCR_DPI)
+            except Exception:
+                pass
     for nr in range(gesamt):
         if abbruch is not None and abbruch.is_set():
             raise Abgebrochen()
         if fortschritt:
             fortschritt(nr + 1, gesamt)
         seite = doc[nr]
-        modus = ocr_entscheidung(seite)
+        modus = entscheidungen.get(nr) or ocr_entscheidung(seite)
         bilder = bildbereiche(seite) if modus != "nein" else []
         woerter, winkel, quelle = None, None, "ocr"
         ocr_gelaufen, ocr_warnung = False, False
@@ -1577,30 +1612,24 @@ def dokument_aufbauen(doc, pfad, ocr=None, ocr_cache=None, melde=None, fortschri
                 if modus == "seite":
                     if melde:
                         melde(f"   OCR läuft: {pfad.name if pfad else ''}, Seite {nr + 1}/{gesamt} …")
-                    w, warnung, winkel, plausibel = _ocr_holen(ocr, pfad, nr)
+                    w, warnung, winkel, plausibel, dienst_meldungen = _ocr_holen(ocr, pfad, nr)
                     woerter = w
                     if warnung == "Abgebrochen" and abbruch is not None and abbruch.is_set():
                         raise Abgebrochen()
-                    if warnung:
-                        ocr_warnung = True
-                        if "unplausibel" in warnung or (plausibel is not None and plausibel < 0.4 and len(w) >= 5):
-                            code = "OCR_UNPLAUSIBEL"
-                        elif "gedreht" in warnung and "fehlgeschlagen" not in warnung:
-                            code = "OCR_GELESEN"
-                        else:
-                            code = "OCR_FEHLER"
-                        _melden(warnungen, meldungen, "warnung", code, warnung, nr)
+                    if warnung or dienst_meldungen:
+                        ocr_warnung = ocr_warnung or bool(warnung)
+                        _ocr_warnung_melden(warnungen, meldungen, warnung, plausibel, len(w), dienst_meldungen, nr)
                 else:
                     for bereich in bilder:
                         if abbruch is not None and abbruch.is_set():
                             raise Abgebrochen()
-                        w, warnung, _, _ = _ocr_holen(ocr, pfad, nr, clip=bereich)
+                        w, warnung, _, plausibel, dienst_meldungen = _ocr_holen(ocr, pfad, nr, clip=bereich)
                         woerter.extend(w)
                         if warnung == "Abgebrochen" and abbruch is not None and abbruch.is_set():
                             raise Abgebrochen()
-                        if warnung:
-                            ocr_warnung = True
-                            _melden(warnungen, meldungen, "warnung", "OCR_FEHLER", warnung, nr)
+                        if warnung or dienst_meldungen:
+                            ocr_warnung = ocr_warnung or bool(warnung)
+                            _ocr_warnung_melden(warnungen, meldungen, warnung, plausibel, len(w), dienst_meldungen, nr)
                 if woerter:
                     ocr_cache[nr] = list(woerter)
         m = seite_aufbauen(seite, nr, ocr_woerter=woerter, ocr_quelle=quelle,
