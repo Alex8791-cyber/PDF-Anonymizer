@@ -32,11 +32,15 @@ Angebots-Nr.
 Angebots-Nummer
 Angebotsnr.
 Angebotsnummer
+Antrag Nr.
 Antrags Nr.
 Antrags-Nr.
 Antrags-Nummer
 Antragsnr.
 Antragsnummer
+Arbeitnehmer-Nr.
+Arbeitnehmernummer
+Auftrag Nr.
 Auftrags Nr.
 Auftrags-ID
 Auftrags-Nr.
@@ -71,28 +75,36 @@ Beihilfe-Nr.
 Beihilfe-Nummer
 Beihilfenr.
 Beihilfenummer
+Beitragskonto
+Beitragskontonummer
 Beleg Nr.
 Beleg-ID
 Beleg-Nr.
 Beleg-Nummer
 Belegnr.
 Belegnummer
+Beschäftigtennummer
 Bescheinigungs Nr.
 Bescheinigungs-Nr
 Bescheinigungs-Nr.
 Bescheinigungs-Nummer
 Bescheinigungsnr.
 Bescheinigungsnummer
+Bestands-Nr.
+Bestandsnummer
 Bestell Nr.
 Bestell-Nr.
 Bestell-Nummer
 Bestellnr.
 Bestellnummer
+Betreuernummer
 Betriebs Nr.
 Betriebs-Nr.
 Betriebs-Nummer
 Betriebsnr.
 Betriebsnummer
+BIC
+BIC/SWIFT
 Buchungs Nr.
 Buchungs-Nr.
 Buchungs-Nummer
@@ -106,6 +118,8 @@ Darlehens-Nummer
 Darlehenskonto
 Darlehensnr.
 Darlehensnummer
+Debitoren-Nr.
+Debitorennummer
 Depot Nr.
 Depot-ID
 Depot-Nr.
@@ -162,12 +176,14 @@ Geschäfts-Nr.
 Geschäfts-Nummer
 Geschäftsnr.
 Geschäftsnummer
+Geschäftspartnernummer
 Geschäftszeichen
 Gläubiger-ID
 Gläubiger-ID-Nr.
 Gläubiger-Identifikationsnummer
 Gläubiger-Identnummer
 Gläubigeridentifikationsnummer
+GP-Nr.
 Gutachten Nr.
 Gutachten-ID
 Gutachten-Nr.
@@ -181,12 +197,21 @@ Id-Nr.
 Identifikationsnummer
 IdNr
 IdNr.
+IHK-Reg.-Nr.
+IHK-Registernummer
 IHK-Registrierungsnummer
 Ihr Aktenzeichen
 Ihr Az.
+Ihr Vertrag
 Ihr Zeichen
+Ihre Kundennummer
+Ihre Police
 Ihre Ref.
 Ihre Referenz
+Ihre Schadennummer
+Ihre Versicherung
+Ihre Versicherungsnummer
+Ihre Vertragsnummer
 Ihre Zeichen
 IMEI
 Karten Nr.
@@ -203,6 +228,7 @@ KdNr
 KdNr.
 Kennz.
 Kennzeichen
+Kennziffer
 Kfz-Kennzeichen
 Kfz-Kz.
 Kfz-Zeichen
@@ -213,12 +239,14 @@ Kindergeld-Nr.
 Kindergeld-Nummer
 Kindergeldnr.
 Kindergeldnummer
+KNr.
 Konto Nr.
 Konto-Nr.
 Konto-Nummer
 Kontonr.
 Kontonummer
 Kontoverbindung
+Kontraktnummer
 Krankenversicherten Nr.
 Krankenversicherten-Nr.
 Krankenversicherten-Nummer
@@ -252,6 +280,7 @@ Kunden-Nummer
 Kunden-Referenz
 Kundenkennung
 Kundenkonto
+Kundenkonto-Nr.
 Kundenkontonummer
 Kundennr
 Kundennr.
@@ -267,6 +296,7 @@ Leasingvertrags-Nummer
 Leasingvertragsnr.
 Leasingvertragsnummer
 Leistungs-Nr.
+Leistungsantrag Nr.
 Leistungsfall Nr.
 Leistungsfall-Nr
 Leistungsfall-Nr.
@@ -274,6 +304,7 @@ Leistungsfall-Nummer
 Leistungsfallnr.
 Leistungsfallnummer
 Leistungsnummer
+MA-Nr.
 Makler Nr.
 Makler-Nr.
 Makler-Nummer
@@ -309,6 +340,7 @@ Mitgl.-Nr.
 Mitglieds Nr.
 Mitglieds-Nr.
 Mitglieds-Nummer
+Mitgliedskonto
 Mitgliedsnr
 Mitgliedsnr.
 Mitgliedsnummer
@@ -317,6 +349,8 @@ Objekt-Nr.
 Objekt-Nummer
 Objektnr.
 Objektnummer
+Partner-Nr.
+Partnernummer
 Pass Nr.
 Pass-Nr
 Pass-Nr.
@@ -332,6 +366,7 @@ Patienten-Nummer
 Patientennr.
 Patientennummer
 Pers.-Nr.
+PersNr
 Personal Nr.
 Personal-ID
 Personal-Nr.
@@ -344,6 +379,7 @@ Personalausweisnr.
 Personalausweisnummer
 Personalnr.
 Personalnummer
+Personenkennzahl
 Personenkennziffer
 PNr.
 Police
@@ -383,6 +419,7 @@ Referenznr.
 Referenznummer
 Reg.-Nr.
 Registernummer
+Registrierungs-Nr.
 Registrierungsnummer
 Reisepass Nr.
 Reisepass-Nr.
@@ -405,6 +442,8 @@ Rentenzeichen
 Reservierungsnummer
 RG-Nr.
 Rg.-Nr.
+Risiko-Nr.
+Risikonummer
 RV-Nr.
 RV-Nummer
 RVNR
@@ -420,6 +459,7 @@ Schadenfall-Nr.
 Schadenfall-Nummer
 Schadenfallnr.
 Schadenfallnummer
+SchadenNr
 Schadennr.
 Schadennummer
 Schadens Nr.
@@ -427,6 +467,8 @@ Schadens-Nr.
 Schadens-Nummer
 Schadensnr.
 Schadensnummer
+Schein-Nr.
+Scheinnummer
 Serien Nr.
 Serien-Nr.
 Serien-Nummer
@@ -458,6 +500,9 @@ SV-Nr
 SV-Nr.
 SV-Nummer
 SVNR
+SWIFT
+Swift-BIC
+SWIFT-Code
 Tagebuch Nr.
 Tagebuch-Nr
 Tagebuch-Nr.
@@ -466,6 +511,7 @@ Tagebuchnr.
 Tagebuchnummer
 Tax ID
 Tgb.-Nr.
+Ticket
 Ticket Nr.
 Ticket-ID
 Ticket-Nr.
@@ -489,6 +535,7 @@ Unser Az.
 Unser Zeichen
 Unsere Ref.
 Unsere Referenz
+Unsere Schadennummer
 Unsere Zeichen
 USt-ID
 USt-ID-Nr.
@@ -522,6 +569,8 @@ Versicherungs Nr.
 Versicherungs-Nr
 Versicherungs-Nr.
 Versicherungs-Nummer
+Versicherungskonto
+Versicherungskontonummer
 Versicherungsnr.
 Versicherungsnummer
 Versicherungsschein
@@ -531,6 +580,7 @@ Versicherungsschein-Nr.
 Versicherungsschein-Nummer
 Versicherungsscheinnr.
 Versicherungsscheinnummer
+VersNr
 Versorgungs Nr.
 Versorgungs-Nr
 Versorgungs-Nr.
@@ -551,6 +601,7 @@ Vertragskontonummer
 Vertragsnr
 Vertragsnr.
 Vertragsnummer
+Vertriebspartnernummer
 Verwendungszweck
 VIN
 VN-Nr.
@@ -575,6 +626,7 @@ Zähler Nr.
 Zähler-Nr.
 Zähler-Nummer
 Zählernr.
+Zahlernummer
 Zählernummer
 Zählpunkt
 Zählpunktbezeichnung

@@ -395,6 +395,13 @@ def _abgedeckt(item, text, funde):
     return not re.sub(r"[^0-9A-Za-zÄÖÜäöüß]", "", rest)
 
 
+# Vertragsänderung Phase 3 (Gutachten EQ-15, Strukturregeln): Anschriften von Behörden und Firmen (Rechtsform,
+# Registerangaben, Erlaubnisliste) sind keine Personendaten und bleiben stehen – sie werden als Vorschlag
+# vermerkt (dok.struktur_vorschlaege), nicht geschwärzt. Kundenanschriften gehen weiter immer weg.
+FIRMENANSCHRIFTEN = {("S10", "Postfach 10 11 12"), ("S10", "90401 Nürnberg"),       # Deutsche Rentenversicherung
+                     ("S36", "Hauptstraße 12a"), ("S36", "60311 Frankfurt am Main")}  # Schmidt Finanz GmbH
+
+
 def _korpus_quote(aktive, nur_kategorien=None):
     korpus = json.loads((DATEN / "korpus_erkennung.json").read_text(encoding="utf-8"))
     statistik = {}
@@ -402,6 +409,8 @@ def _korpus_quote(aktive, nur_kategorien=None):
         funde = analysiere_text(sn["text"], aktive, [], [])
         for item in sn["erwartet"]:
             if nur_kategorien is not None and item["kategorie"] not in nur_kategorien:
+                continue
+            if (sn["id"], item["text"]) in FIRMENANSCHRIFTEN:
                 continue
             d = statistik.setdefault(item["kategorie"], [0, 0])
             d[1] += 1
@@ -422,7 +431,7 @@ def test_korpus_muster_trefferquote():
     statistik = _korpus_quote(OHNE_NAMEN, nur_kategorien=set(MINDESTQUOTE))
     gesamt = sum(v[1] for v in statistik.values())
     gefunden = sum(v[0] for v in statistik.values())
-    assert gesamt == 196
+    assert gesamt == 196 - len(FIRMENANSCHRIFTEN)
     fehlschlaege = {k: v for k, v in statistik.items() if v[0] / v[1] < MINDESTQUOTE[k]}
     assert not fehlschlaege, fehlschlaege
     assert gefunden / gesamt >= 0.98
