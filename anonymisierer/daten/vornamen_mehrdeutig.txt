@@ -1,0 +1,70 @@
+# Vornamen, die zugleich gewöhnliche deutsche Wörter sind (Rosa, Ernst, Frank, Mai, Kai, An …).
+# Regeln verlangen für diese Wörter Kontext (Herr/Frau, Nachname dahinter, Rollen-Etikett).
+# Jeder Eintrag steht auch in vornamen.txt.
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+An
+Angel
+Ángel
+Armen
+August
+Basel
+Berat
+Bin
+Can
+Davor
+Erika
+Ernst
+Fang
+Frank
+Gang
+Gloria
+Granit
+Haben
+Hagen
+Hai
+Hande
+Hằng
+Heide
+Helle
+Horst
+Iris
+Jan
+Jasmin
+Jesús
+Jihad
+Job
+Kader
+Kai
+Kamen
+Kläre
+Lasse
+Long
+Mai
+Marine
+Mark
+Max
+Mentor
+Mercedes
+Min
+Na
+Nur
+Per
+Pol
+Rauf
+Reiner
+Rosa
+Rose
+Rosen
+Sang
+Silvester
+Solange
+Song
+Sultan
+Tor
+Vân
+Victoria
+Viola
+Wen
+Wolf

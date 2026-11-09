@@ -1,0 +1,132 @@
+# Feldbezeichner, hinter denen eine Anschrift oder ein Ort einer Person steht.
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+Address
+Adresse
+Adresszusatz
+aktuelle Anschrift
+alte Anschrift
+Anschrift
+Anschrift der versicherten Person
+Anschrift des Arztes
+Anschrift des Halters
+Anschrift des Unfallgegners
+Anschrift des Versicherungsnehmers
+Anschrift des Versicherungsortes
+Anschrift des Zeugen
+App.
+Appartement
+Arbeitsort
+Arbeitsstätte
+Aufenthaltsort
+Belegenheit
+Beschäftigungsort
+Bezirk
+bisherige Anschrift
+Bundesland
+c/o
+City
+Country
+derzeitige Anschrift
+Dienstort
+Ereignisort
+erster Wohnsitz
+Etage
+Garagenstandort
+Geburtsort
+Gemeinde
+Geschoss
+gewöhnlicher Aufenthalt
+Hauptwohnsitz
+Haus-Nr.
+Hausnr.
+Hausnummer
+Heimatanschrift
+Herkunftsland
+Hinterhaus
+Hnr.
+Kanton
+Klinikanschrift
+Korrespondenzadresse
+Korrespondenzanschrift
+Kreis
+Lage des Risikos
+Land
+Landkreis
+Lieferadresse
+Lieferanschrift
+Meldeadresse
+Meldeanschrift
+Name und Anschrift
+Nationalität
+Nebenwohnsitz
+neue Anschrift
+Nr.
+Objektadresse
+Objektanschrift
+Ort
+Ort des Ereignisses
+Ort des Schadens
+Ort des Unfalls
+Ortsteil
+PLZ
+PLZ Ort
+PLZ und Ort
+PLZ, Ort
+PLZ/Ort
+Postadresse
+Postanschrift
+Postcode
+Postfach
+Postleitzahl
+Praxisanschrift
+Privatanschrift
+Rechnungsadresse
+Rechnungsanschrift
+Risikoanschrift
+Risikoort
+Schadenanschrift
+Schadenort
+Schadensort
+Seitenflügel
+Staat
+Staatsangehörigkeit
+Stadtteil
+ständige Anschrift
+Standort
+Standort des Fahrzeugs
+Stockwerk
+Str.
+Str. Nr.
+Str./Nr.
+Straße
+Straße und Hausnummer
+Straße, Hausnummer
+Straße, Nr.
+Straße/Hausnr.
+Straße/Hausnummer
+Straße/Nr.
+Street
+Tatort
+Unfallort
+Unfallstelle
+Versicherungsanschrift
+Versicherungsort
+Vorderhaus
+Wohnadresse
+Wohnanschrift
+wohnhaft
+wohnhaft in
+Wohnort
+Wohnsitz
+wohnt in
+Wohnung
+z. Hd.
+z.Hd.
+Zip code
+zu Händen
+Zusatz
+Zustelladresse
+Zustellanschrift
+zweiter Wohnsitz
