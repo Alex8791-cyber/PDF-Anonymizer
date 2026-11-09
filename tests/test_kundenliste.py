@@ -1,6 +1,7 @@
 """Tests für die Kundenliste (anonymisierer/kundenliste.py, Vertrag Abschnitt 6)."""
 
 import json
+import re
 import os
 import sys
 import time
@@ -63,9 +64,17 @@ def test_speichern_ohne_klartext_und_laden(tmp_path):
     liste.speichern(ziel)
     roh = ziel.read_bytes()
     text = roh.decode("utf-8")                               # Textdatei (Oberfläche liest sie als UTF-8)
-    for klartext in KLARTEXTE:
-        assert klartext.encode("utf-8") not in roh and klartext not in text, klartext
     daten = json.loads(text)
+    # Die gesalzenen Prüfwerte sind reine Hex-Ketten – dort kann sich kein Klartext verstecken …
+    pruefwerte = [w for merkmale in daten["kunden"] for werte in merkmale.values() for w in werte]
+    assert pruefwerte and all(re.fullmatch(r"[0-9a-f]{32,}", w) for w in pruefwerte)
+    # … und nur außerhalb dieser Zufallswerte (und des Salzes) wird nach Klartext gesucht: kurze Folgen wie
+    # „1983“ oder „DE89“ kommen in Hex- bzw. Base64-Zeichen sonst rein zufällig vor (gemessen ≈ 4 % der Läufe).
+    rest = re.sub(r'"[0-9a-f]{32,}"', '""', text)
+    if daten.get("salz", {}).get("wert"):
+        rest = rest.replace(daten["salz"]["wert"], "")
+    for klartext in KLARTEXTE:
+        assert klartext not in rest, klartext
     assert daten["format"] == kl.FORMAT and len(daten["kunden"]) == 2
     if sys.platform != "win32":
         assert (os.stat(ziel).st_mode & 0o777) == 0o600

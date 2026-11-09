@@ -1409,9 +1409,6 @@ def test_kundenliste_importieren_anzeigen_uebergeben_entfernen(app, umgebung, mo
     csv_datei = tmp / "kunden.csv"
     csv_datei.write_text("Name;Geburtsdatum;IBAN\nMax Mustermann;02.09.1983;DE89370400440532013000\n"
                          "Erika Musterfrau;01.01.1970;\n", encoding="utf-8")
-    # Erst die Anzeige der Attrappe (Engine ohne Kundenliste) – die echte Kundenliste ist aktiv und zeigt
-    # den Hinweis „noch nicht aktiv“ zu Recht nicht mehr.
-    monkeypatch.setattr(gui, "Kundenliste", attrappen.Kundenliste)
     app.kundenliste_importieren(csv_datei)
     assert app.kundenliste is not None and app.kundenliste.anzahl_kunden == 2
     assert app.kunden_label.cget("text").startswith("2 Kunden geladen – gespeichert ohne Klartext")
