@@ -18,6 +18,7 @@ und Windows gleich ausfallen. Fehlt eine Datei, wird auf Base14 zurückgefallen.
 """
 
 import os
+import random
 import re
 import sys
 import unicodedata
@@ -235,6 +236,14 @@ def _silben_grenzen(wort: str) -> list:
     return stellen
 
 
+# Merkmal "sonderzeichen_windows" (Vertrag 12.7): Windows-Schriften liefern in der Textebene NBSP statt
+# Leerzeichen und einen SICHTBAREN weichen Trennstrich (U+00AD) bzw. geschützte Bindestriche (U+2011) statt "-".
+# Der Generator schreibt diese Zeichen in ausgewählte Einträge, damit auch Linux-Läufe die Fehlerklasse messen.
+SONDERZEICHEN_KATEGORIEN = {"namen", "telefon", "email", "iban", "vertrag", "plzort", "strasse", "kfz", "svnr",
+                            "bic", "mandat", "steuerid", "kvnr", "ausweis"}
+SONDERZEICHEN_BEMERKUNG = "Sonderzeichen (Windows)"
+
+
 class Satz:
     """Ein PDF im Aufbau: Seiten, Wahrheitseinträge, Klartext je Seite, Merkmale."""
 
@@ -247,6 +256,27 @@ class Satz:
         self.trennungen = 0
         self.seiten: list = []            # Seite-Objekte
         self.messmodus = False
+        self.sonderzeichen: str | None = None   # Startwert der Sonderzeichen-Entscheidungen oder None (aus)
+
+    def _sonderzeichen_setzen(self, text: str, kategorie: str, schrift: Schrift) -> str:
+        """Leerzeichen -> NBSP, "-" -> sichtbarer U+00AD oder U+2011/U+2010 (je nach Schrift), wie es die
+        Textebene von Windows-Schriften liefert. Die Entscheidung hängt nur von Startwert, Kategorie und Text ab
+        (eigener Zufallsstrom: Messung und Setzen ergeben dasselbe, der übrige Korpus bleibt unverändert)."""
+        if self.sonderzeichen is None or kategorie not in SONDERZEICHEN_KATEGORIEN or schrift.base14:
+            return text
+        rng = random.Random(f"{self.sonderzeichen}/{kategorie}/{text}")
+        if rng.random() >= 0.7:
+            return text
+        striche = [z for z in ("­", "‑", "‐") if schrift._zeichen_ok(z)]
+        aus = []
+        for c in text:
+            if c == " " and schrift._zeichen_ok(" ") and rng.random() < 0.8:
+                aus.append(" ")
+            elif c == "-" and striche and rng.random() < 0.8:
+                aus.append(rng.choice(striche))
+            else:
+                aus.append(c)
+        return "".join(aus)
 
     # -- Einträge ------------------------------------------------------
     def eintrag(self, text: str, kategorie: str, seite: int, kanal: str = "text", bemerkung: str = "",
@@ -282,6 +312,12 @@ class Satz:
                 bem = (bem + "; " if bem else "") + "transliteriert"
                 if not self.messmodus:
                     self.merkmale.add("transliteration")
+            sonder = self._sonderzeichen_setzen(dargestellt, kat, schrift)
+            if sonder != dargestellt:
+                dargestellt = sonder
+                bem = (bem + "; " if bem else "") + SONDERZEICHEN_BEMERKUNG
+                if not self.messmodus:
+                    self.merkmale.add("sonderzeichen_windows")
             if zusatz:
                 bem = (bem + "; " if bem else "") + zusatz
             if not self.messmodus:

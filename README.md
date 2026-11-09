@@ -62,6 +62,12 @@ sie immer zum Programm passt.
 | SEPA-Mandatsreferenzen | – | `[MANDATSREFERENZ]` | an |  |
 | BIC (bei IBAN oder Etikett) | – | `[BIC]` | an |  |
 | Kreditkartennummern | – | `[KREDITKARTE]` | an |  |
+| Ausländische Anschriften und Kennzeichen | – | `[AUSLAND]` | an |  |
+| Orte ohne PLZ (Ort-Datum-Zeile, Geburtsort) | – | `[ORT]` | an |  |
+| Beruf (bei Personen) | – | `[BERUF]` | an |  |
+| Arbeitgeber (bei Personen) | – | `[ARBEITGEBER]` | an |  |
+| Diagnosen, ICD-Codes (Gesundheitsdaten) | – | `[DIAGNOSE]` | aus |  |
+| Medikamente (Gesundheitsdaten) | – | `[MEDIKAMENT]` | aus |  |
 | ALLE Datumsangaben (Vorsicht!) | 15.03.2024 | `[DATUM]` | aus | Vorsicht: auch Vertrags- und Briefdaten |
 <!-- TABELLE-ENDE -->
 
