@@ -1,0 +1,1389 @@
+[
+ {
+  "id": "S01",
+  "typ": "Versicherungsschein LV (Tabellenlayout)",
+  "text": "Allianz Lebensversicherungs-AG\nVersicherungsschein\nVersicherungsnummer: 7 345 678 901\nVersicherungsnehmer\nHerr\nMax Mustermann\nHauptstraße 12a\n90402 Nürnberg\nVersicherte Person          Geburtsdatum          Versicherungsbeginn\nMax Mustermann              02.09.1983            01.01.2020\nTarif: Rente 2020 Komfort\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Max Mustermann"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "7 345 678 901"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Hauptstraße 12a"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "90402 Nürnberg"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "02.09.1983"
+   }
+  ]
+ },
+ {
+  "id": "S02",
+  "typ": "Kfz-Versicherungsschein",
+  "text": "Kfz-Versicherungsschein\nVersicherungsscheinnummer: KH-123456789-01\nVersicherungsnehmer/Halter: Herr Mehmet Öztürk, Von-der-Tann-Str. 3, 90402 NÜRNBERG\nFahrzeug: VW Golf VIII, amtl. Kennzeichen N-AB 1234\nFahrzeug-Ident-Nr. WVWZZZ1KZAW123456\nGeburtsdatum des Versicherungsnehmers: 15.03.1979\n",
+  "erwartet": [
+   {
+    "kategorie": "vertrag",
+    "text": "KH-123456789-01"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Mehmet Öztürk"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Von-der-Tann-Str. 3"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "90402 NÜRNBERG"
+   },
+   {
+    "kategorie": "kfz",
+    "text": "N-AB 1234"
+   },
+   {
+    "kategorie": "fin",
+    "text": "WVWZZZ1KZAW123456"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "15.03.1979"
+   }
+  ]
+ },
+ {
+  "id": "S03",
+  "typ": "Beitragsrechnung",
+  "text": "Beitragsrechnung Nr. 2024-00123\nVers.-Nr. 123.456.789-0\nFrau\nAnna-Lena Müller-Lüdenscheidt\nBerliner Straße 5\n60311 Frankfurt am Main\nFälliger Beitrag: 45,90 EUR, Fälligkeit 01.12.2024\nDer Beitrag wird von Ihrem Konto abgebucht:\nIBAN DE89370400440532013000 BIC COBADEFFXXX\nMandatsreferenz M-2024-556677\n",
+  "erwartet": [
+   {
+    "kategorie": "vertrag",
+    "text": "123.456.789-0"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Anna-Lena Müller-Lüdenscheidt"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Berliner Straße 5"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "60311 Frankfurt am Main"
+   },
+   {
+    "kategorie": "iban",
+    "text": "DE89370400440532013000"
+   },
+   {
+    "kategorie": "bic",
+    "text": "COBADEFFXXX"
+   },
+   {
+    "kategorie": "mandat",
+    "text": "M-2024-556677"
+   }
+  ]
+ },
+ {
+  "id": "S04",
+  "typ": "PKV-Beitragsrechnung",
+  "text": "Debeka Krankenversicherungsverein a. G.\nVersicherungsnummer 1234567890\nKrankenversichertennummer A123456789\nVersicherte Person: Nguyen Thi Lan, geb. 12.07.1990\nMonatsbeitrag ab 01.01.2025: 489,12 EUR\n",
+  "erwartet": [
+   {
+    "kategorie": "vertrag",
+    "text": "1234567890"
+   },
+   {
+    "kategorie": "kvnr",
+    "text": "A123456789"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Nguyen Thi Lan"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "12.07.1990"
+   }
+  ]
+ },
+ {
+  "id": "S05",
+  "typ": "Schadenmeldung Kfz",
+  "text": "Schadenanzeige Kraftfahrt\nSchaden-Nr. 2024-SH-00123\nVersicherungsnehmer: Herr Ahmet Yılmaz, Tel. 0171/2345678\nUnfallort/-zeit: Nürnberg, Fürther Str. 120, am 14.10.2024 um 17:30 Uhr\nUnfallgegner: Frau Katarzyna Nowak, Kennzeichen M-X 1E, Tel. 0911 / 123 45 67\nZeuge: Herr Piotr Wiśniewski, Im Winkel 2, 90403 Nürnberg, Mobil 01512345678\nFahrer: Elif Yılmaz (Tochter, geb. 03.05.2005)\n",
+  "erwartet": [
+   {
+    "kategorie": "vertrag",
+    "text": "2024-SH-00123"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Ahmet Yılmaz"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Katarzyna Nowak"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Piotr Wiśniewski"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Elif Yılmaz"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "0171/2345678"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "0911 / 123 45 67"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "01512345678"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Fürther Str. 120"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Im Winkel 2"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "90403 Nürnberg"
+   },
+   {
+    "kategorie": "kfz",
+    "text": "M-X 1E"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "03.05.2005"
+   }
+  ]
+ },
+ {
+  "id": "S06",
+  "typ": "Antrag BU",
+  "text": "Antrag auf Berufsunfähigkeitsversicherung\nAntragsnummer 87654321\nAntragsteller: MUSTERMANN, MAX\nGeb.-Dat. 2.9.83   Geburtsort: Nürnberg   Staatsangehörigkeit: deutsch\nBeruf: Versicherungskaufmann\nAnschrift: Unter den Linden 1, 10117 Berlin\nE-Mail: Max.Mustermann@Example.DE   Mobil: +49 (0) 171 2345678\n",
+  "erwartet": [
+   {
+    "kategorie": "vertrag",
+    "text": "87654321"
+   },
+   {
+    "kategorie": "namen",
+    "text": "MUSTERMANN, MAX"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "2.9.83"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Unter den Linden 1"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "10117 Berlin"
+   },
+   {
+    "kategorie": "email",
+    "text": "Max.Mustermann@Example.DE"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "+49 (0) 171 2345678"
+   }
+  ]
+ },
+ {
+  "id": "S07",
+  "typ": "Kündigung",
+  "text": "Hiermit kündige ich meinen Vertrag mit der Policen-Nr. 4711/0815/22\nzum nächstmöglichen Zeitpunkt.\nMit freundlichen Grüßen\nAnna-Lena Müller-Lüdenscheidt\nIm Winkel 2\n61348 Bad Homburg v. d. Höhe\nTel. (06172) 123456\n",
+  "erwartet": [
+   {
+    "kategorie": "vertrag",
+    "text": "4711/0815/22"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Anna-Lena Müller-Lüdenscheidt"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Im Winkel 2"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "61348 Bad Homburg v. d. Höhe"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "(06172) 123456"
+   }
+  ]
+ },
+ {
+  "id": "S08",
+  "typ": "Widerruf",
+  "text": "Widerruf\nVorgangsnummer VG-2024-001122\nReferenz: 99887766\nIch, MUSTERMANN MAX, geboren am 2. September 1983, widerrufe den am 05.11.2024\ngeschlossenen Vertrag (Schein-Nr. LV 88 77 66 55).\n",
+  "erwartet": [
+   {
+    "kategorie": "vertrag",
+    "text": "VG-2024-001122"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "99887766"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "LV 88 77 66 55"
+   },
+   {
+    "kategorie": "namen",
+    "text": "MUSTERMANN MAX"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "2. September 1983"
+   }
+  ]
+ },
+ {
+  "id": "S09",
+  "typ": "Rentenbescheid",
+  "text": "Deutsche Rentenversicherung Bund\nVersicherungsnummer 65170839J008\nKennzeichen (bei Schriftwechsel bitte angeben): 65170839J008 / 1234\nHerrn\nMax Mustermann\nAm Bahnhof 3\n66386 St. Ingbert\nRentenbescheid\nSie haben Anspruch auf Regelaltersrente ab 01.10.2048.\nSteuer-ID: 86095742719\n",
+  "erwartet": [
+   {
+    "kategorie": "svnr",
+    "text": "65170839J008"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Max Mustermann"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Am Bahnhof 3"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "66386 St. Ingbert"
+   },
+   {
+    "kategorie": "steuerid",
+    "text": "86095742719"
+   }
+  ]
+ },
+ {
+  "id": "S10",
+  "typ": "Rentenauskunft",
+  "text": "Rentenauskunft\nRentenversicherungsnummer 12 345678 A 123\nFrau Anna Berg, geboren am 02.09.1983\nDeutsche Rentenversicherung Nordbayern, Postfach 10 11 12, 90401 Nürnberg\nBisher erreichte Rentenanwartschaft: 1.234,56 EUR monatlich\n",
+  "erwartet": [
+   {
+    "kategorie": "svnr",
+    "text": "12 345678 A 123"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Anna Berg"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "02.09.1983"
+   },
+   {
+    "kategorie": "postfach",
+    "text": "Postfach 10 11 12"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "90401 Nürnberg"
+   }
+  ]
+ },
+ {
+  "id": "S11",
+  "typ": "Arztbrief",
+  "text": "Praxis Dr. med. Anna Berg, Fachärztin für Innere Medizin\nLindenallee 7, 90402 Nürnberg, Tel. 0911-123456, Fax 0911-123457\nPatient: Herr Mustermann, Max, * 02.09.1983\nwohnhaft Hauptstr. 12 a, 90402 Nürnberg\nDiagnose: Z. n. Bandscheibenvorfall L4/L5\nMitbehandler: Prof. Dr. Hans-Jürgen Weber, Klinikum Nürnberg Süd\nMit kollegialen Grüßen\nDr. med. Anna Berg\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Anna Berg"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Mustermann, Max"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Hans-Jürgen Weber"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Lindenallee 7"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Hauptstr. 12 a"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "90402 Nürnberg"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "0911-123456"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "0911-123457"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "02.09.1983"
+   }
+  ]
+ },
+ {
+  "id": "S12",
+  "typ": "PKV-Leistungsabrechnung",
+  "text": "Leistungsabrechnung\nVersicherten-Nr. 987654321\nVersicherungsnehmer: Herr Dr. Thomas Schneider\nMitversichert: Lea Schneider (Kind), geb. 21.11.2015\nRechnung Dr. med. Anna Berg vom 03.09.2024, Rechnungs-Nr. 2024-4711, Betrag 183,45 EUR\nErstattung: 164,10 EUR auf Konto DE02 1203 0000 0000 2020 51\n",
+  "erwartet": [
+   {
+    "kategorie": "vertrag",
+    "text": "987654321"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Thomas Schneider"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Lea Schneider"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Anna Berg"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "21.11.2015"
+   },
+   {
+    "kategorie": "iban",
+    "text": "DE02 1203 0000 0000 2020 51"
+   }
+  ]
+ },
+ {
+  "id": "S13",
+  "typ": "Maklervollmacht",
+  "text": "Maklervollmacht\nVollmachtgeber: Frau Katarzyna Nowak-Wiśniewska, geb. 30.06.1988\nBerliner Str. 5, 15230 Frankfurt (Oder)\nBevollmächtigter: Thomas Schmidt, Versicherungsmakler (IHK), Schmidt Finanz GmbH\nHauptstraße 12a, 60311 Frankfurt am Main, Tel. +49 69 1234567, E-Mail t.schmidt@schmidt-finanz.de\nDie Vollmacht umfasst die Betreuung sämtlicher Versicherungsverträge.\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Katarzyna Nowak-Wiśniewska"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Thomas Schmidt"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "30.06.1988"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Berliner Str. 5"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Hauptstraße 12a"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "15230 Frankfurt"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "60311 Frankfurt am Main"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "+49 69 1234567"
+   },
+   {
+    "kategorie": "email",
+    "text": "t.schmidt@schmidt-finanz.de"
+   }
+  ]
+ },
+ {
+  "id": "S14",
+  "typ": "Datenschutzerklärung",
+  "text": "Datenschutzerklärung\nVerantwortlicher: Schmidt Finanz GmbH, vertreten durch Thomas Schmidt\nDatenschutzbeauftragte: Frau Dipl.-Jur. Sabine Krüger\nKontakt: datenschutz@schmidt-finanz.de, Telefon (0911) 123456\nBetroffene Person: Herr Max Mustermann, Kundennummer 4711\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Thomas Schmidt"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Sabine Krüger"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Max Mustermann"
+   },
+   {
+    "kategorie": "email",
+    "text": "datenschutz@schmidt-finanz.de"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "(0911) 123456"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "4711"
+   }
+  ]
+ },
+ {
+  "id": "S15",
+  "typ": "Mahnung",
+  "text": "Zahlungserinnerung / 1. Mahnung\nKunden-Nr. 1234567   Aktenzeichen 12 AZ 345/24\nSehr geehrte Frau Müller-Lüdenscheidt,\nfür den Vertrag VS-Nr. 9876543210 ist ein Beitrag von 91,80 EUR offen.\nBitte überweisen Sie auf AT61 1904 3002 3457 3201 (Raiffeisen) oder\nCH93 0076 2011 6238 5295 7 bis zum 20.12.2024.\n",
+  "erwartet": [
+   {
+    "kategorie": "vertrag",
+    "text": "1234567"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "12 AZ 345/24"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "9876543210"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Müller-Lüdenscheidt"
+   },
+   {
+    "kategorie": "iban",
+    "text": "AT61 1904 3002 3457 3201"
+   },
+   {
+    "kategorie": "iban",
+    "text": "CH93 0076 2011 6238 5295 7"
+   }
+  ]
+ },
+ {
+  "id": "S16",
+  "typ": "Telefon-Varianten",
+  "text": "Telefon: 0911 / 123 45 67\nTelefon: (0911) 123456\nTelefon: 0911-123456\nMobil: +49 (0) 171 2345678\nMobil: 0171/2345678\nMobil: 01712345678\nMobil: +49 171 2345678\nFax: 0911 123457\nTelefon: 0911/12 34 56\nTelefon: 0 89 / 12 34 56 78\nTelefon: +49-911-1234567\nTelefon: 0049 911 1234567\nTelefon: 0911 1234567-0\n",
+  "erwartet": [
+   {
+    "kategorie": "telefon",
+    "text": "0911 / 123 45 67"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "(0911) 123456"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "0911-123456"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "+49 (0) 171 2345678"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "0171/2345678"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "01712345678"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "+49 171 2345678"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "0911 123457"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "0911/12 34 56"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "0 89 / 12 34 56 78"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "+49-911-1234567"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "0049 911 1234567"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "0911 1234567-0"
+   }
+  ]
+ },
+ {
+  "id": "S17",
+  "typ": "Straßen-Varianten",
+  "text": "Hauptstraße 12a\nBerliner Straße 5\nBerliner Str. 5\nAm Bahnhof 3\nIm Winkel 2\nVon-der-Tann-Str. 3\nUnter den Linden 1\nPostfach 10 11 12\nc/o Familie Mustermann, Rosenweg 14 b\nSchillerstr.12\nStraße des 17. Juni 135\nAn der Alten Mühle 4\nBerliner Platz 1\nMarktplatz 1\nKirchgasse 2\nLindenallee 7\nGoethestraße 10-12\n",
+  "erwartet": [
+   {
+    "kategorie": "strasse",
+    "text": "Hauptstraße 12a"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Berliner Straße 5"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Berliner Str. 5"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Am Bahnhof 3"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Im Winkel 2"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Von-der-Tann-Str. 3"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Unter den Linden 1"
+   },
+   {
+    "kategorie": "postfach",
+    "text": "Postfach 10 11 12"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Mustermann",
+    "kontext": "Familie Mustermann"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Rosenweg 14 b"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Schillerstr.12"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Straße des 17. Juni 135"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "An der Alten Mühle 4"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Berliner Platz 1"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Marktplatz 1"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Kirchgasse 2"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Lindenallee 7"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Goethestraße 10-12"
+   }
+  ]
+ },
+ {
+  "id": "S18",
+  "typ": "PLZ/Ort-Varianten",
+  "text": "60311 Frankfurt am Main\n61348 Bad Homburg v. d. Höhe\n66386 St. Ingbert\n15230 Frankfurt (Oder)\nD-90402 Nürnberg\nA-1010 Wien\nCH-8001 Zürich\n90402 NÜRNBERG\n10115 Berlin-Mitte\n91413 Neustadt a. d. Aisch\n",
+  "erwartet": [
+   {
+    "kategorie": "plzort",
+    "text": "60311 Frankfurt am Main"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "61348 Bad Homburg v. d. Höhe"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "66386 St. Ingbert"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "15230 Frankfurt (Oder)"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "D-90402 Nürnberg"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "A-1010 Wien"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "CH-8001 Zürich"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "90402 NÜRNBERG"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "10115 Berlin-Mitte"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "91413 Neustadt a. d. Aisch"
+   }
+  ]
+ },
+ {
+  "id": "S19a",
+  "typ": "Geburtsdatum 'geb.'",
+  "text": "Versicherte Person: Max Mustermann, geb. 02.09.1983\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Max Mustermann"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "02.09.1983"
+   }
+  ]
+ },
+ {
+  "id": "S19b",
+  "typ": "Geburtsdatum 'Geburtsdatum:'",
+  "text": "Geburtsdatum: 02.09.1983\n",
+  "erwartet": [
+   {
+    "kategorie": "geburt",
+    "text": "02.09.1983"
+   }
+  ]
+ },
+ {
+  "id": "S19c",
+  "typ": "Geburtsdatum 'Geb.-Dat. 2.9.83'",
+  "text": "Geb.-Dat. 2.9.83\n",
+  "erwartet": [
+   {
+    "kategorie": "geburt",
+    "text": "2.9.83"
+   }
+  ]
+ },
+ {
+  "id": "S19d",
+  "typ": "Geburtsdatum '* 02.09.1983'",
+  "text": "Herr Max Mustermann, * 02.09.1983, wohnhaft in Nürnberg\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Max Mustermann"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "02.09.1983"
+   }
+  ]
+ },
+ {
+  "id": "S19e",
+  "typ": "Geburtsdatum ausgeschrieben",
+  "text": "geboren am 2. September 1983 in Nürnberg\n",
+  "erwartet": [
+   {
+    "kategorie": "geburt",
+    "text": "2. September 1983"
+   }
+  ]
+ },
+ {
+  "id": "S19f",
+  "typ": "Geburtsdatum langes Etikett (26 Zeichen Abstand)",
+  "text": "Geburtsdatum der versicherten Person: 02.09.1983\n",
+  "erwartet": [
+   {
+    "kategorie": "geburt",
+    "text": "02.09.1983"
+   }
+  ]
+ },
+ {
+  "id": "S19g",
+  "typ": "Geburtsdatum Schrägstrich",
+  "text": "Geburtsdatum: 02/09/1983\n",
+  "erwartet": [
+   {
+    "kategorie": "geburt",
+    "text": "02/09/1983"
+   }
+  ]
+ },
+ {
+  "id": "S19h",
+  "typ": "Geburtsdatum ISO",
+  "text": "Geburtsdatum: 1983-09-02\n",
+  "erwartet": [
+   {
+    "kategorie": "geburt",
+    "text": "1983-09-02"
+   }
+  ]
+ },
+ {
+  "id": "S19i",
+  "typ": "Geburtsdatum Tabellenkopf (Versicherungsschein)",
+  "text": "Geburtsdatum           Geschlecht           Familienstand\n02.09.1983             männlich             verheiratet\n",
+  "erwartet": [
+   {
+    "kategorie": "geburt",
+    "text": "02.09.1983"
+   }
+  ]
+ },
+ {
+  "id": "S19j",
+  "typ": "Geburtsdatum zweistelliges Jahr ohne Stichwort",
+  "text": "Antragsteller: Max Mustermann, 02.09.83\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Max Mustermann"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "02.09.83"
+   }
+  ]
+ },
+ {
+  "id": "S20",
+  "typ": "Namen in Tabellenzellen (versicherte Personen)",
+  "text": "Versicherte Personen\nName                  Vorname      Geburtsdatum   Rolle\nMustermann            Max          02.09.1983     VN\nMustermann            Erika        15.05.1985     Ehepartner\nMustermann            Leon         01.02.2012     Kind\nNguyen                Thi Lan      12.07.1990     Partnerin\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Mustermann"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Max"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Erika"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Leon"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Nguyen"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Thi Lan"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "02.09.1983"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "15.05.1985"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "01.02.2012"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "12.07.1990"
+   }
+  ]
+ },
+ {
+  "id": "S21",
+  "typ": "Name über Zeilen getrennt (Adressfenster)",
+  "text": "Herrn\nProf. Dr. Hans-Jürgen\nWeber\nLindenallee 7\n90402 Nürnberg\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Hans-Jürgen"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Weber"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Lindenallee 7"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "90402 Nürnberg"
+   }
+  ]
+ },
+ {
+  "id": "S22",
+  "typ": "Ausländische Namen im Brieftext",
+  "text": "Sehr geehrter Herr Yılmaz,\nsehr geehrte Frau Nowak-Wiśniewska,\nbezüglich der Verträge von Herrn Nguyen Van Minh und Frau Fatima Al-Sayed\nsowie Herrn Mohammed El-Masri und Frau Aylin Kaya haben wir Folgendes veranlasst.\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Yılmaz"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Nowak-Wiśniewska"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Nguyen Van Minh"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Fatima Al-Sayed"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Mohammed El-Masri"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Aylin Kaya"
+   }
+  ]
+ },
+ {
+  "id": "S23",
+  "typ": "Kinder-, Arzt- und Zeugennamen in Prosa",
+  "text": "Unsere Tochter Mia (geb. 04.04.2016) wurde von Dr. Berg behandelt.\nZeugin des Unfalls war Frau Schulze aus der Nachbarschaft.\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Mia"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Berg"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Schulze"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "04.04.2016"
+   }
+  ]
+ },
+ {
+  "id": "S24a",
+  "typ": "IBAN mit Leerzeichen",
+  "text": "IBAN: DE89 3704 0044 0532 0130 00\n",
+  "erwartet": [
+   {
+    "kategorie": "iban",
+    "text": "DE89 3704 0044 0532 0130 00"
+   }
+  ]
+ },
+ {
+  "id": "S24b",
+  "typ": "IBAN ohne Leerzeichen",
+  "text": "IBAN DE89370400440532013000\n",
+  "erwartet": [
+   {
+    "kategorie": "iban",
+    "text": "DE89370400440532013000"
+   }
+  ]
+ },
+ {
+  "id": "S24c",
+  "typ": "IBAN kleingeschrieben",
+  "text": "iban: de89 3704 0044 0532 0130 00\n",
+  "erwartet": [
+   {
+    "kategorie": "iban",
+    "text": "de89 3704 0044 0532 0130 00"
+   }
+  ]
+ },
+ {
+  "id": "S24d",
+  "typ": "IBAN über Zeilenumbruch",
+  "text": "Konto: DE89 3704 0044\n0532 0130 00\n",
+  "erwartet": [
+   {
+    "kategorie": "iban",
+    "text": "DE89 3704 0044\n0532 0130 00"
+   }
+  ]
+ },
+ {
+  "id": "S24e",
+  "typ": "IBAN AT/CH, BIC, Kreditkarte",
+  "text": "IBAN AT61 1904 3002 3457 3201\nIBAN CH93 0076 2011 6238 5295 7\nBIC: COBADEFFXXX\nKreditkarte: VISA 4532 0151 1283 0366, gültig bis 12/27\n",
+  "erwartet": [
+   {
+    "kategorie": "iban",
+    "text": "AT61 1904 3002 3457 3201"
+   },
+   {
+    "kategorie": "iban",
+    "text": "CH93 0076 2011 6238 5295 7"
+   },
+   {
+    "kategorie": "bic",
+    "text": "COBADEFFXXX"
+   },
+   {
+    "kategorie": "kreditkarte",
+    "text": "4532 0151 1283 0366"
+   }
+  ]
+ },
+ {
+  "id": "S25",
+  "typ": "Kfz-Kennzeichen-Varianten",
+  "text": "Kennzeichen N-AB 1234\nKennzeichen B-MW 1\nKennzeichen M-X 1E\nKennzeichen N AB 1234\nKennzeichen N-AB1234\n",
+  "erwartet": [
+   {
+    "kategorie": "kfz",
+    "text": "N-AB 1234"
+   },
+   {
+    "kategorie": "kfz",
+    "text": "B-MW 1"
+   },
+   {
+    "kategorie": "kfz",
+    "text": "M-X 1E"
+   },
+   {
+    "kategorie": "kfz",
+    "text": "N AB 1234"
+   },
+   {
+    "kategorie": "kfz",
+    "text": "N-AB1234"
+   }
+  ]
+ },
+ {
+  "id": "S26",
+  "typ": "E-Mail-Varianten",
+  "text": "max.mustermann@example.de\nMax.Mustermann@Example.DE\nm_mustermann+versicherung@gmail.com\ninfo@müller-versicherungen.de\nmax.mustermann(at)example.de\nE-Mail:max@web.de.\n",
+  "erwartet": [
+   {
+    "kategorie": "email",
+    "text": "max.mustermann@example.de"
+   },
+   {
+    "kategorie": "email",
+    "text": "Max.Mustermann@Example.DE"
+   },
+   {
+    "kategorie": "email",
+    "text": "m_mustermann+versicherung@gmail.com"
+   },
+   {
+    "kategorie": "email",
+    "text": "info@müller-versicherungen.de"
+   },
+   {
+    "kategorie": "email",
+    "text": "max.mustermann(at)example.de"
+   },
+   {
+    "kategorie": "email",
+    "text": "max@web.de"
+   }
+  ]
+ },
+ {
+  "id": "S27",
+  "typ": "Steuernummer vs. Steuer-ID",
+  "text": "Steuernummer 123/4567/8901\nSteuer-ID 86095742719\nIdNr. 86 095 742 719\nSteuerliche Identifikationsnummer: 86095742719\nUSt-IdNr. DE123456789\n",
+  "erwartet": [
+   {
+    "kategorie": "steuernr",
+    "text": "123/4567/8901"
+   },
+   {
+    "kategorie": "steuerid",
+    "text": "86095742719"
+   },
+   {
+    "kategorie": "steuerid",
+    "text": "86 095 742 719"
+   },
+   {
+    "kategorie": "steuernr",
+    "text": "DE123456789"
+   }
+  ]
+ },
+ {
+  "id": "S28",
+  "typ": "Nummern-Etiketten",
+  "text": "Versicherungsnummer: 7 345 678 901\nVersicherungsscheinnummer 123456789\nVers.-Nr. 123.456.789-0\nVS-Nr. 9876543210\nPolicen-Nr. 4711/0815/22\nSchein-Nr. LV 88 77 66 55\nVorgangsnummer VG-2024-001122\nAktenzeichen 12 AZ 345/24\nReferenz: 99887766\nMitgliedsnummer 55667788\nDepot-Nr. 1234567890\nKontonummer 0123456789 BLZ 37040044\nKunden-Nr. 4711\nKd.-Nr. 4711-0815\nVertragsnummer 123456 vom 01.01.2020\n",
+  "erwartet": [
+   {
+    "kategorie": "vertrag",
+    "text": "7 345 678 901"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "123456789",
+    "kontext": "Versicherungsscheinnummer 123456789"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "123.456.789-0"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "9876543210",
+    "kontext": "VS-Nr. 9876543210"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "4711/0815/22"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "LV 88 77 66 55"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "VG-2024-001122"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "12 AZ 345/24"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "99887766"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "55667788"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "1234567890",
+    "kontext": "Depot-Nr. 1234567890"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "0123456789",
+    "kontext": "Kontonummer 0123456789"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "4711",
+    "kontext": "Kunden-Nr. 4711\n"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "4711-0815",
+    "kontext": "Kd.-Nr. 4711-0815"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "123456",
+    "kontext": "Vertragsnummer 123456"
+   }
+  ]
+ },
+ {
+  "id": "S29",
+  "typ": "Kindergeldnummer",
+  "text": "Kindergeld-Nr. 009FK407160\nKindergeldnummer: 009 FK 407160\n",
+  "erwartet": [
+   {
+    "kategorie": "kindergeld",
+    "text": "009FK407160"
+   },
+   {
+    "kategorie": "kindergeld",
+    "text": "009 FK 407160"
+   }
+  ]
+ },
+ {
+  "id": "S30",
+  "typ": "KVNR / Rentenversicherungsnummer",
+  "text": "Krankenversichertennummer A123456789\nVersichertennummer: B987654321\nRentenversicherungsnummer: 65 170839 J 008\nSozialversicherungsnummer 12345678A123\n",
+  "erwartet": [
+   {
+    "kategorie": "kvnr",
+    "text": "A123456789"
+   },
+   {
+    "kategorie": "kvnr",
+    "text": "B987654321"
+   },
+   {
+    "kategorie": "svnr",
+    "text": "65 170839 J 008"
+   },
+   {
+    "kategorie": "svnr",
+    "text": "12345678A123"
+   }
+  ]
+ },
+ {
+  "id": "S31",
+  "typ": "Versicherungsschein-Tabelle mit Vertragsnummer-Spalte",
+  "text": "Vertragsnummer          Beginn          Ablauf          Jahresbeitrag\nLV-2024-887766          01.01.2020      31.12.2045      1.200,00 EUR\n",
+  "erwartet": [
+   {
+    "kategorie": "vertrag",
+    "text": "LV-2024-887766"
+   }
+  ]
+ },
+ {
+  "id": "S32",
+  "typ": "Versicherungsschein: Name, Vorname + Geburtsdatum als Spalten",
+  "text": "Versicherte Person\nName, Vorname                               Geburtsdatum\nMustermann, Max                             02.09.1983\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Mustermann, Max"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "02.09.1983"
+   }
+  ]
+ },
+ {
+  "id": "S33",
+  "typ": "Anschreiben mit Anrede/Unterschrift",
+  "text": "Sehr geehrter Herr Mustermann,\nvielen Dank für Ihre Nachricht. Ihre Frau Erika Mustermann hat uns gestern angerufen.\nMit freundlichen Grüßen\ni. A. Sabine Krüger\nSchmidt Finanz GmbH\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Mustermann"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Erika Mustermann"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Sabine Krüger"
+   }
+  ]
+ },
+ {
+  "id": "S34",
+  "typ": "OCR-Verleser (Scan)",
+  "text": "IBAN: DE89 37O4 0044 0532 0130 00\nTel. O171 2345678\nSteuer-ID 8609574271 9\n",
+  "erwartet": [
+   {
+    "kategorie": "iban",
+    "text": "DE89 37O4 0044 0532 0130 00"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "O171 2345678"
+   },
+   {
+    "kategorie": "steuerid",
+    "text": "8609574271 9"
+   }
+  ]
+ },
+ {
+  "id": "S35",
+  "typ": "Legitimation (GwG)",
+  "text": "Legitimationsprüfung nach GwG\nPersonalausweis-Nr. L01X00T47, ausgestellt am 01.02.2020 von Stadt Nürnberg, gültig bis 31.01.2030\nAusweisnummer: L01X00T47\n",
+  "erwartet": [
+   {
+    "kategorie": "ausweis",
+    "text": "L01X00T47"
+   }
+  ]
+ },
+ {
+  "id": "S36",
+  "typ": "Makler-Signatur",
+  "text": "Thomas Schmidt\nVersicherungsmakler\nSchmidt Finanz GmbH · Hauptstraße 12a · 60311 Frankfurt am Main\nTel.: 069 123456-0 · Fax: 069 123456-99 · Mobil: 0171 2345678\nt.schmidt@schmidt-finanz.de · www.schmidt-finanz.de\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Thomas Schmidt"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Hauptstraße 12a"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "60311 Frankfurt am Main"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "069 123456-0"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "069 123456-99"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "0171 2345678"
+   },
+   {
+    "kategorie": "email",
+    "text": "t.schmidt@schmidt-finanz.de"
+   }
+  ]
+ },
+ {
+  "id": "S37",
+  "typ": "Adresse mit c/o und Firma",
+  "text": "Schmidt Finanz GmbH\nc/o Thomas Schmidt\nHauptstraße 12a\n60311 Frankfurt am Main\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Thomas Schmidt"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Hauptstraße 12a"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "60311 Frankfurt am Main"
+   }
+  ]
+ },
+ {
+  "id": "S38",
+  "typ": "Schadenmeldung Haftpflicht (Prosa)",
+  "text": "Schadenmeldung Privathaftpflicht\nAm 03.11.2024 habe ich, Max Mustermann, beim Besuch meines Nachbarn Herrn Karl-Heinz Große\nversehentlich dessen Fernseher beschädigt. Herr Große wohnt in der Rosenstraße 8, 90403 Nürnberg,\nTelefon 0911 9876543. Als Zeuge kann meine Lebensgefährtin Frau Dr. Julia Hoffmann benannt werden.\nMeine Vertragsnummer lautet PHV 123 456 789.\n",
+  "erwartet": [
+   {
+    "kategorie": "namen",
+    "text": "Max Mustermann"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Karl-Heinz Große"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Große"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Rosenstraße 8"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "90403 Nürnberg"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "0911 9876543"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Julia Hoffmann"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "PHV 123 456 789"
+   }
+  ]
+ },
+ {
+  "id": "S39",
+  "typ": "Rentenbescheid: Steuer-ID im Fließtext mit Punkten",
+  "text": "Ihre steuerliche Identifikationsnummer lautet 86 095 742 719.\nDie Rente wird an die Finanzverwaltung gemeldet.\n",
+  "erwartet": [
+   {
+    "kategorie": "steuerid",
+    "text": "86 095 742 719"
+   }
+  ]
+ },
+ {
+  "id": "S40",
+  "typ": "Vertragsnummer mit Zeilenumbruch nach Etikett",
+  "text": "Versicherungsschein-Nr.:\nLV-2024-887766\nKundennummer:\n4711-0815\n",
+  "erwartet": [
+   {
+    "kategorie": "vertrag",
+    "text": "LV-2024-887766"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "4711-0815"
+   }
+  ]
+ }
+]
