@@ -704,9 +704,12 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
         for f in mitglieder:
             lauf.gefunden.add(id(f))
             kategorien.add(f.get("kategorie", ""))
-        if not teile:
+        if not teile or _unbedeckt(m, s, e, [t[0] for t in teile]):
+            # Lokalisierungsgarantie (Vertrag Z1): jede Glyphe der Stelle muss in einem Rechteck liegen –
+            # sonst nie still weiter, sondern NICHT_LOKALISIERT (Fehler, Ausgabe _PRUEFEN)
             lauf.nicht_lokalisiert.append(fund.get("text") or m.text[s:e])
-            continue
+            if not teile:
+                continue
         rects = [t[0] for t in teile]
         hits.append({"fund": fund, "ersatz": ersatz, "rects": rects, "groesse": teile[0][2],
                      "grundlinie": teile[0][3], "freiraum": m.freiraum(s, e, rects[0])})
@@ -814,6 +817,23 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
         lauf.bild_seiten.append(nr + 1)
     if _hat_kurven(seite):
         lauf.grafik_seiten.append(nr + 1)
+
+
+def _unbedeckt(m, start: int, ende: int, rects: list) -> list:
+    """Glyphen der Stelle, die kein Schwärzungsrechteck berührt (Textebene: Glyphenbox; OCR: Wortbox).
+    Leerraum und Glyphen ohne gültige Box zählen nicht."""
+    offen = []
+    for g in m.glyphen(start, ende):
+        z = m.zeichen[g]
+        if z.c.isspace():
+            continue
+        wid = m.wort_ids[g] if g < len(m.wort_ids) else -1
+        box = m.ocr_boxen[wid] if z.quelle != "text" and 0 <= wid < len(m.ocr_boxen) else z.rect
+        if not (box.x1 > box.x0 and box.y1 > box.y0):
+            continue
+        if not any(box.intersects(r) for r in rects):
+            offen.append(g)
+    return offen
 
 
 def _glyphreste_pruefen(lauf, nr, seite, m, getroffen: set):
@@ -954,11 +974,16 @@ def _kontroll_woerter(lauf: _Lauf, ausgabe: Path, nr: int, rects: list):
     woerter = []
     if modus == "seite":
         # dieselbe Ausrichtung wie beim Original (Gutachten S-08): die Ausgabe enthält zu wenige Wörter,
-        # um sie neu zu bestimmen
-        try:
-            w, _ = lauf.ocr.woerter(ausgabe, nr, OCR_DPI, winkel=lauf.winkel(nr))
-        except TypeError:
-            w, _ = lauf.ocr.woerter(ausgabe, nr, OCR_DPI)
+        # um sie neu zu bestimmen. Vollständiges Ergebnis (10-Tupel mit Ausrichtung und Schräglagen-Korrektur),
+        # damit das Kontrollmodell die Zeilen genauso bildet wie das der Analyse
+        ergebnis_fn = getattr(lauf.ocr, "ergebnis", None)
+        if ergebnis_fn is not None:
+            w = ergebnis_fn(ausgabe, nr, OCR_DPI, winkel=lauf.winkel(nr)).get("woerter")
+        else:
+            try:
+                w, _ = lauf.ocr.woerter(ausgabe, nr, OCR_DPI, winkel=lauf.winkel(nr))
+            except TypeError:
+                w, _ = lauf.ocr.woerter(ausgabe, nr, OCR_DPI)
         woerter += list(w or [])
     else:
         for bereich in lauf.bildbereiche.get(nr, []):

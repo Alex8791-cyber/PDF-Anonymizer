@@ -607,3 +607,115 @@ def test_rueckfall_detektoren_sind_reihenfolge_unabhaengig(register, monkeypatch
     detektoren.registrieren("ner", {"namen"}, funktion=klassisch.namen_erkennen, ersetzt=True)
     detektoren.registrieren("ner", {"namen"}, funktion=eigene, ersetzt=True)   # Ersatz danach geladen
     assert [e.funktion for e in register if e.name == "ner"] == [eigene]
+
+
+# ----------------------------------------------------------------------
+# Phase 3: OCR-Seiten wie Textseiten (Spalten, Leserichtung) und durchsuchbare Scans
+# ----------------------------------------------------------------------
+def _leere_seite(tmp_path, breite=595, hoehe=842, bild=False):
+    doc = fitz.open()
+    seite = doc.new_page(width=breite, height=hoehe)
+    if bild:
+        pix = fitz.Pixmap(fitz.csGRAY, fitz.IRect(0, 0, 60, 80), False)
+        pix.set_rect(pix.irect, (250,))
+        seite.insert_image(seite.rect, pixmap=pix)
+    pdf = tmp_path / "leer.pdf"
+    doc.save(pdf)
+    doc.close()
+    return pdf
+
+
+def test_ocr_spaltentrenner_bei_grosser_luecke_wie_textseite(tmp_path):
+    """Textseiten trennen Tabellenzellen und "Etikett    Wert" durch "\\t\\t" – OCR-Seiten jetzt auch, damit
+    dieselben Detektoren (Zellen, Nachbarzellen, Muster ohne Spaltensprung) greifen. Gleichmäßige Lücken
+    (Blocksatz) bleiben Leerzeichen."""
+    woerter = [(50, 100, 80, 110, "Name:"), (150, 100, 170, 110, "Max"), (174, 100, 230, 110, "Mustermann"),
+               (50, 120, 70, 130, "wir"), (78, 120, 120, 130, "danken"), (128, 120, 145, 130, "für"),
+               (153, 120, 180, 130, "Ihre"), (188, 120, 230, 130, "Geduld")]
+    d = fitz.open(_leere_seite(tmp_path))
+    seite = sm.seite_aufbauen(d[0], 0, ocr_woerter=woerter)
+    d.close()
+    assert seite.text == "Name:\t\tMax Mustermann\nwir danken für Ihre Geduld"
+    assert seite.abbildung[5] == -1 and seite.abbildung[6] == -1, "Spaltentrenner sind synthetisch"
+    s, e = ganzwort_stellen(seite, "Max Mustermann", "name")[0]
+    assert seite.text[s:e] == "Max Mustermann"
+
+
+def test_ocr_zeichen_in_leserichtung_bei_kopfstehendem_scan(tmp_path):
+    """180°: die Leserichtung läuft auf der Seite nach links – das erste Zeichen sitzt am RECHTEN Ende der
+    Wortbox (früher anteilig von links: Vorschau und Zeichenlage waren gespiegelt)."""
+    woerter = [(400, 700, 460, 712, "Max", 0, 0, 0, 180, 0.0), (300, 700, 390, 712, "Mustermann", 0, 0, 1, 180, 0.0)]
+    d = fitz.open(_leere_seite(tmp_path))
+    seite = sm.seite_aufbauen(d[0], 0, ocr_woerter=woerter)
+    d.close()
+    assert seite.text == "Max Mustermann"
+    m = seite.zeichen[seite.abbildung[0]]
+    x = seite.zeichen[seite.abbildung[2]]
+    assert m.c == "M" and abs(m.rect.x1 - 460) < 0.01 and abs(m.rect.x0 - 440) < 0.01
+    assert x.c == "x" and abs(x.rect.x0 - 400) < 0.01
+    teile = seite.rechtecke(0, len(seite.text))
+    assert teile[0][0].contains(fitz.Rect(300, 700, 460, 712)), "ganze Wortboxen + Rand"
+
+
+def test_durchsuchbarer_scan_textebene_und_bild_verknuepft(tmp_path):
+    """Durchsuchbarer Scan: unsichtbare Textebene einer fremden OCR, 3 pt/2 pt gegen das Bild versetzt. Ein
+    Treffer in der Textebene schwärzt die BILDSTELLE (OCR-Box) und die unsichtbaren Zeichen; ein Treffer in der
+    OCR-Lesung schwärzt zusätzlich die verknüpften unsichtbaren Zeichen – egal, wo die Erkennung trifft."""
+    pdf = _leere_seite(tmp_path, bild=True)
+    doc = fitz.open(pdf)
+    s = doc[0]
+    s.insert_text((60, 100), "Versicherungsnehmer Max Mustermann wohnt in Bonn", fontsize=11, render_mode=3)
+    s.insert_text((60, 120), "Kundennummer 4455667788 seit 2019", fontsize=11, render_mode=3)
+    doc.save(tmp_path / "durchsuchbar.pdf")
+    doc.close()
+    d = fitz.open(tmp_path / "durchsuchbar.pdf")
+    seite = d[0]
+    textebene = seite.get_text("words")
+    # OCR-Wörter an der wahren Bildstelle: Textebene liegt 3 pt links und 2 pt höher als die Pixel
+    ocr_woerter = [(w[0] + 3, w[1] + 2, w[2] + 3, w[3] + 2, w[4], w[5], w[6], w[7]) for w in textebene]
+    m = sm.seite_aufbauen(seite, 0, ocr_woerter=ocr_woerter, ocr_quelle="ocr")
+    d.close()
+    assert m.textebene_versatz is not None
+    assert abs(m.textebene_versatz[0] - 3) < 0.01 and abs(m.textebene_versatz[1] - 2) < 0.01
+    assert m.textebene_abgleich == 1.0
+    stellen = ganzwort_stellen(m, "Max Mustermann", "name")
+    assert len(stellen) == 2, "beide Lesungen stehen im Modell"
+    ocr_box = fitz.Rect(min(w[0] for w in ocr_woerter if w[4] in ("Max", "Mustermann")),
+                        min(w[1] for w in ocr_woerter if w[4] in ("Max", "Mustermann")),
+                        max(w[2] for w in ocr_woerter if w[4] in ("Max", "Mustermann")),
+                        max(w[3] for w in ocr_woerter if w[4] in ("Max", "Mustermann")))
+    tl_box = ocr_box + (-3, -2, -3, -2)
+    for s0, e0 in stellen:
+        teile = m.rechtecke(s0, e0)
+        rects = [t[0] for t in teile]
+        assert rects[0].contains(ocr_box), "erstes Rechteck: die ganze Bildstelle (Platzhalter dort)"
+        streifen = [r for r in rects[1:] if r.intersects(tl_box)]
+        assert streifen, "die unsichtbaren Zeichen werden mit entfernt"
+        assert all(tl_box.contains(r) for r in streifen), "Kernstreifen bleiben im Textwort (keine Nachbarn)"
+    # beide Lesungen liefern dasselbe Hauptrechteck -> ein Platzhalter, keine doppelte Schwärzung
+    a, b = (m.rechtecke(s0, e0)[0][0] for s0, e0 in stellen)
+    assert abs(a & b) >= 0.9 * abs(b)
+
+
+def test_textebene_ohne_ocr_partner_schwaerzt_verschobene_bildstelle(tmp_path):
+    """Liest die eigene OCR ein Wort nicht (Verleser, Stempel darüber), schwärzt ein Treffer der Textebene
+    trotzdem die Bildstelle: die um den geschätzten Versatz verschobene Textbox."""
+    pdf = _leere_seite(tmp_path, bild=True)
+    doc = fitz.open(pdf)
+    s = doc[0]
+    s.insert_text((60, 100), "Versicherungsnehmer Erika Musterfrau Kundennummer 4455667788", fontsize=11,
+                  render_mode=3)
+    s.insert_text((60, 120), "Anschrift Lindenallee 47b Stuttgart Telefon 0711 123456", fontsize=11,
+                  render_mode=3)
+    doc.save(tmp_path / "durchsuchbar2.pdf")
+    doc.close()
+    d = fitz.open(tmp_path / "durchsuchbar2.pdf")
+    textebene = d[0].get_text("words")
+    ocr_woerter = [(w[0] + 2, w[1] + 3, w[2] + 2, w[3] + 3, w[4], w[5], w[6], w[7]) for w in textebene
+                   if w[4] != "Musterfrau"]                       # die OCR hat "Musterfrau" nicht gelesen
+    m = sm.seite_aufbauen(d[0], 0, ocr_woerter=ocr_woerter, ocr_quelle="ocr")
+    d.close()
+    (s0, e0), = ganzwort_stellen(m, "Musterfrau", "name")
+    tl = next(fitz.Rect(w[:4]) for w in textebene if w[4] == "Musterfrau")
+    rects = [t[0] for t in m.rechtecke(s0, e0)]
+    assert rects[0].contains(tl + (2, 3, 2, 3)), "Bildstelle = Textbox um den Versatz verschoben"

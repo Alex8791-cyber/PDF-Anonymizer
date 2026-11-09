@@ -480,6 +480,78 @@ def test_durchsuchbarer_scan_mit_versetzter_textebene(tmp_path):
     assert bereich_hell(e["ausgabe"], 0, name_rect)
 
 
+def _durchsuchbarer_scan(pfad, zeilen, versatz=(3.5, 2.5), dpi=200, fontsize=12):
+    """Kopierer-Scan: Bild des Texts plus unsichtbare Textebene, die (wie bei fremder OCR) um `versatz` gegen
+    die Pixel verschoben ist. Liefert (Pfad, Wörter an der wahren Bildstelle)."""
+    vorlage = fitz.open()
+    s = vorlage.new_page()
+    y = 100
+    for z in zeilen:
+        s.insert_text((60, y), z, fontsize=fontsize, fontname="helv")
+        y += 20
+    woerter = [tuple(w[:5]) for w in s.get_text("words")]
+    pix = s.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY, alpha=False)
+    bild = pix.tobytes("jpeg", jpg_quality=80)
+    vorlage.close()
+    doc = fitz.open()
+    p = doc.new_page()
+    p.insert_image(p.rect, stream=bild)
+    y = 100
+    for z in zeilen:
+        p.insert_text((60 - versatz[0], y - versatz[1]), z, fontsize=fontsize, fontname="helv", render_mode=3)
+        y += 20
+    doc.save(pfad)
+    doc.close()
+    return Path(pfad), woerter
+
+
+@braucht_ocr
+def test_durchsuchbarer_scan_beide_lesungen_entfernt_ein_platzhalter(tmp_path, dienst):
+    """Phase 3: Textebene und OCR finden denselben Namen an zwei versetzten Stellen. Beide Lesungen sind
+    verknüpft: Zeichen der Textebene UND Pixel der wahren Bildstelle verschwinden, und es entsteht EIN
+    Platzhalter (früher zwei versetzte, sich überlagernde Platzhalter und ein angeschnittenes Nachbarwort)."""
+    zeilen = ["Versicherungsnehmer " + NAME + " wohnt in Bonn", "IBAN " + IBAN, "Kunden-Nr. 100245678 Stuttgart"]
+    pdf, woerter = _durchsuchbarer_scan(tmp_path / "kopierer2.pdf", zeilen)
+    e = schwaerze_pdf(pdf, [fund(NAME), fund(IBAN, "[IBAN]", "iban")], ocr=dienst, ziel_ordner=tmp_path / "aus")
+    assert e["fehler"] is None and e["reste"] == [], e
+    assert e["stellen_nicht_lokalisiert"] == 0
+    text = volltext(e["ausgabe"])
+    assert "Mustermann" not in text and "3704" not in text, text
+    assert "Versicherungsnehmer" in text and "Stuttgart" in text, "Nachbarwörter der Textebene bleiben"
+    assert text.count("[PERSON A]") == 1, text
+    name_rect = fitz.Rect(min(w[0] for w in woerter if w[4] in ("Max", "Mustermann")),
+                          min(w[1] for w in woerter if w[4] in ("Max", "Mustermann")),
+                          max(w[2] for w in woerter if w[4] in ("Max", "Mustermann")),
+                          max(w[3] for w in woerter if w[4] in ("Max", "Mustermann")))
+    doc = fitz.open(e["ausgabe"])
+    try:
+        platzhalter = [fitz.Rect(w[:4]) for w in doc[0].get_text("words") if "[" in w[4] or "]" in w[4]]
+        rest = doc[0].get_pixmap(dpi=100, clip=name_rect, colorspace=fitz.csGRAY)
+        # dunkle Pixel nur dort, wo der Platzhalter steht
+        dunkel = [(x, y) for y in range(rest.height) for x in range(rest.width) if rest.pixel(x, y)[0] < 150]
+        for x, y in dunkel:
+            punkt = fitz.Point(name_rect.x0 + (x + 0.5) * 72 / 100, name_rect.y0 + (y + 0.5) * 72 / 100)
+            assert any((r + (-1, -1, 1, 1)).contains(punkt) for r in platzhalter), (punkt, platzhalter)
+    finally:
+        doc.close()
+
+
+def test_lokalisierungsgarantie_meldet_teilweise_unbedeckte_stelle(tmp_path, monkeypatch):
+    """Vertrag Z1: Liefert das Modell für einen Teil einer Stelle kein Rechteck (z. B. eine OCR-Zeile ohne
+    Wortkasten), darf die Schwärzung nicht still weitermachen – NICHT_LOKALISIERT als Fehler, Ausgabe _PRUEFEN."""
+    pdf = textseite(tmp_path / "zwei_zeilen.pdf", ["Versicherungsnehmer Max", "Mustermann wohnt in Bonn"])
+    from anonymisierer import seitenmodell as sm
+    original = sm.Seite.rechtecke
+
+    def nur_erste_zeile(self, start, ende):
+        return original(self, start, ende)[:1]
+    monkeypatch.setattr(sm.Seite, "rechtecke", nur_erste_zeile)
+    e = schwaerze_pdf(pdf, [fund(NAME)], ziel_ordner=tmp_path / "aus")
+    assert e["stellen_nicht_lokalisiert"] >= 1, e
+    assert any(m["code"] == "NICHT_LOKALISIERT" and m["art"] == "fehler" for m in e["meldungen"]), e["meldungen"]
+    assert e["status"] == "pruefen" and "_PRUEFEN" in Path(e["ausgabe"]).name
+
+
 @braucht_ocr
 def test_bild_auf_textseite_wird_gelesen_und_geschwaerzt(tmp_path, dienst):
     """M-04: Ausweiskopie (10 % der Seite) auf einer Textseite."""

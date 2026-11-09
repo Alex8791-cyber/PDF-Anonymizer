@@ -459,7 +459,10 @@ def test_unplausible_seite_meldet_ocr_unplausibel(tmp_path, dienst):
     pdf = tmp_path / "kritzel.pdf"
     scan.save(pdf)
     erg = dienst.ergebnis(pdf, 0)
-    if len(erg["woerter"]) < ocr.MIN_TOKENS_WARNUNG:
+    # Die Seitenaufteilung (PSM 3) verwirft Kritzel oft als Nicht-Text; maßgeblich ist deshalb die Lesung
+    # mit den meisten Wörtern (Ausrichtungsproben), wie in _ocr_worker
+    meiste = max([len(erg["woerter"])] + [lauf.get("tokens", 0) for lauf in erg.get("lesungen") or []])
+    if meiste < ocr.MIN_TOKENS_WARNUNG:
         pytest.skip("Tesseract liest im Rauschen zu wenig Wörter für eine Plausibilitätsaussage")
     assert erg["unplausibel"] and "unplausibel" in erg["warnung"]
     assert "OCR_UNPLAUSIBEL" in [m["code"] for m in erg["meldungen"]]
@@ -931,3 +934,222 @@ def test_ocr_textpage_kompatibel(tmp_path):
     assert seite.rotation == 0, "ocr_textpage dreht /Rotate-Seiten vorher gerade"
     assert "Mustermann" in seite.get_text(textpage=tp)
     doc.close()
+
+
+# ----------------------------------------------------------------------
+# Phase 3: Seitenaufteilung (PSM 3), Schräglage, Hintergrund, entartete Zeilen, Tabellenlinien, Zeilen
+# ----------------------------------------------------------------------
+def _traineddata_komponenten(daten: bytes) -> dict:
+    import struct
+    n = struct.unpack_from("<I", daten, 0)[0]
+    versatz = struct.unpack_from(f"<{n}q", daten, 4)
+    da = [(i, o) for i, o in enumerate(versatz) if o >= 0]
+    return {i: daten[o:(da[k + 1][1] if k + 1 < len(da) else len(daten))] for k, (i, o) in enumerate(da)}
+
+
+@braucht_ocr
+def test_traineddata_mit_einstellungen_rundreise():
+    """Die Einstellung landet in der Komponente "config" (Index 0); alle anderen Komponenten bleiben bitgleich,
+    eine vorhandene Konfiguration bleibt erhalten, gleichnamige Einstellungen werden ersetzt."""
+    daten = (Path(ocr._tessdata_finden()) / "deu.traineddata").read_bytes()
+    neu = ocr.traineddata_mit_einstellungen(daten, {"tessedit_pageseg_mode": "3"})
+    alt, jetzt = _traineddata_komponenten(daten), _traineddata_komponenten(neu)
+    assert {i: v for i, v in jetzt.items() if i != 0} == {i: v for i, v in alt.items() if i != 0}
+    assert jetzt[0].decode().splitlines() == alt.get(0, b"").decode().splitlines() + ["tessedit_pageseg_mode 3"]
+    zweimal = ocr.traineddata_mit_einstellungen(neu, {"tessedit_pageseg_mode": "4", "tessedit_do_invert": "0"})
+    zeilen = _traineddata_komponenten(zweimal)[0].decode().splitlines()
+    assert "tessedit_pageseg_mode 4" in zeilen and "tessedit_pageseg_mode 3" not in zeilen
+    assert "tessedit_do_invert 0" in zeilen
+    for kaputt in (b"", b"\x00\x00\x00\x00", b"\xff\xff\xff\x7f" + b"\x00" * 64, daten[:200]):
+        with pytest.raises(ValueError):
+            ocr.traineddata_mit_einstellungen(kaputt, {"tessedit_pageseg_mode": "3"})
+
+
+@braucht_ocr
+def test_tessdata_mit_einstellungen_im_tempordner_und_neu_angelegt(tmp_path, monkeypatch):
+    monkeypatch.setattr(ocr.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(ocr, "_EINSTELLUNGS_ORDNER", {})
+    quelle = ocr._tessdata_finden()
+    ordner = ocr.tessdata_mit_einstellungen(quelle, "deu")
+    datei = Path(ordner) / "deu.traineddata"
+    assert Path(ordner).parent.parent == tmp_path and datei.exists()
+    assert ocr.tessdata_mit_einstellungen(quelle, "deu") == ordner, "zweiter Aufruf: derselbe Ordner"
+    datei.unlink()                                  # z. B. Datenträgerbereinigung während des Laufs
+    assert ocr.tessdata_mit_einstellungen(quelle, "deu") == ordner and datei.exists()
+    assert ocr.tessdata_mit_einstellungen(str(tmp_path / "gibt_es_nicht"), "deu") is None
+    assert ocr.tessdata_mit_einstellungen(None, "deu") is None
+
+
+TABELLE_NAMEN = ["Wolkow, Waldemar", "Dietrich, Claudia", "Wolff, Holger", "Dijkstra, Maarten", "Kraemer, Guenter",
+                 "Schneider, Merve", "Rashid, Hanan", "Celik, Volkan", "Pham, Phuong", "Haidari, Babak",
+                 "Kilic, Murat", "Berisha, Fatmir"]
+
+
+def tabellen_scan(pfad, winkel=0.8, dpi=200):
+    """Bestandsliste als Scan: Gitterlinien, leicht schräg (unter der Schräglagen-Korrektur)."""
+    vorlage = fitz.open()
+    s = vorlage.new_page(width=842, height=595)
+    spalten = [40, 70, 250, 340, 520, 640, 800]
+    y0, hoehe = 80, 16
+    zeilen = [["Nr.", "Kunde (Name, Vorname)", "Geburtsdatum", "PLZ / Ort", "Vertragsnummer", "Beitrag"]]
+    zeilen += [[str(i + 1), n, f"{(i * 7) % 28 + 1:02d}.{(i * 5) % 12 + 1:02d}.19{50 + i * 3}",
+                f"{10000 + i * 7311} Musterstadt", f"KF-20{10 + i}-{836600 + i * 1717}", f"{1000 + i * 37},{i:02d}"]
+               for i, n in enumerate(TABELLE_NAMEN)]
+    for r, werte in enumerate(zeilen):
+        for c, t in enumerate(werte):
+            s.insert_text((spalten[c] + 3, y0 + r * hoehe + 12), t, fontsize=9, fontname="helv")
+    for r in range(len(zeilen) + 1):
+        s.draw_line((spalten[0], y0 + r * hoehe), (spalten[-1], y0 + r * hoehe), width=0.6)
+    for x in spalten:
+        s.draw_line((x, y0), (x, y0 + len(zeilen) * hoehe), width=0.6)
+    pix = s.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72).prerotate(winkel), colorspace=fitz.csGRAY, alpha=False)
+    bild = pix.tobytes("jpeg", jpg_quality=75)
+    vorlage.close()
+    doc = fitz.open()
+    p = doc.new_page(width=pix.width * 72 / dpi, height=pix.height * 72 / dpi)
+    p.insert_image(p.rect, stream=bild)
+    doc.save(pfad)
+    doc.close()
+    return Path(pfad)
+
+
+@braucht_ocr
+def test_seitenaufteilung_liest_schraege_tabellenzeilen(tmp_path, dienst):
+    """Gemessen (Phase 3): Die eingebaute OCR liest ohne Einstellung mit PSM 6 ("ein Textblock") – auf einer
+    0,8° schrägen Gitter-Tabelle fand sie keinen einzigen Namen (048_bestandsliste: jede zweite Zeile fehlte).
+    Mit der Seitenaufteilung (PSM 3, über die traineddata-Konfiguration) stehen die Zeilen im Ergebnis, und
+    eingelesene Gitterlinien ("|") kleben nicht mehr an den Zellen."""
+    pdf = tabellen_scan(tmp_path / "bestand.pdf")
+    erg = dienst.ergebnis(pdf, 0)
+    assert erg["seitenaufteilung"] == ocr.SEITENAUFTEILUNG == 3
+    text = woerter_zu_text(erg["woerter"])
+    gefunden = [n for n in TABELLE_NAMEN if n in text]
+    assert len(gefunden) >= 10, (gefunden, text)
+    assert not any("|" in w[4] for w in erg["woerter"])
+    assert all(len(w) == 10 and w[8] == 0 for w in erg["woerter"]), "10-Tupel mit Ausrichtung und Korrektur"
+
+
+def test_schraeglage_schaetzen_synthetisch():
+    np = pytest.importorskip("numpy")
+    import math
+
+    def bild(grad):
+        a = np.full((700, 900), 245, dtype=np.uint8)
+        for y0 in range(80, 640, 24):
+            for x in range(100, 800):
+                if (x // 9) % 4 == 3:                          # Wortlücken
+                    continue
+                y = int(round(y0 + (x - 450) * math.tan(math.radians(grad))))
+                a[y:y + 6, x] = 20
+        return a
+    for grad in (0.0, 1.5, -2.4, 3.0):
+        assert abs(ocr.schraeglage_schaetzen(bild(grad)) - grad) < 0.15, grad
+    assert ocr.schraeglage_schaetzen(np.full((300, 300), 240, dtype=np.uint8)) == 0.0, "leere Seite"
+
+
+def test_hintergrund_schatten_wird_erkannt_und_herausgerechnet():
+    np = pytest.importorskip("numpy")
+    h, w = 400, 600
+    schatten = np.tile(np.linspace(250, 110, w, dtype=np.float32), (h, 1))     # Schatten von links nach rechts
+    text = np.ones((h, w), dtype=bool)
+    for y in range(60, 360, 30):
+        text[y:y + 8, 50:550:3] = False
+    bild = np.where(text, schatten, schatten * 0.25).astype(np.uint8)
+    klein = bild[::3, ::3]                                       # ~100 dpi wie in _bildanalyse
+    assert ocr.hintergrund_ungleichmaessig(klein)
+    assert not ocr.hintergrund_ungleichmaessig(np.where(text, 240, 40).astype(np.uint8)[::3, ::3])
+    norm = ocr.hintergrund_herausrechnen(bild, block=16)
+    papier = norm[text]
+    assert papier.mean() > 235 and papier.std() < 12, (papier.mean(), papier.std())
+    assert norm[~text].mean() < 120, "Schrift bleibt dunkel"
+
+
+def test_entartete_ocr_zeile_wird_am_bild_repariert():
+    """MuPDF schreibt einzelne OCR-Zeilen mit unsinniger Schriftgröße ins OCR-PDF: Kasten über die ganze
+    Seitenhöhe, rechte Kanten zu kurz. Geschwärzt würde ein seitenhoher Streifen. Die Reparatur setzt die
+    Wörter auf das Tintenband, das kein anderes Wort erklärt, und verlängert sie bis zur letzten Tinte."""
+    np = pytest.importorskip("numpy")
+    dpi = 72                                    # 1 Pixel = 1 pt: Koordinaten direkt vergleichbar
+    a = np.full((300, 400), 250, dtype=np.uint8)
+    a[40:52, 20:120] = 10                       # Zeile 1: "Alpha Beta"
+    a[80:92, 20:150] = 10                       # Zeile 2: "Gamma Delta"
+    a[120:132, 20:90] = 10                      # Zeile 3 (entartet): "Geburtsdatum" …
+    a[121:133, 100:170] = 10                    # … "02.09.1983" (leicht tiefer: schräge Zeile)
+    pix = fitz.Pixmap(fitz.csGRAY, 400, 300, a.tobytes(), False)
+    woerter = [[20, 40, 60, 52, "Alpha", 0, 0, 0], [65, 40, 120, 52, "Beta", 0, 0, 1],
+               [20, 80, 80, 92, "Gamma", 0, 1, 0], [85, 80, 150, 92, "Delta", 0, 1, 1],
+               [20, 1, 60, 299, "Geburtsdatum", 1, 0, 0], [100, 1, 140, 299, "02.09.1983", 1, 0, 1]]
+    repariert, offen = ocr._entartete_zeilen_reparieren(woerter, pix, dpi)
+    assert (repariert, offen) == (1, 0)
+    geb, datum = woerter[4], woerter[5]
+    assert 118 <= geb[1] <= 121 and 131 <= geb[3] <= 134 and geb[2] >= 89, geb
+    assert 119 <= datum[1] <= 122 and 132 <= datum[3] <= 135 and datum[2] >= 169, datum
+    assert woerter[0][:4] == [20, 40, 60, 52], "gesunde Zeilen bleiben unverändert"
+    # ohne Bild: nichts reparierbar, aber gemeldet (die Schwärzung bleibt dann großzügig statt lückenhaft)
+    w2 = [[20, 40, 60, 52, "Alpha", 0, 0, 0], [65, 40, 120, 52, "Beta", 0, 0, 1], [20, 80, 80, 92, "Gamma", 0, 1, 0],
+          [20, 1, 60, 299, "Geburtsdatum", 1, 0, 0]]
+    assert ocr._entartete_zeilen_reparieren(w2, None, dpi) == (0, 1)
+
+
+def test_tabellenlinien_und_rauschzeichen():
+    assert ocr._linien_trennen("1|Wolkow,", 0, 90) == [("1", 0, 10), ("Wolkow,", 20, 90)]
+    assert ocr._linien_trennen("1.714,85|01.12.2039", 0, 190) == [("1.714,85", 0, 80), ("01.12.2039", 90, 190)]
+    assert ocr._linien_trennen("|", 0, 5) == [] and ocr._linien_trennen("Max", 0, 30) == [("Max", 0, 30)]
+    for rauschen in ("°", ".", ":", ";'", "—", "()"):
+        assert ocr._rauschen(rauschen), rauschen
+    for inhalt in ("&", "§", "+", "@", "/", "a", "1", "...", "Dr.", "€", "*"):
+        assert not ocr._rauschen(inhalt), inhalt
+    # nur FREI stehender Staub entfällt: "Name:" "°" "Max" -> "Name: Max"; "Geburtsdatum" ":" bleibt (hängt an)
+    def wort(x0, x1, text, nr):
+        return (x0, 100, x1, 112, text, 0, 0, nr)
+    staub = [wort(50, 80, "Name:", 0), wort(100, 103, "°", 1), wort(130, 150, "Max", 2)]
+    assert woerter_zu_text(staub) == "Name: Max"
+    haengt = [wort(50, 120, "Geburtsdatum", 0), wort(121, 124, ":", 1), wort(150, 200, "01.02.1980", 2)]
+    assert woerter_zu_text(haengt) == "Geburtsdatum : 01.02.1980"
+    stern = [wort(50, 54, "*", 0), wort(60, 120, "12.10.1988", 1)]
+    assert woerter_zu_text(stern) == "* 12.10.1988", "Geburtsstern bleibt"
+
+
+def test_zeilen_zusammenfuehren_etikett_und_wert():
+    """PSM 3 liest Formulare spaltenweise (Etiketten-Block, dann Werte-Block): Etikett und Wert derselben Höhe
+    werden wieder EINE Zeile – wie auf Textseiten. Fließtext zweier Spalten und weit entfernte Briefkopf-
+    spalten bleiben getrennt."""
+    def wort(x, y, text, block, zeile, nr):
+        return (x, y, x + 6 * len(text), y + 12, text, block, zeile, nr)
+    etiketten = [wort(50, 100, "Name:", 0, 0, 0), wort(50, 120, "Anschrift:", 0, 1, 0),
+                 wort(50, 140, "Telefon:", 0, 2, 0)]
+    werte = [wort(150, 100, "Max", 1, 0, 0), wort(176, 100, "Mustermann", 1, 0, 1),
+             wort(150, 120, "Lindenallee", 1, 1, 0), wort(220, 120, "47b", 1, 1, 1),
+             wort(150, 140, "0171", 1, 2, 0), wort(178, 140, "2345678", 1, 2, 1)]
+    soll = "Name: Max Mustermann\nAnschrift: Lindenallee 47b\nTelefon: 0171 2345678"
+    assert woerter_zu_text(etiketten + werte) == soll
+    assert woerter_zu_text(werte + etiketten) == soll, "auch Werte-Block zuerst"
+    # zwei Fließtextspalten (lange Zeilen) und ein Briefkopf rechts außen bleiben getrennt
+    links = [wort(50 + 30 * i, 100 + 20 * z, t, 0, z, i) for z in range(2)
+             for i, t in enumerate("wir bestätigen den Eingang Ihrer Unterlagen".split())]
+    rechts = [wort(330 + 30 * i, 100 + 20 * z, t, 1, z, i) for z in range(2)
+              for i, t in enumerate("und danken für Ihre Geduld bei der Prüfung".split())]
+    zeilen = woerter_zu_zeilen(links + rechts)
+    assert len(zeilen) == 4 and all(len({w[5] for w in z}) == 1 for z in zeilen)
+    kopf = [wort(60, 100, "Frau", 0, 0, 0), wort(60, 112, "Erika", 0, 1, 0), wort(330, 100, "Kundennummer", 1, 0, 0)]
+    assert len(woerter_zu_zeilen(kopf)) == 3, "250 pt Lücke: Briefkopfspalten nicht vereinigen"
+
+
+def test_zeilenbildung_mit_herausgedrehter_schraeglage():
+    """10-Tupel einer gerade gerückt gelesenen Seite (Korrektur 2°): die Kästen liegen in Seitenkoordinaten
+    schräg; die Zeilenbildung dreht sie zurück, lange Tabellenzeilen bleiben Zeilen."""
+    import math
+    korr = 2.0
+    c, s = math.cos(math.radians(korr)), math.sin(math.radians(korr))
+    woerter = []
+    for z in range(5):
+        for i in range(8):
+            gx0, gy0 = 50 + 70 * i, 100 + 13 * z                        # gerade gerückter Rahmen
+            ecken = [(x * c - y * s, x * s + y * c) for x in (gx0, gx0 + 60) for y in (gy0, gy0 + 10)]
+            xs, ys = [e[0] for e in ecken], [e[1] for e in ecken]
+            woerter.append((min(xs), min(ys), max(xs), max(ys), f"w{z}{i}", z, 0, i, 0, korr))
+    zeilen = woerter_zu_zeilen(woerter)
+    assert [[w[4] for w in z] for z in zeilen] == [[f"w{z}{i}" for i in range(8)] for z in range(5)]
+    assert ocr.ausrichtung_der_woerter(woerter) == (0, korr)
+    gx, gy, _, _ = ocr.lesekasten(woerter[9], 0, korr)
+    assert abs(gx - 120) < 0.5 and abs(gy - 113) < 0.5
