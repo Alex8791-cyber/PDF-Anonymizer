@@ -152,3 +152,93 @@ def test_kalenderwort_als_nachname(text, name):
                                   "Wir melden uns am Freitag, den 14. Mai."])
 def test_kalenderwort_ohne_namenskontext_kein_name(text):
     assert not any(k in ("Montag", "Freitag", "Mai") for k in _regeln(text))
+
+
+# ---------------------------------------------------------------------- Runde 1, Paket erkennung-ocr
+def test_strasse_ohne_punkt_ist_kein_name():
+    """"Habsburgerstr" (die OCR hat den Punkt verloren) ist eine Straße, kein Name."""
+    assert na._STRASSENSUFFIX_RE.search("habsburgerstr")
+    assert not na._plausibel("Habsburgerstr", 0, 13)
+    assert not na._plausibel("Habsburgerstr", 0, 13, regel=True)
+    text = "Max Mustermann Habsburgerstr"
+    assert na._bereinigen(text, 0, len(text)) == (0, 14)
+
+
+@pytest.mark.parametrize("text, erwartet", [
+    ("Jörg Ziegler Ursula Frank", ["Jörg Ziegler", "Ursula Frank"]),
+    ("Dipl.-Ing. Jörg Ziegler Ursula Frank", ["Dipl.-Ing. Jörg Ziegler", "Ursula Frank"]),
+    ("Jörg Ziegler Dr. Ursula Frank", ["Jörg Ziegler", "Dr. Ursula Frank"]),
+    ("Thomas Frank Ursula Wolf", ["Thomas Frank", "Ursula Wolf"]),            # "Frank": auch Nachname
+    ("Max Mustermann Erika Musterfrau", ["Max Mustermann", "Erika Musterfrau"]),
+    ("Jörg Ziegler Ursula", ["Jörg Ziegler", "Ursula"]),                       # eindeutiger Vorname am Ende
+    ("KATARZYNA KOŁODZIEJ JÖRG ZIEGLER", ["KATARZYNA KOŁODZIEJ", "JÖRG ZIEGLER"]),
+    ("Anna Maria Schmidt", ["Anna Maria Schmidt"]),                           # Doppelvorname
+    ("Karl Heinz Frank", ["Karl Heinz Frank"]),
+    ("Hans Peter Müller", ["Hans Peter Müller"]),
+    ("Max Mustermann Frank", ["Max Mustermann Frank"]),                       # mehrdeutig am Ende: bleibt
+    ("Peter Schmidt, Anna Weber", ["Peter Schmidt, Anna Weber"]),             # Komma: andere Regeln
+    ("Jörg Ziegler von Ursula Frank", ["Jörg Ziegler von Ursula Frank"]),
+])
+def test_personen_teilen(text, erwartet):
+    assert [text[s:e] for s, e in na.personen_teilen(text, 0, len(text))] == erwartet
+
+
+def test_regel_kandidaten_mehrerer_personen_getrennt():
+    texte = _regeln("Zeuge: Jörg Ziegler Ursula Frank")
+    assert "Jörg Ziegler" in texte and "Ursula Frank" in texte
+    assert "Jörg Ziegler Ursula Frank" not in texte
+
+
+@braucht_modell
+def test_ki_spanne_mehrerer_personen_getrennt():
+    """Die KI fasst "Jörg Ziegler Ursula Frank" (Komma von der OCR verschluckt) zu einer Person zusammen."""
+    texte = {k["text"] for k in na.finde_personen(
+        "Schwarzwald Lebensversicherung AG\nVorstand: Lea Hagedorn (Vorsitzende), Dipl.-Ing. Jörg Ziegler "
+        "Ursula Frank\nSitz: Freiburg")}
+    assert {"Jörg Ziegler", "Ursula Frank"} <= texte
+    assert not any("Ziegler Ursula" in t for t in texte)
+
+
+def test_verlesenes_etikett_ist_kein_name():
+    """Von der OCR verlesene Feldbezeichner sind keine Namen – aber nur, wo der Aufrufer weiß, dass die Zeichen aus
+    der OCR stammen (verlesenes_etikett_statt_name, aufgerufen von detektoren/ocr_lesart.py), und nur in
+    Etikett-Stellung. _ist_sachwort/_plausibel kennen die Quelle nicht und bleiben ohne Toleranz (Review-Befund:
+    sonst gehen unbekannte Nachnamen wie "Ehmann" ~ "Ehemann" auf der Textebene still verloren)."""
+    for text, wort in (("Name, Vomame:\t\tKara, Özlem", "Vomame"),
+                       ("(Unterschrift Verscherungsnchmer\n", "Verscherungsnchmer"),
+                       ("Kundenntimmer 76183905", "Kundenntimmer")):
+        s = text.index(wort)
+        assert na.verlesenes_etikett_statt_name(text, s, s + len(wort)), text
+        assert not na._ist_sachwort(wort), wort
+        assert na._plausibel(text, s, s + len(wort)), wort
+
+
+@pytest.mark.parametrize("text, wort", [
+    ("Gestern rief Ehmann wegen des Schadens an.", "Ehmann"),          # Fließtext
+    ("Teilnehmer: Ehmann, Portner, Witter, Schüller", "Schüller"),     # Liste, Zeilenende
+    ("Mit freundlichen Grüßen\n\nWohnert\nSachbearbeiter", "Wohnert"),  # Grußblock: Name allein auf der Zeile
+    ("Mit freundlichen Grüßen\nSchildner", "Schildner"),
+    ("Laut Nachbaur war das Fenster beschädigt.", "Nachbaur"),
+    ("Spenner hat angerufen.", "Spenner"),
+    ("Hallo Portner,\nbitte Rückruf.", "Portner"),
+])
+def test_unbekannte_nachnamen_bleiben_namen(text, wort):
+    """Review-Befund (hoch): echte Nachnamen außerhalb der Namensliste, die einen Buchstaben neben einem Etikett
+    liegen (Ehmann/Ehemann, Wohnert/Wohnort, Schüller/Schüler, Portner/Partner), sind nie Sachwörter und auch auf
+    OCR-Text kein verlesenes Etikett, solange kein Doppelpunkt dahinter steht."""
+    s = text.index(wort)
+    assert not na._ist_sachwort(wort)
+    assert na._plausibel(text, s, s + len(wort))
+    assert not na.verlesenes_etikett_statt_name(text, s, s + len(wort))
+
+
+@braucht_modell
+def test_unbekannte_nachnamen_auf_der_textebene():
+    """Review-Befund (hoch): auf der Textebene findet die Namenserkennung Ehmann, Portner, Witter, Schüller und Wohnert
+    wieder (c1e8ec4 verlor sie still über die unscharfen Etiketten)."""
+    text = ("Aktennotiz\nTeilnehmer der Besprechung: Ehmann, Portner, Witter, Schüller\n"
+            "Gestern rief Ehmann wegen des Schadens an.\nLaut Portner war die Ampel rot.\n"
+            "Wie Schüller mitteilte, liegt das Gutachten vor.\nMit freundlichen Grüßen\nWohnert\nSachbearbeiter\n")
+    gefunden = " | ".join(k["text"] for k in na.finde_personen(text))
+    for name in ("Ehmann", "Portner", "Witter", "Schüller", "Wohnert"):
+        assert name in gefunden, (name, gefunden)

@@ -657,3 +657,148 @@ def test_vertrag_etikett_am_zeilenende_im_fliesstext():
     assert mu.finde_vertragsnummern("Bitte nennen Sie stets Ihre Vertragsnummer\n2025 wird alles anders.") == []
     assert mu.finde_vertragsnummern("Bitte nennen Sie Ihre Kundennummer\n12345 Musterstadt") == []
     assert mu.finde_vertragsnummern("Ihre Schadennummer\n01.02.2025 eingegangen") == []
+
+
+# ----------------------------------------------------------------------
+# PLZ + Ort: nie über den Spaltentrenner, keine Registernummern (Runde 1, Paket erkennung-ocr)
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, erwartet", [
+    ("90762 Fürth\t\tPHV", ["90762 Fürth"]),
+    ("90762 Bad\t\tHomburg", ["90762 Bad"]),
+    ("60311 Frankfurt am\t\tMain", ["60311 Frankfurt"]),
+    ("Musterweg 1\t\t90762 Fürth\t\tLeben Allianz", ["90762 Fürth"]),
+    ("90402\t12345 Nürnberg", ["12345 Nürnberg"]),                 # einzelner Tabulator ist eine Lücke, kein Trenner
+])
+def test_plz_ort_nie_ueber_spaltentrenner(text, erwartet):
+    assert mu.finde_plz_ort(text) == erwartet
+    for s, e in mu.finde_plz_ort_stellen(text):
+        assert "\t\t" not in text[s:e]
+
+
+@pytest.mark.parametrize("text, erwartet", [
+    # reine PLZ-Zelle + ganze Ort-Zelle: EINE Stelle über genau diesen Trenner (Tabelle PLZ | Ort, Kästchen)
+    ("27568\t\tBremerhaven", ["27568\t\tBremerhaven"]),
+    ("Anschrift:\t\tBirkenallee 119\t\t27568\t\tBremerhaven", ["27568\t\tBremerhaven"]),
+    ("61348\t\tBad Homburg v. d. Höhe", ["61348\t\tBad Homburg v. d. Höhe"]),
+    ("90762\t\tFürth\t\tPHV", ["90762\t\tFürth"]),                  # die Zelle danach gehört nicht dazu
+    ("73610\t\tMateusz Grabowski", []),                             # Nachbarzelle ist kein Ort
+    ("x 12345\t\tBerlin", []),                                       # PLZ-Zelle enthält mehr als die PLZ
+    ("Kunden-Nr.\t\t12345\t\tAllianz", []),
+    ("Vertrag\t\t12345\t\tGenerali", []),
+    ("12345\t\tUSt-IdNr. DE123", []),
+    # Review-Befund: die PLZ beendet ihre Zelle hinter Straße/Anschrift-Etikett, der Ort steht daneben
+    ("Anschrift: Hauptstraße 5, 79098\t\tFreiburg im Breisgau", ["79098\t\tFreiburg im Breisgau"]),
+    ("Hauptstraße 5 79098\t\tFreiburg", ["79098\t\tFreiburg"]),
+    ("Hauptstraße 5, D-79098\t\tFreiburg", ["D-79098\t\tFreiburg"]),
+    ("Wohnort: 79098\t\tFreiburg\t\tTelefon: 0761 123456", ["79098\t\tFreiburg"]),
+    ("PLZ, Ort: 12345\t\tMusterstadt", ["12345\t\tMusterstadt"]),
+    # Gegenproben: vor der PLZ steht keine Anschrift
+    ("Fahrzeug: VW Golf, 45000\t\tBenzin", []),
+    ("Tarif Komfort, 12000\t\tSelbstbeteiligung", []),
+    ("Kunden-Nr. 12345\t\tAllianz", []),
+])
+def test_plz_und_ort_in_nachbarzellen(text, erwartet):
+    assert mu.finde_plz_ort(text) == erwartet
+    for s, e in mu.finde_plz_ort_stellen(text):
+        assert text[s:e].count("\t\t") <= 1 and mu.plz_ort_zellenpaar(text, s, e) == ("\t\t" in text[s:e])
+
+
+@pytest.mark.parametrize("text", [
+    "Amtsgericht Hamburg 12345 Musterstadt", "Registergericht Hamburg 12345 Musterstadt",
+    "Handelsregister 12345 Musterstadt", "Amtsgericht Hamburg, HRB 12345 Musterstadt", "HRB: 16963 Vorstand",
+    "HR B 16963 Musterstadt", "Amtsgericht Lübeck HR8 16963 Musterstadt",
+    "Registergericht: Amtsgericht Lübeck, 45650 Musterstadt", "Amtsgericht Frankfurt am Main 12345 Musterstadt",
+    "Amtsgericht München HRB\n12345 München",
+    "Sitz: Wunsiedel - Amtsgericht Wunsiedel HRB 98644\t\tUSt-IdNr. DE871667547",
+])
+def test_registernummer_ist_keine_plz(text):
+    assert mu.finde_plz_ort(text) == []
+
+
+@pytest.mark.parametrize("text, erwartet", [
+    ("Max Mustermann\nHauptstr. 5\n12345 Berlin", ["12345 Berlin"]),
+    ("Das Amtsgericht hat entschieden.\n12345 Berlin", ["12345 Berlin"]),
+    ("Amtsgericht Berlin\nLittenstraße 12\n10179 Berlin", ["10179 Berlin"]),
+])
+def test_registerregel_gegenproben(text, erwartet):
+    assert mu.finde_plz_ort(text) == erwartet
+
+
+# ----------------------------------------------------------------------
+# Lücken der Muster (Runde 1, Paket erkennung-ocr)
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, erwartet", [
+    ("Tel. 0049 163 8280469\n6. Unfallhergang", ["0049 163 8280469"]),       # keine Aufzählung der Folgezeile
+    ("Telefon 0911 123456\n45,90 EUR", ["0911 123456"]),                       # kein Betrag der Folgezeile
+    ("Tel. (0911) 12\n34 56. Bitte rufen Sie an", ["(0911) 12\n34 56"]),       # Satzende ist keine Aufzählung
+    ("Telefon: +49\n(0)1511 6539102.", ["+49\n(0)1511 6539102"]),
+    ("Tel. 07 51 / 345\n09 42", ["07 51 / 345\n09 42"]),
+    ("Bei Fragen bin ich unter 0\n15 22 / 660 77 64 erreichbar.", ["0\n15 22 / 660 77 64"]),
+])
+def test_telefon_ueber_zeilenumbruch_hinter_etikett(text, erwartet):
+    assert mu.finde_telefon(text) == erwartet
+
+
+@pytest.mark.parametrize("text, erwartet", [
+    ("Die Polizei (Autobahnpolizei Feucht, Aktenzeichen 92 Js 6010/24) nahm den Unfall auf.", ["92 Js 6010/24"]),
+    ("Die Polizei (Polizeipräsidium Oberfranken, Aktenzeichen 381 C\n817/23) nahm den Unfall auf.",
+     ["381 C\n817/23"]),
+    ("Aktenzeichen 4 Ds 123/24 Js", ["4 Ds 123/24"]),
+    ("Kundennummer 12 Js", []),
+    ("Aktenzeichen 381 C\n2025 wird alles anders", []),
+])
+def test_aktenzeichen_mit_registerzeichen_und_umbruch(text, erwartet):
+    assert mu.finde_vertragsnummern(text) == erwartet
+
+
+def test_ocr_datum_mit_o_ist_keine_telefonnummer():
+    assert mu.finde_telefon("Geburtsdatum:\t\tO1/08/1966") == []
+    assert mu.finde_telefon("Tel. O171 2345678") == ["O171 2345678"]
+
+
+def test_mandatsreferenz_mit_ocr_rest_in_fuellpunkten():
+    assert mu.finde_mandatsreferenz("Mandatsreferenz ...........nn. SEPA816626-520") == ["SEPA816626-520"]
+    assert mu.finde_mandatsreferenz("Mandatsreferenz: wird ab dem 01.02.2025 vergeben") == []
+
+
+def test_geburtsdatum_mit_monatsnamen_ueber_zeilenumbruch():
+    assert mu.finde_geburtsdaten("Geburtsdatum laut unseren Unterlagen: 27.\nJanuar 1976.") == ["27.\nJanuar 1976"]
+    assert mu.finde_geburtsdaten("Vertragsbeginn: 27.\nJanuar 2020") == []
+
+
+@pytest.mark.parametrize("text, erwartet", [
+    ("Steuer-ID der versicherten Person: 55 894 120 358;", ["55 894 120 358"]),
+    ("Steuer-Identifikationsnummer des Kindes: 86095742719", ["86095742719"]),
+    ("Steuer-Identifikationsnummer: 86 095 742\n719", ["86 095 742\n719"]),
+    ("Steuer-IdNr. 86095742719", ["86095742719"]),
+    ("Steuer-ID siehe Anlage. Telefon: 0911 1234567", []),
+    ("Steuer-ID der Person und Telefon: 0911 1234567", []),
+])
+def test_steuer_id_hinter_laengerer_wendung(text, erwartet):
+    assert mu.finde_steuer_id(text) == erwartet
+
+
+@pytest.mark.parametrize("text, erwartet", [
+    # Review-Befund: "-Nr."/"-Nummer" gehören zum Etikett, Zusätze zur Person sind kein fremdes Etikett
+    ("Steuer-ID-Nr.: 89 323 416 709", ["89 323 416 709"]),
+    ("Steuer-ID-Nr.: 12 345 678 901", ["12 345 678 901"]),
+    ("Steuer-ID-Nummer: 12 345 678 901", ["12 345 678 901"]),
+    ("Steuer-Id-Nummer: 12345678901", ["12345678901"]),
+    ("Steuer-ID Nr. 12345678901", ["12345678901"]),
+    ("Steuer-ID-Nr. 89 323 416 709", ["89 323 416 709"]),
+    ("Steuer-Id-Nr.: 12 345 678 901", ["12 345 678 901"]),
+    ("Steuer-ID-Nr.:\t\t89 323 416 709", ["89 323 416 709"]),
+    ("Steuer-ID-Nr.:\n89 323 416 709", ["89 323 416 709"]),
+    ("Steuer-ID des Kunden: 12 345 678 901", ["12 345 678 901"]),
+    ("Steuer-ID Kontoinhaber: 12 345 678 901", ["12 345 678 901"]),
+    ("Steuer-ID des Vertragspartners: 12 345 678 901", ["12 345 678 901"]),
+    ("Steuer-ID (VN): 12 345 678 901", ["12 345 678 901"]),
+    ("TIN-Nr.: 12345678901", ["12345678901"]),
+    # Gegenproben: ein fremdes Etikett vor der Zahl
+    ("Steuer-ID und Telefon: 0911 1234567", []),
+    ("Steuer-ID wurde nicht übermittelt, Konto: 12345678901", []),
+    ("Steuer-ID fehlt, Kunden-Nr.: 12345678901", []),
+    ("Steuer-ID fehlt, Kundennummer: 12345678901", []),
+])
+def test_steuer_id_mit_nummer_im_etikett(text, erwartet):
+    assert mu.finde_steuer_id(text) == erwartet

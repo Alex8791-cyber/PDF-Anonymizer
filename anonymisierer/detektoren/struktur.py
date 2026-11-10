@@ -41,6 +41,12 @@ try:
 except Exception:  # pragma: no cover
     _muster = None
 
+try:
+    from ..namen import personen_teilen as _personen_teilen
+except Exception:  # pragma: no cover
+    def _personen_teilen(text, start, ende):
+        return [(start, ende)]
+
 
 # ----------------------------------------------------------------------
 # Kategorien
@@ -352,6 +358,7 @@ class Etikett(NamedTuple):
                            #  "neutral", "laufend"}
     kategorie: str | None  # Zielkategorie einer Kennung (vertrag, iban, kfz …) bzw. telefon/email
     eintrag: str           # Listeneintrag (bzw. das Wort selbst)
+    unscharf: bool = False  # nur als von der OCR verlesenes Etikett erkannt (detektoren/etiketten_unscharf.py)
 
 
 # Kennungs-Etikett -> Kategorie (auf der Vergleichsform: klein, ohne Diakritika, Trenner = Leerzeichen)
@@ -460,6 +467,23 @@ def _etiketten_roh(text: str) -> list:
     return aus
 
 
+def _etiketten_ocr_unscharf(seite) -> list:
+    """Von der OCR verlesene Etiketten ("Name, Vomame:", "Kundenntimmer 76183905") – nur in OCR-Zeilen
+    (detektoren/etiketten_unscharf.py)."""
+    try:
+        from .etiketten_unscharf import unscharfe_etiketten
+        from .ocr_lesart import OCR_QUELLEN, zeile_ist_ocr
+    except Exception:  # pragma: no cover - Modul fehlt
+        return []
+    if not any(z.quelle in OCR_QUELLEN for z in seite.zeichen):
+        return []
+    aus = []
+    for z in seite.zeilen:
+        if z.ende > z.start and zeile_ist_ocr(seite, z):
+            aus.extend(unscharfe_etiketten(seite.text, z.start, z.ende))
+    return aus
+
+
 def etiketten(seite) -> list:
     """Etiketten einer Seite (nach Lage geordnet, nicht überlappend, nie über eine Zellgrenze)."""
     zw = getattr(seite, "_struktur_etiketten", None)
@@ -467,7 +491,11 @@ def etiketten(seite) -> list:
         return zw[1]
     text = seite.text
     lg = lage(seite)
+    unscharf_roh = _etiketten_ocr_unscharf(seite)
+    unscharf = {(s, e) for s, e, *_ in unscharf_roh}
     roh = _etiketten_roh(text)
+    unscharf -= {(s, e) for s, e, *_ in roh}           # exakt erkannt geht vor
+    roh += unscharf_roh
     # neutrale Spaltenköpfe und laufende Nummern
     for m in re.finditer(r"(?<![\w.])([A-Za-zÄÖÜäöüß][\w.\-äöüß]*|#)(?![\w])", text):
         w = m.group(1)
@@ -522,7 +550,7 @@ def etiketten(seite) -> list:
                 kategorie = kennung_kategorie(f"{stamm} Nr.")
                 if kategorie is not None:
                     arten, eintrag = {"kennung"}, f"{stamm} Nr."
-        aus.append(Etikett(s, e, frozenset(arten), kategorie, eintrag))
+        aus.append(Etikett(s, e, frozenset(arten), kategorie, eintrag, (s, e) in unscharf))
     try:
         seite._struktur_etiketten = (text, aus)
     except AttributeError:
@@ -1417,8 +1445,12 @@ def _namens_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
             continue
         if sp.woerter == 1 and not sp.bekannt and not mit_trenner:
             break
-        gruppe = text[sp.start:sp.ende] if sp.woerter >= 2 else None
-        aus.append(Wert(sp.start, sp.ende, "namen", gruppe))
+        # "Jörg Ziegler Ursula Frank" (Komma von der OCR verschluckt): je Person ein Wert
+        teile = _personen_teilen(text, sp.start, sp.ende) if sp.woerter >= 3 and not sp.komma \
+            else [(sp.start, sp.ende)]
+        for a, b in teile:
+            gruppe = text[a:b] if len(text[a:b].split()) >= 2 and (len(teile) > 1 or sp.woerter >= 2) else None
+            aus.append(Wert(a, b, "namen", gruppe))
         if not liste:
             break
         pos = sp.ende

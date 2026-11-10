@@ -137,6 +137,18 @@ def test_r5_personenlisten_in_fusszeilen():
     assert not any("USt" in n or "DE64" in n for n in namen)
 
 
+def test_r5_personenliste_nie_ueber_spaltentrenner_und_ohne_komma_geteilt():
+    """Fußzeile im Scan: Spalten durch "\\t\\t" getrennt, die OCR hat ein Aufzählungskomma verschluckt."""
+    text = ("Vorstand: Monika Voigt, Witali\t\tVorsitz Aufsichtsrat:\n"
+            "Marktplatz 6\t\t95632 Wunsiedel\t\tRempel, Carmela Marino\t\tPetr Kfiz\n"
+            "Vorstand: Dipl.-Ing. Jörg Ziegler Ursula Frank\nSitz: Freiburg")
+    namen = _namen(text)
+    assert not any("\t" in n for n in namen), namen
+    for name in ("Carmela Marino", "Petr Kfiz", "Jörg Ziegler", "Ursula Frank"):
+        assert name in namen, (name, namen)
+    assert "Jörg Ziegler Ursula Frank" not in namen
+
+
 def test_r6_rolle_und_r7_url():
     assert "Patel" in _namen("Der Zeuge Patel hat den Vorgang beobachtet.")
     assert "Thomas Weber" in _namen("Anna Weber ist die Ehefrau von Thomas Weber.")

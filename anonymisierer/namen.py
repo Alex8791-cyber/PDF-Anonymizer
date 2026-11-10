@@ -2,8 +2,12 @@
 Plausibilitätsfilter gegen Fehlalarme und Stopplisten.
 
 Öffentliche Namen: lade_ner, finde_personen_ner (Menge von Namenstexten, wie bisher),
-finde_personen (Kandidaten mit Position und Zusammengehörigkeit), NAMEN_STOPPLISTE,
-ner_fehler.
+finde_personen (Kandidaten mit Position und Zusammengehörigkeit), personen_teilen (mehrere Personen ohne
+Komma an Vornamen trennen – "Jörg Ziegler Ursula Frank"), verlesenes_etikett_statt_name (von der OCR
+verlesener Feldbezeichner statt Name – nur für OCR-Text), NAMEN_STOPPLISTE, ner_fehler.
+
+Die Filter dieses Moduls kennen die Herkunft der Zeichen nicht und gelten deshalb für jeden Text gleich; eine
+Toleranz für OCR-Lesefehler gehört nicht hierher (detektoren/ocr_lesart.py prüft die Quelle).
 """
 
 import functools
@@ -176,7 +180,8 @@ _NAMENSENDE = {"tel", "tel.", "telefon", "telefax", "fax", "mobil", "handy", "ke
                "schadennummer", "steuer-id", "e-mail", "email", "mail", "web", "www", "tochter", "sohn",
                "kind", "ehefrau", "ehemann", "vn", "versicherungsnehmer", "versicherungsmakler", "makler",
                "wohnhaft", "geschäftsführer", "inhaber", "vorstand", "leiter", "leiterin"}
-_STRASSENSUFFIX_RE = re.compile(r"(?i:straße|strasse|str\.|weg|allee|platz|gasse|ring|damm|ufer|markt|chaussee)$")
+# Straßenwort am Wortende – "str" auch ohne Punkt ("Habsburgerstr": die OCR verliert den Punkt gern)
+_STRASSENSUFFIX_RE = re.compile(r"(?i:straße|strasse|str\.?|weg|allee|platz|gasse|ring|damm|ufer|markt|chaussee)$")
 _KFZ_RE = re.compile(r"^[A-ZÄÖÜ]{1,3}-[A-Z]{1,2}$")
 _BIC_FORM_RE = re.compile(r"^[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?$")
 _ORT_DATUM_RE = re.compile(r",[ \t]*(?:den[ \t]+|im[ \t]+|am[ \t]+)?\d{1,2}\.[ \t]?(?:\d{1,2}\.|[A-ZÄÖÜ][a-zä]+)[ \t]?\d{2,4}")
@@ -284,7 +289,59 @@ def _ist_sachwort(wort: str) -> bool:
             return True
         if _wissen_art(teil)[1]:
             return True
+    # Kein Abgleich mit verlesenen Etiketten: _ist_sachwort gilt für jeden Text, auch für die Textebene eines PDFs,
+    # und ein unbekannter Nachname ("Ehmann", "Wohnert") liegt oft nur einen Buchstaben neben einem Feldbezeichner
+    # ("Ehemann", "Wohnort"). Verlesene Etiketten prüft verlesenes_etikett_statt_name – nur für OCR-Text.
     return False
+
+
+def _verlesenes_etikett(wort: str) -> bool:
+    """Von der OCR verlesener Feldbezeichner ("Vomame", "Verscherungsnchmer") nach detektoren/etiketten_unscharf.py:
+    langes, großgeschriebenes Wort, das weder bekannter Name noch bekanntes Wort ist. Allein KEIN Grund, einen
+    Namen zu verwerfen – siehe verlesenes_etikett_statt_name."""
+    w = wort.strip(".,;:()[]\"'")
+    if len(w) < 6 or not w.isalpha():
+        return False
+    try:
+        from .detektoren.etiketten_unscharf import etikettwort_fuer
+    except Exception:  # pragma: no cover - Paket nicht ladbar
+        return False
+    # lange Komposita ("Versicherungsnuarmmer") auch mit untypischem Lesefehler – Nachnamen sind so lang nicht
+    return etikettwort_fuer(w, nachsichtig=len(w) >= _LANGES_ETIKETTWORT) is not None
+
+
+# Etikett-Stellung hinter einer Namensstelle: Doppelpunkt (auch hinter einer kurzen Klammer: "Vomame (Rufname):")
+_DOPPELPUNKT_DANACH_RE = re.compile(r"[ \t]*(?:\([^()\n]{0,25}\)[ \t]*)?:")
+# bei langen Wörtern auch Zeilen-/Zellenende oder eine Kennung dahinter ("Kundenntimmer 76183905")
+_ETIKETT_ENDE_RE = re.compile(r"[ \t]*(?:\)[ \t]*)?(?:\n|\t\t|$)"
+                              r"|[ \t]*(?:Nr\.?[ \t]*)?:?[ \t]*[A-Z]{0,4}[ \t./-]?\d{2}")
+_LANGES_ETIKETTWORT = 12          # so lange Wörter sind Komposita ("Verscherungsnchmer"), kaum Nachnamen
+
+
+def verlesenes_etikett_statt_name(text: str, start: int, ende: int) -> bool:
+    """Ist die Namensstelle text[start:ende] der KI in Wahrheit ein von der OCR verlesener Feldbezeichner
+    ("Name, Vomame:", "(Unterschrift Verscherungsnchmer")?
+
+    NUR für OCR-Text: der Aufrufer prüft, dass die Zeichen aus der OCR stammen (detektoren/ocr_lesart.py). Auf der
+    Textebene eines PDFs ist ein unbekanntes Wort nie ein Lesefehler, sondern womöglich ein Name ("Ehmann",
+    "Wohnert", "Portner" liegen einen Buchstaben neben "Ehemann", "Wohnort", "Partner").
+
+    Bedingungen: alle Wörter sind Sachwörter oder verlesene Etikettwörter, mindestens eins ist verlesen, und die
+    Stelle steht in Etikett-Stellung – ein Doppelpunkt direkt dahinter; bei einem langen verlesenen Wort (ab 12
+    Buchstaben, ein Kompositum wie "Verscherungsnchmer") auch das Zeilen- oder Zellenende oder eine Nummer dahinter
+    ("Kundenntimmer 76183905"). Ein Nachname üblicher Länge allein auf einer Zeile (Grußblock, Unterschrift), in
+    einer Liste oder im Fließtext bleibt damit ein Name; verworfen wird er nur mit Doppelpunkt dahinter, wenn er
+    zugleich nur einen typischen Lesefehler von einem Etikettwort entfernt und dem Sprachmodell unbekannt ist."""
+    if not (0 <= start < ende <= len(text)):
+        return False
+    teile = _namensteile(text[start:ende])
+    verlesen = [t for t in teile if _verlesenes_etikett(t)]
+    if not verlesen or not all(t in verlesen or _ist_sachwort(t) for t in teile):
+        return False
+    if _DOPPELPUNKT_DANACH_RE.match(text, ende):
+        return True
+    return (any(len(t) >= _LANGES_ETIKETTWORT for t in verlesen)
+            and _ETIKETT_ENDE_RE.match(text, ende) is not None)
 
 
 # ----------------------------------------------------------------------
@@ -484,6 +541,88 @@ def _bereinigen(text: str, start: int, ende: int):
     return (start, ende) if ende > start else None
 
 
+_TEILWORT_RE = re.compile(r"[^\s,;]+[,;]?")
+
+
+def _wissen_wort(frage: str, wort: str) -> bool:
+    """Frage an die Wissensbasis (ist_vorname, ist_nachname …) für ein Wort, Versalien in Titelform."""
+    w = wort.strip(".,;:()[]\"'")
+    if len(w) < 2:
+        return False
+    try:
+        from . import wissen
+        return bool(getattr(wissen, frage)(w.title() if w.isupper() else w))
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return False
+
+
+def personen_teilen(text: str, start: int, ende: int) -> list:
+    """Stelle mit mehreren Personen ohne Komma dazwischen an bekannten Vornamen teilen: "Jörg Ziegler Ursula
+    Frank" (die OCR hat das Aufzählungskomma verschluckt) -> [(Jörg Ziegler), (Ursula Frank)].
+
+    Geteilt wird vor einem Vornamen der Wissensbasis (oder vor einem Titel, auf den ein Vorname folgt), wenn davor
+    mindestens zwei Namenswörter derselben Person stehen und das Wort davor ein Nachname ist (kein Vorname, oder
+    ein mehrdeutiger Vorname, der auch Nachname ist: "Thomas Frank Ursula Wolf"). Doppelvornamen ("Anna Maria
+    Schmidt", "Karl Heinz Frank") bleiben zusammen; ein Vorname ganz am Ende bildet nur dann eine eigene Person, wenn
+    er eindeutig ist. Trenner zwischen den Personen sind nur Leerzeichen/Tabulatoren (kein Komma, kein Umbruch).
+    Liefert [(start, ende), …] (eine Stelle, wenn nichts zu teilen ist)."""
+    woerter = [(start + m.start(), start + m.end(), m.group(0)) for m in _TEILWORT_RE.finditer(text[start:ende])]
+    if len(woerter) < 3:
+        return [(start, ende)]
+
+    def art(roh: str) -> str:
+        w = roh.rstrip(",;")
+        k = w.lower()
+        if k in TITEL or k.strip(".") in TITEL or re.fullmatch(r"(?:Dipl|Prof|Dr|Mag|Ing)\.[\w.\-]*", w):
+            return "titel"
+        if w.islower() and (k in PARTIKEL or k.strip(".") in PARTIKEL):
+            return "partikel"
+        if w[:1].isupper() and len(w.strip(".")) >= 2:
+            return "name"
+        return "sonst"
+
+    arten = [art(w[2]) for w in woerter]
+    grenzen = []
+    namen_seit = 0                                   # Namenswörter der laufenden Person
+    for i, (s, e, roh) in enumerate(woerter):
+        if arten[i] == "name" and namen_seit >= 2 and i >= 1:
+            # Kandidat für eine neue Person: Vorname direkt hier, oder Titel(-kette) davor
+            j = i
+            while j > 0 and arten[j - 1] == "titel":
+                j -= 1
+            vorher = woerter[j - 1] if j >= 1 else None
+            if (vorher is not None and arten[j - 1] == "name" and not vorher[2].endswith((",", ";"))
+                    and text[vorher[1]:woerter[j][0]].strip(" \t") == ""
+                    and _wissen_wort("ist_vorname", roh) and not _wissen_wort("ist_allerweltswort", roh)):
+                vor_wort = vorher[2]
+                nachname = (not _wissen_wort("ist_vorname", vor_wort)
+                            or (_wissen_wort("ist_vorname_mehrdeutig", vor_wort)
+                                and _wissen_wort("ist_nachname", vor_wort)))
+                letzter = i == len(woerter) - 1
+                eindeutig = not _wissen_wort("ist_vorname_mehrdeutig", roh) and not _wissen_wort("ist_nachname", roh)
+                if nachname and (not letzter or eindeutig):
+                    grenzen.append(j)
+                    namen_seit = 1
+                    continue
+        if arten[i] == "name":
+            namen_seit += 1
+        elif arten[i] == "sonst":
+            namen_seit = 0
+    if not grenzen:
+        return [(start, ende)]
+    teile = []
+    anfang = 0
+    for g in grenzen + [len(woerter)]:
+        stueck = woerter[anfang:g]
+        if stueck:
+            s, e = stueck[0][0], stueck[-1][1]
+            while e > s and text[e - 1] in ",; \t":
+                e -= 1
+            teile.append((s, e))
+        anfang = g
+    return teile
+
+
 def _nachname_hinter_vorname(text: str, start: int, ende: int, wort: str) -> bool:
     """Steht `wort` (großgeschrieben, bekannter Nachname) direkt hinter einem bekannten Vornamen?"""
     if not wort[:1].isupper():
@@ -670,12 +809,16 @@ def _kandidat(kandidaten, text, start, ende, gruppe=None, regel=False):
     luecke = _LUECKE_RE.search(text, start, ende)
     if luecke:
         ende = luecke.start()
-    bereich = _bereinigen(text, start, ende)
-    if bereich and _plausibel(text, *bereich, regel=regel):
-        kandidaten.append({"text": text[bereich[0]:bereich[1]], "start": bereich[0],
-                           "ende": bereich[1], "gruppe": gruppe})
-        return True
-    return False
+    # mehrere Personen ohne Komma ("Jörg Ziegler Ursula Frank") werden getrennte Kandidaten
+    teile = personen_teilen(text, start, ende) if gruppe is None else [(start, ende)]
+    gefunden = False
+    for s, e in teile:
+        bereich = _bereinigen(text, s, e)
+        if bereich and _plausibel(text, *bereich, regel=regel):
+            kandidaten.append({"text": text[bereich[0]:bereich[1]], "start": bereich[0],
+                               "ende": bereich[1], "gruppe": gruppe})
+            gefunden = True
+    return gefunden
 
 
 def _name_kuerzen(text: str, start: int, ende: int):

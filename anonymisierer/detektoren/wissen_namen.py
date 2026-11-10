@@ -20,7 +20,7 @@ from __future__ import annotations
 import functools
 import re
 
-from .. import wissen
+from .. import namen, wissen
 from . import ALLE_PROFILE, Treffer, detektor
 
 _GROSS = "A-ZÄÖÜÀ-ÖØ-ÞĀĂĄĆČĎĐĒĖĘĚĞĢĪĮİĶĹĻĽŁŃŅŇŌŐŒŔŘŚŞŠŢŤŪŮŰŲŹŻŽȘȚ"
@@ -473,8 +473,9 @@ def _personenlisten(text: str) -> list:
         ende = ende_m.start() if ende_m else min(len(text), m.end() + 400)
         abschnitt = text[m.end():ende]
         pos = 0
-        for teil in re.split(r"(,|;|\bund\b|\bsowie\b|·|\|)", abschnitt):
-            if teil in (",", ";", "und", "sowie", "·", "|") or not teil.strip():
+        # Trenner der Aufzählung; der Spaltentrenner "\t\t" beendet einen Namen immer (Nachbarspalte der Fußzeile)
+        for teil in re.split(r"(,|;|\bund\b|\bsowie\b|·|\||\t\t)", abschnitt):
+            if teil in (",", ";", "und", "sowie", "·", "|", "\t\t") or not teil.strip():
                 pos += len(teil)
                 continue
             roh = re.sub(r"\([^)]*\)?", lambda x: " " * len(x.group(0)), teil)   # "(Vorsitzender)" weg
@@ -499,7 +500,9 @@ def _personenlisten(text: str) -> list:
                                 aus.append(_treffer(z0, z0 + len(zeile.strip()), text, 0.7, voll))
                             teil_start += len(zeile) + 1
                     else:
-                        aus.append(_treffer(s, s + len(name), text, 0.7))
+                        # "Jörg Ziegler Ursula Frank": OCR hat das Komma verschluckt -> zwei Personen
+                        for a, b in namen.personen_teilen(text, s, s + len(name)):
+                            aus.append(_treffer(a, b, text, 0.7))
             pos += len(teil)
     return aus
 
