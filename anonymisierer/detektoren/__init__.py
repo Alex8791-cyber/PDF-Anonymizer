@@ -140,8 +140,9 @@ def alle_treffer(dok, kontext: Kontext, fehler: list | None = None) -> list:
 # ----------------------------------------------------------------------
 # ALLE Module dieses Pakets – Rückfall, falls iter_modules (z. B. in einer EXE) nichts liefert. Ein neues Modul
 # gehört auch hierher; tests/test_detektoren_register.py hält die Liste deckungsgleich mit dem Paketordner.
-_BEKANNTE_MODULE = ("klassisch", "kundenabgleich", "muster_spans", "struktur", "struktur_adresse", "struktur_brief",
-                    "struktur_formular", "struktur_tabelle", "wissen_kontext", "wissen_namen")
+_BEKANNTE_MODULE = ("etiketten_unscharf", "klassisch", "kundenabgleich", "muster_spans", "ocr_lesart", "struktur",
+                    "struktur_adresse", "struktur_brief", "struktur_formular", "struktur_tabelle", "wissen_kontext",
+                    "wissen_namen")
 
 
 def _automatisch_laden():
