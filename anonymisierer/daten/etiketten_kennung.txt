@@ -224,6 +224,7 @@ Kassenzeichen
 Kd-Nr.
 Kd.-Nr.
 Kd.Nr.
+Kd_Nr
 KdNr
 KdNr.
 Kennz.
@@ -272,12 +273,15 @@ Kto-Nr.
 Kto.
 Kto.-Nr.
 Kunde Nr.
+Kunde_ID
 Kunden Nr.
 Kunden-ID
 Kunden-Kennung
 Kunden-Nr.
 Kunden-Nummer
 Kunden-Referenz
+Kunden_ID
+KundenID
 Kundenkennung
 Kundenkonto
 Kundenkonto-Nr.
@@ -384,6 +388,7 @@ Personenkennziffer
 PNr.
 Police
 Police-Nr.
+Police_Nr
 Policen Nr.
 Policen-Nr.
 Policen-Nummer
@@ -490,6 +495,7 @@ Steuer-Identifikationsnummer
 Steuer-IdNr.
 Steuer-Nr.
 Steuer-Nummer
+Steuer_Nr
 Steueridentifikationsnummer
 Steuerliche Identifikationsnummer
 Steuerliche IdNr.
@@ -590,11 +596,13 @@ Versorgungsnummer
 Vertr.-Nr.
 Vertrag
 Vertrag Nr.
+Vertrag_Nr
 Vertrags Nr.
 Vertrags-ID
 Vertrags-Nr
 Vertrags-Nr.
 Vertrags-Nummer
+Vertrags_Nr
 Vertragskennung
 Vertragskonto
 Vertragskontonummer
@@ -617,6 +625,7 @@ Vorgangsnummer
 VS-Nr
 VS-Nr.
 VS-Nummer
+VS_Nr
 VSNR
 VSNr.
 W-IdNr.

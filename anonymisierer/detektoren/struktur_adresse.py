@@ -8,7 +8,10 @@ einem Block ohne Person) der Block direkt darüber eine Rechtsform (GmbH, AG, VV
 Organisationswort (…versicherung, …kasse, Bank, Amtsgericht, Kundenservice …), Registerangaben (HRB,
 Sitz, Vorstand, USt-IdNr.), eine Web-Adresse oder eine Organisation der Erlaubnisliste
 (wissen.ist_allowlist, daten/versicherer_und_organisationen.txt) enthält – und keine Anredezeile
-(Herrn, Frau, Familie) dabeisteht. Kundenanschriften gehen IMMER weg.
+(Herrn, Frau, Familie) dabeisteht. Kundenanschriften gehen IMMER weg. Ein Kundendatenblock (Formularzeilen mit
+Personen-Feldname und Namen bzw. Geburtsdatum, etwa im EDV-Ausdruck "VERSICHERUNGSNEHMER   HAAS, FIETE") ist nie
+Briefkopf: Registerwörter darin ("BANKVERBINDUNG") und der Firmenkopf darüber machen seine Anschrift nicht zur
+Firmenanschrift (personen_formzeile).
 
 Umsetzung: »muster.strasse« und »muster.plzort« werden mit ersetzt=True neu registriert – dieselben
 Muster, aber als Stellen (muster.stellen; keine Stelle über einen Spaltentrenner, dazu die zeilenweise
@@ -33,8 +36,8 @@ import re
 
 from ..seitenmodell import SPALTENTRENNER
 from . import REGISTER, Treffer, detektor, registrieren
-from .struktur import (lage, namen_spanne, ort_verlaengern, plz_ort_kappen, plz_ort_spannen, strasse_spanne,
-                       _muster, _wissen)
+from .struktur import (_GREMIUM_RE, _ORG_ROLLEN_RE, etiketten, lage, namen_spanne, ort_verlaengern, plz_ort_kappen,
+                       plz_ort_spannen, strasse_spanne, _muster, _wissen)
 
 MM = 72 / 25.4
 
@@ -122,6 +125,35 @@ _REGISTER_RE = re.compile(r"(?i)(?<![\wäöüß])(?:HRB|HRA)(?![\wäöüß])|amt
                           r"(?<![\wäöüß])www\.|https?://|service-?telefon|bankverbindung")
 
 
+# Feldnamen von Mitarbeitern, Gremien und Organisationen: kein Beleg für einen Kundendatenblock
+_KEIN_KUNDENFELD_RE = re.compile(r"(?i)ansprechpart|sachbearbeit|bearbeiter|berater|betreuer|vermittler|makler|"
+                                 r"agentur|zeichen|vorstand|aufsichtsrat|geschäftsführ|geschaftsfuhr|inhaber|"
+                                 r"prokur|vertreten|vorsitz")
+
+
+def personen_formzeile(seite, z) -> bool:
+    """Formularzeile eines Kundendatenblocks: Personen-Feldname am Zeilenanfang mit einem Namen dahinter
+    ("VERSICHERUNGSNEHMER   HAAS, FIETE", "Name: Erika Muster") oder Geburtsdatum-Feldname mit Datum.
+    Briefkopf und Fußzeile tragen solche Zeilen nie – Mitarbeiter- und Gremienfelder ("Ansprechpartner:",
+    "Vorstand:") zählen nicht."""
+    text = seite.text
+    roh = text[z.start:z.ende]
+    anfang = z.start + len(roh) - len(roh.lstrip())
+    ets = [et for et in etiketten(seite) if z.start <= et.start < z.ende and et.arten]
+    if not ets or ets[0].start != anfang:
+        return False
+    et = ets[0]
+    if _KEIN_KUNDENFELD_RE.search(et.eintrag) or _ORG_ROLLEN_RE.match(et.eintrag) or _GREMIUM_RE.match(et.eintrag):
+        return False
+    ende = ets[1].start if len(ets) > 1 else z.ende
+    wert = text[et.ende:ende].strip(" \t:.")
+    if not wert:
+        return False
+    if "datum_geburt" in et.arten:
+        return bool(re.match(r"\d{1,2}\.\d{1,2}\.\d{2,4}", wert))
+    return "person" in et.arten and _ist_personenzeile(wert)
+
+
 def _adressartig(text: str) -> bool:
     """Kann die Zeile zu einem Anschriftenblock gehören (Name, Firma, Abteilung, Straße, c/o)? Nicht:
     Formularzeilen mit "Etikett:", nummerierte Überschriften, Sätze."""
@@ -155,9 +187,13 @@ class _Firmenkontext:
         for z in seite.zeilen:
             je_block.setdefault(z.block, []).append(z.id)
         self.block_von = {z.id: z.block for z in seite.zeilen}
+        # Formularzeilen eines Kundendatenblocks ("VERSICHERUNGSNEHMER   HAAS, FIETE", "Geb.-Datum: …")
+        self.kundenzeile = {z.id: personen_formzeile(seite, z) for z in seite.zeilen}
         # Registerangaben zählen nur in kleinen Blöcken (Briefkopf, Fußzeilen-Spalte), nicht in einem Block,
-        # der die ganze Seite umfasst (reiner Text: eine Seite = ein Block)
+        # der die ganze Seite umfasst (reiner Text: eine Seite = ein Block), und nicht in einem Kundendatenblock
+        # ("BANKVERBINDUNG  IBAN …" unter Name und Geburtsdatum des Kunden)
         self.block_register = {b: len(ids) <= 6 and any(_REGISTER_RE.search(self.zeilen_text[zid]) for zid in ids)
+                               and not any(self.kundenzeile[zid] for zid in ids)
                                for b, ids in je_block.items()}
         self.lg = lage(seite)
         self._firma: dict = {}
@@ -198,8 +234,8 @@ class _Firmenkontext:
             if oben is None:
                 return False
             t = self.zeilen_text.get(oben, "")
-            if not _adressartig(t):
-                return False
+            if self.kundenzeile.get(oben) or not _adressartig(t):
+                return False                          # Formularzeile des Kunden darüber: Kundendatenblock
             if _ANREDE_ZEILE_RE.match(t.strip()) or re.match(r"(?i)c/o\b", t.strip()):
                 return False                          # Anrede oder "c/o <Person>": Postanschrift einer Person
             if self.beleg.get(oben):

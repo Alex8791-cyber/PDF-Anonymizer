@@ -18,7 +18,12 @@ Punktleiste oder breiter Lücke, in der Zeile darunter in derselben Spalte oder 
 Folgezeile. Die Art des Etiketts bestimmt die Kategorie (Person -> namen, Kennung -> vertrag bzw. die
 passende Kennungsart, Geburt -> geburt, Anschrift -> strasse/plzort, Kontakt -> telefon/email);
 Vertragsdaten (Beginn, Ablauf, Stand …) bleiben stehen. Gremien-Etiketten (Vorstand, Aufsichtsrat,
-Geschäftsführer) lesen eine ganze Namensliste, auch über die Folgezeilen derselben Spalte.
+Geschäftsführer) lesen eine ganze Namensliste, auch über die Folgezeilen derselben Spalte. Quer gestellte
+Tabellen (eine Spalte je Beteiligtem: "Führerschein-Nr. ⇥⇥ H996KNYGE24 ⇥⇥ P9873B6ND15") liefern jede weitere
+Wertzelle derselben Art (folgezellen_werte). Kopfzeilen aus Feldnamen/Kürzeln ("NAME ⇥⇥ VORN. ⇥⇥ GEB.-DAT.")
+haben keinen Wert in derselben Zeile (kopfzeile). Auf OCR-Zeilen gilt ohne lesbare Wertform der Rohwert hinter
+dem Feldnamen (Handschrift, Kästchen, Schreibmaschine), wenn er die grobe Gestalt seiner Kategorie hat
+(ocr_rohwert, Quelle "struktur.etikett_wert.rohwert").
 """
 
 from __future__ import annotations
@@ -389,8 +394,8 @@ _KONTAKT_EMAIL_RE = re.compile(r"mail|e post|de mail|\bbea\b")
 
 # zusammengesetzte Nummern-Etiketten, die in keiner Liste stehen ("Bestandsnummer", "Mitglieds-ID")
 _NUMMERN_WORT_RE = re.compile(
-    r"(?<![\w.\-])([A-ZÄÖÜa-zäöü][\wäöüß]*(?:[-.][\wäöüßÄÖÜ]+)*?(?:[Nn]ummer|NUMMER|-?[Nn]r\.?|-?NR\.?|-ID|-Id|"
-    r"[Kk]ennung|KENNUNG|[Kk]ennziffer))(?![\w])")
+    r"(?<![\w.\-])([A-ZÄÖÜa-zäöü][\wäöüß]*?(?:[-._][\wäöüßÄÖÜ]+)*?(?:[Nn]ummer|NUMMER|[-_]?[Nn]r\.?|[-_]?NR\.?|"
+    r"[-_]ID|[-_]Id|[Kk]ennung|KENNUNG|[Kk]ennziffer))(?![\w])")
 _NUMMERN_FREMD = re.compile(
     r"(?i)^(?:telefon|tel|fax|telefax|ruf|handy|mobil|mobilfunk|festnetz|haus|artikel|art|position|pos|seiten?|"
     r"version|tarif|produkt|bankleit|material|modell|typ|zimmer|raum|kapitel|absatz|paragraph|ziffer|zeilen?|"
@@ -411,6 +416,10 @@ vorher nachher änderung anderung zeitart arbeitgeber tätigkeit tatigkeit beruf
 """.split())
 
 _LAUFEND = frozenset({"nr", "nr.", "no", "no.", "pos", "pos.", "lfd", "lfd.", "lfd. nr.", "lfd nr", "#", "nummer"})
+# Spaltenkürzel aus Exporten (Excel, Bestandsführung): Versalien bis vier Buchstaben, Kürzel mit Punkt oder Wörter mit
+# Unterstrich ("VU", "ZW.", "HF", "GES.", "VORN.", "BTR_BRUTTO", "TEL_PRIVAT") – nie ein Personenname im Kopf
+ABKUERZUNG_RE = re.compile(r"[A-ZÄÖÜ]{1,4}\.?|[A-ZÄÖÜa-zäöü]{1,6}\.(?:[ ]?[A-ZÄÖÜa-zäöü]{1,5}\.)*|"
+                           r"[A-ZÄÖÜ0-9]+(?:_[A-ZÄÖÜ0-9]+)+(?:[ ][A-ZÄÖÜ]{1,4}\.?)?")
 _GREMIUM_RE = re.compile(
     r"(?i)^(?:vorst(?:a|ä)nd(?:e|s)?|vorstandsvorsitzende[r]?|aufsichtsrat(?:s|es)?|aufsichtsratsvorsitzende[r]?|"
     r"vorsitz(?:ende[r]?)?(?: des)?(?: aufsichtsrat(?:s|es)?| vorstand(?:s|es)?)?|geschäftsführer(?:in|innen)?|"
@@ -419,12 +428,13 @@ _GREMIUM_RE = re.compile(
 
 
 def _vergleichsform(text: str) -> str:
+    # "_" trennt wie "-" und "." (Spaltennamen aus Datenbank-Exporten: "STEUER_NR", "VN_GEBDAT")
     if _wissen is not None:
         try:
-            return " ".join(_wissen.normalisieren(re.sub(r"[-./()]+", " ", text)).split())
+            return " ".join(_wissen.normalisieren(re.sub(r"[-./()_]+", " ", text)).split())
         except Exception:
             pass
-    return " ".join(re.sub(r"[-./()]+", " ", text).casefold().split())
+    return " ".join(re.sub(r"[-./()_]+", " ", text).casefold().split())
 
 
 def kennung_kategorie(eintrag: str) -> str | None:
@@ -452,9 +462,12 @@ def _etiketten_roh(text: str) -> list:
     aus = []
     if _wissen is None:
         return aus
+    # Zellen getrennt durchsuchen: der Spaltentrenner "\t\t" gilt der Wissensbasis als Leerraum, ein Eintrag
+    # "PLZ Ort" würde sonst über zwei Kopfzellen "PLZ ⇥⇥ ORT" greifen und (verworfen) beide Etiketten verdecken
+    such = text.replace("\t", "\n")
     for art in ARTEN:
         try:
-            vorkommen = _wissen.finde(text, f"etiketten_{art}")
+            vorkommen = _wissen.finde(such, f"etiketten_{art}")
         except Exception:
             continue
         for v in vorkommen:
@@ -465,6 +478,12 @@ def _etiketten_roh(text: str) -> list:
             continue
         aus.append((m.start(1), m.end(1), "kennung", wort))
     return aus
+
+
+# Straßenwort als Teil eines Straßennamens statt als Feldname: Wort + ein Leerzeichen davor, Hausnummer danach
+_STRASSENNAME_TEIL_RE = re.compile(r"(?i)stra(?:ß|ss)e|str\.?")
+_VOR_STRASSENWORT_RE = re.compile(r"[A-Za-zÄÖÜäöüß][\wäöüß'’.\-]*[ ]$")
+_HAUSNUMMER_DANACH_RE = re.compile(r"[ ]?\d{1,4}(?![\d.:])")
 
 
 def _etiketten_ocr_unscharf(seite) -> list:
@@ -513,6 +532,9 @@ def etiketten(seite) -> list:
             continue                                  # mitten im Wort ("Ehm-Welk-Str.")
         if art == "vertragsdaten" and text[s:e].islower() and len(text[s:e]) <= 5:
             continue                                  # "am", "ab", "bis", "per", "seit": Funktionswörter
+        if art == "adresse" and _STRASSENNAME_TEIL_RE.fullmatch(text[s:e]) and \
+                _VOR_STRASSENWORT_RE.search(text, max(0, s - 40), s) and _HAUSNUMMER_DANACH_RE.match(text, e):
+            continue                                  # "HOHE STRASSE 129", "Neue Str. 5": Teil des Straßennamens
         a = lg.zelle_bei(s)
         if a is None or e > a.ende:
             continue                                  # über eine Zellgrenze hinweg: kein Etikett
@@ -720,12 +742,21 @@ _MONATE = {"januar": 1, "jan": 1, "februar": 2, "feb": 2, "märz": 3, "maerz": 3
            "apr": 4, "mai": 5, "juni": 6, "jun": 6, "juli": 7, "jul": 7, "august": 8, "aug": 8,
            "september": 9, "sep": 9, "sept": 9, "oktober": 10, "okt": 10, "november": 11, "nov": 11,
            "dezember": 12, "dez": 12}
+# Pässe und Ausweise anderer Staaten: Monatskürzel englisch/französisch in Versalien, Jahr zweistellig
+# ("11 JAN 94", "04 JUL/JUIL 50" – ICAO 9303 Teil 3, Sichtzone)
+_MONATE_PASS = {"jan": 1, "janv": 1, "feb": 2, "fev": 2, "fév": 2, "fevr": 2, "févr": 2, "mar": 3, "mars": 3,
+                "apr": 4, "avr": 4, "may": 5, "mai": 5, "jun": 6, "juin": 6, "jul": 7, "juil": 7, "aug": 8,
+                "aou": 8, "aoû": 8, "aout": 8, "août": 8, "sep": 9, "sept": 9, "oct": 10, "okt": 10, "nov": 11,
+                "dec": 12, "déc": 12, "dez": 12}
 _MONAT_ALT = "|".join(sorted(_MONATE, key=len, reverse=True))
+_MONAT_PASS_ALT = "|".join(sorted({m.upper() for m in _MONATE_PASS}, key=len, reverse=True))
 _DATUM_RE = re.compile(
     r"(?<![\d.])(?:(\d{1,2})\.[ ]?(\d{1,2})\.[ ]?((?:19|20)\d{2}|\d{2})"
     r"|(\d{1,2})\.?[ ]?(" + _MONAT_ALT + r")\.?[ ]?((?:19|20)\d{2})"
     r"|((?:19|20)\d{2})-(\d{2})-(\d{2})"
-    r"|(\d{1,2})/(\d{1,2})/((?:19|20)\d{2}))(?![\d])", re.IGNORECASE)
+    r"|(\d{1,2})/(\d{1,2})/((?:19|20)\d{2})"
+    r"|(\d{1,2})[ ]+(?-i:(" + _MONAT_PASS_ALT + r"))(?:[ ]?/[ ]?(?-i:" + _MONAT_PASS_ALT + r"))?\.?[ ]+"
+    r"((?:19|20)\d{2}|\d{2}))(?![\d])", re.IGNORECASE)
 
 
 def _heute() -> datetime.date:
@@ -741,8 +772,10 @@ def datum_zerlegen(m) -> tuple | None:
             t, mo, j = int(g[3]), _MONATE[g[4].casefold()], int(g[5])
         elif g[6]:
             j, mo, t = int(g[6]), int(g[7]), int(g[8])
-        else:
+        elif g[9]:
             t, mo, j = int(g[9]), int(g[10]), int(g[11])
+        else:
+            t, mo, j = int(g[12]), _MONATE_PASS[g[13].casefold()], int(g[14])
     except (KeyError, ValueError, TypeError):
         return None
     if j < 100:
@@ -1573,6 +1606,217 @@ def werte_darunter(seite, lg: Lage, et: Etikett, alle_starts: set) -> list:
     return []
 
 
+_FUELLWERT_RE = re.compile(r"(?i)^(?:wie\b.*|siehe\b.*|s\.\s*o\.?|entf[aä]llt|keine?|nein|ja|[-–—/_.x]+|n/?a|"
+                           r"unbekannt|nicht\s+bekannt|wird\s+(?:separat|gesondert|noch|nachträglich)\b.*|"
+                           r"(?:folgt|nachgereicht)\b.*)$")
+# Beschriftungen unter Unterschriftslinien und Firmenzusätze: kein Eintrag einer Person
+_BESCHRIFTUNG_RE = re.compile(r"(?i)unterschrift|^datum\b|^ort\b|stempel")
+_HINWEIS_KLAMMER_RE = re.compile(r"[ \t]*\([^()\n]{0,30}\)?")
+_PLZ_ORT_FELD_RE = re.compile(r"(?i)^(?:plz|postleitzahl|ort|wohnort|plz[ ,/]*(?:und[ ]+)?ort|postleitzahl und ort)"
+                              r"\.?:?$")
+
+
+def etikett_kategorie(et: Etikett, etikett_text: str, wert: str = "") -> str | None:
+    """Kategorie eines Werts hinter einem Feldnamen (unabhängig von seiner Form)."""
+    arten = et.arten
+    if "person" in arten:
+        return "namen"
+    if "datum_geburt" in arten:
+        v = _vergleichsform(et.eintrag)
+        if re.search(r"(?:ort|\bin)$", v) and not re.search(r"dat|tag", v):
+            return "plzort"
+        return "geburt"
+    if "kennung" in arten:
+        return et.kategorie or "vertrag"
+    if "kontakt" in arten:
+        return et.kategorie or ("email" if "@" in wert else "telefon")
+    if "adresse" in arten:
+        if _NICHT_ADRESSE_RE.search(_vergleichsform(et.eintrag)):
+            return None
+        return "plzort" if _PLZ_ORT_FELD_RE.match(etikett_text.strip()) else "strasse"
+    return None
+
+
+# Rohwerte: Funktionswörter verraten Satzreste und Überschriften ("für Innere Medizin", "Ich kündige daher den")
+_ROH_FUNKTIONSWORT = frozenset(
+    "für und oder das die dem des zum zur im am an auf aus bei mit nach vom zu sie ich wir ihr er es mein meine "
+    "meinen meiner ihre ihren unser unsere daher bitte nicht diese dieser dieses wie ist sind wird werden wurde hat "
+    "haben kein keine sowie siehe".split())
+_ROH_NAMENSPARTIKEL = frozenset("von van de der den del della di da dos du la le ter ten zu vom y".split())
+_ROH_KENNUNG = frozenset({"vertrag", "ausweis", "kvnr", "svnr", "steuerid", "steuernr", "iban", "kfz", "fin",
+                          "mandat", "kreditkarte", "kindergeld", "postfach"})
+# Ort eines Ereignisses (Unfall, Schaden, Einsatz) ist keine Anschrift; Unterschrift/Stempel sind Felder für Tinte
+_ROH_KEIN_FELD_RE = re.compile(r"(?i)(?:schadens?|unfall|ereignis|tat|einsatz)(?:ort|stelle)|unterschrift|stempel")
+
+
+# Führungspunkte mit eingestreutem OCR-Rest ("2..........;", "i....."): höchstens zwei Zeichen zwischen Punkten
+_FUEHRUNGSPUNKTE_RE = re.compile(r"[^\s.…_]{1,2}(?=[.…_]{3})[.…_]{3,}[;:,]?")
+
+
+def _rohwert_passt(wert: str, kat: str) -> bool:
+    """Passt ein OCR-Rohwert zur Kategorie seines Feldnamens? Ohne lesbare Wertform zählt nur die grobe Gestalt:
+    Kennungen, Daten und Telefonnummern tragen Ziffern, Namen keine; kein Satzrest, kein weiterer Feldname
+    ("NAME", "GEB.-DAT.", "Name, Vorname"), keine Übersetzung eines zweisprachigen Feldnamens ("/ Prénoms")."""
+    w = wert.strip()
+    if not w or w[0] in "/([{":
+        return False
+    teile = [t.strip(" .:") for t in re.split(r"\t\t|[ ]*[/,;][ ]*", w) if t.strip(" .:")]
+    if not teile or all(etikett_fuer_text(t, mit_vertragsdaten=True) is not None for t in teile):
+        return False
+    ziffern = sum(c.isdigit() for c in w)
+    if kat == "geburt":
+        return ziffern >= 3
+    if kat == "telefon":
+        return ziffern >= 5
+    if kat == "email":
+        return "@" in w or bool(re.search(r"\w\.\w", w))
+    if kat == "bic":
+        return sum(c.isalnum() for c in w) >= 8
+    if kat in _ROH_KENNUNG:
+        return ziffern >= 2
+    if kat == "strasse":
+        return ziffern >= 1 or bool(re.search(r"(?i)stra(?:ß|ss)e|str\.|weg\b|platz\b|allee\b|gasse\b", w))
+    woerter = re.findall(r"[^\W\d_][^\W\d_'’.\-]*", w)
+    if not woerter:
+        return False
+    if kat == "namen":
+        if ziffern > 1:
+            return False
+        if woerter[0][0].islower() and woerter[0].casefold() not in _ROH_NAMENSPARTIKEL:
+            return False
+        if any(x.casefold() in _ROH_FUNKTIONSWORT for x in woerter):
+            return False
+        lang = [x.strip(".") for x in woerter if len(x) >= 3]
+        return bool(lang) and not all(_roh_feldwort(x) for x in lang)
+    return True
+
+
+def _roh_feldwort(wort: str) -> bool:
+    """Feldbezeichner oder Allerweltswort, auch in der Mehrzahl ("Personen", "Namen, Anschriften")."""
+    if ist_etikett_oder_allerwelt(wort):
+        return True
+    stamm = re.sub(r"(?:en|n|s|e)$", "", wort)
+    return len(stamm) >= 3 and stamm != wort and (ist_etikett_oder_allerwelt(stamm) or
+                                                  etikett_fuer_text(stamm) is not None)
+
+
+def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
+    """Rohwert hinter einem Feldnamen auf einer gescannten Seite. Handschrift, Druckbuchstaben in Kästchen und
+    Schreibmaschine liest die OCR oft als Buchstabensalat ("Versicherungsnummer: REN RER ⇥⇥ ERNEST EI") – keine
+    Wertform passt, die Tinte steht trotzdem da. Steht der Feldname am Anfang seiner Zelle, gilt dann der ganze
+    Eintrag bis zum nächsten Feldnamen bzw. Zeilenende als Wert (Kategorie nach dem Feldnamen); steht er allein in
+    seiner Zeile, der Eintrag der Zeile darunter in derselben Spalte. Nur auf OCR-Zeilen: auf der Textebene sind
+    die Wertformen verlässlich. Ausgenommen sind Füllwerte ("wie oben", "entfällt", "nein"), Werte ohne die grobe
+    Gestalt ihrer Kategorie (_rohwert_passt), Ereignisorte ("Schadenort", "Unfallort") und Unterschriftsfelder."""
+    zelle = lg.zelle_bei(et.start)
+    if zelle is None or not lg.zeilen_ocr.get(zelle.zeile) or not _etikett_am_zellanfang(seite, lg, et):
+        return []
+    kat = etikett_kategorie(et, seite.text[et.start:et.ende])
+    if kat is None or _ROH_KEIN_FELD_RE.search(seite.text[et.start:et.ende]):
+        return []
+    text = seite.text
+    zeile = seite.zeile_von(et.start)
+    if zeile is None:
+        return []
+    starts = sorted(n.start for n in alle if n.arten)
+
+    def bereich(s: int, ende: int):
+        h = _HINWEIS_KLAMMER_RE.match(text, s, ende)       # "(TTMMJJJJ)", "(bei Selbstständigen)"
+        if h and h.end() > s:
+            s = h.end()
+        while s < ende:
+            while s < ende and text[s] in " \t:;.…_-–":
+                s += 1
+            m = _FUEHRUNGSPUNKTE_RE.match(text, s, ende)   # "Kontoinhaber ......2.........; Zeidler"
+            if not m or m.end() <= s:
+                break
+            s = m.end()
+        i = bisect_right(starts, s)
+        if i < len(starts) and starts[i] < ende:
+            ende = starts[i]
+        e = ende
+        while e > s and text[e - 1] in " \t,;:":
+            e -= 1
+        while s < e and text[s] in " \t,;":
+            s += 1
+        wert = text[s:e]
+        ziffern = sum(c.isdigit() for c in wert)
+        if e <= s or sum(c.isalnum() for c in wert) < (2 if ziffern else 3) or len(wert) > 80 \
+                or len(wert.split()) > 8:
+            return None
+        sauber = wert.strip()
+        if _FUELLWERT_RE.match(sauber) or _BESCHRIFTUNG_RE.search(sauber):
+            return None
+        if re.fullmatch(r"[a-zäöüß]{1,5}", sauber):
+            return None                                 # Funktionswort/OCR-Rest ("und", "der", "ll")
+        if any(t.casefold().strip(".,") in _FIRMEN_TOKEN for t in sauber.split()) or \
+                re.search(r"(?i)versicherung|assekuranz|sparkasse|\bbank\b|kasse\b", sauber):
+            return None                                 # Firma als Zahlungsempfänger/Versicherer
+        if not _rohwert_passt(sauber, kat):
+            return None
+        return s, e
+    b = bereich(et.ende, zeile.ende)
+    if b is not None:
+        return [Wert(b[0], b[1], kat)]
+    if text[et.ende:zeile.ende].strip(" \t:.()…_") and not _HINWEIS_KLAMMER_RE.fullmatch(text[et.ende:zeile.ende]):
+        return []
+    # Feldname allein in seiner Zeile: Eintrag darunter in derselben Spalte
+    box = lg.box(et.start, et.ende)
+    if box is None:
+        return []
+    h = max(zelle.hoehe, 4.0)
+    for zid in lg.zeilen_darunter(zelle.zeile, 1.9 * h):
+        if not lg.zeilen_ocr.get(zid):
+            return []
+        for z in lg.zellen_je_zeile.get(zid, ()):
+            if ueberlappung(z.x0, z.x1, box[0] - h, max(box[2], box[0] + 8 * h)) <= 0:
+                continue
+            i = bisect_left(starts, z.start)
+            if i < len(starts) and starts[i] <= z.start + 2:
+                return []                               # darunter steht der nächste Feldname
+            b = bereich(z.start, z.ende)
+            return [Wert(b[0], b[1], kat)] if b is not None else []
+        return []
+    return []
+
+
+def folgezellen_werte(seite, lg: Lage, et: Etikett, werte: list, starts: set) -> list:
+    """Weitere Wertzellen derselben Zeile hinter dem ersten Wert – Spalten je Beteiligtem in einer quer gestellten
+    Tabelle ("Führerschein-Nr. ⇥⇥ H996KNYGE24 ⇥⇥ P9873B6ND15", Unfallbeteiligte A/B, Versicherte 1/2). Gelesen wird
+    nur, solange jede Zelle ganz ein Wert derselben Art wie der erste ist (gleiche Kategorie, ähnliche Länge) und
+    kein Feldname in ihr beginnt; das Etikett steht am Anfang seiner Zeile."""
+    zelle0 = lg.zelle_bei(et.start)
+    if zelle0 is None or not _etikett_am_zellanfang(seite, lg, et):
+        return []
+    text = seite.text
+    zeile = seite.zeile_von(et.start)
+    if zeile is None or text[zeile.start:et.start].strip():
+        return []
+    kategorien = {w.kategorie for w in werte}
+    laenge0 = max(1, werte[0].ende - werte[0].start)
+    ende_bisher = werte[-1].ende
+    aus = []
+    for z in sorted(lg.zellen_je_zeile.get(zelle0.zeile, ()), key=lambda z: z.start):
+        if z.start < ende_bisher or z.start <= et.start:
+            continue
+        if any(z.start <= s0 < z.ende for s0 in starts):
+            break                                     # nächster Feldname: neue Spalte mit eigenem Wert
+        inhalt = text[z.start:z.ende].strip()
+        if not inhalt:
+            continue
+        neu = werte_lesen(text, z.start, z.ende, et, True)
+        if not neu or not {w.kategorie for w in neu} <= kategorien:
+            break
+        if sum(w.ende - w.start for w in neu) < 0.6 * len(inhalt) or \
+                not 0.4 <= (neu[0].ende - neu[0].start) / laenge0 <= 2.5:
+            break
+        aus.extend(neu)
+        ende_bisher = neu[-1].ende
+        if len(aus) >= 4:
+            break
+    return aus
+
+
 def kennung_folgezeile(seite, lg: Lage, et: Etikett) -> list:
     """Kennungs-Etikett am Zeilenende eines Satzes, Wert am Anfang der Folgezeile (umbrochener Text);
     höchstens ein kurzes OCR-Bruchstück davor wird übersprungen."""
@@ -1636,6 +1880,31 @@ def gremium_folgezeilen(seite, lg: Lage, et: Etikett, letzte_ende: int, alle_sta
     return aus
 
 
+def kopfzeile(seite, lg: Lage, pos: int, alle: list, cache: dict | None = None) -> bool:
+    """Steht `pos` in einer Kopfzeile (Spaltenköpfe einer Liste: mindestens drei Zellen, keine Ziffern, fast jede
+    Zelle ein Etikett oder Spaltenkürzel – "NAME ⇥⇥ VORN. ⇥⇥ GEBDAT ⇥⇥ PLZ")? Rechts neben einem Kopf steht der
+    nächste Kopf, kein Wert."""
+    zelle = lg.zelle_bei(pos)
+    if zelle is None:
+        return False
+    if cache is not None and zelle.zeile in cache:
+        return cache[zelle.zeile]
+    zellen = lg.zellen_je_zeile.get(zelle.zeile, ())
+    text = seite.text
+    ergebnis = False
+    if len(zellen) >= 3 and not any(c.isdigit() or c == "@" for z in zellen for c in text[z.start:z.ende]):
+        starts = sorted(et.start for et in alle)
+        mit = 0
+        for z in zellen:
+            i = bisect_left(starts, z.start)
+            if (i < len(starts) and starts[i] < z.ende) or ABKUERZUNG_RE.fullmatch(text[z.start:z.ende].strip()):
+                mit += 1
+        ergebnis = mit >= max(3, 0.75 * len(zellen))
+    if cache is not None:
+        cache[zelle.zeile] = ergebnis
+    return ergebnis
+
+
 @detektor("struktur.etikett_wert", ALLE_KATEGORIEN)
 def etikett_wert(dok, kontext):
     """Etikett der Wissensbasis + Wert (gleiche Zeile, Zeile darunter, Folgezeile)."""
@@ -1648,18 +1917,22 @@ def etikett_wert(dok, kontext):
         if not alle:
             continue
         starts = {et.start for et in alle if et.arten & (PII_ARTEN | {"vertragsdaten"})}
+        koepfe: dict = {}
         for idx, et in enumerate(alle):
             if not et.arten & PII_ARTEN:
                 continue
             if et.arten <= {"person"} and _in_wendung(seite.text, lg, et):
                 continue                              # "Verhältnis zum VN: Mitbewohner" ist kein Personenfeld
             werte = []
-            bereich = wert_bereich_rechts(seite, lg, et, alle, idx)
+            bereich = None if kopfzeile(seite, lg, et.start, alle, koepfe) else wert_bereich_rechts(seite, lg, et,
+                                                                                                    alle, idx)
             if bereich is not None:
                 s, g, mit_trenner = bereich
                 werte = werte_lesen(seite.text, s, g, et, mit_trenner)
                 if werte and _GREMIUM_RE.search(et.eintrag) and "person" in et.arten:
                     werte += gremium_folgezeilen(seite, lg, et, werte[-1].ende, starts)
+                elif werte:
+                    werte += folgezellen_werte(seite, lg, et, werte, starts)
             if not werte and _etikett_am_ende(seite, lg, et) and _etikett_am_zellanfang(seite, lg, et) \
                     and not _mit_doppelpunkt(seite, et):
                 werte = werte_darunter(seite, lg, et, starts)
@@ -1668,6 +1941,10 @@ def etikett_wert(dok, kontext):
                 quelle_sicherheit = SICHERHEIT_ETIKETT
             if not werte and "kennung" in et.arten:
                 werte = kennung_folgezeile(seite, lg, et)
+            quelle = "struktur.etikett_wert"
+            if not werte and not kopfzeile(seite, lg, et.start, alle, koepfe):
+                werte = ocr_rohwert(seite, lg, et, alle)
+                quelle, quelle_sicherheit = "struktur.etikett_wert.rohwert", 0.6
             werte = [w for w in werte if w.kategorie in kontext.aktive or not kontext.aktive]
-            treffer.extend(_global(dok, nr, werte, "struktur.etikett_wert", quelle_sicherheit))
+            treffer.extend(_global(dok, nr, werte, quelle, quelle_sicherheit))
     return treffer

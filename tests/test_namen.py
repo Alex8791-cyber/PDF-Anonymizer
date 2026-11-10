@@ -242,3 +242,11 @@ def test_unbekannte_nachnamen_auf_der_textebene():
     gefunden = " | ".join(k["text"] for k in na.finde_personen(text))
     for name in ("Ehmann", "Portner", "Witter", "Schüller", "Wohnert"):
         assert name in gefunden, (name, gefunden)
+
+
+@pytest.mark.parametrize("wort", ["surname", "given names", "nom", "prénoms", "nationality", "date of birth",
+                                  "passport", "personalausweis", "führerschein", "licence", "permis"])
+def test_feldnamen_von_ausweisen_sind_keine_namen(wort):
+    """Zweisprachige Feldnamen von Pass, Ausweis und Führerschein ("Name / Surname / Nom", "Given names /
+    Prénoms") stehen in Versalien über den Werten – sie sind keine Personennamen."""
+    assert wort in na.NAMEN_STOPPLISTE

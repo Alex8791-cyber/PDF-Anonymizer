@@ -638,8 +638,9 @@ _STRASSE_RE = re.compile(
     # Am Bahnhof 3, Unter den Linden 1, An der Alten Mühle 4, ZUM STEINBRUCH 66, An den Eichen 140
     + _PRAEPOSITION + r"[ \t]+" + _KEIN_STRASSENWORT + _WORT + r"(?:[ \t]+" + _WORT + r"){0,2}"
     r"[ \t]+\d{1,3}(?![\d])(?:[ \t]?[a-hA-H](?![\wäöüß]))?" + _KEINE_EINHEIT +
-    # Berliner Straße 5, Fürther Str. 120, Berliner Platz 1
-    r"|" + _WORT + r"(?:[ \t]+" + _WORT + r")?[ \t]+" + _SUFFIX_WORT + _HAUSNUMMER +
+    # Berliner Straße 5, Fürther Str. 120, Berliner Platz 1 – Wörter durch höchstens zwei Leerzeichen getrennt: die
+    # breite Lücke einer Schreibmaschinen-/EDV-Zeile trennt Feldname und Wert ("ANSCHRIFT       HOHE STRASSE 12")
+    r"|" + _WORT + r"(?:[ \t]{1,2}" + _WORT + r")?[ \t]{1,2}" + _SUFFIX_WORT + _HAUSNUMMER +
     # Hauptstraße 12a, Von-der-Tann-Str. 3, Schillerstr.12, HAUPTSTRASSE 12, Kleine Bergstraße 16
     r"|(?:" + _STRASSEN_ADJEKTIV + r"[ \t]+)?[A-ZÄÖÜ][\wäöüß\-.]{0,60}?" + _SUFFIX_ANGEHAENGT + _HAUSNUMMER +
     # Platz der Republik 99 a, Straße der Einheit 5, Allee der Kosmonauten 12
@@ -1207,9 +1208,24 @@ def finde_steuer_id(text):
     return _eindeutig([text[s:e] for s, e in finde_steuer_id_stellen(text)])
 
 
-_STEUERNR_FREI_RE = re.compile(r"(?<![\d/])\d{2,3}/\d{3,4}/\d{4,5}(?![\d/])")
-_STEUERNR_ETIKETT_RE = re.compile(r"(?i:Steuernummer|Steuer-?Nr\.?|St\.-?Nr\.?|StNr\.?)[ \t]*:?[ \t]*"
-                                  r"(\d{13}|\d{2,3}[ \t]\d{3,4}[ \t]\d{4,5}|\d{10,11})(?!\d)")
+# Steuernummern der Länder (Standardschema): FF/BBB/UUUUP und 0FF/BBB/UUUUP (BE, HH, NI, BY, BB, MV, SL, SN, ST,
+# TH), FFF/BBBB/UUUP (NW), FF/BBB/UUUU/P (RP), dazu die ELSTER-Nummer mit Schrägstrichen 1234/567/89012. Ohne
+# Etikett nur mit Schrägstrichen; FFBBB/UUUUP (BW), Leerzeichen (HB, HE, SH) und die 13-stellige ELSTER-Nummer nur
+# hinter dem Etikett.
+# ELSTER-Präfix: Bundesland (5 NW, 9 BY, 10 SL, 11 BE, 21 SH, 22 HH, 23 NI, 24 HB, 26 HE, 27 RP, 28 BW, 30 BB, 31 ST,
+# 32 SN, 40 MV, 41 TH) + Finanzamt – "2024/123/45678" (Aktenzeichen mit Jahr) ist keine Steuernummer
+_ELSTER_KOPF = r"(?:[59]\d{3}|(?:1[01]|2[1-46-8]|3[0-2]|4[01])\d{2})"
+_STEUERNR_FREI_RE = re.compile(r"(?<![\d/])(?:\d{2,3}/\d{3,4}/\d{4,5}|\d{2}/\d{3}/\d{4}/\d|" + _ELSTER_KOPF +
+                               r"/\d{3}/\d{5})(?![\d/])")
+# Etikett mit Zusätzen: "Steuernummer beim Finanzamt Nürnberg-Süd:", "STEUERNR. (GEWERBE)", "St.-Nr. lautet"
+_STEUERNR_ETIKETT_RE = re.compile(
+    r"(?i:Steuernummer|Steuer-?Nr\.?|St\.-?Nr\.?|StNr\.?)"
+    r"(?:[ \t]*\([^()\n]{1,30}\))?"
+    r"(?:[ \t]+(?:beim|bei[ \t]+dem|des|vom)[ \t]+Finanzamt(?:[ \t]+[A-ZÄÖÜ][\wäöüß]*(?:[ \t]*-[ \t]*[\wäöüß]+)*"
+    r"(?:[ \t]+(?:[IV]{1,3}|[A-ZÄÖÜ][\wäöüß]*))?)?)?"
+    r"(?:[ \t]+lautet)?[ \t]*:?[ \t]*"
+    r"(\d{13}|\d{2,3}[ \t]\d{3,4}[ \t]\d{4,5}|\d{10,11}|\d{5}/\d{5}|\d{2,3}/\d{3,4}/\d{4,5}|\d{2}/\d{3}/\d{4}/\d|"
+    + _ELSTER_KOPF + r"/\d{3}/\d{5})(?![\d/])")
 _UST_ID_RE = re.compile(r"(?i:USt[-\s]?Id(?:Nr)?\.?|Umsatzsteuer-?(?:Identifikationsnummer|ID|IdNr\.?))"
                         r"[ \t]*:?[ \t]*(DE[ \t]?\d{9})(?!\d)")
 # Firmenzusammenhang einer USt-IdNr. (Fußzeile des Versicherers, Gutachten EQ-16): dann keine Person
@@ -1236,8 +1252,7 @@ def _steuernr_spannen(text: str) -> list:
         if _FIRMEN_KONTEXT_RE.search(umgebung):
             continue
         aus.append(Stelle(m.start(1), m.end(1)))
-    aus.sort()
-    return aus
+    return sorted(set(aus))
 
 
 def finde_steuernummer_stellen(text):
@@ -1436,6 +1451,7 @@ _BIC_ETIKETT_RE = re.compile(r"(?i:(?<![\wäöüß])BIC|SWIFT(?:-?(?:Code|BIC))?
 # Ziffer im Ortscode) – 8 Großbuchstaben allein könnten ein Wort sein
 _BIC_FREI_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z]{4}([A-Z]{2})(?:[A-Z0-9]{2}XXX|[A-Z0-9]\d(?:[A-Z0-9]{3})?|"
                           r"\d[A-Z0-9](?:[A-Z0-9]{3})?)(?![A-Za-z0-9])")
+_BIC_WORT_RE = re.compile(r"(?<![A-Za-z0-9])(?:BIC|SWIFT)(?![A-Za-z0-9])")
 
 
 def _bic_spannen(text: str) -> list:
@@ -1452,6 +1468,21 @@ def _bic_spannen(text: str) -> list:
             if b.group(1) in _BIC_LAENDER and (b.start(), b.end()) not in belegt:
                 aus.append(Stelle(b.start(), b.end()))
                 belegt.add((b.start(), b.end()))
+    # "Kreditinstitut (Name und BIC)" über "VR-Bank Rhein-Lahn   IRLGDEUGNN8": BIC-Form hinter dem Wort BIC/SWIFT
+    # (Rest der Zeile und die nächste Zeile); ohne Ziffer und ohne "XXX" nur mit Länderkennung DE/AT/CH –
+    # "POSTBANK" hat zwar die Form, ist aber ein Wort
+    for m in _BIC_WORT_RE.finditer(text):
+        ende = text.find("\n", m.end())
+        ende = text.find("\n", ende + 1) if ende >= 0 else len(text)
+        ende = min(ende if ende >= 0 else len(text), m.end() + 120)
+        for b in _BIC_WERT_RE.finditer(text, m.end(), ende):
+            wert = b.group(0)
+            if b.group(1) not in _BIC_LAENDER or (b.start(), b.end()) in belegt:
+                continue
+            if not (any(c.isdigit() for c in wert) or wert.endswith("XXX") or b.group(1) in ("DE", "AT", "CH")):
+                continue
+            aus.append(Stelle(b.start(), b.end()))
+            belegt.add((b.start(), b.end()))
     for b in _BIC_FREI_RE.finditer(text):
         if b.group(1) in _BIC_LAENDER and (b.start(), b.end()) not in belegt:
             aus.append(Stelle(b.start(), b.end(), 0.7, False))

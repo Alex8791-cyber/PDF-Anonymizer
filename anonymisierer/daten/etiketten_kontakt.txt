@@ -12,6 +12,7 @@ E-mail address
 E-Mail-Adr.
 E-Mail-Adresse
 E-Post
+E_Mail
 Email
 erreichbar unter
 Erreichbarkeit
@@ -62,6 +63,9 @@ Tel. tagsüber
 Tel.-Nr.
 Tel.-Nummer
 Tel.Nr.
+Tel_Dienst
+Tel_Mobil
+Tel_Privat
 Telefax
 Telefax-Nr.
 Telefon

@@ -25,6 +25,15 @@ statt "-" – so, wie die Textebene von PDFs aus Windows-Programmen aussehen kan
 aus einem EIGENEN Zufallsstrom ("sonderzeichen/<seed>/<nr>"): Plan, Inhalte und Schriften aller Dokumente bleiben
 wie in Generator 1.0, nur die ausgewählten Dokumente enthalten zusätzlich diese Zeichen (ihre Wahrheit nennt
 das Merkmal und die Bemerkung "Sonderzeichen (Windows)"). Bereits erzeugte Korpora werden nicht neu erzeugt.
+
+Erweiterte Verteilung (Generator 1.2, nur auf Anfrage): erzeuge_korpus(..., erweitert=True) mischt zehn neue
+Dokumenttypen hinzu (dokumenttypen_erweitert.py: Ausweis-/Pass-/Führerscheinkopien mit MRZ bzw. nummerierten Feldern,
+SEPA-Mandat, Excel-Bestandsliste, Unfallbericht mit zwei Parteien, Fax, Schreibmaschine/EDV-Ausdruck, Handschrift-
+und Blockschriftformulare mit Kammfeldern), jeder mindestens sechsmal. Alles daran kommt aus EIGENEN Zufallsströmen
+("plan_erweitert/<seed>", "x<seed>/<nr>/<versuch>", Kennung "x<seed>-<nr>", "sonderzeichen/x<seed>/<nr>"); ohne
+erweitert=True erzeugt der Generator Byte für Byte dieselben Dateien wie Generator 1.1 (Seeds 1 und 7, CI-Korpus;
+geprüft in tests/test_generator_erweitert.py). Die Wahrheit erweiterter Dokumente nennt "generator": "1.2" und
+"mischung": "erweitert". Aufruf: python -m werkzeuge.benchmark.generator --erweitert --seed 3 --anzahl 80 --ziel <ordner>
 """
 
 import json
@@ -47,6 +56,7 @@ from .dokumenttypen import TYPEN, typ_antrag_formular
 from .normalisierung import Gefaltet
 
 GENERATOR_VERSION = "1.1"
+GENERATOR_VERSION_ERWEITERT = "1.2"     # nur Dokumente der erweiterten Verteilung
 SONDERZEICHEN_QUOTE = 0.18      # Anteil der Textdokumente mit Merkmal "sonderzeichen_windows"
 
 # ----------------------------------------------------------------------
@@ -79,6 +89,7 @@ class Plan:
     typ: str
     scan: str | None = None            # Schlüssel aus SCAN_VARIANTEN oder "gemischt" (nur letzte Seite)
     neben: tuple = ()
+    mischung: str = "standard"         # "erweitert": eigene Zufallsströme, neue Typen (Generator 1.2)
 
     def name(self, hauptname: str | None = None) -> str:
         basis = f"{self.nr:03d}_{self.typ}"
@@ -111,8 +122,13 @@ _TYP_GEWICHTE = {"brief_form_a": 10, "brief_form_b": 8, "versicherungsschein": 8
                  "email_ausdruck": 6, "bestandsliste": 4}
 
 
-def plane_korpus(anzahl: int, seed: int) -> list:
-    """Deterministischer Plan für `anzahl` Dokumente."""
+def plane_korpus(anzahl: int, seed: int, erweitert: bool = False) -> list:
+    """Deterministischer Plan für `anzahl` Dokumente (erweitert=True: erweiterte Verteilung, eigener Strom)."""
+    if erweitert:
+        from .dokumenttypen_erweitert import plane_erweitert
+        typen = list(_TYP_GEWICHTE)
+        return plane_erweitert(anzahl, seed, alte_typen=typen, alte_gewichte=[_TYP_GEWICHTE[t] for t in typen],
+                               scan_folge=_SCAN_FOLGE, nebenkanaele=NEBENKANAELE)
     plaene = []
     rng = random.Random(f"plan/{seed}")
     scan_index = 0
@@ -133,7 +149,10 @@ def plane_korpus(anzahl: int, seed: int) -> list:
 
 
 def _scan_parameter(variante: str, rng, seite: int = 0) -> SC.ScanParameter:
-    spec = SCAN_VARIANTEN[variante]
+    spec = SCAN_VARIANTEN.get(variante)
+    if spec is None:                       # Varianten der erweiterten Verteilung (z. B. "fax_fein")
+        from .dokumenttypen_erweitert import SCAN_VARIANTEN_NEU
+        spec = SCAN_VARIANTEN_NEU[variante]
 
     def wert(schl, standard=None):
         v = spec.get(schl, standard)
@@ -328,10 +347,16 @@ def _merkmale_aus_eintraegen(eintraege: list) -> set:
     return mm
 
 
+def _strom(plan: Plan, seed: int) -> str:
+    """Kennung des Zufallsstroms: "<seed>" (Standardverteilung, wie Generator 1.0/1.1) bzw. "x<seed>" (erweitert)."""
+    return f"x{seed}" if plan.mischung == "erweitert" else f"{seed}"
+
+
 def sonderzeichen_gewaehlt(plan: Plan, seed: int) -> bool:
     """Bekommt dieses Dokument das Merkmal "sonderzeichen_windows"? Eigener Zufallsstrom, nur Textdokumente
     (bei Scans gibt es keine Textebene mit Sonderzeichen)."""
-    return not plan.scan and random.Random(f"sonderzeichen/{seed}/{plan.nr}").random() < SONDERZEICHEN_QUOTE
+    return not plan.scan and random.Random(f"sonderzeichen/{_strom(plan, seed)}/{plan.nr}").random() \
+        < SONDERZEICHEN_QUOTE
 
 
 def erzeuge_dokument(plan: Plan, seed: int, ordner: Path, max_versuche: int = 40) -> dict:
@@ -339,12 +364,22 @@ def erzeuge_dokument(plan: Plan, seed: int, ordner: Path, max_versuche: int = 40
     ordner = Path(ordner)
     ordner.mkdir(parents=True, exist_ok=True)
     rest_kollisionen = []
+    strom = _strom(plan, seed)
+    neue_typen = {}
+    if plan.mischung == "erweitert":
+        from . import dokumenttypen_erweitert as neu
+        neue_typen = neu.NEUE_TYPEN
     for versuch in range(max_versuche):
-        rng = random.Random(f"{seed}/{plan.nr}/{versuch}")
-        dok = Dok(rng, f"{seed}-{plan.nr:03d}", querformat=(plan.typ == "bestandsliste"))
+        rng = random.Random(f"{strom}/{plan.nr}/{versuch}")
+        if plan.typ in neue_typen:
+            dok = neu.dok_fuer(plan.typ, rng, f"{strom}-{plan.nr:03d}", plan.scan)
+        else:
+            dok = Dok(rng, f"{strom}-{plan.nr:03d}", querformat=(plan.typ == "bestandsliste"))
         if sonderzeichen_gewaehlt(plan, seed):
-            dok.satz.sonderzeichen = f"sonderzeichen/{seed}/{plan.nr}"
-        if plan.typ == "antrag_formular" and plan.scan:
+            dok.satz.sonderzeichen = f"sonderzeichen/{strom}/{plan.nr}"
+        if plan.typ in neue_typen:
+            typ = neue_typen[plan.typ](dok)
+        elif plan.typ == "antrag_formular" and plan.scan:
             typ = typ_antrag_formular(dok, formular=False)       # Papierantrag, eingescannt
         else:
             typ = TYPEN[plan.typ](dok)
@@ -387,6 +422,9 @@ def erzeuge_dokument(plan: Plan, seed: int, ordner: Path, max_versuche: int = 40
                              "versuch": versuch, "schrift": dok.stil.familie.name,
                              "schrift_datei": Path(dok.stil.normal.datei).name if dok.stil.normal.datei else None,
                              "groesse": dok.stil.groesse, "zeilenabstand": dok.stil.zeilenabstand}
+    if plan.mischung == "erweitert":
+        wahrheit["erzeugung"]["generator"] = GENERATOR_VERSION_ERWEITERT
+        wahrheit["erzeugung"]["mischung"] = "erweitert"
     if rest_kollisionen:
         wahrheit["erzeugung"]["kollisionen"] = rest_kollisionen
     (ordner / (Path(name).stem + ".wahrheit.json")).write_text(
@@ -394,12 +432,31 @@ def erzeuge_dokument(plan: Plan, seed: int, ordner: Path, max_versuche: int = 40
     return wahrheit
 
 
-def erzeuge_korpus(ordner: Path, anzahl: int, seed: int = 1, melde=None) -> list:
-    """Erzeugt `anzahl` Dokumente in `ordner` und liefert die Wahrheiten."""
+def erzeuge_korpus(ordner: Path, anzahl: int, seed: int = 1, melde=None, erweitert: bool = False) -> list:
+    """Erzeugt `anzahl` Dokumente in `ordner` und liefert die Wahrheiten (erweitert=True: erweiterte Verteilung)."""
     ergebnisse = []
-    for plan in plane_korpus(anzahl, seed):
+    for plan in plane_korpus(anzahl, seed, erweitert=erweitert):
         w = erzeuge_dokument(plan, seed, ordner)
         ergebnisse.append(w)
         if melde:
             melde(f"erzeugt: {w['dokument']} ({w['seiten']} S., {len(w['eintraege'])} Einträge)")
     return ergebnisse
+
+
+def main(argv=None) -> int:
+    """Korpus erzeugen (ohne Bewertung): python -m werkzeuge.benchmark.generator --seed 3 --anzahl 80 --erweitert
+    --ziel <ordner>. Bewertet wird anschließend mit werkzeuge/benchmark.py --korpus <ordner>."""
+    import argparse
+    parser = argparse.ArgumentParser(description="Entwicklungskorpus erzeugen")
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--anzahl", type=int, default=60)
+    parser.add_argument("--erweitert", action="store_true", help="erweiterte Verteilung (neue Dokumenttypen)")
+    parser.add_argument("--ziel", type=Path, required=True)
+    args = parser.parse_args(argv)
+    erzeuge_korpus(args.ziel, args.anzahl, args.seed, melde=print, erweitert=args.erweitert)
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())

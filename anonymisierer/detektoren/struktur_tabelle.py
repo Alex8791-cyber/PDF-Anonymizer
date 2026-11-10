@@ -25,8 +25,8 @@ from bisect import bisect_left
 from typing import NamedTuple
 
 from . import Treffer, detektor
-from .struktur import (_ORG_ROLLEN_RE, ALLE_KATEGORIEN, PARTIKEL, PII_ARTEN, SICHERHEIT_SPALTE, Lage, _wissen,
-                       NR_VORSATZ_RE, datums_spannen, etikett_fuer_text, etiketten,
+from .struktur import (_ORG_ROLLEN_RE, ABKUERZUNG_RE, ALLE_KATEGORIEN, PARTIKEL, PII_ARTEN, SICHERHEIT_SPALTE, Lage,
+                       _wissen, NR_VORSATZ_RE, datums_spannen, etikett_fuer_text, etiketten,
                        geburtsdatum_plausibel, ist_kennungsform, kennung_spanne, lage, muster_spannen,
                        namen_spanne, ort_spanne, plz_ort_spannen, strasse_spanne, ueberlappung, _muster,
                        _vergleichsform)
@@ -90,6 +90,7 @@ def _etiketten_in(ets: list, starts: list, s: int, e: int) -> list:
 
 
 _WERTARTIG_RE = re.compile(r"\d(?![\d ]*%)|@")          # Ziffern (außer "19 %") oder E-Mail: ein Wert
+_ABKUERZUNG_RE = ABKUERZUNG_RE
 
 
 def _kopfteile(text: str, reihe: Reihe, ets: list, starts: list) -> list | None:
@@ -125,6 +126,10 @@ def _kopfteile(text: str, reihe: Reihe, ets: list, starts: list) -> list | None:
                 gruppen[-1].append(w)
         for g in gruppen:
             et = next((t for t in teiler if t.start == g[0].start), None)
+            # Spaltenname aus einer Datenbank ("VN_PLZ", "KD_ORT", "VP_GEBDAT"): vorn die Rolle, hinten das Feld
+            hinten = [t for t in teiler if g[0].start < t.start < g[-1].ende and text[t.start - 1] == "_"]
+            if et is not None and hinten:
+                et = hinten[-1]
             teile.append((min(w.x0 for w in g), max(w.x1 for w in g), et, text[g[0].start:g[-1].ende]))
     return teile
 
@@ -147,6 +152,8 @@ def _kopf_spalten(text: str, reihe: Reihe, ets: list, starts: list, breite: floa
         # unbekannte Kopfteile: kurz, ohne Namen ("Györi, Réka" ist ein Wert, kein Kopf)
         if "," in inhalt or len(inhalt.split()) > 3:
             return None
+        if _ABKUERZUNG_RE.fullmatch(inhalt.strip()):
+            continue                                 # Spaltenkürzel eines Exports ("VU", "ZW.", "BTR_BRUTTO")
         sp = namen_spanne(inhalt, 0, len(inhalt))
         if sp is not None and (sp.bekannt or sp.komma) and sp.ende - sp.start >= 0.7 * len(inhalt.strip()):
             return None
@@ -353,6 +360,15 @@ def _wert_fuer_spalte(text: str, s: int, e: int, sp: Spalte) -> list:
     return []
 
 
+# Spaltenköpfe für Vor- und Nachnamen, auch als Kürzel aus Exporten ("VORN.", "VN_NAME", "NACHNAME_VP")
+_VORNAME_KOPF_RE = re.compile(r"^(?:(?:vn|vp|kd|kunde|vers|versicherte|mitversicherte|kind) )?"
+                              r"(?:vorname|vornamen|vorn|rufname|first name|given names?)(?: (?:vn|vp|kd))?$")
+_NAMEN_KOPF_RE = re.compile(r"^(?:(?:vn|vp|kd|kunde|vers|versicherte|mitversicherte|kind) )?"
+                            r"(?:name|nachname|familienname|vorname|vornamen|vorn|rufname|first name|given names?|"
+                            r"last name|surname)(?: (?:vn|vp|kd))?$")
+# ganze Zelle als Name: ein bis vier Wörter aus Buchstaben (auch Versalien, Partikel), keine Ziffern
+_GANZER_NAME_RE = re.compile(r"[ \t]*([A-ZÄÖÜ][A-Za-zÄÖÜäöüßÀ-ÿ'’\-]+(?:[ ][A-Za-zÄÖÜäöüßÀ-ÿ][A-Za-zÄÖÜäöüßÀ-ÿ'’\-]*){0,3})"
+                             r"[ \t]*")
 _ARBEITGEBER_KOPF_RE = re.compile(r"(?:arbeitgeber(?:in)?|dienstherr|beschaftigungsbetrieb|ausbildungsbetrieb|"
                                   r"beschaftigungsstelle)\b")
 
@@ -457,7 +473,7 @@ def _geburt(text: str, s: int, e: int) -> list:
 
 
 _ORT_KOPF_RE = re.compile(r"(?:^|\b)(?:ort|wohnort|stadt|city|geburtsort|gemeinde)$")
-_PLZ_KOPF_RE = re.compile(r"^(?:plz|postleitzahl)$")
+_PLZ_KOPF_RE = re.compile(r"(?:^|\b)(?:plz|postleitzahl)$")
 _STRASSE_KOPF_RE = re.compile(r"str|stra|hausn|street|anschrift|adresse")
 
 
@@ -475,9 +491,19 @@ def _adresse(text: str, s: int, e: int, eintrag: str) -> list:
             return [(s + m.start(1), s + m.end(1), "plzort", None)]
     if _ORT_KOPF_RE.search(v) or "/" in eintrag or "plz" in v:
         sp = ort_spanne(text, s, e)
+        if _ORT_KOPF_RE.search(v):
+            # Spalte "Ort": die ganze Zelle ist der Ort ("ST. WENDEL", "LAUF A.D.PEGNITZ", "NEUSTADT AN DER
+            # WEINSTRASSE") – ort_spanne kennt nicht jede Abkürzung und hört vor "AN DER" auf
+            m = _GANZER_ORT_RE.fullmatch(text, s, e)
+            if m and (sp is None or m.end(1) > sp[1]):
+                return [(m.start(1), m.end(1), "plzort", None)]
         if sp:
             return [(sp[0], sp[1], "plzort", None)]
     return []
+
+
+_GANZER_ORT_RE = re.compile(r"[ \t]*([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]*(?:[ \u00a0][A-Za-zÄÖÜäöüß(][A-Za-zÄÖÜäöüß.()\-]*){0,5})"
+                            r"[ \t]*")
 
 
 def _kontakt(text: str, s: int, e: int, kategorie: str | None) -> list:
@@ -496,7 +522,10 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
     treffer = []
     hat_person = any("person" in sp.arten for sp in tab.spalten)
     vorname_idx = [i for i, sp in enumerate(tab.spalten) if "person" in sp.arten
-                   and _vergleichsform(sp.eintrag) in ("vorname", "vornamen", "rufname", "first name", "given name")]
+                   and _VORNAME_KOPF_RE.match(_vergleichsform(sp.eintrag))]
+    namensspalte = {i for i, sp in enumerate(tab.spalten) if "person" in sp.arten
+                    and _NAMEN_KOPF_RE.match(_vergleichsform(sp.eintrag))}
+    ganze_zellen = []     # Zellen einer Namensspalte ohne lesbare Namensform ("FREITAG", "NUR", "Kaplan")
     for idx, sp in enumerate(tab.spalten):
         werte = tab.werte[idx]
         if not werte:
@@ -505,8 +534,13 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
         roh = []          # (seite, start, ende, kategorie, gruppe, reihe)
         for nr, s, e, reihe in werte:
             text = dok.seiten[nr].text
-            for a, b, kat, gruppe in _wert_fuer_spalte(text, s, e, sp):
+            gefunden = _wert_fuer_spalte(text, s, e, sp)
+            for a, b, kat, gruppe in gefunden:
                 roh.append((nr, a, b, kat, gruppe, reihe))
+            if not gefunden and idx in namensspalte:
+                m = _GANZER_NAME_RE.match(text, s, e)
+                if m and not text[m.end():e].strip():
+                    ganze_zellen.append((nr, m.start(1), m.end(1), "namen", None, reihe, idx))
         if not arten & PII_ARTEN and "vertragsdaten" not in arten:
             # Spalte ohne Personen-Etikett ("Nr.", unbekannter Kopf): Kennungsform in >= 3 Werten
             if hat_person:
@@ -527,18 +561,27 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
     # Namen brauchen einen Beleg: ein bekannter Vor- oder Nachname in der Zelle – oder, bei getrennten Spalten
     # "Name" und "Vorname", in der Partnerzelle derselben Reihe ("von Schönau" neben "Silke").
     # "Berlin, Hamburg" in der Kundenspalte ist kein Name.
-    paar_idx = {i for i, sp in enumerate(tab.spalten) if "person" in sp.arten
-                and _vergleichsform(sp.eintrag) in ("name", "nachname", "familienname", "vorname", "vornamen",
-                                                    "rufname", "first name", "given name", "last name", "surname")}
+    paar_idx = set(namensspalte)
     belegt = set()
     belegt_paar = set()
+    belegt_je_spalte: dict = {}
     for k, t in enumerate(treffer):
         if t[3] == "namen" and _namensbeleg(dok.seiten[t[0]].text[t[1]:t[2]]):
             belegt.add(k)
+            belegt_je_spalte[t[6]] = belegt_je_spalte.get(t[6], 0) + 1
             if t[6] in paar_idx:
                 belegt_paar.add(t[5])
+    # Eine Namensspalte, deren Zellen überwiegend bekannte Namen tragen, ist als solche belegt: dann zählen auch
+    # unbekannte Namen ("FERESHTEH", "Tschernyschow") und Namen, die zugleich Wörter sind ("FREITAG", "NUR")
+    sichere_spalten = set()
+    for idx in namensspalte:
+        nicht_leer = sum(1 for nr, s, e, _ in tab.werte[idx] if dok.seiten[nr].text[s:e].strip())
+        if belegt_je_spalte.get(idx, 0) >= 3 and belegt_je_spalte[idx] >= 0.5 * max(1, nicht_leer):
+            sichere_spalten.add(idx)
     treffer = [t for k, t in enumerate(treffer)
-               if t[3] != "namen" or k in belegt or (t[6] in paar_idx and t[5] in belegt_paar)]
+               if t[3] != "namen" or k in belegt or (t[6] in paar_idx and t[5] in belegt_paar)
+               or t[6] in sichere_spalten]
+    treffer += [t for t in ganze_zellen if t[6] in sichere_spalten]
     # Personen über Spalten "Name" + "Vorname" derselben Reihe gruppieren
     if vorname_idx:
         je_reihe: dict = {}

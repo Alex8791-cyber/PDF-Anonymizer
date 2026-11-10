@@ -802,3 +802,47 @@ def test_steuer_id_hinter_laengerer_wendung(text, erwartet):
 ])
 def test_steuer_id_mit_nummer_im_etikett(text, erwartet):
     assert mu.finde_steuer_id(text) == erwartet
+
+
+# ----------------------------------------------------------------------
+# Steuernummern der Länder, ELSTER-Nummer, Feldnamen mit Zusätzen (Generalisierung)
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, erwartet", [
+    ("St.-Nr. 22/815/0815/4.", "22/815/0815/4"),                               # RP: FF/BBB/UUUU/P, auch frei
+    ("Meine Steuernummer lautet 9181/815/08155.", "9181/815/08155"),           # ELSTER mit Schrägstrichen
+    ("Steuernummer beim Finanzamt Nürnberg-Süd: 9181081508155.", "9181081508155"),
+    ("Steuernummer beim Finanzamt Leipzig II: 201/123/12340", "201/123/12340"),
+    ("STEUERNR. (GEWERBE)      2893081508152", "2893081508152"),               # EDV-Ausdruck, breite Lücke
+    ("Steuernummer (bei Selbstständigen) 93815/08152", "93815/08152"),         # BW: FFBBB/UUUUP nur mit Etikett
+    ("Steuer-Nr.: 29 815 08158", "29 815 08158"),                              # SH/HB mit Leerzeichen
+    ("Bitte nennen Sie 2893/815/08152 im Schreiben.", "2893/815/08152"),
+    ("133/8150/8159", "133/8150/8159"),                                        # NW
+])
+def test_steuernummer_laenderformate(text, erwartet):
+    assert mu.finde_steuernummer(text) == [erwartet]
+
+
+@pytest.mark.parametrize("text", [
+    "Die Nummer 12345/67890 ist eine Durchwahl",       # 5/5 ohne Etikett
+    "Tel. 0911/123/45678",                              # Vorwahl mit 0: keine ELSTER-Nummer
+    "Az. 2024/123/45678",                               # Jahr vorn: kein Länderpräfix
+    "Rechnung 9181081508155",                           # 13 Ziffern ohne Etikett
+])
+def test_steuernummer_gegenproben(text):
+    assert mu.finde_steuernummer(text) == []
+
+
+def test_bic_hinter_dem_wort_bic():
+    assert mu.finde_bic("Kreditinstitut (Name und BIC)\nVR-Bank Rhein-Lahn   IRLGDEUGNN8\nIBAN …") == ["IRLGDEUGNN8"]
+    assert mu.finde_bic("Name und BIC: Sparkasse KölnBonn COLSDE33XXX") == ["COLSDE33XXX"]
+    assert mu.finde_bic("BIC\nJSWVDEVC") == ["JSWVDEVC"]
+    # Wortformen ohne Ziffer, ohne "XXX" und ohne DE/AT/CH an Stelle 5-6 bleiben stehen ("POSTBANK": BA)
+    assert mu.finde_bic("Name und BIC des Kreditinstituts\nPOSTBANK HAMBURG") == []
+    assert mu.finde_bic("Die BIC finden Sie auf Ihrer KONTOKARTE") == []
+
+
+def test_strasse_beginnt_nicht_beim_feldnamen_einer_edv_zeile():
+    text = "ANSCHRIFT             HOHE STRASSE 129-131, 96450 COBURG"
+    assert mu.finde_strasse(text) == ["HOHE STRASSE 129-131"]
+    assert mu.finde_strasse("Fürther  Str. 120") == ["Fürther  Str. 120"]       # zwei Leerzeichen: noch ein Name
+    assert mu.finde_strasse("wohnhaft Berliner Straße 5") == ["Berliner Straße 5"]
