@@ -3,7 +3,7 @@ Arbeitskopie im Programmordner für Zwischendateien, Einstellungen laden/speiche
 Einzelinstanz-Sperre, verwaiste Zwischendateien, CSV-Vorschau (Kundenliste).
 
 Das Modul braucht beim Import keine Fremdpakete (das Startskript lädt es vor der Paketprüfung); PyMuPDF wird nur
-in den Funktionen geladen, die es brauchen (Bild umwandeln, Kennwort prüfen/entfernen)."""
+in den Funktionen geladen, die es brauchen (Inhalt einer Datei prüfen, Bild umwandeln, Kennwort prüfen/entfernen)."""
 
 import csv
 import io
@@ -44,7 +44,8 @@ _CLOUD_MERKMALE = ("onedrive", "dropbox", "icloud", "google drive", "googledrive
 # Inhalt statt Endung (R-01, R-10)
 # ----------------------------------------------------------------------
 KOPF_BYTES = 2048
-BILD_ARTEN = ("jpeg", "png", "tiff", "bmp")          # werden auf Wunsch in eine PDF umgewandelt
+# werden auf Wunsch in eine PDF umgewandelt; „bild“ = ein Bildformat, das erst MuPDF selbst erkannt hat
+BILD_ARTEN = ("jpeg", "png", "tiff", "bmp", "pnm", "psd", "bild")
 BILD_ENDUNGEN = frozenset({".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".tif", ".tiff", ".bmp", ".dib"})
 # Nur bei diesen Endungen wird der Inhalt gelesen (bei allen anderen sagt schon die Endung „keine PDF“, und das
 # Lesen würde Cloud-Dateien unnötig herunterladen); „“ = Datei ohne Endung (z. B. Download aus einem Portal)
@@ -55,19 +56,31 @@ _SYSTEM_DATEIEN = frozenset({"desktop.ini", "thumbs.db", "ehthumbs.db", "ehthumb
 ART_BESCHREIBUNG = {
     "pdf": "eine PDF-Datei", "jpeg": "ein Foto (JPEG)", "png": "ein Bild (PNG)", "tiff": "ein Bild (TIFF, z. B. Fax)",
     "bmp": "ein Bild (BMP)", "gif": "ein Bild (GIF)", "webp": "ein Bild (WEBP)", "heic": "ein iPhone-Foto (HEIC)",
+    "pnm": "ein Bild (PNM/PAM, z. B. von einem Scanner)", "psd": "ein Bild (Photoshop)", "bild": "ein Bild",
     "html": "eine Webseite (HTML)", "svg": "eine Grafik (SVG)", "xml": "eine XML-Datei",
-    "office": "eine Office- oder ZIP-Datei (z. B. Word, Excel)",
+    "office": "eine Office- oder ZIP-Datei (z. B. Word, Excel)", "archiv": "ein Archiv (z. B. TAR)",
+    "ebook": "ein E-Book (z. B. EPUB)", "xps": "ein XPS-Dokument",
     "ole": "eine ältere Office-Datei oder eine Outlook-Nachricht", "rtf": "ein RTF-Text", "text": "eine Textdatei",
     "leer": "leer (0 Byte)", "unbekannt": "keine PDF-Datei", "endung": "keine PDF-Datei",
     "nicht_lesbar": "nicht lesbar"}
 # Inhalte, die mit der Endung .pdf an die Engine gehen dürfen: echte PDFs und Unbestimmtes (Text, leere Datei,
-# unbekannte Bytes) – dafür meldet die Engine „keine lesbare PDF-Datei“ oder repariert eine beschädigte PDF. Alles
-# andere (Bilder, Webseiten, SVG, XML, ZIP …) öffnet PyMuPDF als Nicht-PDF; der erste Seitenzugriff brachte das
-# ganze Programm zum Absturz (R-01, nachgemessen: JPEG, PNG, TIFF, BMP, GIF, HTML, XHTML, SVG, FB2, ZIP mit Bildern).
+# unbekannte Bytes), das auch MuPDF NICHT öffnen kann (datei_art fragt MuPDF selbst) – dafür meldet die Engine
+# „keine lesbare PDF-Datei“ oder repariert eine beschädigte PDF. Alles, was MuPDF als Nicht-PDF öffnet (Bilder,
+# Webseiten auch in UTF-16, SVG, XML, FictionBook, ZIP/TAR, PNM, Photoshop …), geht nie an die Engine: der erste
+# Seitenzugriff brachte das ganze Programm zum Absturz (R-01).
 ENGINE_ARTEN = frozenset({"pdf", "text", "leer", "unbekannt"})
+# Arten aus den ersten Bytes, bei denen MuPDF selbst gefragt wird, wie es die Datei öffnet (sie gingen sonst an die
+# Engine): nicht raten, sondern MuPDF fragen – ohne Seitenzugriff, das stürzt nie ab
+_MUPDF_PRUEFEN = frozenset({"pdf", "text", "unbekannt"})
+# MuPDF-Formatangabe (metadata["format"], klein geschrieben) -> Art; was hier fehlt, heißt „format:<Angabe>“
+_MUPDF_FORMATE = (("pnm", "pnm"), ("image", "bild"), ("svg", "svg"), ("html", "html"), ("fictionbook", "xml"),
+                  ("epub", "ebook"), ("mobi", "ebook"), ("tar", "archiv"), ("zip", "archiv"), ("cbz", "archiv"),
+                  ("xps", "xps"))
 _BMP_KOPFGROESSEN = (12, 16, 40, 52, 56, 64, 108, 124)
 _HTML_ANFAENGE = (b"<!doctype html", b"<html", b"<head", b"<body", b"<meta", b"<title", b"<script", b"<!-- ")
 _HEIF_MARKEN = (b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1", b"avif")
+# Netpbm (PNM/PBM/PGM/PPM, z. B. von SANE-Scannern): „P1“ … „P6“, Breite, Höhe (und Maximalwert), Kommentare erlaubt
+_PNM_KOPF = re.compile(rb"P[1-6](?:\s+(?:#[^\n]*\n\s*)*\d+){2,3}\s")
 
 
 def _ist_text(kopf: bytes) -> bool:
@@ -78,9 +91,21 @@ def _ist_text(kopf: bytes) -> bool:
     return steuer <= len(kopf) // 100
 
 
+def _auszeichnung_art(anfang: bytes) -> str | None:
+    """Webseite, SVG oder XML (auch FictionBook) an einem Textanfang (klein geschrieben, ohne BOM und Leerraum)."""
+    if anfang.startswith(_HTML_ANFAENGE) or (anfang.startswith((b"<?xml", b"<!--")) and b"<html" in anfang):
+        return "html"
+    if b"<svg" in anfang[:600]:
+        return "svg"
+    if anfang.startswith(b"<?xml") or b"<fictionbook" in anfang[:600]:
+        return "xml"
+    return None
+
+
 def art_aus_kopf(kopf: bytes) -> str:
     """Art einer Datei nach ihren ersten Bytes (nicht nach der Endung): "pdf", "jpeg", "png", "tiff", "bmp", "gif",
-    "webp", "heic", "html", "svg", "xml", "office", "ole", "rtf", "text", "leer" oder "unbekannt"."""
+    "webp", "heic", "pnm", "psd", "html", "svg", "xml", "office", "archiv", "ole", "rtf", "text", "leer" oder
+    "unbekannt". Nur eine erste Einordnung – datei_art fragt bei "pdf", "text" und "unbekannt" zusätzlich MuPDF."""
     if not kopf:
         return "leer"
     if b"%PDF" in kopf[:1024]:                      # wie Acrobat: Kennung irgendwo in den ersten 1024 Bytes
@@ -99,32 +124,65 @@ def art_aus_kopf(kopf: bytes) -> str:
         return "webp"
     if kopf[4:8] == b"ftyp" and kopf[8:12] in _HEIF_MARKEN:
         return "heic"
+    if kopf[:4] == b"8BPS":
+        return "psd"
+    if _PNM_KOPF.match(kopf) or (kopf.startswith(b"P7\n") and b"ENDHDR" in kopf[:512]):
+        return "pnm"
     if kopf[:4] == b"PK\x03\x04":
         return "office"
+    if kopf[257:262] == b"ustar":
+        return "archiv"
     if kopf[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
         return "ole"
     if kopf[:5] == b"{\\rtf":
         return "rtf"
-    anfang = kopf.lstrip(b"\xef\xbb\xbf").lstrip().lower()
-    if anfang.startswith(_HTML_ANFAENGE) or (anfang.startswith((b"<?xml", b"<!--")) and b"<html" in anfang):
-        return "html"
-    if b"<svg" in anfang[:600]:
-        return "svg"
-    if anfang.startswith(b"<?xml"):
-        return "xml"
+    if kopf[:2] in (b"\xff\xfe", b"\xfe\xff"):     # UTF-16 mit BOM (z. B. eine als .pdf gespeicherte Webseite)
+        text = kopf.decode("utf-16", errors="ignore").lstrip("\ufeff").lstrip().lower()
+        return _auszeichnung_art(text.encode("utf-8", errors="ignore")) or "text"
+    auszeichnung = _auszeichnung_art(kopf.lstrip(b"\xef\xbb\xbf").lstrip().lower())
+    if auszeichnung:
+        return auszeichnung
     if _ist_text(kopf):
         return "text"
     return "unbekannt"
 
 
+def _art_laut_mupdf(pfad, art: str) -> str:
+    """Fragt MuPDF selbst, wie es die Datei öffnet – nur öffnen, kein Seitenzugriff (das stürzt nie ab). Öffnet
+    MuPDF sie als PDF: "pdf". Öffnet es sie als etwas anderes (Webseite, Bild, E-Book, Archiv …), darf sie nie an die
+    Engine – die Art kommt dann aus MuPDFs Formatangabe. Kann MuPDF sie gar nicht öffnen, bleibt die Art aus den
+    ersten Bytes: dann meldet auch die Engine nur „keine lesbare PDF-Datei“ (R-01)."""
+    try:
+        fitz = _fitz()
+    except ImportError:                    # ohne PyMuPDF läuft die Engine ohnehin nicht
+        return art
+    try:
+        with fitz.open(langpfad(pfad)) as doc:
+            if doc.is_pdf:
+                return "pdf"
+            angabe = str((doc.metadata or {}).get("format") or "").strip()
+    except Exception:
+        return art
+    klein = angabe.lower()
+    for merkmal, neue_art in _MUPDF_FORMATE:
+        if merkmal in klein:
+            return neue_art
+    return "format:" + (angabe or "?")
+
+
 def datei_art(pfad) -> str:
-    """Art einer Datei nach ihrem INHALT (siehe art_aus_kopf); "nicht_lesbar", wenn sie nicht geöffnet werden kann."""
+    """Art einer Datei nach ihrem INHALT, nicht nach der Endung: erst die ersten Bytes (art_aus_kopf); wäre die Datei
+    damit ein Fall für die Engine ("pdf", "text", "unbekannt"), entscheidet MuPDF selbst (_art_laut_mupdf).
+    "nicht_lesbar", wenn sie nicht geöffnet werden kann."""
     try:
         with open(langpfad(pfad), "rb") as datei:
             kopf = datei.read(KOPF_BYTES)
     except OSError:
         return "nicht_lesbar"
-    return art_aus_kopf(kopf)
+    art = art_aus_kopf(kopf)
+    if art in _MUPDF_PRUEFEN:
+        art = _art_laut_mupdf(pfad, art)
+    return art
 
 
 def ist_bild_art(art: str) -> bool:
@@ -132,13 +190,34 @@ def ist_bild_art(art: str) -> bool:
 
 
 def fuer_engine_erlaubt(art: str) -> bool:
-    """Darf eine Datei dieser Art (Endung .pdf) an Analyse, Schwärzung und Vorschau? (nicht_lesbar: ja – die Engine
-    meldet den Fehler selbst)."""
+    """Darf eine Datei dieser Art (aus datei_art, Endung .pdf) an Analyse, Schwärzung und Vorschau? Nur echte PDFs
+    und was auch MuPDF nicht öffnen kann (dafür meldet die Engine „keine lesbare PDF-Datei“); nicht_lesbar: ja – die
+    Engine meldet den Fehler selbst."""
     return art in ENGINE_ARTEN or art == "nicht_lesbar"
 
 
 def art_beschreibung(art: str) -> str:
+    if art.startswith("format:"):
+        return f"eine Datei im Format „{art[len('format:'):]}“"
     return ART_BESCHREIBUNG.get(art, ART_BESCHREIBUNG["unbekannt"])
+
+
+# Dateien, deren Inhalt nicht gelesen wird (die Endung sagt schon „keine PDF“): was sie vermutlich sind
+_ENDUNG_BESCHREIBUNG = {
+    ".msg": "eine Outlook-Nachricht", ".eml": "eine E-Mail", ".doc": "ein Word-Dokument",
+    ".docx": "ein Word-Dokument", ".odt": "ein Textdokument", ".rtf": "ein RTF-Text", ".txt": "eine Textdatei",
+    ".xls": "eine Excel-Tabelle", ".xlsx": "eine Excel-Tabelle", ".ods": "eine Tabelle", ".csv": "eine Tabelle (CSV)",
+    ".ppt": "eine Präsentation", ".pptx": "eine Präsentation", ".heic": "ein iPhone-Foto (HEIC)",
+    ".heif": "ein iPhone-Foto (HEIF)", ".webp": "ein Bild (WEBP)", ".gif": "ein Bild (GIF)",
+    ".zip": "ein Archiv (ZIP)", ".7z": "ein Archiv (7z)", ".rar": "ein Archiv (RAR)",
+    ".htm": "eine Webseite (HTML)", ".html": "eine Webseite (HTML)", ".xml": "eine XML-Datei",
+    ".svg": "eine Grafik (SVG)", ".xps": "ein XPS-Dokument", ".oxps": "ein XPS-Dokument",
+    ".mp4": "ein Video", ".mov": "ein Video", ".mp3": "eine Tonaufnahme", ".m4a": "eine Tonaufnahme"}
+
+
+def endung_beschreibung(name) -> str | None:
+    """Was eine Datei nach ihrer Endung vermutlich ist („eine Outlook-Nachricht“); None, wenn unbekannt."""
+    return _ENDUNG_BESCHREIBUNG.get(_endung(os.fspath(name)))
 
 
 def ist_systemdatei(name: str) -> bool:
@@ -338,8 +417,8 @@ def sammle_pdfs_bericht(pfade) -> dict:
     """
     Nimmt Dateien UND Ordner entgegen und prüft jede Datei am INHALT (nicht nur an der Endung, R-01). Bericht:
       "pdfs": [Path]            echte PDFs (einzeln gewählte Ausgaben des Programms eingeschlossen)
-      "bilder": [Path]          Bilder (JPEG, PNG, TIFF, BMP – auch mit falscher Endung wie „Foto.pdf“), die die
-                                Oberfläche auf Wunsch in eine PDF umwandelt
+      "bilder": [Path]          Bilder (JPEG, PNG, TIFF, BMP, PNM, Photoshop – auch mit falscher Endung wie
+                                „Foto.pdf“), die die Oberfläche auf Wunsch in eine PDF umwandelt
       "pdf_ohne_endung": [Path] PDFs ohne die Endung .pdf (z. B. Download aus einem Portal)
       "uebersprungen": [Path]   einzeln gewählte Dateien, die keine PDF und kein Bild sind
       "keine_pdf": [Path]       solche Dateien aus Ordner-Scans (R-10; ohne System- und Programmdateien)
@@ -395,8 +474,17 @@ def gemeinsamer_stamm(pfade) -> Path | None:
 # Arbeitskopien: Bild als PDF, entschlüsselte PDF (R-01, R-12)
 # ----------------------------------------------------------------------
 A4_LANG, A4_KURZ = 842.0, 595.0
-_BILD_DATEITYP = {"jpeg": "jpg", "png": "png", "tiff": "tiff", "bmp": "bmp"}
+# Art -> Dateityp für MuPDF (None: ein Bildformat, das nur MuPDF selbst erkannt hat – über den Pfad öffnen)
+_BILD_DATEITYP = {"jpeg": "jpg", "png": "png", "tiff": "tiff", "bmp": "bmp", "pnm": "pnm", "psd": "psd",
+                  "bild": None}
 _SITZUNG: Path | None = None
+# Nach dem endgültigen Aufräumen beim Beenden wird keine neue Sitzung (und keine Arbeitskopie) mehr angelegt –
+# sonst entstand still ein neuer Ordner mit einer entschlüsselten Kopie, den erst der nächste Start löschte
+_SITZUNG_BEENDET = False
+
+
+class SitzungBeendet(RuntimeError):
+    """Das Programm wird beendet: es wird keine Arbeitskopie mehr angelegt."""
 
 
 def _fitz():
@@ -415,9 +503,25 @@ def temp_basis() -> Path:
     return _zustands_basis() / TEMP_ORDNER
 
 
+def sitzung_beginnen():
+    """Neue Programmsitzung (beim Öffnen des Hauptfensters): Arbeitskopien dürfen (wieder) angelegt werden; ein
+    Ordner einer früheren Sitzung dieses Prozesses wird nicht weiterverwendet."""
+    global _SITZUNG, _SITZUNG_BEENDET
+    _SITZUNG_BEENDET = False
+    _SITZUNG = None
+
+
+def aktuelle_sitzung() -> Path | None:
+    """Ordner der laufenden Sitzung, ohne ihn anzulegen (None: es gibt noch keine Arbeitskopie)."""
+    return _SITZUNG
+
+
 def sitzungsordner() -> Path:
-    """Ordner dieser Programmsitzung („sitzung_<PID>_…“); wird beim ersten Bedarf angelegt."""
+    """Ordner dieser Programmsitzung („sitzung_<PID>_…“); wird beim ersten Bedarf angelegt. SitzungBeendet, wenn das
+    Programm schon beendet wird (nie still einen neuen Ordner anlegen)."""
     global _SITZUNG
+    if _SITZUNG_BEENDET:
+        raise SitzungBeendet("Das Programm wird beendet – es wird keine Arbeitskopie mehr angelegt.")
     if _SITZUNG is None or not _SITZUNG.is_dir():
         basis = temp_basis()
         basis.mkdir(parents=True, exist_ok=True)
@@ -455,13 +559,32 @@ def arbeitskopie_entfernen(pfad) -> bool:
         return False
 
 
-def sitzung_aufraeumen() -> bool:
-    """Löscht alle Arbeitskopien dieser Sitzung (beim Beenden). True, wenn danach nichts mehr übrig ist."""
-    global _SITZUNG
-    ordner, _SITZUNG = _SITZUNG, None
-    if ordner is None or not ordner.exists():
+def sitzung_aufraeumen(endgueltig: bool = False) -> bool:
+    """Löscht alle Arbeitskopien dieser Sitzung. True, wenn danach nichts mehr übrig ist. endgueltig=True (beim
+    Beenden): danach wird keine neue Sitzung mehr angelegt (SitzungBeendet). Bleibt etwas übrig (unter Windows hält
+    ein noch laufender Lesevorgang die Datei offen), bleibt der Ordner vermerkt – ein weiterer Aufruf versucht es
+    erneut; ordner_loeschen räumt ihn auch später noch gezielt weg."""
+    global _SITZUNG, _SITZUNG_BEENDET
+    if endgueltig:
+        _SITZUNG_BEENDET = True
+    ordner = _SITZUNG
+    if ordner is None:
         return True
-    shutil.rmtree(ordner, ignore_errors=True)
+    if ordner_loeschen(ordner):
+        if _SITZUNG == ordner:
+            _SITZUNG = None
+        return True
+    return False
+
+
+def ordner_loeschen(ordner) -> bool:
+    """Löscht einen Sitzungsordner samt Inhalt – nur innerhalb des Ordners für Arbeitskopien. True, wenn er danach
+    nicht mehr existiert."""
+    ordner = Path(ordner)
+    if not _innerhalb_temp(ordner):
+        return not ordner.exists()
+    if ordner.exists():
+        shutil.rmtree(ordner, ignore_errors=True)
     return not ordner.exists()
 
 
@@ -491,17 +614,22 @@ def alte_sitzungen_aufraeumen(max_alter: float = SITZUNG_MAX_ALTER) -> list[Path
 
 
 def bild_als_pdf(bild, ziel, art: str | None = None) -> int:
-    """Wandelt ein Bild (JPEG, PNG, TIFF – auch mehrseitige Faxe –, BMP) mit PyMuPDF in eine PDF um: je Bildseite
-    eine PDF-Seite, aufgerichtet nach der Lage-Angabe des Fotos (EXIF) und höchstens A4 groß (ein Handyfoto mit
-    72 dpi wäre sonst über einen Meter breit; die Texterkennung liest die Seite dann wie einen Scan).
+    """Wandelt ein Bild (JPEG, PNG, TIFF – auch mehrseitige Faxe –, BMP, PNM/PAM vom Scanner, Photoshop oder ein
+    anderes Bildformat, das MuPDF erkennt) mit PyMuPDF in eine PDF um: je Bildseite eine PDF-Seite, aufgerichtet nach
+    der Lage-Angabe des Fotos (EXIF) und höchstens A4 groß (ein Handyfoto mit 72 dpi wäre sonst über einen Meter
+    breit; die Texterkennung liest die Seite dann wie einen Scan).
     Liefert die Seitenzahl; ValueError, wenn das Bild nicht lesbar ist."""
     fitz = _fitz()
     art = art or datei_art(bild)
     if art not in _BILD_DATEITYP:
         raise ValueError(f"Die Datei ist kein unterstütztes Bild ({art_beschreibung(art)}).")
     try:
-        daten = Path(langpfad(bild)).read_bytes()
-        with fitz.open(stream=daten, filetype=_BILD_DATEITYP[art]) as quelle:
+        dateityp = _BILD_DATEITYP[art]
+        if dateityp is None:                          # nur MuPDF kennt das Format: so öffnen, wie es geprüft wurde
+            quelle = fitz.open(langpfad(bild))
+        else:
+            quelle = fitz.open(stream=Path(langpfad(bild)).read_bytes(), filetype=dateityp)
+        with quelle:
             pdf_daten = quelle.convert_to_pdf()
     except OSError:
         raise

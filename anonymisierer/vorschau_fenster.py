@@ -52,6 +52,9 @@ HINWEIS_VORHER = ("Klick auf ein Wort: schwärzen an/aus · Rahmen ziehen: Berei
                   "schwärzen / nicht schwärzen · Bild auf/ab: Seite blättern")
 HINWEIS_NACHHER = ("Ausgabe nach dem Schwärzen. Orange = Verdacht der Restrisiko-Prüfung. Markierte Verdachtsstellen "
                    "nachschwärzen – oder, wenn nichts Persönliches mehr zu sehen ist, „Freigeben“.")
+# Fotos und Ausweiskopien (Befund Runde 2): Gesicht/Lichtbild, Unterschrift und Handschrift erkennt das Programm nicht
+HINWEIS_FOTO = ("Foto: Gesichter/Lichtbilder, Unterschriften und Handschrift werden NICHT automatisch geschwärzt – "
+                "unter „Geplante Schwärzung“ einen Rahmen darüber ziehen.")
 GANZE_SEITE_RAND = 3.0        # pt: Rahmen eines Seitenverdachts liegt knapp innerhalb des Seitenrands
 
 
@@ -366,7 +369,17 @@ class VorschauFenster:
         if gesperrt:
             self.status("Gerade läuft eine Analyse oder Schwärzung – Änderungen sind danach wieder möglich.")
         else:
-            self.status(HINWEIS_VORHER if self.modus == "vorher" else HINWEIS_NACHHER)
+            self.status(self._hinweis())
+
+    def _ist_foto(self) -> bool:
+        """Ist die gezeigte Datei ein in eine PDF umgewandeltes Foto bzw. ein Bild-Scan?"""
+        eintrag = getattr(self.app, "arbeitskopien", {}).get(self.pdf) or {}
+        return eintrag.get("art") == "bild"
+
+    def _hinweis(self) -> str:
+        """Bedienhinweis der Statuszeile; bei Fotos zuerst die Warnung zu Gesicht, Unterschrift und Handschrift."""
+        hinweis = HINWEIS_VORHER if self.modus == "vorher" else HINWEIS_NACHHER
+        return f"{HINWEIS_FOTO} {hinweis}" if self._ist_foto() else hinweis
 
     def _ausgabe(self) -> Path | None:
         eintrag = self.app.ausgaben.get(self.pdf)
@@ -424,7 +437,7 @@ class VorschauFenster:
         self.titel_setzen()
         self.seiten = self._seitenzahl()
         ziel = self.seite if seite is None else seite
-        self.status(HINWEIS_VORHER if modus == "vorher" else HINWEIS_NACHHER)
+        self.status(self._hinweis())
         self._knoepfe_aktualisieren()
         self.zeige_seite(max(0, min(int(ziel or 0), self.seiten - 1)), erzwingen=True)
 
@@ -513,6 +526,12 @@ class VorschauFenster:
         immer aus dem Speicher (Attrappe) – ein offener Datei-Handle würde unter Windows „Freigeben“ (Umbenennen)
         und „Verwerfen“ (Löschen) verhindern."""
         if self.modus == "vorher" and vorher_quelle_engine(self.app, self.pdf):
+            # R-01: das Vorschau-Modul der Engine öffnet die Datei nach ihrem Inhalt – eine inzwischen ersetzte Datei,
+            # die MuPDF als Nicht-PDF öffnet, brächte beim Seitenzugriff das ganze Programm zum Absturz
+            art = dateien.datei_art(datei)
+            if not dateien.fuer_engine_erlaubt(art):
+                raise ValueError(f"Die Datei ist keine PDF mehr, sondern {dateien.art_beschreibung(art)} (inzwischen "
+                                 f"ersetzt?) – bitte aus der Liste entfernen und neu hinzufügen.")
             try:
                 return _engine_vorschau.seite_bild(datei, nr, zoom)
             except Exception:

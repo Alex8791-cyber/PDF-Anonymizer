@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import threading
+import time
 import tkinter as tk
 import tkinter.font as tkfont
 from datetime import datetime
@@ -94,6 +95,8 @@ PROTOKOLL_ZEILEN_KLEIN = 3
 PROTOKOLL_MAX_ZEILEN = 5000
 VORLADEN_NACH_MS = 800              # spaCy-Modell so lange nach dem Start im Hintergrund laden (PERF-09)
 ERSTSTART_NACH_MS = 300             # Hinweis beim ersten Start erst, wenn das Hauptfenster steht
+RESTE_WARTEN_S = 30.0               # beim Beenden höchstens so lange auf den Arbeits-Thread warten, der eine
+                                    # Arbeitskopie noch offen hält (Windows löscht sie sonst nicht)
 
 HAKEN = {"an": "☑", "aus": "☐", "teil": "⊟"}
 # Zeichen vor der Kategorie in der Fundliste: ⚑ = Fund mit Hinweis der Engine (Statuszeile zeigt ihn; steht auch an
@@ -119,9 +122,14 @@ ERSTSTART_TEXT = (
     "Telefon- und Vertragsnummern durch Platzhalter wie [PERSON A].\n\n"
     "Andere Angaben bleiben je nach Schutzstufe lesbar – zum Beispiel Diagnosen, Beruf, Beträge oder Orte. "
     "Daraus kann eine Person unter Umständen noch zu erkennen sein.\n\n"
+    "Gesichter und Lichtbilder (etwa auf einer Ausweiskopie), Unterschriften und Handschrift werden NICHT "
+    "geschwärzt – sie bleiben sichtbar, wenn Sie in der Vorschau keinen Rahmen darüber ziehen.\n\n"
     "Keine automatische Erkennung ist fehlerfrei. Sehen Sie sich deshalb jedes Ergebnis in der Vorschau an, "
     "bevor Sie es weitergeben.\n\n"
     "Die Verantwortung für die Weitergabe an einen KI-Dienst bleibt bei Ihnen.")
+# Fotos und Ausweiskopien (Befund Runde 2): Gesicht/Lichtbild, Unterschrift und Handschrift bleiben stehen
+FOTO_GRENZEN = ("Gesichter und Lichtbilder (z. B. auf einer Ausweiskopie), Unterschriften und Handschrift werden "
+                "NICHT geschwärzt – in der Vorschau unter „Geplante Schwärzung“ einen Rahmen darüber ziehen.")
 KENNWORT_TITEL = "Kennwort erforderlich"
 ANZEIGE_ART = {"bild": " (Bild → PDF)", "entschluesselt": " (Kennwort entfernt)", "kopie": " (als PDF)"}
 NEBENKANAL_NAMEN = (("metadaten", "Metadaten"), ("lesezeichen", "Lesezeichen"), ("anhaenge", "Anhänge"),
@@ -163,8 +171,9 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
     """Untertitel, Hinweiskasten und Hilfetext – wahrheitsgemäß für den Funktionsumfang der Engine (GR-09)."""
     if neue_kategorien:
         lesbar = "je nach Schutzstufe bleiben Diagnosen, Beruf, Arbeitgeber, Beträge und Orte lesbar"
-        kasten = ("Nur je nach Schutzstufe erkannt: Diagnosen, Beruf, Arbeitgeber. Nicht erkannt werden: "
-                  "Unterschriften, Handschrift, Freitext; Text in Bildern nur unsicher (OCR).")
+        kasten = ("Nur je nach Schutzstufe erkannt: Diagnosen, Beruf, Arbeitgeber. Nicht erkannt und nicht geschwärzt "
+                  "werden: Gesichter/Lichtbilder (z. B. auf Ausweiskopien), Unterschriften, Handschrift, Freitext; "
+                  "Text in Bildern nur unsicher (OCR).")
         grenzen_kopf = "NICHT oder nur teilweise erkannt werden:\n"
         grenzen_umfang = ("  • Diagnosen, Krankheiten, Medikamente: nur bekannte Begriffe, angehakt erst in der "
                           "Schutzstufe „Maximal“ (sonst gemeldet und nicht angehakt in der Fundliste angeboten, "
@@ -173,8 +182,8 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
                           "Einkommen und Familienstand nicht\n")
     else:
         lesbar = "Diagnosen, Beruf, Arbeitgeber, Beträge und Orte bleiben lesbar"
-        kasten = ("Nicht erkannt werden: Diagnosen, Beruf, Arbeitgeber, Unterschriften, Handschrift, Freitext; "
-                  "Text in Bildern nur unsicher (OCR).")
+        kasten = ("Nicht erkannt werden: Diagnosen, Beruf, Arbeitgeber, Gesichter/Lichtbilder (z. B. auf "
+                  "Ausweiskopien), Unterschriften, Handschrift, Freitext; Text in Bildern nur unsicher (OCR).")
         grenzen_kopf = "NICHT erkannt werden:\n"
         grenzen_umfang = ("  • Diagnosen, Krankheiten, ICD-Codes, Medikamente\n"
                           "  • Beruf, Arbeitgeber, Einkommen, Familienstand\n")
@@ -186,6 +195,7 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
     grenzen = (
         "Das Programm ersetzt direkte Identifikatoren durch Platzhalter (Pseudonymisierung).\n\n"
         + grenzen_kopf + grenzen_umfang +
+        "  • Gesichter und Lichtbilder (z. B. das Passfoto auf einer Ausweiskopie) – sie werden NICHT geschwärzt\n"
         "  • Unterschriften, Stempel, Handschrift\n"
         "  • Text in Bildern, Fotos und Logos wird per OCR nur unsicher gelesen (Handyfotos, geringe Auflösung)\n"
         "  • Freitext, aus dem eine Person erkennbar bleibt\n"
@@ -195,8 +205,11 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
         "Pseudonymisierte Dokumente bleiben personenbezogene Daten. Für die Weitergabe an einen KI-Dienst "
         "braucht es weiterhin eine Rechtsgrundlage und in der Regel einen Auftragsverarbeitungsvertrag. Die "
         "Verantwortung für die Weitergabe bleibt bei Ihnen (Hilfe → „Hinweise vor der Nutzung …“).\n\n"
-        "Fotos und Bild-Scans (JPEG, PNG, TIFF, BMP) werden auf Wunsch in eine PDF umgewandelt und per "
-        "Texterkennung gelesen. PDFs mit Kennwort werden nach Eingabe des Kennworts geprüft – die Ausgabe hat "
+        "Fotos und Bild-Scans (JPEG, PNG, TIFF, BMP, PNM) werden auf Wunsch in eine PDF umgewandelt und per "
+        "Texterkennung gelesen. Gesichter, Lichtbilder, Unterschriften und Handschrift darauf werden NICHT "
+        "geschwärzt: in der Vorschau unter „Geplante Schwärzung“ einen Rahmen darüber ziehen. Die Ausgabe eines "
+        "Fotos muss deshalb immer in der Vorschau freigegeben werden („_PRUEFEN“). "
+        "PDFs mit Kennwort werden nach Eingabe des Kennworts geprüft – die Ausgabe hat "
         "dann kein Kennwort mehr. Die umgewandelte bzw. entschlüsselte Arbeitskopie liegt nur während der "
         "Bearbeitung im Programmordner für Zwischendateien und wird beim Entfernen aus der Liste und beim Beenden "
         "gelöscht. Andere Dateien (Word, Mails …) werden nicht geprüft: zuerst als PDF speichern.\n\n"
@@ -809,7 +822,13 @@ class AnonymisiererApp:
         # liest die Kopie, Liste, Ausgabeordner und Protokoll gehören zum Original
         self.arbeitskopien: dict[Path, dict] = {}
         self.nicht_geprueft: dict[Path, str] = {}        # Datei -> Grund (keine PDF, unlesbar, ohne Kennwort …)
+        self._auswahl_ungeprueft: dict[Path, str] | None = None   # davon aus der gerade laufenden Auswahl
         self._hinzufuegen_laeuft = False
+        # Schließen, während eine Auswahl auf eine Rückfrage wartet (Kennwort, Fotos …): erst die Auswahl sauber
+        # abbrechen (keine weitere Arbeitskopie), dann schließen (Befund Runde 2)
+        self._schliessen_angefordert = False
+        self._lauf_thread: threading.Thread | None = None   # Arbeits-Thread des laufenden bzw. letzten Laufs
+        self._reste_threads: dict[str, threading.Thread] = {}   # Sitzungsordner -> Thread, der ihn später löscht
         self.laufprotokoll: list[dict] = []              # je Lauf eine Zusammenfassung ohne Inhalte (M-61)
         self.ereignisse: list[tuple[str, str]] = []      # (Uhrzeit, Ereignis) – Freigeben/Verwerfen/Nachschwärzen
         self._lauf_kontext: dict | None = None
@@ -818,6 +837,7 @@ class AnonymisiererApp:
         self.hinweis_dialog = None
         self.kennwort_dialog = None
         self.hinweis_gelesen = bool(self.einstellungen.get("hinweis_gelesen", False))
+        dateien.sitzung_beginnen()                        # Arbeitskopien dieses Fensters in einem neuen Ordner
 
         self.skalierung = float(self.root.tk.call("tk", "scaling"))
         self.k = self.skalierung / BASIS_SKALIERUNG     # 1.0 = Windows 100 %
@@ -1037,9 +1057,12 @@ class AnonymisiererApp:
         k3 = self._knopf(zeile, "Liste leeren", self.liste_leeren, True)
         k3.pack(side="right")
         self._sperrbar += [k1, k2, k3]
-        self.datei_hinweis = tk.Label(zeile, text="Noch keine Dateien. Die Liste erscheint unten in Schritt 3.",
-                                      font=self.f_normal, bg=FARBE_KARTE, fg=FARBE_TEXT_GRAU, anchor="w")
-        self.datei_hinweis.pack(side="left", padx=(12, 0), fill="x", expand=True)
+        # Bericht zum Hinzufügen in eigener Zeile unter den Knöpfen, mit Umbruch (Breite folgt dem Fenster): in der
+        # Knopfzeile wurde er abgeschnitten – genau „(nicht geprüft)“ war nicht mehr zu sehen (Befund Runde 2)
+        self.datei_hinweis = tk.Label(karte1, text="Noch keine Dateien. Die Liste erscheint unten in Schritt 3.",
+                                      font=self.f_normal, bg=FARBE_KARTE, fg=FARBE_TEXT_GRAU, anchor="w",
+                                      justify="left", wraplength=self._px(840))
+        self.datei_hinweis.pack(fill="x", pady=(4, 0))
 
         ziel = tk.Frame(karte1, bg=FARBE_KARTE)
         ziel.pack(fill="x", pady=(6, 0))
@@ -1351,6 +1374,7 @@ class AnonymisiererApp:
             return
         breite = max(300, ereignis.width - self._px(60))
         self.untertitel.config(wraplength=breite)
+        self.datei_hinweis.config(wraplength=max(300, breite - self._px(40)))
         self.hinweis_kasten.config(wraplength=max(300, breite - self._px(40)))
         self.profil_beschreibung.config(wraplength=max(300, breite - self._px(40)))
         self.baum_hinweis.config(wraplength=max(300, breite - self._px(40)))
@@ -1432,8 +1456,39 @@ class AnonymisiererApp:
         return Path(dateien.ohne_langpfad(pfad)).name
 
     def _nicht_geprueft_merken(self, pfad, grund: str):
-        """Datei aus der Auswahl, die NICHT geprüft wird – steht im Abschlussdialog der Schwärzung."""
+        """Datei aus der Auswahl, die NICHT geprüft wird – steht in den Abschlussdialogen von Analyse und Schwärzung
+        und (für die laufende Auswahl) in der letzten Protokollzeile des Hinzufügens."""
         self.nicht_geprueft[Path(pfad)] = grund
+        if self._auswahl_ungeprueft is not None:
+            self._auswahl_ungeprueft[Path(pfad)] = grund
+
+    @staticmethod
+    def _grund_keine_pdf(pfad, arten: dict) -> str:
+        """„keine PDF, sondern eine Webseite (HTML)“ – mit der Art, wenn der Inhalt geprüft wurde, sonst nach der
+        Endung („keine PDF, sondern eine Outlook-Nachricht“)."""
+        art = (arten or {}).get(pfad)
+        if art and art not in ("endung", "unbekannt"):
+            return f"keine PDF, sondern {dateien.art_beschreibung(art)}"
+        vermutlich = dateien.endung_beschreibung(dateien.ohne_langpfad(pfad)) if art == "endung" else None
+        return f"keine PDF, sondern {vermutlich}" if vermutlich else "keine PDF"
+
+    def _nicht_geprueft_text(self, eintraege, anzahl: int = 8) -> str:
+        """„a.msg (keine PDF), b.pdf (Kennwort nicht eingegeben) und 2 weitere“."""
+        eintraege = list(eintraege)
+        teile = [f"{self._kurzname(pfad)} ({grund})" for pfad, grund in eintraege[:anzahl]]
+        return ", ".join(teile) + (f" und {len(eintraege) - anzahl} weitere" if len(eintraege) > anzahl else "")
+
+    def _nicht_geprueft_block(self, anzahl: int = 5) -> list[str]:
+        """Block für die Abschlussdialoge: alle Dateien der Auswahl, die NICHT geprüft wurden – mit Grund."""
+        eintraege = list(self.nicht_geprueft.items())
+        if not eintraege:
+            return []
+        zeilen = [f"NICHT geprüft wurden {len(eintraege)} Datei(en) aus der Auswahl (keine PDF, Foto nicht "
+                  f"übernommen, ohne Kennwort, nicht lesbar …) – diese Dateien nicht ungeprüft weitergeben:"]
+        zeilen += [f"  • {self._kurzname(pfad)}: {grund}" for pfad, grund in eintraege[:anzahl]]
+        if len(eintraege) > anzahl:
+            zeilen.append(f"  • … und {len(eintraege) - anzahl} weitere (siehe Protokoll)")
+        return zeilen
 
     def _namen_liste(self, pfade, anzahl=5, arten: dict | None = None) -> str:
         teile = []
@@ -1471,6 +1526,8 @@ class AnonymisiererApp:
                 "In PDFs umwandeln und mitprüfen? Der Text wird dann per Texterkennung (OCR) gelesen – das ist "
                 "unsicherer als bei einer echten PDF; das Ergebnis bitte besonders sorgfältig ansehen. Die Umwandlung "
                 "liegt nur vorübergehend im Programmordner, die Ausgabe heißt wie gewohnt anonym_NN.pdf.\n\n"
+                f"ACHTUNG: {FOTO_GRENZEN} Die Ausgabe eines Fotos muss deshalb immer in der Vorschau freigegeben "
+                "werden.\n\n"
                 "„Nein“: Die Bilder werden NICHT geprüft und nicht in die Liste aufgenommen.")
         return self._frage("Fotos als PDF übernehmen?", text)
 
@@ -1483,7 +1540,7 @@ class AnonymisiererApp:
         except Exception as fehler:
             if ziel is not None:
                 dateien.arbeitskopie_entfernen(ziel)
-            if not isinstance(fehler, (OSError, ValueError)):
+            if not isinstance(fehler, (OSError, ValueError, dateien.SitzungBeendet)):
                 dateien.fehler_protokollieren(*sys.exc_info())
             grund = str(fehler) if isinstance(fehler, ValueError) else _verstaendliche_fehlermeldung(fehler, bild)
             self._log(f"⚠ {self._kurzname(bild)}: konnte nicht als PDF übernommen werden ({grund}) – NICHT geprüft.",
@@ -1513,7 +1570,7 @@ class AnonymisiererApp:
             fehlversuch = False
             while True:
                 kennwort = self._kennwort_abfragen(pdf, fehlversuch)
-                if kennwort is None:
+                if kennwort is None or self._auswahl_abgebrochen():   # „Überspringen“ oder Fenster geschlossen
                     dateien.arbeitskopie_entfernen(ziel)
                     return None
                 if dateien.pdf_entschluesseln(pdf, kennwort, ziel):
@@ -1523,6 +1580,8 @@ class AnonymisiererApp:
         except Exception as fehler:
             if ziel is not None:
                 dateien.arbeitskopie_entfernen(ziel)
+            if isinstance(fehler, dateien.SitzungBeendet):        # Programm wird beendet: still abbrechen
+                return None
             log = dateien.fehler_protokollieren(*sys.exc_info())
             self._log(f"✖ {self._kurzname(pdf)}: konnte nicht entschlüsselt werden "
                       f"({_verstaendliche_fehlermeldung(fehler, pdf)}) – NICHT geprüft." + (f" Details: {log}" if log
@@ -1541,12 +1600,39 @@ class AnonymisiererApp:
         if self._hinzufuegen_laeuft:                  # z. B. Drag & Drop, während der Kennwortdialog offen ist
             self._status("Bitte erst die laufende Auswahl abschließen (Kennwort eingeben oder überspringen).")
             return
+        if self.beendet or self._schliessen_angefordert:
+            return
         self._hinzufuegen_laeuft = True
+        self._auswahl_ungeprueft = {}
         try:
             self._pdfs_hinzufuegen_ausfuehren(pfade)
         finally:
             self._hinzufuegen_laeuft = False
+            self._auswahl_ungeprueft = None
             self._beschaeftigt(False)
+            if self._schliessen_angefordert and not self.beendet:
+                # Das Fenster wurde während einer Rückfrage geschlossen: jetzt, da die Auswahl abgebrochen und ihre
+                # Arbeitskopien gelöscht sind, wirklich schließen (nach dem laufenden Tk-Ereignis)
+                try:
+                    self.root.after_idle(self._schliessen_nachholen)
+                except tk.TclError:
+                    self._schliessen_nachholen()
+
+    def _schliessen_nachholen(self):
+        self._schliessen_angefordert = False
+        if not self.beendet:
+            self.schliessen()
+
+    def _auswahl_abgebrochen(self) -> bool:
+        """Wurde das Fenster während der Auswahl geschlossen? Dann keine weitere Datei und keine Arbeitskopie mehr."""
+        return self.beendet or self._schliessen_angefordert
+
+    def _kopien_verwerfen(self, kopien: dict):
+        """Arbeitskopien einer abgebrochenen Auswahl löschen (sie stehen noch nicht in self.arbeitskopien)."""
+        for eintrag in kopien.values():
+            if eintrag and eintrag.get("pfad"):
+                dateien.arbeitskopie_entfernen(eintrag["pfad"])
+        kopien.clear()
 
     def _pdfs_hinzufuegen_ausfuehren(self, pfade):
         self._beschaeftigt(True, "Dateien werden geprüft …")
@@ -1557,6 +1643,7 @@ class AnonymisiererApp:
         arten = bericht.get("arten", {})
         gruende = bericht.get("gruende", {})
         teile = []
+        kopien: dict[Path, dict] = {}
 
         # M-63: einzeln gewählte Ausgaben nur nach Rückfrage
         pdf_kandidaten = [p for p in bericht["pdfs"] if p not in self.dateien]
@@ -1564,14 +1651,17 @@ class AnonymisiererApp:
         if ausgaben and not self._ausgaben_bestaetigen(ausgaben):
             pdf_kandidaten = [p for p in pdf_kandidaten if p not in ausgaben]
             teile.append(f"{len(ausgaben)} Ausgabe(n) nicht hinzugefügt")
+        if self._auswahl_abgebrochen():
+            return
         ohne_endung = [p for p in bericht.get("pdf_ohne_endung", []) if p not in self.dateien]
 
         # Fotos und Bild-Scans: auf Wunsch als PDF-Arbeitskopie
-        kopien: dict[Path, dict] = {}
         bilder = [p for p in bericht.get("bilder", []) if p not in self.dateien]
         bilder_neu = 0
         if bilder:
             if self._bilder_bestaetigen(bilder, arten):
+                if self._auswahl_abgebrochen():
+                    return
                 self._beschaeftigt(True, "Fotos werden in PDFs umgewandelt …")
                 try:
                     for bild in bilder:
@@ -1581,6 +1671,8 @@ class AnonymisiererApp:
                 finally:
                     self._beschaeftigt(False)
             else:
+                if self._auswahl_abgebrochen():
+                    return
                 for bild in bilder:
                     self._nicht_geprueft_merken(bild, "Bild nicht übernommen")
                 teile.append(f"{len(bilder)} Bild(er) nicht übernommen")
@@ -1593,6 +1685,8 @@ class AnonymisiererApp:
         bekannt: list[str] = []
         try:
             for pdf in pdf_kandidaten + ohne_endung:
+                if self._auswahl_abgebrochen():
+                    break                    # geschlossen, während ein Kennwortdialog offen war: nichts mehr anlegen
                 if dateien.pdf_kennwort_noetig(pdf):
                     eintrag = self._geschuetzte_pdf_entsperren(pdf, bekannt)
                     if not eintrag:
@@ -1610,7 +1704,7 @@ class AnonymisiererApp:
                     try:
                         ziel = dateien.arbeitskopie_ziel(self._kurzname(pdf))
                         dateien.pdf_kopieren(pdf, ziel)
-                    except OSError as fehler:
+                    except (OSError, dateien.SitzungBeendet) as fehler:
                         if ziel is not None:
                             dateien.arbeitskopie_entfernen(ziel)
                         self._log(f"⚠ {self._kurzname(pdf)}: {_verstaendliche_fehlermeldung(fehler, pdf)} – NICHT "
@@ -1621,6 +1715,11 @@ class AnonymisiererApp:
                     kopien[pdf] = {"pfad": ziel, "art": "kopie"}
         finally:
             bekannt.clear()                  # das Kennwort lebt nicht über die Auswahl hinaus
+        if self._auswahl_abgebrochen():
+            # Fenster während einer Rückfrage geschlossen: nichts davon kommt in die Liste – und keine
+            # (entschlüsselte) Arbeitskopie bleibt liegen (Befund Runde 2)
+            self._kopien_verwerfen(kopien)
+            return
 
         neu = 0
         for pdf in pdf_kandidaten + ohne_endung + bilder:
@@ -1651,14 +1750,14 @@ class AnonymisiererApp:
         if bericht["uebersprungen"]:
             namen = self._namen_liste(bericht["uebersprungen"], arten=arten)
             for p in bericht["uebersprungen"]:
-                self._nicht_geprueft_merken(p, "keine PDF")
+                self._nicht_geprueft_merken(p, self._grund_keine_pdf(p, arten))
             teile.append(f"{len(bericht['uebersprungen'])} übersprungen – keine PDF")
             self._log(f"⚠ Übersprungen (keine PDF-Datei; Fotos, Mails oder Office-Dateien bitte zuerst als "
                       f"PDF speichern): {namen}", "warnung", zaehlen=False)
         keine_pdf = bericht.get("keine_pdf", [])
         if keine_pdf:
             for p in keine_pdf:
-                self._nicht_geprueft_merken(p, "keine PDF")
+                self._nicht_geprueft_merken(p, self._grund_keine_pdf(p, arten))
             teile.append(f"{len(keine_pdf)} keine PDF (nicht geprüft)")
             satz = ("1 Datei im Ordner ist keine PDF und wurde" if len(keine_pdf) == 1 else
                     f"{len(keine_pdf)} Dateien im Ordner sind keine PDF und wurden")
@@ -1688,18 +1787,32 @@ class AnonymisiererApp:
             self._log("⚠ Nicht gefunden: " + ", ".join(
                 dateien.ohne_langpfad(p) + (f" ({gruende[p]} – unter Windows ggf. zu lang)" if p in gruende else "")
                 for p in bericht["fehlend"][:3]), "warnung", zaehlen=False)
-        self.datei_hinweis.config(text="; ".join(teile) + f" · insgesamt {len(self.dateien)} Datei(en).")
+        ungeprueft = dict(self._auswahl_ungeprueft or {})
+        hinweis = "; ".join(teile) + f" · insgesamt {len(self.dateien)} Datei(en)."
+        if ungeprueft:
+            hinweis += f" ⚠ {len(ungeprueft)} Datei(en) dieser Auswahl werden NICHT geprüft – Namen im Protokoll."
+        self.datei_hinweis.config(text=hinweis, fg=FARBE_WARNUNG if ungeprueft else FARBE_TEXT_GRAU)
         if (neu or bilder_neu) and self.analyse_ergebnisse:
             self._log("ℹ Neue Dateien sind noch nicht analysiert – bitte erneut analysieren, bevor geschwärzt wird.",
                       "hinweis")
+        if ungeprueft:
+            # als LETZTE Zeile: das Protokoll zeigt auf kleinen Bildschirmen nur drei Zeilen – die Namen der nicht
+            # geprüften Dateien dürfen nicht von einer ℹ-Zeile hinausgeschoben werden (Befund Runde 2)
+            self._log(f"⚠ NICHT geprüft aus dieser Auswahl: {len(ungeprueft)} Datei(en) – "
+                      f"{self._nicht_geprueft_text(ungeprueft.items())}. Diese Dateien nicht ungeprüft weitergeben.",
+                      "warnung", zaehlen=False)
         self._status_dateien()
         self._start_knopf_aktualisieren()
 
     def _status_dateien(self):
+        # die Statuszeile ist immer sichtbar (auch wenn der Einstellbereich weggescrollt ist): nicht geprüfte Dateien
+        # stehen dort zuerst
+        vorne = (f"⚠ {len(self.nicht_geprueft)} Datei(en) werden NICHT geprüft (siehe Protokoll) · "
+                 if self.nicht_geprueft else "")
         if not self.dateien:
-            self._status("Bereit. Bitte PDF-Dateien hinzufügen (Schritt 1).")
+            self._status(vorne + "Bereit. Bitte PDF-Dateien hinzufügen (Schritt 1).")
         elif not self.analyse_ergebnisse:
-            self._status(f"{len(self.dateien)} Datei(en) ausgewählt – jetzt unten „Analysieren“ drücken.")
+            self._status(vorne + f"{len(self.dateien)} Datei(en) ausgewählt – jetzt unten „Analysieren“ drücken.")
 
     def _datei_vergessen(self, pdf: Path):
         """Alles zu einer Datei vergessen (Vorschau, manuelle Markierungen, Ausgabestatus, Arbeitskopie)."""
@@ -1741,7 +1854,8 @@ class AnonymisiererApp:
         self.baum.delete(*self.baum.get_children())
         self.analyse_veraltet = False
         self.nicht_geprueft.clear()
-        self.datei_hinweis.config(text="Noch keine Dateien. Die Liste erscheint unten in Schritt 3.")
+        self.datei_hinweis.config(text="Noch keine Dateien. Die Liste erscheint unten in Schritt 3.",
+                                  fg=FARBE_TEXT_GRAU)
         self._status_dateien()
         self._start_knopf_aktualisieren()
 
@@ -1769,7 +1883,8 @@ class AnonymisiererApp:
         if self.baum.exists(iid):
             self.baum.delete(iid)
         self._beschriftungen_aktualisieren()
-        self.datei_hinweis.config(text=f"„{pdf.name}“ entfernt · insgesamt {len(self.dateien)} Datei(en).")
+        self.datei_hinweis.config(text=f"„{pdf.name}“ entfernt · insgesamt {len(self.dateien)} Datei(en).",
+                                  fg=FARBE_TEXT_GRAU)
         self._status_dateien()
         self._start_knopf_aktualisieren()
 
@@ -2848,7 +2963,17 @@ class AnonymisiererApp:
                      "Gerade läuft noch eine Analyse oder Schwärzung. Bitte warten oder „Abbrechen“ drücken.")
 
     def schliessen(self):
-        """Fenster schließen (Rückfrage, solange ein Lauf aktiv ist); Einstellungen sichern, Sperre freigeben."""
+        """Fenster schließen (Rückfrage, solange ein Lauf aktiv ist); Einstellungen sichern, Sperre freigeben.
+        Wartet gerade eine Auswahl auf eine Rückfrage (Kennwort, Fotos …), wird sie zuerst abgebrochen – erst danach
+        schließt das Fenster, damit keine (entschlüsselte) Arbeitskopie mehr entsteht oder liegen bleibt."""
+        if self.beendet:
+            return
+        if self._hinzufuegen_laeuft:
+            self._schliessen_angefordert = True
+            dialog = self.kennwort_dialog
+            if dialog is not None:
+                dialog.abbrechen()                      # wie „Überspringen“; _pdfs_hinzufuegen schließt danach
+            return
         if self.laeuft:
             antwort = messagebox.askyesno(
                 "Lauf läuft noch",
@@ -2869,7 +2994,9 @@ class AnonymisiererApp:
 
     def _aufraeumen(self):
         """Prozessweite Zustände zurückgeben (KQ-10): threading.excepthook, Einzelinstanz-Sperre, ausstehende
-        after()-Aufrufe; Arbeitskopien (Bild als PDF, entschlüsselte PDF) dieser Sitzung löschen."""
+        after()-Aufrufe; Arbeitskopien (Bild als PDF, entschlüsselte PDF) dieser Sitzung löschen – endgültig: danach
+        entsteht keine neue Arbeitskopie mehr. Lässt sich etwas nicht löschen (unter Windows hält ein noch laufender
+        Analyse- oder Schwärz-Thread die Kopie offen), wird es nach dem Ende des Threads erneut versucht."""
         for kennung in self._nach_start:
             try:
                 self.root.after_cancel(kennung)
@@ -2882,12 +3009,45 @@ class AnonymisiererApp:
             self._vorschau_dateien_freigeben()
         except Exception:
             pass
+        kopien = [Path(e["pfad"]) for e in self.arbeitskopien.values() if e and e.get("pfad")]
         for pdf in list(self.arbeitskopien):
             self._arbeitskopie_loeschen(pdf)
-        dateien.sitzung_aufraeumen()
+        sitzung = dateien.aktuelle_sitzung()
+        if not dateien.sitzung_aufraeumen(endgueltig=True) and sitzung is not None:
+            self._reste_spaeter_loeschen(sitzung, kopien)
         if self.instanz_sperre is not None:
             self.instanz_sperre.freigeben()
             self.instanz_sperre = None
+
+    def _reste_spaeter_loeschen(self, sitzung: Path, kopien: list):
+        """Arbeitskopien, die beim Beenden noch geöffnet waren (Windows löscht keine offene Datei; der Analyse- bzw.
+        Schwärz-Thread liest sie noch), nach dem Ende des Threads löschen. Ein eigener, nicht im Hintergrund
+        laufender Thread hält das Programm so lange am Leben (höchstens RESTE_WARTEN_S Sekunden). Bleibt trotzdem
+        etwas übrig, steht das in fehler.log – der nächste Programmstart löscht es."""
+        schluessel = str(sitzung)
+        if schluessel in self._reste_threads and self._reste_threads[schluessel].is_alive():
+            return
+        lauf = self._lauf_thread
+
+        def spaeter():
+            ende = time.monotonic() + RESTE_WARTEN_S
+            if lauf is not None and lauf.is_alive():
+                lauf.join(max(0.1, ende - time.monotonic()))
+            while True:
+                for kopie in kopien:
+                    dateien.arbeitskopie_entfernen(kopie)
+                if dateien.ordner_loeschen(sitzung) or time.monotonic() >= ende:
+                    break
+                time.sleep(0.25)
+            if Path(sitzung).exists():
+                hinweis = RuntimeError(f"Arbeitskopien im Programmordner für Zwischendateien ({Path(sitzung).name}) "
+                                       f"konnten beim Beenden nicht gelöscht werden (Datei noch geöffnet?) – sie "
+                                       f"werden beim nächsten Programmstart gelöscht.")
+                dateien.fehler_protokollieren(type(hinweis), hinweis, None)
+
+        faden = threading.Thread(target=spaeter, daemon=False, name="Arbeitskopien-loeschen")
+        self._reste_threads[schluessel] = faden
+        faden.start()
 
     # ------------------------------------------------------------------
     # Namenserkennung vorladen (PERF-09)
@@ -2969,9 +3129,10 @@ class AnonymisiererApp:
             self._log("ℹ Die Kundenliste wird von dieser Programmversion noch nicht beim Analysieren genutzt.",
                       "hinweis")
         self._status("Analyse startet …")
-        threading.Thread(target=self._analyse_lauf,
-                         args=(pdfs, aktive, nie, immer_je_datei, zusatz, self.abbruch, arbeit),
-                         daemon=True, name="Analyse").start()
+        self._lauf_thread = threading.Thread(target=self._analyse_lauf,
+                                             args=(pdfs, aktive, nie, immer_je_datei, zusatz, self.abbruch, arbeit),
+                                             daemon=True, name="Analyse")
+        self._lauf_thread.start()
 
     @staticmethod
     def _keine_pdf_ergebnis(pdf: Path, art: str) -> dict:
@@ -3140,34 +3301,58 @@ class AnonymisiererApp:
                                 + ["„Schwärzen starten“ erzeugt eine bereinigte Ausgabe ohne diese Teile. Das "
                                    "Original NICHT weitergeben."])
 
+        # Dateien der Auswahl, die gar nicht geprüft wurden (keine PDF, Foto nicht übernommen, ohne Kennwort, nicht
+        # lesbar) oder nicht analysiert werden konnten: dann gilt kein Satz wie „keine personenbezogenen Daten“ für
+        # die ganze Auswahl – er hieße für den Makler „der Ordner ist sauber“ (Befund Runde 2)
+        ungeprueft = list(self.nicht_geprueft.items())
+        alles_geprueft = not ungeprueft and not mit_fehler
+        geprueft = [p for p, e in ergebnisse.items() if not e["fehler"]]
+        nicht_zahl = len(ungeprueft) + len(mit_fehler)
+
         if gesamt == 0 and nebenkanal:
             self._log(f"Analyse fertig: auf den Seiten keine Funde, aber Personendaten in Metadaten/Anhängen von "
                       f"{len(nebenkanal)} Datei(en) – „Schwärzen starten“ erzeugt eine bereinigte Ausgabe.",
                       "warnung", zaehlen=False)
-            self._status("Personendaten in Metadaten/Anhängen – bitte „Schwärzen starten“: die Ausgabe wird bereinigt.")
+            status = "Personendaten in Metadaten/Anhängen – bitte „Schwärzen starten“: die Ausgabe wird bereinigt."
         elif gesamt and angehakt:
             davon = f", davon {len(angeboten_funde)} nur angeboten (nicht angehakt)" if angeboten_funde else ""
             self._log(f"Analyse fertig: {gesamt} Fund(e) in {len(ergebnisse)} Datei(en){davon}. "
                       f"Bitte Liste prüfen (Doppelklick = Vorschau), dann schwärzen.", "ok")
-            self._status(f"{gesamt} Fund(e) in {len(ergebnisse)} Datei(en){davon} – Liste prüfen (Doppelklick auf "
-                         f"eine Datei = Vorschau), dann schwärzen.")
+            status = (f"{gesamt} Fund(e) in {len(ergebnisse)} Datei(en){davon} – Liste prüfen (Doppelklick auf "
+                      f"eine Datei = Vorschau), dann schwärzen.")
         elif gesamt:
             was = "mögliche Gesundheitsangaben" if nur_gesundheit else "Funde"
             folge = ("Wegen der Personendaten in Metadaten/Anhängen erzeugt „Schwärzen starten“ trotzdem eine "
                      "bereinigte Ausgabe." if nebenkanal else "Ohne Häkchen wird keine Ausgabedatei erzeugt.")
-            self._log(f"Analyse fertig: keine Personendaten zum Schwärzen in {len(ergebnisse)} Datei(en) – nur "
+            wo = f"{len(ergebnisse)} Datei(en)" if alles_geprueft else f"den {len(geprueft)} geprüften Datei(en)"
+            self._log(f"Analyse fertig: keine Personendaten zum Schwärzen in {wo} – nur "
                       f"{gesamt} {was} angeboten (nicht angehakt). {folge}",
-                      "ok", zaehlen=False)
-            self._status(f"Keine Personendaten zum Schwärzen – nur {was} angeboten (nicht angehakt). Bitte prüfen; "
-                         f"zum Schwärzen anhaken.")
-        else:
+                      "ok" if alles_geprueft else "warnung", zaehlen=False)
+            status = (f"Keine Personendaten zum Schwärzen – nur {was} angeboten (nicht angehakt). Bitte prüfen; "
+                      f"zum Schwärzen anhaken.")
+        elif alles_geprueft:
             self._log(f"Analyse fertig: 0 Funde in {len(ergebnisse)} Datei(en) – es gibt nichts zu schwärzen, "
                       f"es wird keine Ausgabedatei erzeugt.", "warnung" if ohne_text else "ok", zaehlen=False)
-            self._status("Keine Funde – nichts zu schwärzen. Bitte Hinweise im Protokoll lesen.")
+            status = "Keine Funde – nichts zu schwärzen. Bitte Hinweise im Protokoll lesen."
+        else:
+            self._log(f"Analyse fertig: 0 Funde in den {len(geprueft)} geprüften Datei(en) – {nicht_zahl} Datei(en) "
+                      f"der Auswahl wurden NICHT geprüft bzw. nicht analysiert (siehe unten).", "warnung",
+                      zaehlen=False)
+            status = (f"Keine Funde in den geprüften Dateien – {nicht_zahl} Datei(en) wurden NICHT geprüft "
+                      f"(siehe Protokoll).")
+        if ungeprueft:
+            # als LETZTE Protokollzeile und VORN in der (immer sichtbaren) Statuszeile
+            self._log(f"⚠ NICHT geprüft: {len(ungeprueft)} Datei(en) der Auswahl – "
+                      f"{self._nicht_geprueft_text(ungeprueft)}. Diese Dateien nicht ungeprüft weitergeben.",
+                      "warnung", zaehlen=False)
+            if not (gesamt == 0 and not nebenkanal):
+                status = f"⚠ {len(ungeprueft)} Datei(en) NICHT geprüft (siehe Protokoll) · " + status
+        self._status(status)
 
         # Abschlussdialog aus Blöcken (je Überschrift mit ihren Punkten), durch Leerzeilen getrennt
         bloecke: list[list[str]] = []
-        art = "info"
+        art = "info" if alles_geprueft else "warning"
+        nicht_block = self._nicht_geprueft_block()
         if gesamt == 0 and nebenkanal:
             art = "warning"
             bloecke.append(nebenkanal_block)
@@ -3176,14 +3361,23 @@ class AnonymisiererApp:
                 bloecke.append([f"In {len(ohne)} weiteren Datei(en) wurde nichts gefunden – bitte selbst durchsehen "
                                 f"(Doppelklick = Vorschau):"] + [f"  • {self._anzeigename(p)}" for p in ohne[:10]])
         elif gesamt == 0:
-            bloecke.append(["Es wurden keine personenbezogenen Daten erkannt. Es gibt nichts zu schwärzen, "
-                            "deshalb bleibt der Schwärzen-Knopf aus und es wird keine Ausgabedatei erzeugt."])
+            if alles_geprueft:
+                bloecke.append(["Es wurden keine personenbezogenen Daten erkannt. Es gibt nichts zu schwärzen, "
+                                "deshalb bleibt der Schwärzen-Knopf aus und es wird keine Ausgabedatei erzeugt."])
+            elif geprueft:
+                bloecke.append(["In den geprüften Dateien wurde nichts gefunden – dort gibt es nichts zu schwärzen, "
+                                "deshalb bleibt der Schwärzen-Knopf aus und es wird keine Ausgabedatei erzeugt. Das "
+                                f"gilt NICHT für die {nicht_zahl} Datei(en), die nicht geprüft werden konnten "
+                                f"(siehe unten)."])
+            else:
+                bloecke.append([f"Keine Datei der Auswahl konnte geprüft werden ({nicht_zahl} Datei(en), siehe "
+                                f"unten) – es wird keine Ausgabedatei erzeugt."])
             if ohne_text:
                 art = "warning"
                 bloecke.append(["ACHTUNG – in diesen Dateien war kein Text lesbar (z. B. unlesbarer Scan). "
                                 "Dort konnte NICHTS geprüft werden; diese Dateien nicht ungeprüft weitergeben:"]
                                + [f"  • {self._anzeigename(p)}" for p in ohne_text[:10]])
-            else:
+            elif geprueft:
                 bloecke.append(["Mögliche Gründe: Das Dokument enthält keine Namen, IBANs, Adressen usw. "
                                 "(z. B. ein Bedingungswerk), oder die Daten stehen in Bildern oder Handschrift. "
                                 "Bitte das Dokument selbst durchsehen (Doppelklick = Vorschau)."])
@@ -3193,12 +3387,17 @@ class AnonymisiererApp:
             bloecke.append(["Auf den Seiten stehen nur angebotene, NICHT angehakte Stellen – sie bleiben lesbar, "
                             "wenn sie nicht angehakt werden."])
         elif not angehakt:
-            bloecke.append([f"Keine Personendaten zum Schwärzen erkannt (keine Namen, Anschriften, IBANs, Nummern …). "
-                            f"In der Fundliste stehen nur angebotene, NICHT angehakte Stellen. Ohne Häkchen bleibt "
-                            f"der Schwärzen-Knopf aus, und es wird keine Ausgabedatei erzeugt."])
+            satz = ("Keine Personendaten zum Schwärzen erkannt" if alles_geprueft else
+                    "In den geprüften Dateien wurden keine Personendaten zum Schwärzen erkannt")
+            bloecke.append([f"{satz} (keine Namen, Anschriften, IBANs, Nummern …). In der Fundliste stehen nur "
+                            f"angebotene, NICHT angehakte Stellen. Ohne Häkchen bleibt der Schwärzen-Knopf aus, und es "
+                            f"wird keine Ausgabedatei erzeugt."])
         elif nebenkanal:
             art = "warning"
             bloecke.append(nebenkanal_block)
+        elif ungeprueft and not self.warnungen_anzahl:
+            bloecke.append([f"Die Analyse hat {gesamt} Fund(e) in {len(geprueft)} geprüften Datei(en) ergeben – "
+                            f"bitte die Fundliste prüfen (Doppelklick = Vorschau), dann schwärzen."])
         if self.warnungen_anzahl and gesamt:
             art = "warning"
             kopf = (f"Die Analyse hat {gesamt} Fund(e) ergeben und {self.warnungen_anzahl} Warnung(en)/Fehler "
@@ -3208,6 +3407,10 @@ class AnonymisiererApp:
                       for p, ws in mit_warnung[:10]]
             # Überschrift und ihre Punkte als EIN Block – vorne, wenn etwas angehakt ist
             bloecke.insert(0 if angehakt else len(bloecke), [kopf + (":" if punkte else ".")] + punkte)
+        if nicht_block:
+            # gleich nach der ersten Aussage (bzw. den Warnungen) – nicht erst unter allen anderen Hinweisen
+            art = "warning"
+            bloecke.insert(min(1, len(bloecke)), nicht_block)
         if mit_fehler:
             art = "warning"
             bloecke.append(["Nicht analysierbar:"] + [f"  • {self._anzeigename(p)}: {f}" for p, f in mit_fehler[:10]])
@@ -3240,6 +3443,10 @@ class AnonymisiererApp:
                 zeilen += block
             titel = "Analyse abgeschlossen" if gesamt else ("Personendaten in Metadaten/Anhängen" if nebenkanal
                                                              else "Keine Funde")
+            # der Titel nennt, dass nicht alles geprüft wurde – ein bloßes „Keine Funde“ sah genauso aus wie
+            # „alles geprüft, nichts gefunden“
+            if ungeprueft or (not gesamt and not nebenkanal and not alles_geprueft):
+                titel += f" – {nicht_zahl} Datei(en) NICHT geprüft"
             self._dialog(art, titel, "\n".join(zeilen))
 
     @staticmethod
@@ -3317,7 +3524,14 @@ class AnonymisiererApp:
                 "datei": Path(kopie["pfad"]) if kopie else pdf,
                 "ziel_ordner": Path(pdf).parent / dateien.AUSGABE_ORDNER if kopie else None,
                 "nebenkanaele": ergebnis.get("nebenkanaele") if nebenkanal is not None else None,
-                "nur_nebenkanal": not funde and not bereiche and not stellen}
+                "nur_nebenkanal": not funde and not bereiche and not stellen,
+                # Foto/Ausweiskopie: Gesicht, Unterschrift und Handschrift bleiben stehen – die Ausgabe braucht
+                # IMMER eine Freigabe in der Vorschau, auch wenn das Häkchen „Freigabe …“ aus ist (Befund Runde 2)
+                "foto": self._ist_foto(pdf)}
+
+    def _ist_foto(self, pdf: Path) -> bool:
+        """Wurde die Datei aus einem Foto oder Bild-Scan in eine PDF umgewandelt?"""
+        return (self.arbeitskopien.get(pdf) or {}).get("art") == "bild"
 
     def schwaerzen(self, nur: list | None = None, ersetzt: Path | None = None) -> bool:
         """Schwärzt alle angehakten Funde (bzw. nur die Dateien in „nur“, z. B. zum Nachschwärzen; die Ausgabe
@@ -3363,12 +3577,15 @@ class AnonymisiererApp:
         freigabe = bool(self.freigabe_var.get())
         self._schwaerz_kontext = {"freigabe": freigabe, "profil": self.profil_var.get(),
                                   "basis_profil": self.basis_profil, "nachschwaerzen": ersetzt is not None,
-                                  "gemeinsamer_zielordner": ziel_ordner is not None and ersetzt is None}
+                                  "gemeinsamer_zielordner": ziel_ordner is not None and ersetzt is None,
+                                  "fotos": sum(1 for a in auftraege if a.get("foto"))}
         self._lauf_starten("schwaerzen")
         self._status("Schwärzung startet …")
-        threading.Thread(target=self._schwaerz_lauf,
-                         args=(auftraege, ziel_ordner, self.abbruch, freigabe, self.basis_profil, ersetzt),
-                         daemon=True, name="Schwaerzung").start()
+        self._lauf_thread = threading.Thread(target=self._schwaerz_lauf,
+                                             args=(auftraege, ziel_ordner, self.abbruch, freigabe, self.basis_profil,
+                                                   ersetzt),
+                                             daemon=True, name="Schwaerzung")
+        self._lauf_thread.start()
         return True
 
     def _schwaerz_lauf(self, auftraege, ziel_ordner, abbruch, freigabe=True, profil="hoch", ersetzt=None):
@@ -3412,8 +3629,9 @@ class AnonymisiererApp:
                 if auftrag["stellen"]:
                     kwargs["manuelle_stellen"] = auftrag["stellen"]
                 freigabe_engine = kann(schwaerze_pdf, "freigabe_erforderlich")
+                freigabe_hier = bool(freigabe or auftrag.get("foto"))      # Fotos immer erst nach Freigabe
                 if freigabe_engine:
-                    kwargs["freigabe_erforderlich"] = freigabe
+                    kwargs["freigabe_erforderlich"] = freigabe_hier
                 if kann(schwaerze_pdf, "profil"):
                     kwargs["profil"] = profil
                 datei = auftrag.get("datei", pdf)
@@ -3428,7 +3646,7 @@ class AnonymisiererApp:
                         ergebnis = _schwaerz_ergebnis_pruefen(schwaerze_pdf(datei, auftrag["funde"], **kwargs), pdf)
                     if ergebnis["fehler"] and ergebnis["fehler"] != "Abgebrochen":
                         ergebnis["fehler"] = _fehlertext_verstaendlich(ergebnis["fehler"])
-                    if freigabe and not freigabe_engine:
+                    if freigabe_hier and not freigabe_engine:
                         self._freigabe_emulieren(ergebnis)
                     self._reste_verorten(ergebnis)
                 except Exception as fehler:
@@ -3522,7 +3740,7 @@ class AnonymisiererApp:
             self._log(f"✖ {name}: {nicht_lokalisiert} Fundstelle(n) konnten nicht lokalisiert werden – Ausgabe "
                       f"unbedingt prüfen!", "fehler", zaehlen="NICHT_LOKALISIERT" not in codes)
 
-    def _grund(self, ergebnis: dict, status: str) -> str:
+    def _grund(self, ergebnis: dict, status: str, pdf: Path | None = None) -> str:
         if status == "fehler":
             return ergebnis["fehler"] or ""
         if status == "keine":
@@ -3535,6 +3753,8 @@ class AnonymisiererApp:
             teile.append(f"{len(ergebnis['reste'])} Fundtext(e) noch auffindbar")
         if int(ergebnis.get("stellen_nicht_lokalisiert") or 0):
             teile.append("Stellen nicht lokalisiert")
+        if status == "pruefen" and pdf is not None and self._ist_foto(pdf):
+            teile.append("Foto: Gesicht, Unterschrift und Handschrift selbst prüfen")
         if status == "pruefen" and not teile:
             teile.append("Freigabe ausstehend")
         return " · ".join(teile)
@@ -3547,7 +3767,7 @@ class AnonymisiererApp:
                 continue                                  # Nachschwärzen gescheitert: alte Ausgabe bleibt gültig
             verdacht = list(e.get("verdacht") or []) + list(e.get("_reste_verdacht") or [])
             self.ausgaben[pdf] = {"pfad": e["ausgabe"], "status": status, "verdacht": verdacht,
-                                  "ergebnis": e, "grund": self._grund(e, status)}
+                                  "ergebnis": e, "grund": self._grund(e, status, pdf)}
             self._ausgabe_zeile_setzen(pdf)
         geschrieben = [(pdf, e) for pdf, e in ergebnisse
                        if e["ausgabe"] is not None and Path(e["ausgabe"]).exists()]
@@ -3612,11 +3832,7 @@ class AnonymisiererApp:
                 zeilen.append(f"  • {self._anzeigename(pdf)}: nicht verarbeitet (abgebrochen)")
         if self.nicht_geprueft:
             zeilen.append("")
-            zeilen.append(f"NICHT geprüft (keine PDF, nicht lesbar oder ohne Kennwort): {len(self.nicht_geprueft)} "
-                          f"Datei(en) aus der Auswahl – diese Dateien nicht ungeprüft weitergeben:")
-            zeilen += [f"  • {self._kurzname(pfad)}: {grund}" for pfad, grund in list(self.nicht_geprueft.items())[:5]]
-            if len(self.nicht_geprueft) > 5:
-                zeilen.append(f"  … und {len(self.nicht_geprueft) - 5} weitere (siehe Protokoll)")
+            zeilen += self._nicht_geprueft_block()
         if pruefen:
             zeilen.append("")
             zeilen.append(f"Zu prüfen: {len(pruefen)} Datei(en). {PRUEFEN_ERKLAERUNG}")
@@ -3895,6 +4111,7 @@ class AnonymisiererApp:
                     zeilen.append("  " + " ".join(teile))
             else:
                 zeilen.append(f"Freigabe vor Weitergabe: {'an' if k.get('freigabe') else 'aus'}"
+                              + (" (für Fotos immer)" if k.get("fotos") and not k.get("freigabe") else "")
                               + (" · Nachschwärzen" if k.get("nachschwaerzen") else "")
                               + (" · gemeinsamer Zielordner" if k.get("gemeinsamer_zielordner") else ""))
                 for d in lauf["dokumente"]:
