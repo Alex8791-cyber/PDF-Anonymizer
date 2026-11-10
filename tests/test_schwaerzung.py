@@ -14,7 +14,7 @@ import pytest
 
 import pymupdf as fitz
 
-from conftest import braucht_ocr, schrift_mit_zeichen
+from conftest import braucht_ocr, schrift_mit_zeichen, textebene_angleichen
 from anonymisierer import schwaerzung
 from anonymisierer.ocr import OcrDienst
 from anonymisierer.schwaerzung import WARNUNG_KEIN_TREFFER, schwaerze_pdf
@@ -312,13 +312,17 @@ def test_versichertenliste_helvetica_9pt_vollstaendig(tmp_path):
 def test_nachbarzeilen_bei_zeilenabstand_1_0_bleiben_heil(tmp_path):
     zeilen = ["Ihr Vertrag LV-2024-887766 beginnt am 01.01.2025.", NAME, "Beitrag: 500 EUR jährlich gyp",
               "IBAN " + IBAN, "Telefon 0171 2345678 (Mobil)", "Ägypten Zeile darunter"]
-    for fontfile, kennung in ((None, "helv"), ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "dejavu")):
-        if fontfile and not Path(fontfile).exists():
-            continue
+    # dazu eine TrueType-Schrift mit großen Ober-/Unterlängen: Linux DejaVu Sans, Windows Arial. Deren Textebene
+    # liefert unter Windows NBSP und weiche Trennstriche – angeglichen, damit die Prüfungen überall gelten.
+    varianten = [(None, "helv")]
+    ttf = schrift_mit_zeichen("".join(zeilen))
+    if ttf is not None:
+        varianten.append((str(ttf), ttf.stem))
+    for fontfile, kennung in varianten:
         pdf = textseite(tmp_path / f"eng_{kennung}.pdf", zeilen, fontsize=11, abstand=1.0,
                         fontname="helv" if not fontfile else "F0", fontfile=fontfile)
         e = schwaerze_pdf(pdf, [fund(NAME), fund(IBAN, "[IBAN]", "iban"), fund("0171 2345678", "[TELEFON]", "telefon")])
-        text = pdftotext(e["ausgabe"])
+        text = textebene_angleichen(pdftotext(e["ausgabe"]))
         assert e["treffer"] == 3 and e["reste"] == []
         for rest in (NAME, "Mustermann", "0532", "2345678"):
             assert rest not in text
@@ -968,7 +972,7 @@ from anonymisierer.analyse import analysiere_pdf  # noqa: E402
 from anonymisierer.muster import KATEGORIEN  # noqa: E402
 
 OHNE_NAMEN = {k for k, _, _, _, an in KATEGORIEN if an} - {"namen"}
-DEJAVU = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+SCHRIFT_LIGATUREN = schrift_mit_zeichen("ﬀﬃ")   # Linux: DejaVu Sans, Windows: z. B. Calibri
 SCHRIFT_ESZETT = schrift_mit_zeichen("ẞßÄÖÜäöü")   # Linux: DejaVu Sans, Windows: Arial/Segoe UI
 
 
@@ -1082,11 +1086,11 @@ def test_teilrest_wird_erkannt(tmp_path, monkeypatch):
     assert e["status"] == "pruefen" and any("nicht entfernt" in r for r in e["reste"]), e["reste"]
 
 
-@pytest.mark.skipif(not DEJAVU.exists(), reason="DejaVuSans fehlt")
+@pytest.mark.skipif(SCHRIFT_LIGATUREN is None, reason="keine installierte Schrift mit den Ligaturen ﬀ, ﬃ")
 def test_ligaturen_werden_geschwaerzt(tmp_path):
     """Gutachten S-03: 'Steﬃ Hoﬀmann' (Ligaturglyphen) – Fund aus der Analyse wird vollständig entfernt."""
     pdf = textseite(tmp_path / "lig.pdf", ["Versicherungsnehmerin: Frau Steﬃ Hoﬀmann", "Herr Pfeiﬀer"],
-                    fontname="F0", fontfile=str(DEJAVU))
+                    fontname="F0", fontfile=str(SCHRIFT_LIGATUREN))
     a = _analysiert(pdf, immer=["Steffi Hoffmann", "Pfeiffer"])
     e = schwaerze_pdf(pdf, a["funde"], modell=a["modell"], ocr=FakeDienst())
     assert e["reste"] == [] and e["stellen_nicht_lokalisiert"] == 0

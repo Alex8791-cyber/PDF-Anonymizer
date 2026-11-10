@@ -15,9 +15,10 @@ import pymupdf as fitz
 from anonymisierer import detektoren, seitenmodell as sm
 from anonymisierer.detektoren import Kontext, Treffer
 from anonymisierer.seitenmodell import dokument_aus_text, ganzwort_stellen
+from conftest import erste_passende_schrift, schrift_mit_geteilten_glyphen, schrift_mit_zeichen, textebene_fehlt
 
 DATEN = Path(__file__).parent / "daten"
-DEJAVU = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+SCHRIFT_LIGATUREN = schrift_mit_zeichen("ﬀﬃ")   # Linux: DejaVu Sans, Windows: z. B. Calibri
 
 
 def baue(pfad: Path) -> sm.Dokument:
@@ -52,9 +53,10 @@ def texte(dok, stellen):
 # ----------------------------------------------------------------------
 # Zeichenregeln: Ligaturen, NFC, Leerzeichen, Silbentrennung
 # ----------------------------------------------------------------------
-@pytest.mark.skipif(not DEJAVU.exists(), reason="DejaVuSans fehlt")
+@pytest.mark.skipif(SCHRIFT_LIGATUREN is None, reason="keine installierte Schrift mit den Ligaturen ﬀ, ﬃ")
 def test_ligaturen_werden_aufgeloest_und_zeigen_auf_dieselbe_glyphe(tmp_path):
-    pdf = textseite(tmp_path / "lig.pdf", ["Frau Steﬃ Hoﬀmann und Herr Pfeiﬀer"], fontname="F0", fontfile=str(DEJAVU))
+    pdf = textseite(tmp_path / "lig.pdf", ["Frau Steﬃ Hoﬀmann und Herr Pfeiﬀer"], fontname="F0",
+                    fontfile=str(SCHRIFT_LIGATUREN))
     dok = baue(pdf)
     seite = dok.seiten[0]
     assert "Steffi Hoffmann" in seite.text and "Pfeiffer" in seite.text
@@ -569,14 +571,34 @@ def test_normalisiere_text_regeln_und_abbildung():
         "schwarzwald-versicherung 3-4 Tel-0421 1"
 
 
-@pytest.mark.skipif(not DEJAVU.exists(), reason="DejaVuSans fehlt")
-def test_windows_sonderzeichen_im_seitentext(tmp_path):
-    pdf = textseite(tmp_path / "win.pdf", ["Versicherungsnehmerin Noémie Bonnet",
-                                           "Kundennummer 51­633867, Telefon 0421 3498­936",
-                                           "a.krause@schwarzwald­versicherung.de, Mobil 0171‑2345678",
-                                           "Zeitraum 3–4 Wochen, Abzug −5 EUR",
-                                           "Versicherungs­", "nehmer Klein­", "Hoffmann"],
-                    fontname="F0", fontfile=str(DEJAVU))
+WINDOWS_ZEILEN = ["Versicherungsnehmerin Noémie\xa0Bonnet",
+                  "Kundennummer 51\xad633867, Telefon 0421 3498\xad936",
+                  "a.krause@schwarzwald\xadversicherung.de, Mobil 0171\u20112345678",
+                  "Zeitraum 3–4 Wochen, Abzug \u22125 EUR",
+                  "Versicherungs\xad", "nehmer Klein\xad", "Hoffmann"]
+# Vertrag 12.7 prüft Regeln für NBSP, den sichtbaren weichen Trennstrich und U+2011 – prüfbar nur, wenn die Textebene
+# sie als EIGENE, sichtbare Zeichen liefert. Legt eine Schrift U+00AD mit U+2010/U+2011 auf eine Glyphe, liefert die
+# Textebene ihn als U+2011/U+2010, und die Regel liefe nie; solche Schriften überspringt die Schriftwahl (conftest).
+# Linux: DejaVu Sans; Windows: eine Systemschrift mit U+2011, deren Textebene U+00AD liefert (z. B. Times New Roman;
+# Arial hat kein U+2011). Die Textebene liefert dort zusätzlich NBSP statt Leerzeichen und U+00AD statt Bindestrichen.
+WINDOWS_UNTERSCHEIDBAR = "\xa0\xad\u2011"
+SCHRIFT_WINDOWS = schrift_mit_zeichen("".join(WINDOWS_ZEILEN), unterscheidbar=WINDOWS_UNTERSCHEIDBAR)
+OHNE_SCHRIFT_WINDOWS = ("keine installierte Schrift, deren Textebene NBSP, weichen Trennstrich (U+00AD) und U+2011 "
+                        "als eigene Zeichen liefert (dazu U+2212) – Vertrag 12.7 ist hier nicht prüfbar")
+# wie Arial und Times New Roman des Windows-Runners: Leerzeichen und Bindestrich liegen auf der Glyphe von NBSP bzw.
+# weichem Trennstrich – die Textebene liefert dann NBSP statt JEDEM Leerzeichen und U+00AD statt JEDEM Bindestrich
+WINDOWS_TEILUNG = {0x20: 0xA0, 0x2D: 0xAD}
+
+
+@pytest.mark.skipif(SCHRIFT_WINDOWS is None, reason=OHNE_SCHRIFT_WINDOWS)
+@pytest.mark.parametrize("variante", ["installiert", "windows_artig"])
+def test_windows_sonderzeichen_im_seitentext(tmp_path, variante):
+    schrift = SCHRIFT_WINDOWS
+    if variante == "windows_artig":
+        schrift = schrift_mit_geteilten_glyphen(SCHRIFT_WINDOWS, tmp_path / "windows_artig.ttf", WINDOWS_TEILUNG)
+    pdf = textseite(tmp_path / "win.pdf", WINDOWS_ZEILEN, fontname="F0", fontfile=str(schrift))
+    # Testvoraussetzung (sichert die Schriftwahl am echten Testdokument ab): sonst prüfte der Test Vertrag 12.7 nicht
+    assert textebene_fehlt(pdf, WINDOWS_UNTERSCHEIDBAR) == "", schrift
     dok = baue(pdf)
     t = dok.text
     for erwartet in ("Noémie Bonnet", "51-633867", "0421 3498-936", "a.krause@schwarzwald-versicherung.de",
@@ -586,7 +608,45 @@ def test_windows_sonderzeichen_im_seitentext(tmp_path):
     # sichtbarer weicher Trennstrich zeigt auf seine Glyphe (wird mitgeschwärzt)
     s = dok.seiten[0]
     i = t.index("51-633867") + 2
-    assert s.abbildung[i] >= 0 and s.zeichen[s.abbildung[i]].c == "­"
+    assert s.abbildung[i] >= 0 and s.zeichen[s.abbildung[i]].c == "\xad"
+
+
+@pytest.mark.skipif(SCHRIFT_WINDOWS is None, reason=OHNE_SCHRIFT_WINDOWS)
+def test_schriftwahl_verwirft_schriften_die_den_weichen_trennstrich_verschlucken(tmp_path):
+    """Befund (Runde 1, windows-exe): Legt eine Schrift U+00AD mit U+2010/U+2011 auf EINE Glyphe, schreibt MuPDF nur
+    den höchsten Codepunkt in die Textebene – der weiche Trennstrich kommt als U+2011/U+2010 an, und Vertrag 12.7
+    (sichtbarer weicher Trennstrich = Bindestrich) läuft mit dieser Schrift in keinem Test. Die Schriftwahl muss sie
+    überspringen (nächste Schrift oder ehrlich übersprungen), statt den Test ohne Prüfung grün werden zu lassen."""
+    def variante(name, teilung):
+        return schrift_mit_geteilten_glyphen(SCHRIFT_WINDOWS, tmp_path / f"{name}.ttf", teilung)
+    alle = variante("alle", {0xAD: 0x2D, 0x2010: 0x2D, 0x2011: 0x2D})   # weicher Trennstrich -> U+2011
+    mit_2010 = variante("mit_2010", {0xAD: 0x2D, 0x2010: 0x2D})           # -> U+2010
+    mit_2011 = variante("mit_2011", {0xAD: 0x2011})                       # -> U+2011
+    fremd = variante("fremd", {0xAD: 0x2D, 0xFF0D: 0x2D})                 # höherer Codepunkt außerhalb der Liste
+    wie_windows = variante("wie_windows", WINDOWS_TEILUNG)                # U+00AD bleibt der höchste Codepunkt
+    verschlucken = [alle, mit_2010, mit_2011, fremd]
+    for schrift in verschlucken + [wie_windows]:
+        pdf = textseite(tmp_path / f"{schrift.stem}.pdf", WINDOWS_ZEILEN, fontname="F0", fontfile=str(schrift))
+        fehlt = textebene_fehlt(pdf, WINDOWS_UNTERSCHEIDBAR)
+        assert ("\xad" in fehlt) if schrift in verschlucken else (fehlt == ""), (schrift.name, fehlt)
+    zeichen = frozenset("".join(WINDOWS_ZEILEN))
+    unterscheidbar = frozenset(WINDOWS_UNTERSCHEIDBAR)
+    assert erste_passende_schrift(verschlucken + [wie_windows], zeichen, unterscheidbar) == wie_windows
+    assert erste_passende_schrift(verschlucken, zeichen, unterscheidbar) is None
+    # nur nach vorhandenen Glyphen gewählt (Stand 31c7542) wäre die erste genommen worden – genau das war das Loch
+    assert erste_passende_schrift(verschlucken + [wie_windows], zeichen) == alle
+
+
+DEJAVU = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+
+
+@pytest.mark.skipif(not DEJAVU.is_file(), reason="DejaVu Sans fehlt (Linux-Systemschrift)")
+def test_schriftwahl_nimmt_dejavu_mit_eigenen_glyphen():
+    """Gegenstück: DejaVu Sans hat eigene Glyphen für NBSP, U+00AD und U+2011, die Textebene liefert sie unverändert –
+    die Schriftwahl muss sie nehmen. Sonst würden die Windows-Tests auch unter Linux nur noch übersprungen, etwa wenn
+    die Probe der Schriftwahl selbst kaputtginge (Linux-CI bleibt das strenge Tor für Vertrag 12.7)."""
+    zeichen = frozenset("".join(WINDOWS_ZEILEN))
+    assert erste_passende_schrift([DEJAVU], zeichen, frozenset(WINDOWS_UNTERSCHEIDBAR)) == DEJAVU
 
 
 def test_rueckfall_detektoren_sind_reihenfolge_unabhaengig(register, monkeypatch):

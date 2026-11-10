@@ -25,10 +25,10 @@ from anonymisierer.analyse import analysiere_pdf
 from anonymisierer.muster import KATEGORIEN
 from anonymisierer.ocr import OcrDienst
 from anonymisierer.schwaerzung import schwaerze_pdf
-from conftest import _modell_vorhanden, braucht_ocr, schrift_mit_zeichen
+from conftest import (_modell_vorhanden, braucht_ocr, schrift_mit_geteilten_glyphen, schrift_mit_zeichen,
+                      textebene_angleichen, textebene_fehlt)
 
 DATEN = Path(__file__).parent / "daten"
-DEJAVU = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
 SCHRIFT_ESZETT = schrift_mit_zeichen("ẞßÄÖÜäöü")   # Linux: DejaVu Sans, Windows: Arial/Segoe UI
 STANDARD = {k for k, _, _, _, an in KATEGORIEN if an}
 MIT_MODELL = _modell_vorhanden()
@@ -97,10 +97,14 @@ def tabelle(pfad):
     doc.close()
 
 
+LIGATUR_ZEILEN = ["Versicherungsnehmerin: Frau Steﬃ Hoﬀmann", "Ehemann: Herr Raﬀael Pfeiﬀer",
+                  "Die Auﬂage ist oﬀen; Steﬃ Hoﬀmann unterschreibt."]
+SCHRIFT_LIGATUREN = schrift_mit_zeichen("".join(LIGATUR_ZEILEN))   # Linux: DejaVu Sans, Windows: z. B. Calibri
+
+
 def ligaturen(pfad):
     doc = fitz.open()
-    _seite(doc, ["Versicherungsnehmerin: Frau Steﬃ Hoﬀmann", "Ehemann: Herr Raﬀael Pfeiﬀer",
-                 "Die Auﬂage ist oﬀen; Steﬃ Hoﬀmann unterschreibt."], fontname="F0", fontfile=str(DEJAVU))
+    _seite(doc, LIGATUR_ZEILEN, fontname="F0", fontfile=str(SCHRIFT_LIGATUREN))
     doc.save(pfad)
     doc.close()
 
@@ -195,8 +199,10 @@ def invarianten_pruefen(pdf: Path, ocr, immer=()):
     # Z2
     assert erg["reste"] == [], (pdf.name, erg["reste"])
     # Z2': unabhängige Nachkontrolle über die Textebene (OCR-Stellen prüft die Kontroll-OCR in Z2)
+    # Textebene angeglichen: Windows-Schriften liefern NBSP statt Leerzeichen und weiche/geschützte Trennstriche
+    # statt Bindestrichen – sonst fände die Nachkontrolle "51-633867" in der Ausgabe nie (conftest)
     with fitz.open(erg["ausgabe"]) as aus:
-        ausgabe = _PLATZHALTER_RE.sub(" ", "\n".join(s.get_text() for s in aus))
+        ausgabe = _PLATZHALTER_RE.sub(" ", textebene_angleichen("\n".join(s.get_text() for s in aus)))
     modell = analyse["modell"]
     # abgewählte Stellen (bewusst ausgelassen: NIE-Liste, mehrdeutig am Satzanfang …) dürfen stehen bleiben
     erlaubt = Counter(" ".join(st["text"].split()).casefold() for f in funde for st in f["stellen"]
@@ -231,8 +237,8 @@ def test_invarianten_testdaten(tmp_path, name):
 
 @pytest.mark.parametrize("art", sorted(ERZEUGT))
 def test_invarianten_erzeugte_dokumente(tmp_path, art):
-    if art in ("ligaturen",) and not DEJAVU.exists():
-        pytest.skip("DejaVuSans fehlt")
+    if art == "ligaturen" and SCHRIFT_LIGATUREN is None:
+        pytest.skip("keine installierte Schrift mit den Ligaturen ﬀ, ﬃ, ﬂ")
     if art == "versalien" and SCHRIFT_ESZETT is None:
         pytest.skip("keine installierte Schrift mit Versal-ß (ẞ)")
     pdf = tmp_path / f"{art}.pdf"
@@ -263,23 +269,43 @@ def test_invarianten_scans_mit_rotate(tmp_path, dienst, rotate):
         assert rest not in kontrolle, (rotate, rest, kontrolle)
 
 
-def windows_sonderzeichen(pfad):
+WINDOWS_ZEILEN = ["Versicherungsnehmerin: Frau Noémie\xa0Bonnet",
+                  "Kundennummer: 51\xad633867",
+                  "Telefon 0421 3498\xad936, Mobil 0171\u20112345678",
+                  "E-Mail a.krause@schwarzwald\xadversicherung.de",
+                  "IBAN DE89\xa03704\xa00044\xa00532\xa00130\xa000"]
+# Vertrag 12.7 ist nur prüfbar, wenn die Textebene NBSP, den sichtbaren weichen Trennstrich und U+2011 als EIGENE
+# Zeichen liefert – Schriften, die U+00AD mit U+2010/U+2011 auf eine Glyphe legen (Textebene: U+2011), überspringt
+# die Schriftwahl (conftest). Linux: DejaVu Sans; Windows: z. B. Times New Roman (Arial hat kein U+2011) – deren
+# Textebene liefert zusätzlich NBSP statt Leerzeichen und U+00AD statt Bindestrichen (gemeinsame Glyphen).
+WINDOWS_UNTERSCHEIDBAR = "\xa0\xad\u2011"
+SCHRIFT_WINDOWS = schrift_mit_zeichen("".join(WINDOWS_ZEILEN), unterscheidbar=WINDOWS_UNTERSCHEIDBAR)
+# wie Arial und Times New Roman des Windows-Runners: Leerzeichen und Bindestrich auf der Glyphe von NBSP bzw. weichem
+# Trennstrich – die Textebene liefert NBSP statt JEDEM Leerzeichen und U+00AD statt JEDEM Bindestrich
+WINDOWS_TEILUNG = {0x20: 0xA0, 0x2D: 0xAD}
+
+
+def windows_sonderzeichen(pfad, schrift=None):
     """Vertrag 12.7: Textauslesung wie auf dem Windows-Runner – NBSP statt Leerzeichen, sichtbarer weicher
     Trennstrich (U+00AD) statt Bindestrich, U+2011 in Nummern."""
     doc = fitz.open()
-    _seite(doc, ["Versicherungsnehmerin: Frau Noémie Bonnet",
-                 "Kundennummer: 51­633867",
-                 "Telefon 0421 3498­936, Mobil 0171‑2345678",
-                 "E-Mail a.krause@schwarzwald­versicherung.de",
-                 "IBAN DE89 3704 0044 0532 0130 00"], fontname="F0", fontfile=str(DEJAVU))
+    _seite(doc, WINDOWS_ZEILEN, fontname="F0", fontfile=str(schrift or SCHRIFT_WINDOWS))
     doc.save(pfad)
     doc.close()
 
 
-@pytest.mark.skipif(not DEJAVU.exists(), reason="DejaVuSans fehlt")
-def test_windows_sonderzeichen_werden_erkannt_und_geschwaerzt(tmp_path):
+@pytest.mark.skipif(SCHRIFT_WINDOWS is None,
+                    reason="keine installierte Schrift, deren Textebene NBSP, weichen Trennstrich (U+00AD) und U+2011 "
+                           "als eigene Zeichen liefert – Vertrag 12.7 ist hier nicht prüfbar")
+@pytest.mark.parametrize("variante", ["installiert", "windows_artig"])
+def test_windows_sonderzeichen_werden_erkannt_und_geschwaerzt(tmp_path, variante):
     pdf = tmp_path / "windows.pdf"
-    windows_sonderzeichen(pdf)
+    schrift = SCHRIFT_WINDOWS
+    if variante == "windows_artig":
+        schrift = schrift_mit_geteilten_glyphen(SCHRIFT_WINDOWS, tmp_path / "windows_artig.ttf", WINDOWS_TEILUNG)
+    windows_sonderzeichen(pdf, schrift)
+    # Testvoraussetzung (sichert die Schriftwahl am echten Testdokument ab): sonst prüfte der Test Vertrag 12.7 nicht
+    assert textebene_fehlt(pdf, WINDOWS_UNTERSCHEIDBAR) == "", schrift
     analyse, erg = invarianten_pruefen(pdf, KeinOcr(), immer=["Noémie Bonnet"])
     texte = {" ".join(f["text"].split()) for f in analyse["funde"]}
     for wert in ("Noémie Bonnet", "51-633867", "0421 3498-936", "0171-2345678",
