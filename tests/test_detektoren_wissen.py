@@ -16,7 +16,8 @@ from anonymisierer.detektoren import Kontext, alle_treffer
 from anonymisierer.detektoren import wissen_kontext as wk
 from anonymisierer.detektoren import wissen_namen as wn
 from anonymisierer.seitenmodell import dokument_aus_text
-from conftest import braucht_modell, schrift_mit_zeichen, textebene_angleichen
+from conftest import (braucht_modell, schrift_mit_geteilten_glyphen, schrift_mit_zeichen, textebene_angleichen,
+                      textebene_fehlt)
 
 STANDARD = {k for k, _, _, _, an in muster.KATEGORIEN if an}
 LIBERATION = Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf")
@@ -250,23 +251,35 @@ def test_windows_sonderzeichen_im_reinen_text():
         assert any(wert == " ".join(t.split()) for t in texte), (wert, texte)
 
 
-# Schrift mit é, NBSP, weichem Trennstrich und U+2011: Linux DejaVu Sans, Windows Arial/Segoe UI (deren Textebene
-# liefert für Leerzeichen und Trennstriche je nach Schrift andere Codepunkte – genau das soll hier mitlaufen)
-SCHRIFT_WINDOWS = schrift_mit_zeichen("".join(WINDOWS_ZEILEN))
+# Schrift mit é, NBSP, weichem Trennstrich und U+2011, deren Textebene NBSP, U+00AD und U+2011 als EIGENE Zeichen
+# liefert – nur dann läuft Vertrag 12.7 hier mit (conftest: Schriften, die U+00AD mit U+2010/U+2011 auf eine Glyphe
+# legen, liefern U+2011 und werden übersprungen). Linux: DejaVu Sans; Windows: z. B. Times New Roman.
+WINDOWS_UNTERSCHEIDBAR = "\xa0\xad\u2011"
+SCHRIFT_WINDOWS = schrift_mit_zeichen("".join(WINDOWS_ZEILEN), unterscheidbar=WINDOWS_UNTERSCHEIDBAR)
+# wie Arial und Times New Roman des Windows-Runners: Leerzeichen und Bindestrich auf der Glyphe von NBSP bzw. weichem
+# Trennstrich – die Textebene liefert NBSP statt JEDEM Leerzeichen und U+00AD statt JEDEM Bindestrich
+WINDOWS_TEILUNG = {0x20: 0xA0, 0x2D: 0xAD}
 
 
 @pytest.mark.skipif(SCHRIFT_WINDOWS is None,
-                    reason="keine installierte Schrift mit NBSP, weichem Trennstrich (U+00AD) und U+2011")
+                    reason="keine installierte Schrift, deren Textebene NBSP, weichen Trennstrich (U+00AD) und U+2011 "
+                           "als eigene Zeichen liefert – Vertrag 12.7 ist hier nicht prüfbar")
 @braucht_modell
-def test_windows_sonderzeichen_pdf_vollstaendig_geschwaerzt(tmp_path):
+@pytest.mark.parametrize("variante", ["installiert", "windows_artig"])
+def test_windows_sonderzeichen_pdf_vollstaendig_geschwaerzt(tmp_path, variante):
     from anonymisierer.schwaerzung import schwaerze_pdf
     pdf = tmp_path / "windows.pdf"
+    schrift = SCHRIFT_WINDOWS
+    if variante == "windows_artig":
+        schrift = schrift_mit_geteilten_glyphen(SCHRIFT_WINDOWS, tmp_path / "windows_artig.ttf", WINDOWS_TEILUNG)
     doc = fitz.open()
     seite = doc.new_page()
     for i, zeile in enumerate(WINDOWS_ZEILEN):
-        seite.insert_text((50, 80 + 18 * i), zeile, fontsize=11, fontname="F0", fontfile=str(SCHRIFT_WINDOWS))
+        seite.insert_text((50, 80 + 18 * i), zeile, fontsize=11, fontname="F0", fontfile=str(schrift))
     doc.save(pdf)
     doc.close()
+    # Testvoraussetzung (sichert die Schriftwahl am echten Testdokument ab): sonst prüfte der Test Vertrag 12.7 nicht
+    assert textebene_fehlt(pdf, WINDOWS_UNTERSCHEIDBAR) == "", schrift
     erg = analysiere_pdf(pdf, STANDARD, [], [])
     assert erg["fehler"] is None
     gefunden = {" ".join(st["text"].split()) for f in erg["funde"] for st in f["stellen"]}

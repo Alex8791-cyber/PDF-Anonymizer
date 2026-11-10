@@ -25,7 +25,8 @@ from anonymisierer.analyse import analysiere_pdf
 from anonymisierer.muster import KATEGORIEN
 from anonymisierer.ocr import OcrDienst
 from anonymisierer.schwaerzung import schwaerze_pdf
-from conftest import _modell_vorhanden, braucht_ocr, schrift_mit_zeichen, textebene_angleichen
+from conftest import (_modell_vorhanden, braucht_ocr, schrift_mit_geteilten_glyphen, schrift_mit_zeichen,
+                      textebene_angleichen, textebene_fehlt)
 
 DATEN = Path(__file__).parent / "daten"
 SCHRIFT_ESZETT = schrift_mit_zeichen("ẞßÄÖÜäöü")   # Linux: DejaVu Sans, Windows: Arial/Segoe UI
@@ -273,25 +274,38 @@ WINDOWS_ZEILEN = ["Versicherungsnehmerin: Frau Noémie\xa0Bonnet",
                   "Telefon 0421 3498\xad936, Mobil 0171\u20112345678",
                   "E-Mail a.krause@schwarzwald\xadversicherung.de",
                   "IBAN DE89\xa03704\xa00044\xa00532\xa00130\xa000"]
-# Linux: DejaVu Sans; Windows: Arial/Segoe UI – deren Textebene liefert zusätzlich NBSP statt Leerzeichen und
-# weiche bzw. geschützte Trennstriche statt Bindestrichen (gemeinsame Glyphen, s. conftest)
-SCHRIFT_WINDOWS = schrift_mit_zeichen("".join(WINDOWS_ZEILEN))
+# Vertrag 12.7 ist nur prüfbar, wenn die Textebene NBSP, den sichtbaren weichen Trennstrich und U+2011 als EIGENE
+# Zeichen liefert – Schriften, die U+00AD mit U+2010/U+2011 auf eine Glyphe legen (Textebene: U+2011), überspringt
+# die Schriftwahl (conftest). Linux: DejaVu Sans; Windows: z. B. Times New Roman (Arial hat kein U+2011) – deren
+# Textebene liefert zusätzlich NBSP statt Leerzeichen und U+00AD statt Bindestrichen (gemeinsame Glyphen).
+WINDOWS_UNTERSCHEIDBAR = "\xa0\xad\u2011"
+SCHRIFT_WINDOWS = schrift_mit_zeichen("".join(WINDOWS_ZEILEN), unterscheidbar=WINDOWS_UNTERSCHEIDBAR)
+# wie Arial und Times New Roman des Windows-Runners: Leerzeichen und Bindestrich auf der Glyphe von NBSP bzw. weichem
+# Trennstrich – die Textebene liefert NBSP statt JEDEM Leerzeichen und U+00AD statt JEDEM Bindestrich
+WINDOWS_TEILUNG = {0x20: 0xA0, 0x2D: 0xAD}
 
 
-def windows_sonderzeichen(pfad):
+def windows_sonderzeichen(pfad, schrift=None):
     """Vertrag 12.7: Textauslesung wie auf dem Windows-Runner – NBSP statt Leerzeichen, sichtbarer weicher
     Trennstrich (U+00AD) statt Bindestrich, U+2011 in Nummern."""
     doc = fitz.open()
-    _seite(doc, WINDOWS_ZEILEN, fontname="F0", fontfile=str(SCHRIFT_WINDOWS))
+    _seite(doc, WINDOWS_ZEILEN, fontname="F0", fontfile=str(schrift or SCHRIFT_WINDOWS))
     doc.save(pfad)
     doc.close()
 
 
 @pytest.mark.skipif(SCHRIFT_WINDOWS is None,
-                    reason="keine installierte Schrift mit NBSP, weichem Trennstrich (U+00AD) und U+2011")
-def test_windows_sonderzeichen_werden_erkannt_und_geschwaerzt(tmp_path):
+                    reason="keine installierte Schrift, deren Textebene NBSP, weichen Trennstrich (U+00AD) und U+2011 "
+                           "als eigene Zeichen liefert – Vertrag 12.7 ist hier nicht prüfbar")
+@pytest.mark.parametrize("variante", ["installiert", "windows_artig"])
+def test_windows_sonderzeichen_werden_erkannt_und_geschwaerzt(tmp_path, variante):
     pdf = tmp_path / "windows.pdf"
-    windows_sonderzeichen(pdf)
+    schrift = SCHRIFT_WINDOWS
+    if variante == "windows_artig":
+        schrift = schrift_mit_geteilten_glyphen(SCHRIFT_WINDOWS, tmp_path / "windows_artig.ttf", WINDOWS_TEILUNG)
+    windows_sonderzeichen(pdf, schrift)
+    # Testvoraussetzung (sichert die Schriftwahl am echten Testdokument ab): sonst prüfte der Test Vertrag 12.7 nicht
+    assert textebene_fehlt(pdf, WINDOWS_UNTERSCHEIDBAR) == "", schrift
     analyse, erg = invarianten_pruefen(pdf, KeinOcr(), immer=["Noémie Bonnet"])
     texte = {" ".join(f["text"].split()) for f in analyse["funde"]}
     for wert in ("Noémie Bonnet", "51-633867", "0421 3498-936", "0171-2345678",
