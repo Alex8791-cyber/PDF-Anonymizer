@@ -18,12 +18,23 @@ Geprüft wird die Ausgabedatei (nicht die Fundliste) über diese Kanäle:
                 Sprachdaten des Repos (DIESELBE Engine wie das Programm!) und – wo vorhanden – die
                 Tesseract-Kommandozeile als zweite, unabhängigere Leseart
     pixel       Pixelvergleich Original/Ausgabe an den Wortrechtecken der Wahrheit (nur Scans;
-                unabhängig von jeder OCR: Stehen dort noch die Original-Pixel, ist der Text lesbar)
+                unabhängig von jeder OCR: Stehen dort noch die Original-Pixel, ist der Text lesbar).
+                Verglichen wird mit einem Bild der Ausgabeseite OHNE die eingefügten Platzhaltertexte
+                ("[PERSON A]" … – Text-Schwärzung nur auf den Platzhalterzeichen einer Kopie, Bilder und
+                Grafik unberührt): deren Tinte im grauen Rechteck ist kein Original. Jedes Wortrechteck
+                wird auf die Tintenzeilen seiner eigenen Zeile zugeschnitten (es kann bei Schräglage und
+                Schrifthöhe in die Nachbarzeile reichen – deren Tinte gehört nicht zum Wort).
 
 Kennzahlen je Eintrag mit erwartung=schwaerzen:
     leck       der normalisierte Volltext steht noch in einem Kanal (Pixel: alle Wörter sichtbar)
     teilweise  kein Volltreffer, aber ein signifikantes Token steht noch auf derselben Seite
     entfernt   sonst
+Je Eintrag mit erwartung=behalten (Über-Schwärzung): Textseiten – steht der Eintrag noch an SEINER Stelle
+(Wörter der Ausgabe in den Wortrechtecken, sofern das Original dort den Eintrag zeigt), sonst wie oft er
+EIGENSTÄNDIG vorkommt (nicht als Teil einer längeren Zeichenfolge: "BU" in einer geschwärzten Kennung
+"BU-2018-848343" ist kein Vorkommen von "BU" – deren Schwärzung ist keine Über-Schwärzung); Scans – Pixel.
+Fehlalarme: nur Funde mit mindestens einer angehakten Stelle ("an": True) – nur angebotene Funde (alle
+Stellen abgewählt) werden nicht geschwärzt.
 Restrisiko (zweite Verteidigungslinie, Vertrag Abschnitt 7) – je Dokument werden der Status der Ausgabe
 ("fertig"/"pruefen" aus schwaerze_pdf, sonst aus dem Namen _PRUEFEN) und die Verdachtsstellen festgehalten:
     stille Lecks          Kern-Einträge mit Status leck/teilweise in Dokumenten, deren Ausgabe NICHT _PRUEFEN ist
@@ -42,7 +53,11 @@ Gezählt werden die Verdachtsstellen der Restrisiko-Prüfung und – wie in der 
 Selbstkontrolle gemeldeten Reste mit ihrer Lage (gui_attrappen.reste_als_verdacht).
 Normalisierung siehe normalisierung.py (Schema-Normalisierung + Diakritika-Faltung + Wortgrenzen).
 Mehrdeutigkeit: Kommt ein Wert/Token im ORIGINAL auch außerhalb der Einträge vor (z. B. ein Ortsname im
-Briefkopf des Versicherers), zählt erst ein Vorkommen ÜBER dieser Grundzahl als Rest.
+Briefkopf des Versicherers), zählt erst ein Vorkommen ÜBER dieser Grundzahl als Rest. Seitenkanäle: je Eintrag
+eine Stelle; Dokumentkanäle (Metadaten, Lesezeichen, Anhänge, Dateiname): ein Eintrag steht für ALLE Exemplare
+seines Werts (Info-Dict-Titel und XMP dc:title) – ein einzelnes übrig gebliebenes Exemplar ist ein Leck.
+Selbstprüfung (selbstpruefung()): Null-Anonymisierer, Orakel, Orakel mit Platzhaltertext und Teilreste (Orakel, dann
+EIN Exemplar eines Nebenkanals aus dem Original zurück: XMP, Info-Dict, Anhangname, Anhanginhalt).
 """
 
 import difflib
@@ -70,11 +85,15 @@ try:
 except ImportError:
     np = None
 
-from .normalisierung import Gefaltet, signifikante_token, token
+from .normalisierung import Gefaltet, _zeichen_falten, signifikante_token, token
 
 SICHTBAR_SCHWELLE = 0.55      # Anteil unveränderter Tintenpixel, ab dem ein Wort als lesbar gilt
 TEILWEISE_SCHWELLE = 0.30     # darunter gilt ein Wort als entfernt
 PIXEL_DPI = 100
+ZEILEN_STREIFEN_PX = 8        # Zuschnitt auf die eigene Zeile: Breite der Spaltenstreifen (Pixel bei PIXEL_DPI);
+                              # so schmal, dass eine Zeile mit 3° Schräglage darin um < 0,5 Pixel wandert
+ZEILEN_MITTELBAND = 0.2       # … ein Tintenlauf gehört zur eigenen Zeile, wenn er das Band ±20 % der Kastenhöhe
+                              # um die Kastenmitte berührt (die Mitte des Wortrechtecks liegt auf dem Wort)
 OCR_DPI = 300
 SEITENKANAELE = ("text", "formular", "anmerkung")
 DOKUMENTKANAELE = ("metadaten", "lesezeichen", "anhang", "rohdaten", "dateiname")
@@ -294,16 +313,23 @@ class Kanaele:
             self.formular = []
             self.anmerkung = []
             self.woerter = []
+            self.felder = []             # je Seite: [(Rechteck in Anzeigekoordinaten, Wert)] der Formularfelder
             for page in doc:
                 self.seitentext.append(page.get_text("text"))
-                self.woerter.append([tuple(w[:5]) for w in page.get_text("words")])
+                # Wortrechtecke in Anzeigekoordinaten (nach /Rotate) wie die Wahrheit – die Ausgabe des Programms
+                # ist entdreht, das Original nicht unbedingt
+                self.woerter.append([tuple(fitz.Rect(w[:4]) * page.rotation_matrix) + (w[4],)
+                                     for w in page.get_text("words")])
                 werte = []
+                felder = []
                 try:
                     for w in page.widgets():
                         werte += [str(w.field_value or ""), str(w.field_name or ""), str(getattr(w, "field_label", "") or "")]
                         werte += [str(x) for x in (w.choice_values or [])]
+                        felder.append((fitz.Rect(w.rect) * page.rotation_matrix, str(w.field_value or "")))
                 except Exception:
                     pass
+                self.felder.append(felder)
                 self.formular.append("\n".join(werte))
                 notizen = []
                 try:
@@ -471,9 +497,34 @@ def _tintenschwelle(region) -> int:
     return min(200, int(np.median(region)) - 45)
 
 
-def wort_sichtbarkeit(original, ausgabe, rechteck) -> float | None:
+def eigene_zeile(tinte):
+    """Tinte der EIGENEN Zeile in einem Wortrechteck (bool-Matrix -> bool-Matrix). Ein Wortrechteck der Wahrheit
+    kann in die Nachbarzeilen reichen (Schräglage: das achsenparallele Rechteck eines gedrehten Worts wächst;
+    Schrifthöhe mit Ober-/Unterlänge); deren Tinte gehört nicht zum Wort und verfälschte den Anteil. Je
+    Spaltenstreifen (ZEILEN_STREIFEN_PX) zählen die zusammenhängenden Läufe von Pixelzeilen mit Tinte, die das
+    Mittelband des Rechtecks berühren – die eigene Zeile läuft durch die Mitte, auch schräg (der Streifen ist so
+    schmal, dass sie darin kaum wandert); die Nachbarzeile liegt eine Zeilenhöhe entfernt."""
+    h, b = tinte.shape
+    if h < 3 or b < 1:
+        return tinte
+    mitte = (h - 1) / 2.0
+    band = max(1.0, ZEILEN_MITTELBAND * h)
+    maske = np.zeros_like(tinte)
+    for x0 in range(0, b, ZEILEN_STREIFEN_PX):
+        zeilen = tinte[:, x0:x0 + ZEILEN_STREIFEN_PX].any(axis=1).astype(np.int8)
+        kanten = np.diff(np.concatenate(([0], zeilen, [0])))
+        for a, e in zip(np.flatnonzero(kanten == 1), np.flatnonzero(kanten == -1) - 1):
+            if a <= mitte + band and e >= mitte - band:
+                maske[a:e + 1, x0:x0 + ZEILEN_STREIFEN_PX] = True
+    return maske & tinte
+
+
+def wort_sichtbarkeit(original, ausgabe, rechteck, zuschnitt: bool = True) -> float | None:
     """Anteil der Tintenpixel des Originals im Wortrechteck, die in der Ausgabe unverändert
-    dunkel sind (1.0 = Wort unverändert lesbar, ~0 = entfernt). None = keine Tinte gefunden."""
+    dunkel sind (1.0 = Wort unverändert lesbar, ~0 = entfernt). None = keine Tinte gefunden.
+    `ausgabe` ist das Bild der Ausgabeseite ohne eingefügte Platzhaltertexte (graubild_ohne_platzhalter);
+    mit zuschnitt zählt nur die Tinte der eigenen Zeile (eigene_zeile; bleiben dabei weniger als 3 Tintenpixel,
+    gilt das ganze Rechteck)."""
     if np is None:
         return None
     s = PIXEL_DPI / 72.0
@@ -488,10 +539,88 @@ def wort_sichtbarkeit(original, ausgabe, rechteck) -> float | None:
     a = ausgabe[y0:y1, x0:x1].astype(np.int16)
     schwelle = _tintenschwelle(o)
     tinte = o < schwelle
+    if zuschnitt:
+        eigen = eigene_zeile(tinte)
+        if eigen.sum() >= 3:
+            tinte = eigen
     if tinte.sum() < 3:
         return None
     unveraendert = tinte & (a < schwelle) & (np.abs(a - o) < 60)
     return float(unveraendert.sum() / tinte.sum())
+
+
+_PLATZHALTER_RE = re.compile(r"\[[^\[\]\n]{1,60}\]")
+
+
+def platzhalter_rechtecke(seite, original=None) -> list:
+    """Schwärzungsrechtecke für die EINGEFÜGTEN Platzhaltertexte einer Ausgabeseite ("[PERSON A]", "[PLZ ORT]" …),
+    in Seitenkoordinaten wie get_text. MuPDF entfernt bei einer Text-Schwärzung jedes Zeichen, dessen Kasten das
+    Rechteck berührt – deshalb je Platzhalter nur ein schmaler Streifen durch die Zeichenmitten (waagerechte Zeile)
+    bzw. je Zeichen ein kleines Mittelrechteck: Nachbarzeilen und Nachbarwörter bleiben unberührt. Ein Klammertext,
+    der im ORIGINAL an derselben Stelle steht (genau dieser Text in den Wörtern, die das Rechteck zur Hälfte
+    überdecken; Anzeigekoordinaten), ist nicht eingefügt und bleibt (Null-Anonymisierer: Ausgabe = Original ->
+    nichts wird entfernt)."""
+    vorhanden = []
+    if original is not None:
+        try:
+            vorhanden = [(fitz.Rect(w[:4]) * original.rotation_matrix, w[4]) for w in original.get_text("words")]
+        except Exception:
+            vorhanden = []
+
+    def im_original(anzeige, text: str) -> bool:
+        flaeche = abs(anzeige) or 1.0
+        dort = [t for r, t in vorhanden if abs(r & anzeige) >= 0.5 * min(flaeche, abs(r) or 1.0)]
+        return bool(dort) and re.sub(r"\s+", "", text) in re.sub(r"\s+", "", "".join(dort))
+
+    aus = []
+    try:
+        roh = seite.get_text("rawdict")
+    except Exception:
+        return aus
+    for block in roh.get("blocks", []):
+        for zeile in block.get("lines", []):
+            zeichen = [c for span in zeile.get("spans", []) for c in span.get("chars", [])]
+            text = "".join(c.get("c", "") for c in zeichen)
+            richtung = zeile.get("dir", (1.0, 0.0))
+            for treffer in _PLATZHALTER_RE.finditer(text):
+                kaesten = [fitz.Rect(c["bbox"]) for c in zeichen[treffer.start():treffer.end()]]
+                kaesten = [k for k in kaesten if not k.is_empty]
+                if not kaesten:
+                    continue
+                gesamt = fitz.Rect(kaesten[0])
+                for k in kaesten[1:]:
+                    gesamt |= k
+                if im_original(gesamt * seite.rotation_matrix, treffer.group(0)):
+                    continue
+                if abs(richtung[1]) < 0.05 and len(kaesten) >= 2:
+                    mx0 = (kaesten[0].x0 + kaesten[0].x1) / 2
+                    mx1 = (kaesten[-1].x0 + kaesten[-1].x1) / 2
+                    my, dh = (gesamt.y0 + gesamt.y1) / 2, 0.15 * gesamt.height
+                    aus.append(fitz.Rect(min(mx0, mx1), my - dh, max(mx0, mx1), my + dh))
+                else:
+                    for k in kaesten:
+                        mx, my = (k.x0 + k.x1) / 2, (k.y0 + k.y1) / 2
+                        aus.append(fitz.Rect(mx - 0.2 * k.width, my - 0.2 * k.height,
+                                             mx + 0.2 * k.width, my + 0.2 * k.height))
+    return aus
+
+
+def graubild_ohne_platzhalter(pdf, nr: int, original=None):
+    """Graubild der Ausgabeseite nr (0-basiert), in dem NUR die eingefügten Platzhaltertexte fehlen – sonst zählte
+    deren Tinte im grauen Rechteck als stehen gebliebene Original-Tinte. Eigene Kopie der Datei, Text-Schwärzung
+    genau auf den Platzhalterzeichen (platzhalter_rechtecke); Bilder und Vektorgrafik (das graue Rechteck) bleiben
+    unberührt, keine Füllung. `original`: Seite des Originals (Klammertexte, die dort schon stehen, bleiben).
+    Liefert (Bild, Anzahl entfernter Platzhalter)."""
+    with fitz.open(pdf) as kopie:
+        seite = kopie[nr]
+        rechtecke = platzhalter_rechtecke(seite, original)
+        for r in rechtecke:
+            seite.add_redact_annot(r, fill=False)
+        if rechtecke:
+            seite.apply_redactions(images=getattr(fitz, "PDF_REDACT_IMAGE_NONE", 0),
+                                   graphics=getattr(fitz, "PDF_REDACT_LINE_ART_NONE", 0),
+                                   text=getattr(fitz, "PDF_REDACT_TEXT_REMOVE", 0))
+        return _graubild(seite), len(rechtecke)
 
 
 # ----------------------------------------------------------------------
@@ -563,19 +692,50 @@ def _scan_seiten(pdf: Path, wahrheit: dict) -> set:
 # ----------------------------------------------------------------------
 # Bewertung eines Dokuments
 # ----------------------------------------------------------------------
+def _eintragskanaele(kanal: str) -> set:
+    """Kanäle der Wahrheit, deren Einträge im Kanal `kanal` des Originals stehen: Textebene, Rohdaten und OCR
+    enthalten Text-, Formular- (Erscheinungsbild der Felder), Scan- (unsichtbare Textebene, Bild) und sichtbare
+    Anmerkungen; jeder Nebenkanal nur seine eigenen Einträge."""
+    if kanal in ("text", "rohdaten") or kanal.startswith("ocr_"):
+        return {"text", "formular", "scan", "anmerkung"}
+    return {kanal}
+
+
+WERTKANAELE = ("metadaten", "lesezeichen", "anhang", "dateiname")   # ein Eintrag = ALLE Exemplare seines Werts
+
+
 def _grundzahl(original: Kanaele, kanal: str, seite, nadel: Gefaltet, eintraege: list) -> int:
-    """Vorkommen von `nadel` im Original-Kanal, die NICHT zu einem zu schwärzenden Eintrag gehören."""
-    im_original = original.gefaltet(kanal, seite).zaehle(nadel)
-    if not im_original:
+    """Vorkommen von `nadel` im Original-Kanal, die NICHT zu einem zu schwärzenden Eintrag DIESES Kanals gehören
+    (ein Datum "2025-05-21" der Textebene macht das "2025" eines Eingangsstempels in einer Anmerkung nicht zum
+    Rest des Datums).
+    Textebene, Rohdaten, OCR, Formular, Anmerkungen: ein Eintrag steht für EINE Stelle – abgezogen wird je Eintrag,
+    wie oft die Nadel in seinem Text steht. Dokumentkanäle (WERTKANAELE): ein Eintrag steht für ALLE Exemplare seines
+    Werts im Kanal (Info-Dict-Titel und XMP dc:title sind EIN Eintrag, ebenso Name, Dateiname und Inhalt eines
+    Anhangs) – nicht zur Grundzahl zählt jedes Vorkommen der Nadel, das eine Fundstelle eines Eintragswerts dieses
+    Kanals berührt; ein vollkommener Anonymisierer hätte es mit entfernt. Sonst läge ein einzelnes übrig gebliebenes
+    Exemplar (Info-Dict bereinigt, XMP vergessen) nicht über der Grundzahl."""
+    g = original.gefaltet(kanal, seite)
+    treffer = g.finde(nadel)
+    if not treffer:
         return 0
+    if kanal in WERTKANAELE:
+        belegt = []
+        for e in eintraege:
+            if e["erwartung"] != "schwaerzen" or e.get("kanal") != kanal:
+                continue
+            wert = Gefaltet(e["text"])
+            belegt += [(i, i + len(wert.kette)) for i in g.finde(wert)]
+        laenge = len(nadel.kette)
+        return sum(1 for i in treffer if not any(a < i + laenge and i < b for a, b in belegt))
     in_eintraegen = 0
+    kanaele = _eintragskanaele(kanal)
     for e in eintraege:
-        if e["erwartung"] != "schwaerzen":
+        if e["erwartung"] != "schwaerzen" or e.get("kanal", "text") not in kanaele:
             continue
         if seite is not None and e["seite"] != seite:
             continue
         in_eintraegen += Gefaltet(e["text"]).zaehle(nadel)
-    return max(0, im_original - in_eintraegen)
+    return max(0, len(treffer) - in_eintraegen)
 
 
 def _grund_kanal(original: Kanaele, kanal: str, seite, nadel: Gefaltet, eintraege: list) -> int:
@@ -617,9 +777,11 @@ def _erkannt(e_text: str, funde_gefaltet: list, scan: bool = False) -> str:
     return "nein"
 
 
-def _am_ort(e: dict, aus: "Kanaele", sichtbar: list) -> str | None:
+def _am_ort(e: dict, aus: "Kanaele", sichtbar: list, original: "Kanaele | None" = None) -> str | None:
     """Steht der Eintrag noch an SEINER Stelle? voll | teil | weg (None = nicht bestimmbar).
-    Textseiten: Wörter der Ausgabe, deren Mitte in einem Wortrechteck des Eintrags liegt;
+    Textseiten: Wörter der Ausgabe, deren Mitte in einem Wortrechteck des Eintrags liegt; Formularwerte: das
+    Formularfeld des Originals an dieser Stelle (Wert eines Felds der Ausgabe dort oder Text im Feldrechteck – die
+    Wortrechtecke der Wahrheit kennen die Lage der Wörter im Feld nicht);
     Scans: Pixelvergleich; Nebenkanäle: der eigene Kanal."""
     kanal = e["kanal"]
     nadel = Gefaltet(e["text"])
@@ -644,6 +806,13 @@ def _am_ort(e: dict, aus: "Kanaele", sichtbar: list) -> str | None:
     if not (0 < seite <= len(aus.woerter)):
         return None
     kaesten = [fitz.Rect(w[:4]) + (-1, -1, 1, 1) for w in e["woerter"]]
+    if kanal == "formular" and original is not None and 0 < seite <= len(original.felder):
+        felder = [r for r, _ in original.felder[seite - 1] if any(r.intersects(k) for k in kaesten)]
+        if felder:
+            if 0 < seite <= len(aus.felder) and any(Gefaltet(wert).enthaelt(nadel) for r, wert in aus.felder[seite - 1]
+                                                   if any(r.intersects(f) for f in felder)):
+                return "voll"
+            kaesten = [f + (-1, -1, 1, 1) for f in felder]
     gefunden = [w for w in aus.woerter[seite - 1]
                 if any(k.contains(fitz.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2)) for k in kaesten)]
     if not gefunden:
@@ -710,12 +879,16 @@ def bewerte_dokument(pdf: Path, wahrheit: dict, pipeline: Pipeline, dienst, ziel
                 otext, _ = ocr_pymupdf(doc_orig[s - 1], tessdata)
                 original.ocr[s] = {"pymupdf": otext}
         bilder = {}
+        platzhalter_entfernt = {}
         if pixel and np is not None:
             for s in {e["seite"] for e in wahrheit["eintraege"] if e["kanal"] == "scan" and e.get("woerter")}:
                 if s <= len(doc_aus) and s <= len(doc_orig):
-                    bilder[s] = (_graubild(doc_orig[s - 1]), _graubild(doc_aus[s - 1]))
+                    # Vergleichsbild der Ausgabe OHNE eingefügte Platzhaltertexte (deren Tinte ist kein Original)
+                    bild_aus, platzhalter_entfernt[s] = graubild_ohne_platzhalter(ausgabe, s - 1, doc_orig[s - 1])
+                    bilder[s] = (_graubild(doc_orig[s - 1]), bild_aus)
     eintraege = wahrheit["eintraege"]
     funde_gefaltet = [Gefaltet(f.get("text", "")) for f in funde]
+    aktive_funde = [f for f in funde if fund_aktiv(f)]
     kanalnamen = aus.kanalnamen()
     bewertete = []
     for e in eintraege:
@@ -735,7 +908,8 @@ def bewerte_dokument(pdf: Path, wahrheit: dict, pipeline: Pipeline, dienst, ziel
                     sichtbar.append((w[4], anteil))
         if e["erwartung"] == "behalten":
             r.update(_behalten_pruefen(e, nadel, original, aus, sichtbar))
-            r["verursacht_von"] = [f.get("text") for f in funde if _ueberlappt(Gefaltet(f.get("text", "")), nadel)][:3]
+            r["verursacht_von"] = [f.get("text") for f in aktive_funde
+                                   if _ueberlappt(Gefaltet(f.get("text", "")), nadel)][:3]
             bewertete.append(r)
             continue
         # 1) Volltreffer in irgendeinem Kanal
@@ -757,7 +931,7 @@ def bewerte_dokument(pdf: Path, wahrheit: dict, pipeline: Pipeline, dienst, ziel
         else:
             status = "entfernt"
         erk = _erkannt(e["text"], funde_gefaltet, scan=e["kanal"] == "scan")
-        ort = _am_ort(e, aus, sichtbar)
+        ort = _am_ort(e, aus, sichtbar, original)
         r.update({"status": status, "kanaele": lecks, "reste": reste, "erkannt": erk, "am_ort": ort,
                   "pixel": [[t, round(a, 2)] for t, a in sichtbar] if sichtbar else None})
         if status != "entfernt":
@@ -772,7 +946,7 @@ def bewerte_dokument(pdf: Path, wahrheit: dict, pipeline: Pipeline, dienst, ziel
     behalten = [(Gefaltet(e["text"]), set(signifikante_token(e["text"])))
                 for e in eintraege if e["erwartung"] == "behalten"]
     fehlalarme = []
-    for f in funde:
+    for f in aktive_funde:                       # nur angebotene Funde (alle Stellen abgewählt) schwärzen nichts
         g = Gefaltet(f.get("text", ""))
         if not g.kette:
             continue
@@ -783,10 +957,19 @@ def bewerte_dokument(pdf: Path, wahrheit: dict, pipeline: Pipeline, dienst, ziel
         fehlalarme.append({"text": f.get("text"), "kategorie": f.get("kategorie"), "trifft_kontext": schaedlich})
     verdacht_bewerten(ergebnis, bewertete, eintraege)
     ergebnis.update({"eintraege": bewertete, "fehlalarme": fehlalarme, "dauer_bewertung_s": round(t4 - t3, 2),
-                     "funde": [{"kategorie": f.get("kategorie"), "text": f.get("text"), "seiten": f.get("seiten")}
-                               for f in funde],
-                     "ocr_seiten_bewertung": sorted(aus.ocr), "pixel_seiten": sorted(bilder)})
+                     "funde": [{"kategorie": f.get("kategorie"), "text": f.get("text"), "seiten": f.get("seiten"),
+                                "aktiv": fund_aktiv(f)} for f in funde],
+                     "funde_aktiv": len(aktive_funde),
+                     "ocr_seiten_bewertung": sorted(aus.ocr), "pixel_seiten": sorted(bilder),
+                     "platzhalter_entfernt": {str(s): n for s, n in sorted(platzhalter_entfernt.items())}})
     return ergebnis
+
+
+def fund_aktiv(f: dict) -> bool:
+    """Wird der Fund geschwärzt? Nur Stellen mit "an": True – wie schwaerze_pdf (Funde ohne Stellen, ältere
+    Programmversionen: immer)."""
+    stellen = f.get("stellen")
+    return not stellen or any(st.get("an", True) for st in stellen)
 
 
 def _verdacht_feld(v, name, standard=None):
@@ -905,7 +1088,85 @@ def _token_reste(e: dict, original: Kanaele, aus: Kanaele, sichtbar: list, eintr
     return reste
 
 
+# Zwischen zwei Buchstaben/Ziffern verbinden diese Zeichen EIN Wort ("BU-2018-848343", "BU/96/8657146",
+# "47.897.336.2"); Leerraum und andere Satzzeichen trennen eigenständige Wörter
+_WORTVERBINDER = set("-/._") | set("­‐‑‒–−")
+
+
+def _harte_grenzen(text: str) -> tuple:
+    """(gefaltete Kette wie Gefaltet, Positionen in der Kette, an denen ein EIGENSTÄNDIGES Wort beginnen bzw. enden
+    darf): Textanfang/-ende und Lücken mit Leerraum oder Satzzeichen – nicht ein einzelner Wortverbinder zwischen
+    Buchstaben/Ziffern."""
+    teile, grenzen = [], {0}
+    laenge, luecke = 0, None              # luecke: Zeichen seit dem letzten Buchstaben/der letzten Ziffer
+    for zeichen in text or "":
+        gefaltet = _zeichen_falten(zeichen)
+        if not gefaltet:
+            continue                      # allein stehender Akzent (wie Gefaltet)
+        if not all(c.isalnum() for c in gefaltet):
+            luecke = (luecke or "") + zeichen
+            continue
+        if luecke and not (len(luecke) == 1 and luecke in _WORTVERBINDER):
+            grenzen.add(laenge)
+        luecke = ""
+        teile.append(gefaltet)
+        laenge += len(gefaltet)
+    grenzen.add(laenge)
+    return "".join(teile), grenzen
+
+
+def eigenstaendig_zaehlen(text: str, nadel_text: str) -> int:
+    """Wie oft steht nadel_text EIGENSTÄNDIG im Text – Anfang und Ende an einer harten Grenze (_harte_grenzen),
+    also nicht als Teil einer längeren Zeichenfolge ("BU" in "BU-2018-848343" zählt nicht, "(BU)" und "BU,"
+    zählen)? Verglichen wird gefaltet (Groß/klein, Diakritika, Leerraum innerhalb egal)."""
+    kette, grenzen = _harte_grenzen(text)
+    nadel = Gefaltet(nadel_text).kette
+    if not nadel:
+        return 0
+    anzahl, start = 0, 0
+    while True:
+        i = kette.find(nadel, start)
+        if i < 0:
+            return anzahl
+        start = i + 1
+        if i in grenzen and i + len(nadel) in grenzen:
+            anzahl += 1
+
+
+def _an_der_stelle(e: dict, kanaele: Kanaele, nadel: Gefaltet) -> bool | None:
+    """Stehen in den Wortrechtecken des Eintrags (Textebene) Wörter, die zusammen den Eintragstext ergeben?
+    None = keine Wortrechtecke / Seite fehlt."""
+    seite = e["seite"]
+    if not e.get("woerter") or not (0 < seite <= len(kanaele.woerter)):
+        return None
+    kaesten = [fitz.Rect(w[:4]) + (-1, -1, 1, 1) for w in e["woerter"]]
+    gefunden = [w for w in kanaele.woerter[seite - 1]
+                if any(k.contains(fitz.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2)) for k in kaesten)]
+    return bool(gefunden) and Gefaltet(" ".join(w[4] for w in gefunden)).enthaelt(nadel, grenzen_pruefen=False)
+
+
+def _auf_den_zeilen(e: dict, kanaele: Kanaele) -> int:
+    """Eigenständige Vorkommen des Eintragstexts auf den Zeilen seiner Wortrechtecke (Wörter derselben Höhe, von
+    links nach rechts) – die Stelle mit Spielraum nach links/rechts: MuPDF verliert beim Schwärzen eines Werts in
+    einem Textbefehl gelegentlich den Vorschub eines Zeichens, der Rest der Zeile rückt dann ein Stück nach links."""
+    seite = e["seite"]
+    if not e.get("woerter") or not (0 < seite <= len(kanaele.woerter)):
+        return 0
+    kaesten = [fitz.Rect(w[:4]) for w in e["woerter"]]
+
+    def gleiche_hoehe(w, k) -> bool:
+        return min(w[3], k.y1) - max(w[1], k.y0) >= 0.6 * min(w[3] - w[1], k.height)
+
+    zeile = sorted((w for w in kanaele.woerter[seite - 1] if any(gleiche_hoehe(w, k) for k in kaesten)),
+                   key=lambda w: (round(w[1]), w[0]))
+    return eigenstaendig_zaehlen(" ".join(w[4] for w in zeile), e["text"])
+
+
 def _behalten_pruefen(e: dict, nadel: Gefaltet, original: Kanaele, aus: Kanaele, sichtbar: list) -> dict:
+    """Zu behaltender Eintrag: noch da? Scans über die Pixel (sonst OCR); Textseiten an SEINER Stelle (sofern das
+    Original dort den Eintrag zeigt; ist er dort nicht mehr, zählen seine eigenständigen Vorkommen auf derselben
+    Zeile – wie im Original), sonst über eigenständige Vorkommen auf der Seite – nie über eine Rohzählung: "BU"
+    steckt auch in einer geschwärzten Kennung "BU-2018-848343", deren Schwärzung keine Über-Schwärzung ist."""
     seite = e["seite"]
     if e["kanal"] == "scan":
         if sichtbar:
@@ -913,13 +1174,20 @@ def _behalten_pruefen(e: dict, nadel: Gefaltet, original: Kanaele, aus: Kanaele,
             return {"status": "erhalten" if ok else "fehlt", "pixel": [[t, round(a, 2)] for t, a in sichtbar]}
         ok = any(aus.gefaltet(k, seite).enthaelt(nadel) for k in aus.kanalnamen() if k.startswith("ocr_"))
         return {"status": "erhalten" if ok else "fehlt"}
-    soll = original.gefaltet("text", seite).zaehle(nadel)
-    ist = aus.gefaltet("text", seite).zaehle(nadel)
-    if soll == 0:
-        status = "unbekannt"                     # steht so nicht im Original – nicht bewertbar
+    text_orig = original.seitentext[seite - 1] if 0 < seite <= len(original.seitentext) else ""
+    text_aus = aus.seitentext[seite - 1] if 0 < seite <= len(aus.seitentext) else ""
+    soll = eigenstaendig_zaehlen(text_orig, e["text"])
+    ist = eigenstaendig_zaehlen(text_aus, e["text"])
+    am_ort = _an_der_stelle(e, aus, nadel) if _an_der_stelle(e, original, nadel) else None
+    if am_ort is False:                           # an der Stelle nicht mehr – verschoben auf derselben Zeile?
+        am_ort = _auf_den_zeilen(e, aus) >= max(1, _auf_den_zeilen(e, original))
+    if am_ort is not None:
+        status = "erhalten" if am_ort else "fehlt"
+    elif soll == 0:
+        status = "unbekannt"                     # steht so nicht (eigenständig) im Original – nicht bewertbar
     else:
         status = "erhalten" if ist >= soll else "fehlt"
-    return {"status": status, "anzahl_original": soll, "anzahl_ausgabe": ist}
+    return {"status": status, "am_ort": am_ort, "anzahl_original": soll, "anzahl_ausgabe": ist}
 
 
 def _diagnose(status: str, lecks: list, reste: list, erkannt: str, e: dict, am_ort: str | None) -> str:
@@ -961,6 +1229,7 @@ def kennzahlen(dokumente: list) -> dict:
     beh = [e for d in dokumente for e in d["eintraege"] if e["erwartung"] == "behalten" and e["status"] != "unbekannt"]
     fehlt = [e for e in beh if e["status"] == "fehlt"]
     funde = sum(d.get("funde_anzahl", 0) for d in dokumente)
+    funde_aktiv = sum(d.get("funde_aktiv", d.get("funde_anzahl", 0)) for d in dokumente)
     fa = [f for d in dokumente for f in d.get("fehlalarme", [])]
     gesamt = {
         "dokumente": len(dokumente), "seiten": sum(d.get("seiten") or 0 for d in dokumente),
@@ -971,8 +1240,9 @@ def kennzahlen(dokumente: list) -> dict:
                                if kern else None),
         "behalten_n": len(beh), "behalten_fehlt": len(fehlt),
         "ueberschwaerzung": round(len(fehlt) / len(beh), 4) if beh else None,
-        "funde": funde, "fehlalarme": len(fa), "fehlalarme_auf_kontext": sum(1 for f in fa if f["trifft_kontext"]),
-        "fehlalarm_quote": round(len(fa) / funde, 4) if funde else None,
+        "funde": funde, "funde_aktiv": funde_aktiv,
+        "fehlalarme": len(fa), "fehlalarme_auf_kontext": sum(1 for f in fa if f["trifft_kontext"]),
+        "fehlalarm_quote": round(len(fa) / funde_aktiv, 4) if funde_aktiv else None,
         "dokumente_ohne_ausgabe": sum(1 for d in dokumente if d.get("keine_ausgabe")),
         "dokumente_mit_fehler": sum(1 for d in dokumente if d.get("fehler")),
         "dokumente_ohne_leck_kern": sum(1 for d in dokumente
@@ -1109,8 +1379,10 @@ def restrisiko_kennzahlen(dokumente: list) -> dict:
 # Lauf über einen Korpus
 # ----------------------------------------------------------------------
 def bewerte_korpus(korpus: Path, ausgabe: Path, repo: Path | None = None, cli_ocr: bool = True,
-                   pixel: bool = True, melde=print, nur: list | None = None) -> dict:
-    """Alle Dokumente eines Korpus bewerten; schreibt ergebnis.json und bericht.md nach `ausgabe`."""
+                   pixel: bool = True, melde=print, nur: list | None = None, pipeline=None) -> dict:
+    """Alle Dokumente eines Korpus bewerten; schreibt ergebnis.json und bericht.md nach `ausgabe`.
+    pipeline: statt des Programms aus `repo` ein anderer „Anonymisierer“ mit derselben Schnittstelle (Selbstprüfung:
+    NullAnonymisierer, Orakel)."""
     korpus, ausgabe = Path(korpus), Path(ausgabe)
     ausgabe.mkdir(parents=True, exist_ok=True)
     ziel = ausgabe / "anonymisiert"
@@ -1118,7 +1390,7 @@ def bewerte_korpus(korpus: Path, ausgabe: Path, repo: Path | None = None, cli_oc
         shutil.rmtree(ziel)
     ziel.mkdir(parents=True)
     arbeits = Path(tempfile.mkdtemp(prefix="bewertung_", dir=ausgabe))
-    pipeline = Pipeline(repo)
+    pipeline = pipeline if pipeline is not None else Pipeline(repo)
     wahrheiten = lade_wahrheiten(korpus)
     if nur:
         wahrheiten = [w for w in wahrheiten if w["dokument"] in nur]
@@ -1162,6 +1434,310 @@ def bewerte_korpus(korpus: Path, ausgabe: Path, repo: Path | None = None, cli_oc
     (ausgabe / "ergebnis.json").write_text(json.dumps(ergebnis, ensure_ascii=False, indent=1, default=str),
                                           encoding="utf-8")
     (ausgabe / "bericht.md").write_text(bericht_markdown(ergebnis), encoding="utf-8")
+    return ergebnis
+
+
+# ----------------------------------------------------------------------
+# Selbstprüfung der Bewertung: Null-Anonymisierer und Orakel
+# ----------------------------------------------------------------------
+class _Pruefling:
+    """Schnittstelle wie Pipeline für die Selbstprüfung: keine Erkennung (keine Funde), kein OCR-Dienst."""
+
+    reste_als_verdacht = None
+    ocr_modul = None
+
+    def __init__(self, name: str):
+        self.repo = Path(__file__).resolve().parents[2]
+        self.commit = name
+        self.kategorien = []
+
+    def aktive(self) -> set:
+        return set()
+
+    def ocr_dienst(self):
+        return None
+
+    def tessdata(self) -> str | None:
+        kandidat = self.repo / "tessdata"
+        return str(kandidat) if any(kandidat.glob("*.traineddata")) else None
+
+    def analysiere_pdf(self, pdf, *args, **kwargs) -> dict:
+        return {"funde": [], "warnungen": [], "fehler": None, "ocr_cache": {}}
+
+
+class NullAnonymisierer(_Pruefling):
+    """Ausgabe = unverändertes Original (Kopie unter demselben Namen). Die Bewertung muss JEDEN zu schwärzenden
+    Eintrag als Leck an seiner Stelle zählen und jeden zu behaltenden als erhalten – sonst ist sie zu nachsichtig."""
+
+    def __init__(self):
+        super().__init__("null-anonymisierer")
+
+    def schwaerze_pdf(self, pdf, funde=None, ziel_ordner=None, **kwargs) -> dict:
+        ziel = Path(ziel_ordner) / Path(pdf).name
+        shutil.copyfile(pdf, ziel)
+        return {"ausgabe": ziel, "treffer": 0, "status": "fertig", "verdacht": [], "reste": [], "warnungen": []}
+
+
+_ORAKEL_GRAU = (0.92, 0.92, 0.92)      # Füllfarbe der Schwärzungsrechtecke des Programms
+
+
+def _mittelstreifen(r) -> "fitz.Rect":
+    """Schmaler Streifen durch die Mitte eines Wortrechtecks: eine Text-Schwärzung darauf entfernt genau die Zeichen
+    des Worts (MuPDF entfernt jedes Zeichen, dessen Kasten das Rechteck berührt – das volle Rechteck berührte bei
+    engem Zeilenabstand auch die Nachbarzeilen)."""
+    r = fitz.Rect(r)
+    my, dh = (r.y0 + r.y1) / 2, max(0.3, 0.15 * r.height)
+    dx = min(0.3, 0.25 * r.width)
+    return fitz.Rect(r.x0 + dx, my - dh, r.x1 - dx, my + dh)
+
+
+def _ersetzen(text: str, nadeln) -> str:
+    for n in sorted({n for n in nadeln if n}, key=len, reverse=True):
+        text = text.replace(n, "[GESCHWÄRZT]")
+    return text
+
+
+def _platzhalter_setzen(seite, r, text: str) -> None:
+    """Platzhaltertext wie das Programm: zentriert in das graue Rechteck (Schriftgröße passend zur Breite)."""
+    r = fitz.Rect(r)
+    laenge = fitz.get_text_length(text, fontname="helv", fontsize=1) or 1.0
+    groesse = min(9.0, 0.75 * r.height, 0.95 * r.width / laenge)
+    if groesse < 3:
+        return
+    breite = laenge * groesse
+    seite.insert_text(fitz.Point(r.x0 + (r.width - breite) / 2, (r.y0 + r.y1) / 2 + 0.35 * groesse), text,
+                      fontname="helv", fontsize=groesse, color=(0, 0, 0))
+
+
+def orakel_schwaerzen(pdf, wahrheit: dict, ziel, platzhalter: bool = False) -> int:
+    """Perfekte Schwärzung aus der Wahrheit (Selbstprüfung der Bewertung): entfernt GENAU die zu schwärzenden
+    Einträge aus allen Kanälen und lässt alles andere stehen. Textebene: Text-Schwärzung (Streifen durch die
+    Wortmitte); Formularfelder mit zu schwärzendem Wert werden entfernt; Scans: Wortrechtecke abgedeckt (und die
+    unsichtbare Textebene durchsuchbarer Scans geschwärzt); Anmerkungen, Metadaten/XMP, Lesezeichen, Anhänge:
+    Eintragstexte ersetzt bzw. entfernt. platzhalter=True schwärzt wie das Programm: graues Rechteck und
+    eingefügter Platzhaltertext darüber. Liefert die Zahl der geschwärzten Einträge."""
+    schwaerzen = [e for e in wahrheit["eintraege"] if e["erwartung"] == "schwaerzen"]
+    texte = defaultdict(list)
+    for e in schwaerzen:
+        texte[e["kanal"]].append(e["text"])
+    leer = getattr(fitz, "PDF_REDACT_IMAGE_NONE", 0), getattr(fitz, "PDF_REDACT_LINE_ART_NONE", 0)
+    doc = fitz.open(pdf)
+    try:
+        for seite in doc:
+            if seite.rotation:
+                seite.remove_rotation()           # wie das Programm: Anzeige- = Seitenkoordinaten (Wahrheit)
+        for nr in range(len(doc)):
+            seite = doc[nr]
+            kaesten = [(e, fitz.Rect(w[:4])) for e in schwaerzen if e["seite"] == nr + 1
+                       and e["kanal"] in ("text", "formular", "scan") for w in e.get("woerter") or []]
+            if not kaesten:
+                continue
+            for widget in list(seite.widgets()):
+                if any(e["kanal"] == "formular" and fitz.Rect(widget.rect).intersects(r) for e, r in kaesten):
+                    seite.delete_widget(widget)
+            woerter = seite.get_text("words")
+            for e, r in kaesten:
+                if e["kanal"] != "scan":
+                    seite.add_redact_annot(_mittelstreifen(r), fill=False)
+                    continue
+                teile = set(token(e["text"]))   # unsichtbare Textebene eines durchsuchbaren Scans (leicht versetzt)
+                for w in woerter:
+                    wr = fitz.Rect(w[:4])
+                    if wr.intersects(r + (-6, -6, 6, 6)) and set(token(w[4])) & teile:
+                        seite.add_redact_annot(_mittelstreifen(wr), fill=False)
+            seite.apply_redactions(images=leer[0], graphics=leer[1], text=getattr(fitz, "PDF_REDACT_TEXT_REMOVE", 0))
+            for e, r in kaesten:
+                if e["kanal"] == "scan" or platzhalter:
+                    seite.draw_rect(r, color=None, fill=_ORAKEL_GRAU if platzhalter else (1, 1, 1), overlay=True)
+            if platzhalter:
+                for e, r in kaesten:
+                    _platzhalter_setzen(seite, r, f"[{str(e['kategorie']).upper()}]")
+        if texte["anmerkung"]:
+            for seite in doc:
+                for a in list(seite.annots()):
+                    info = a.info or {}
+                    neu = {k: _ersetzen(info.get(k) or "", texte["anmerkung"]) for k in ("content", "title", "subject")}
+                    if any(neu[k] != (info.get(k) or "") for k in neu):
+                        a.set_info(**neu)
+                        a.update()
+        if texte["metadaten"]:
+            meta = {k: _ersetzen(v, texte["metadaten"]) for k, v in (doc.metadata or {}).items()
+                    if isinstance(v, str) and k not in ("format", "encryption")}
+            doc.set_metadata(meta)
+            doc.del_xml_metadata()
+        if texte["lesezeichen"]:
+            doc.set_toc([[t[0], _ersetzen(t[1], texte["lesezeichen"]), t[2]] for t in doc.get_toc(simple=True)])
+        if texte["anhang"]:
+            for i in reversed(range(doc.embfile_count())):
+                info = doc.embfile_info(i)
+                alles = " ".join([str(info.get(k, "")) for k in ("name", "filename", "ufilename", "desc")]
+                                 + [_bytes_als_text(doc.embfile_get(i))])
+                if any(Gefaltet(alles).enthaelt(Gefaltet(t)) for t in texte["anhang"]):
+                    doc.embfile_del(i)
+        doc.save(ziel, garbage=4, deflate=True, clean=True)
+    finally:
+        doc.close()
+    return len(schwaerzen)
+
+
+class Orakel(_Pruefling):
+    """Perfekter Anonymisierer aus der Wahrheit des Korpus (orakel_schwaerzen); Ausgabe "orakel_NN.pdf" (der
+    Dateiname trägt keinen Namen mehr). Die Bewertung muss Recall 100 % und Über-Schwärzung 0 ergeben – sonst
+    meldet sie Lecks oder Über-Schwärzung, wo keine sind."""
+
+    def __init__(self, korpus, platzhalter: bool = False):
+        super().__init__("orakel-platzhalter" if platzhalter else "orakel")
+        self.wahrheiten = {w["dokument"]: w for w in lade_wahrheiten(korpus)}
+        self.platzhalter = platzhalter
+        self._nr = 0
+
+    def schwaerze_pdf(self, pdf, funde=None, ziel_ordner=None, **kwargs) -> dict:
+        self._nr += 1
+        ziel = Path(ziel_ordner) / f"orakel_{self._nr:02d}.pdf"
+        n = orakel_schwaerzen(pdf, self.wahrheiten[Path(pdf).name], ziel, self.platzhalter)
+        return {"ausgabe": ziel, "treffer": n, "status": "fertig", "verdacht": [], "reste": [], "warnungen": []}
+
+
+TEILRESTE = {
+    # Art: (Kanal, Beschreibung) – das Orakel schwärzt perfekt, dann kommt EIN Exemplar aus dem Original zurück
+    "xmp": ("metadaten", "XMP-Metadaten des Originals zurückgeschrieben (Info-Dict bereinigt)"),
+    "info": ("metadaten", "Info-Dict des Originals zurückgeschrieben (XMP bereinigt)"),
+    "anhang_name": ("anhang", "Anhänge mit Namen und Beschreibung des Originals, Inhalt neutral"),
+    "anhang_inhalt": ("anhang", "Anhänge mit dem Inhalt des Originals, Name neutral"),
+}
+
+
+class OrakelMitTeilrest(Orakel):
+    """Orakel, das EIN Exemplar eines Nebenkanals aus dem Original zurückschreibt (TEILRESTE: XMP oder Info-Dict,
+    Anhangname oder Anhanginhalt) – ein klassischer Teilfehler einer Bereinigung. Jeder Eintrag des Kanals, dessen
+    Wert in diesem Exemplar steht, muss als Leck in seinem Kanal zählen (sonst ist die Grundzahl zu hoch); alles
+    andere bleibt entfernt. `kopien` hält je Dokument den Text des zurückgeschriebenen Exemplars."""
+
+    def __init__(self, korpus, art: str):
+        super().__init__(korpus)
+        self.commit = f"orakel-teilrest-{art}"
+        self.art = art
+        self.kopien: dict = {}
+
+    def schwaerze_pdf(self, pdf, funde=None, ziel_ordner=None, **kwargs) -> dict:
+        aus = super().schwaerze_pdf(pdf, funde, ziel_ordner, **kwargs)
+        ziel = Path(aus["ausgabe"])
+        teile = []
+        with fitz.open(pdf) as original, fitz.open(ziel) as doc:
+            if self.art == "xmp":
+                xmp = original.get_xml_metadata() or ""
+                if xmp:
+                    doc.set_xml_metadata(xmp)
+                    teile.append(xmp)
+            elif self.art == "info":
+                meta = {k: v for k, v in (original.metadata or {}).items()
+                        if isinstance(v, str) and k not in ("format", "encryption")}
+                doc.set_metadata(meta)
+                teile += [v for v in meta.values() if v]
+            else:
+                for i in range(original.embfile_count()):
+                    info = original.embfile_info(i)
+                    if self.art == "anhang_name":
+                        namen = [str(info.get(k) or "") for k in ("name", "filename", "ufilename", "desc")]
+                        doc.embfile_add(namen[0] or f"anlage_{i}.txt", b"Notiz", filename=namen[1] or None,
+                                        ufilename=namen[2] or None, desc=namen[3] or None)
+                        teile += namen
+                    else:
+                        inhalt = original.embfile_get(i)
+                        doc.embfile_add(f"anlage_{i + 1}.txt", inhalt, filename=f"anlage_{i + 1}.txt",
+                                        ufilename=f"anlage_{i + 1}.txt", desc="Anlage")
+                        teile.append(_bytes_als_text(inhalt))
+            zwischen = ziel.with_name(ziel.stem + "_teilrest.pdf")
+            doc.save(zwischen, garbage=4, deflate=True)
+        zwischen.replace(ziel)
+        self.kopien[Path(pdf).name] = "\n".join(teile)
+        return aus
+
+
+def _selbstpruefung_teilrest(ergebnis: dict, kanal: str, kopien: dict) -> dict:
+    """Teilrest-Probe auswerten: jeder Eintrag des Kanals, dessen Wert im zurückgeschriebenen Exemplar steht, ist ein
+    Leck IN DIESEM KANAL; Einträge, von denen dort weder der Wert noch ein signifikantes Token steht, bleiben
+    entfernt."""
+    erwartet, nicht_leck, unerwartet = 0, [], []
+    for d in ergebnis["dokumente"]:
+        kopie = kopien.get(d["dokument"])
+        if kopie is None:
+            continue
+        g = Gefaltet(kopie)
+        for e in d["eintraege"]:
+            if e["erwartung"] != "schwaerzen":
+                continue
+            drin = g.enthaelt(Gefaltet(e["text"]))
+            if drin and e["kanal"] == kanal:
+                erwartet += 1
+                if e["status"] != "leck" or kanal not in (e.get("kanaele") or []):
+                    nicht_leck.append((d["dokument"], e["id"], e["text"], e["status"], e.get("kanaele")))
+            elif not drin and e["status"] != "entfernt" \
+                    and not any(g.enthaelt(Gefaltet(t)) for t in signifikante_token(e["text"])):
+                unerwartet.append((d["dokument"], e["id"], e["text"], e["status"], e.get("kanaele") or e.get("reste")))
+    return {"kanal": kanal, "erwartet": erwartet, "leck": erwartet - len(nicht_leck), "nicht_leck": nicht_leck,
+            "unerwartet": unerwartet, "ok": not nicht_leck and not unerwartet}
+
+
+def _selbstpruefung_null(ergebnis: dict) -> dict:
+    schw = [(d["dokument"], e) for d in ergebnis["dokumente"] for e in d["eintraege"] if e["erwartung"] == "schwaerzen"]
+    beh = [(d["dokument"], e) for d in ergebnis["dokumente"] for e in d["eintraege"] if e["erwartung"] == "behalten"]
+    nicht_leck = [(dok, e["id"], e["text"], e["status"]) for dok, e in schw if e["status"] != "leck"]
+    nicht_am_ort = [(dok, e["id"], e["text"], e.get("am_ort")) for dok, e in schw
+                    if e.get("am_ort") is not None and e.get("am_ort") != "voll"]
+    fehlt = [(dok, e["id"], e["text"], e["status"]) for dok, e in beh if e["status"] not in ("erhalten",)]
+    return {"schwaerzen": len(schw), "leck": len(schw) - len(nicht_leck), "nicht_leck": nicht_leck,
+            "am_ort_voll": sum(1 for _, e in schw if e.get("am_ort") == "voll"),
+            "am_ort_unbestimmt": sum(1 for _, e in schw if e.get("am_ort") is None), "nicht_am_ort": nicht_am_ort,
+            "behalten": len(beh), "behalten_erhalten": len(beh) - len(fehlt), "behalten_nicht_erhalten": fehlt,
+            "ok": not nicht_leck and not nicht_am_ort and not fehlt}
+
+
+def _selbstpruefung_orakel(ergebnis: dict) -> dict:
+    g = ergebnis["gesamt"]
+    reste = [(d["dokument"], e["id"], e["text"], e["status"], e.get("kanaele") or e.get("reste"))
+             for d in ergebnis["dokumente"] for e in d["eintraege"]
+             if e["erwartung"] == "schwaerzen" and e["status"] != "entfernt"]
+    fehlt = [(u["dokument"], u["id"], u["text"], u.get("pixel") or u.get("anzahl_ausgabe"))
+             for u in ergebnis["ueberschwaerzt"]]
+    return {"recall_kern": g["recall_kern"], "recall_erweitert": g["recall_erweitert"],
+            "ueberschwaerzung": g["ueberschwaerzung"], "behalten_fehlt": g["behalten_fehlt"],
+            "behalten_n": g["behalten_n"], "nicht_entfernt": reste, "ueberschwaerzt": fehlt,
+            "ok": not reste and not fehlt}
+
+
+def selbstpruefung(korpus: Path, ausgabe: Path, cli_ocr: bool = False, pixel: bool = True, melde=print,
+                   nur: list | None = None) -> dict:
+    """Selbstprüfung der Bewertung auf einem Korpus: Null-Anonymisierer (jeder zu schwärzende Eintrag ein Leck an
+    seiner Stelle, alles zu Behaltende erhalten), Orakel (Recall 100 %, Über-Schwärzung 0), Orakel mit
+    Platzhaltertext im grauen Rechteck wie das Programm (dessen Tinte darf nicht als Original zählen) und Teilreste
+    (TEILRESTE: Orakel, dann EIN Exemplar eines Nebenkanals aus dem Original zurück – jeder Eintrag, dessen Wert darin
+    steht, ist ein Leck in seinem Kanal; nur auf Dokumenten mit Einträgen in diesem Kanal). Schreibt
+    selbstpruefung.json nach `ausgabe` und liefert die Zusammenfassung."""
+    ausgabe = Path(ausgabe)
+    ergebnis = {}
+    laeufe = [("null_anonymisierer", NullAnonymisierer(), _selbstpruefung_null, nur),
+              ("orakel", Orakel(korpus), _selbstpruefung_orakel, nur),
+              ("orakel_platzhalter", Orakel(korpus, platzhalter=True), _selbstpruefung_orakel, nur)]
+    wahrheiten = lade_wahrheiten(korpus)
+    for art, (kanal, _) in TEILRESTE.items():
+        dokumente = [w["dokument"] for w in wahrheiten if (not nur or w["dokument"] in nur)
+                     and any(e["kanal"] == kanal and e["erwartung"] == "schwaerzen" for e in w["eintraege"])]
+        if not dokumente:
+            continue
+        pruefling = OrakelMitTeilrest(korpus, art)
+        laeufe.append((f"teilrest_{art}", pruefling,
+                       lambda lauf, k=kanal, p=pruefling: _selbstpruefung_teilrest(lauf, k, p.kopien), dokumente))
+    for name, pruefling, auswertung, auswahl in laeufe:
+        lauf = bewerte_korpus(korpus, ausgabe / name, cli_ocr=cli_ocr, pixel=pixel, melde=None, nur=auswahl,
+                              pipeline=pruefling)
+        ergebnis[name] = auswertung(lauf)
+        if melde:
+            melde(f"Selbstprüfung {name}: {'OK' if ergebnis[name]['ok'] else 'FEHLER'} – "
+                  + ", ".join(f"{k} {v}" for k, v in ergebnis[name].items() if not isinstance(v, list) and k != "ok"))
+    ausgabe.mkdir(parents=True, exist_ok=True)
+    (ausgabe / "selbstpruefung.json").write_text(json.dumps(ergebnis, ensure_ascii=False, indent=1, default=str),
+                                                 encoding="utf-8")
     return ergebnis
 
 
@@ -1244,7 +1820,7 @@ def _restrisiko_bericht(e: dict) -> list:
 
 def bericht_markdown(e: dict) -> str:
     g = e["gesamt"]
-    zeilen = [f"# Entwicklungs-Benchmark PDF-Anonymisierer", "",
+    zeilen = ["# Entwicklungs-Benchmark PDF-Anonymisierer", "",
               f"Erzeugt {e['erzeugt']} · Repository `{e['repo']}` · Commit `{e.get('commit')}` · Korpus `{e['korpus']}`", "",
               "## Gesamtergebnis", ""]
     zeilen += _tabelle(["Kennzahl", "Wert"], [
@@ -1254,8 +1830,10 @@ def bericht_markdown(e: dict) -> str:
         ["recall_erweitert", f"{_p(g['recall_erweitert'])} ({g['erweitert']['entfernt']}/{g['erweitert']['n']})"],
         ["Kern ortsgenau entfernt (Nebenmaß: an der eigenen Fundstelle weg)", _p(g.get("recall_kern_am_ort"))],
         ["Über-Schwärzung (Kontext fehlt)", f"{_p(g['ueberschwaerzung'])} ({g['behalten_fehlt']}/{g['behalten_n']})"],
-        ["Fehlalarme (Funde ohne PII-Bezug)", f"{g['fehlalarme']} von {g['funde']} Funden ({_p(g['fehlalarm_quote'])}), "
-                                               f"davon auf Kontext: {g['fehlalarme_auf_kontext']}"],
+        ["Fehlalarme (angehakte Funde ohne PII-Bezug)",
+         f"{g['fehlalarme']} von {g.get('funde_aktiv', g['funde'])} angehakten Funden ({_p(g['fehlalarm_quote'])}), "
+         f"davon auf Kontext: {g['fehlalarme_auf_kontext']}; nur angeboten (nicht gezählt): "
+         f"{g['funde'] - g.get('funde_aktiv', g['funde'])}"],
         ["Dokumente ohne Kern-Rest", f"{g['dokumente_ohne_leck_kern']} von {g['dokumente']}"],
         ["Dokumente ohne Ausgabe / mit Fehler", f"{g['dokumente_ohne_ausgabe']} / {g['dokumente_mit_fehler']}"],
     ])
