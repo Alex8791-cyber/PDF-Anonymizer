@@ -71,11 +71,30 @@ sys.excepthook = _unbehandelter_fehler
 # ----------------------------------------------------------------------
 # Abhängigkeiten
 # ----------------------------------------------------------------------
+def _pymupdf_laden():
+    """PyMuPDF unter dem zukunftssicheren Namen „pymupdf“ laden, sonst unter dem alten „fitz“ (M-37). Fehlt der
+    alte Name einmal (er gilt als veraltet), läuft das Programm trotzdem."""
+    try:
+        import pymupdf as fitz
+    except ImportError:
+        import fitz
+    return fitz
+
+
+def _meldung_paket_fehlt() -> str:
+    """Text, wenn PyMuPDF fehlt – in der EXE gibt es kein Installieren.bat (M-70)."""
+    if getattr(sys, "frozen", False):
+        return ("Ein Programmbestandteil (PyMuPDF) fehlt oder wurde vom Virenscanner entfernt.\n\n"
+                "Bitte den Programmordner vollständig neu entpacken bzw. eine neue ZIP-Datei anfordern "
+                "(ggf. die Quarantäne des Virenscanners prüfen).")
+    return ("Das Paket 'PyMuPDF' fehlt.\n\n"
+            "Bitte einmal 'Installieren.bat' ausführen.")
+
+
 try:
-    import fitz  # PyMuPDF  # noqa: F401
+    _pymupdf_laden()
 except ImportError:
-    meldung = ("Das Paket 'PyMuPDF' fehlt.\n\n"
-               "Bitte einmal 'Installieren.bat' ausführen.")
+    meldung = _meldung_paket_fehlt()
     print("FEHLER: " + meldung)
     try:
         import tkinter as _tk

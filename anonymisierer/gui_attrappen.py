@@ -21,7 +21,10 @@ import os
 import re
 from pathlib import Path
 
-import fitz  # PyMuPDF
+try:
+    import pymupdf as fitz
+except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
+    import fitz
 
 from . import dateien
 from .muster import KATEGORIEN

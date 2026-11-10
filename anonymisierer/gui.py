@@ -6,7 +6,9 @@ Engine sie anbietet (Signatur bzw. hasattr); bis dahin greifen die Attrappen in 
 Engine eine Fähigkeit, die der Nutzer anfordert, sagt die Oberfläche das – sie lässt nichts still weg.
 """
 
+import base64
 import errno
+import importlib.metadata
 import inspect
 import os
 import re
@@ -18,7 +20,10 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-import fitz  # PyMuPDF
+try:
+    import pymupdf as fitz
+except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
+    import fitz
 
 from . import __version__, dateien
 from . import analyse as _analyse_modul
@@ -67,6 +72,8 @@ FARBE_WARNUNG = "#b45309"
 FARBE_HINWEIS_HINTERGRUND = "#fff7e6"
 FARBE_HINWEIS_RAND = "#f0c36d"
 FARBE_RAND = "#e5e7eb"
+FARBE_KNOPF_GESPERRT = "#d1d5db"     # gesperrter Hauptknopf: grau statt blau – deutlich anders als „bereit“
+FARBE_KNOPF_GESPERRT_TEXT = "#4b5563"
 
 SCHRIFT = "Segoe UI"
 SCHRIFT_MONO = "Consolas"
@@ -86,6 +93,7 @@ PROTOKOLL_ZEILEN = 5
 PROTOKOLL_ZEILEN_KLEIN = 3
 PROTOKOLL_MAX_ZEILEN = 5000
 VORLADEN_NACH_MS = 800              # spaCy-Modell so lange nach dem Start im Hintergrund laden (PERF-09)
+ERSTSTART_NACH_MS = 300             # Hinweis beim ersten Start erst, wenn das Hauptfenster steht
 
 HAKEN = {"an": "☑", "aus": "☐", "teil": "⊟"}
 # Zeichen vor der Kategorie in der Fundliste: ⚑ = Fund mit Hinweis der Engine (Statuszeile zeigt ihn; steht auch an
@@ -101,6 +109,23 @@ SPALTEN_MASSE = {"#0": (185, 150, False), "kategorie": (130, 105, False), "text"
                  "ersatz": (95, 85, False)}
 ANALYSE_TEXT = "  Analysieren – Funde anzeigen  "
 START_TEXT = "  Schwärzen starten  "
+VORSCHAU_TEXT = "Vorschau …"
+# Tastenkürzel (Alt + Buchstabe); der Buchstabe ist im Knopf unterstrichen (M-67)
+KUERZEL = {"analyse": "a", "start": "s", "vorschau": "v"}
+SYMBOL_GROESSEN = (16, 32, 48, 64)        # Fenstersymbol (iconphoto); icon.ico enthält 16, 32, 48 und 256
+ERSTSTART_TITEL = "Bitte vor der ersten Nutzung lesen"
+ERSTSTART_TEXT = (
+    "Dieses Programm PSEUDONYMISIERT: Es ersetzt direkte Angaben wie Namen, Anschriften, Geburtsdaten, IBAN, "
+    "Telefon- und Vertragsnummern durch Platzhalter wie [PERSON A].\n\n"
+    "Andere Angaben bleiben je nach Schutzstufe lesbar – zum Beispiel Diagnosen, Beruf, Beträge oder Orte. "
+    "Daraus kann eine Person unter Umständen noch zu erkennen sein.\n\n"
+    "Keine automatische Erkennung ist fehlerfrei. Sehen Sie sich deshalb jedes Ergebnis in der Vorschau an, "
+    "bevor Sie es weitergeben.\n\n"
+    "Die Verantwortung für die Weitergabe an einen KI-Dienst bleibt bei Ihnen.")
+KENNWORT_TITEL = "Kennwort erforderlich"
+ANZEIGE_ART = {"bild": " (Bild → PDF)", "entschluesselt": " (Kennwort entfernt)", "kopie": " (als PDF)"}
+NEBENKANAL_NAMEN = (("metadaten", "Metadaten"), ("lesezeichen", "Lesezeichen"), ("anhaenge", "Anhänge"),
+                    ("xfa", "Formulardaten (XFA)"))
 BAUM_HINWEIS = ("Kästchen (oder Leertaste) = Fund an/aus · Doppelklick auf eine Datei = Vorschau (dort per Klick "
                "oder Rahmen nachschwärzen) · Rechtsklick = mehr")
 ANZEIGE_BEGRIFF_VORSCHAU = "Begriff (Vorschau)"
@@ -168,7 +193,13 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
         "Deshalb: jede Ausgabe in der Vorschau prüfen (Doppelklick auf die Datei). Was dort noch zu sehen ist, "
         "per Klick oder Rahmen nachschwärzen.\n\n"
         "Pseudonymisierte Dokumente bleiben personenbezogene Daten. Für die Weitergabe an einen KI-Dienst "
-        "braucht es weiterhin eine Rechtsgrundlage und in der Regel einen Auftragsverarbeitungsvertrag.\n\n"
+        "braucht es weiterhin eine Rechtsgrundlage und in der Regel einen Auftragsverarbeitungsvertrag. Die "
+        "Verantwortung für die Weitergabe bleibt bei Ihnen (Hilfe → „Hinweise vor der Nutzung …“).\n\n"
+        "Fotos und Bild-Scans (JPEG, PNG, TIFF, BMP) werden auf Wunsch in eine PDF umgewandelt und per "
+        "Texterkennung gelesen. PDFs mit Kennwort werden nach Eingabe des Kennworts geprüft – die Ausgabe hat "
+        "dann kein Kennwort mehr. Die umgewandelte bzw. entschlüsselte Arbeitskopie liegt nur während der "
+        "Bearbeitung im Programmordner für Zwischendateien und wird beim Entfernen aus der Liste und beim Beenden "
+        "gelöscht. Andere Dateien (Word, Mails …) werden nicht geprüft: zuerst als PDF speichern.\n\n"
         "Ausgaben in Ordnern, die mit OneDrive, Dropbox o. Ä. synchronisiert werden, landen ebenfalls in der "
         "Cloud. Per Dateidialog geöffnete Dateien merkt sich Windows unter „Zuletzt verwendet“."
     )
@@ -321,7 +352,9 @@ def _kontext_anzeige(kontext: str) -> str:
 
 
 def _seitenzahl(pdf: Path) -> int:
-    """Seitenzahl für den Fortschrittsbalken (1, wenn das PDF nicht lesbar ist)."""
+    """Seitenzahl für den Fortschrittsbalken (1, wenn das PDF nicht lesbar ist – oder gar keine PDF, R-01)."""
+    if not dateien.fuer_engine_erlaubt(dateien.datei_art(pdf)):
+        return 1
     try:
         with fitz.open(pdf) as doc:
             return max(1, len(doc))
@@ -331,6 +364,122 @@ def _seitenzahl(pdf: Path) -> int:
 
 def _profil_name(name: str) -> str:
     return attrappen.PROFIL_ANZEIGE.get(name, name)
+
+
+def _kuerzel_index(text: str, buchstabe: str) -> int:
+    """Stelle des Kürzel-Buchstabens im Knopftext (für underline); -1, wenn er fehlt."""
+    return text.lower().find(buchstabe.lower())
+
+
+# Hilfetexte der Engine nennen „Installieren.bat“ – in der EXE gibt es die nicht (M-70)
+_EXE_ERSETZUNGEN = (
+    ("Der Ordner »tessdata« mit deu.traineddata muss neben dem Programm liegen",
+     "Die Datei deu.traineddata muss im Programmordner unter _internal\\tessdata liegen"),
+    ("(Installieren.bat erneut ausführen)",
+     "(bitte den Programmordner vollständig neu entpacken bzw. eine neue ZIP-Datei anfordern; ggf. die "
+     "Quarantäne des Virenscanners prüfen)"),
+    ("Installieren.bat erneut ausführen",
+     "bitte den Programmordner vollständig neu entpacken bzw. eine neue ZIP-Datei anfordern"),
+    ("Bitte einmal 'Installieren.bat' ausführen",
+     "Bitte den Programmordner vollständig neu entpacken bzw. eine neue ZIP-Datei anfordern"),
+    ("Installieren.bat", "eine neue ZIP-Datei des Programms (neu entpacken)"),
+)
+
+
+def _text_fuer_exe(text: str) -> str:
+    """In der EXE (sys.frozen) führen Hinweise auf Installieren.bat ins Leere: dort heißt die Abhilfe „Programmordner
+    neu entpacken“. Im Skriptbetrieb bleibt der Text unverändert."""
+    if not getattr(sys, "frozen", False) or not text or ("Installieren.bat" not in text and "tessdata" not in text):
+        return text
+    for alt, neu in _EXE_ERSETZUNGEN:
+        text = text.replace(alt, neu)
+    return text
+
+
+_LANGPFAD_PRAEFIX = "\\\\?\\"            # „\\?\“ vor langen Windows-Pfaden (R-09)
+
+
+def _anzeigetext(text: str) -> str:
+    """Text für Protokoll und Dialoge: EXE-gerechte Hilfetexte (M-70), ohne das Präfix langer Windows-Pfade."""
+    text = _text_fuer_exe(text)
+    if text and _LANGPFAD_PRAEFIX in text:
+        text = text.replace(_LANGPFAD_PRAEFIX + "UNC\\", "\\\\").replace(_LANGPFAD_PRAEFIX, "")
+    return text
+
+
+def _nebenkanal_bezug(ergebnis: dict) -> dict | None:
+    """Personenbezogene Daten nur in Nebenkanälen (Metadaten, Lesezeichen, Anhänge, XFA – R-04, Paket
+    analyse-status): {"metadaten", "lesezeichen", "anhaenge", "xfa", "personenbezug"} oder None."""
+    nk = ergebnis.get("nebenkanaele") if isinstance(ergebnis, dict) else None
+    if isinstance(nk, dict) and nk.get("personenbezug"):
+        return nk
+    if isinstance(ergebnis, dict) and "NEBENKANAL_FUND" in meldungs_codes(ergebnis):
+        return nk if isinstance(nk, dict) else {"personenbezug": True}
+    return None
+
+
+def _nebenkanal_text(nk: dict) -> str:
+    """„Metadaten (2), Anhänge (1)“ – wo die Daten stehen (ohne Inhalte)."""
+    teile = []
+    for schluessel, name in NEBENKANAL_NAMEN:
+        wert = nk.get(schluessel)
+        if isinstance(wert, bool):
+            if wert:
+                teile.append(name)
+        elif isinstance(wert, (int, float)) and wert:
+            teile.append(f"{name} ({int(wert)})")
+    return ", ".join(teile) or "Metadaten/Anhänge"
+
+
+def programm_symbol_png(groesse: int) -> bytes:
+    """Programmsymbol als PNG (groesse × groesse Pixel, durchsichtiger Hintergrund), mit PyMuPDF gezeichnet: ein
+    Blatt mit umgeknickter Ecke, schwarzen Balken (geschwärzte Stellen) und grauen Textzeilen. Dieselbe Zeichnung
+    schreibt werkzeuge/programmsymbol.py in icon.ico (EXE und Desktop-Verknüpfung). Ganzzahlige Kanten, damit
+    das Symbol auch mit 16 Pixeln scharf bleibt."""
+    n = int(groesse)
+    doc = fitz.open()
+    try:
+        seite = doc.new_page(width=n, height=n)
+        blau, weiss, schwarz = (0.10, 0.37, 0.71), (1, 1, 1), (0.07, 0.09, 0.15)
+        grau, hell = (0.61, 0.64, 0.69), (0.86, 0.91, 0.97)
+        x0, y0 = round(n * 0.15), round(n * 0.06)
+        x1, y1 = n - x0, n - y0
+        rand = max(1, round(n / 24))
+        ecke = max(3, round(n * 0.24))
+        form = seite.new_shape()
+        aussen = [(x0, y0), (x1 - ecke, y0), (x1, y0 + ecke), (x1, y1), (x0, y1), (x0, y0)]
+        form.draw_polyline([fitz.Point(p) for p in aussen])
+        form.finish(color=None, fill=blau, closePath=True)
+        innen = [(x0 + rand, y0 + rand), (x1 - ecke - rand * 0.4, y0 + rand), (x1 - rand, y0 + ecke + rand * 0.4),
+                 (x1 - rand, y1 - rand), (x0 + rand, y1 - rand), (x0 + rand, y0 + rand)]
+        form.draw_polyline([fitz.Point(p) for p in innen])
+        form.finish(color=None, fill=weiss, closePath=True)
+        knick = [(x1 - ecke, y0), (x1 - ecke, y0 + ecke), (x1, y0 + ecke), (x1 - ecke, y0)]
+        form.draw_polyline([fitz.Point(p) for p in knick])
+        form.finish(color=None, fill=blau if n < 48 else hell, closePath=True)
+        if n >= 48:
+            form.draw_polyline([fitz.Point(p) for p in knick])
+            form.finish(color=blau, width=rand, closePath=True)
+        # Zeilen: schwarze Balken im Wechsel mit grauen Textzeilen (bei 16 Pixeln nur Balken)
+        innen_x0, innen_x1 = x0 + rand + max(1, round(n * 0.07)), x1 - rand - max(1, round(n * 0.07))
+        hoehe = max(2, round(n * 0.085))
+        abstand = max(1, round(n * 0.065))
+        y = y0 + ecke + abstand
+        breiten = (1.0, 0.8, 0.9, 0.65, 1.0)
+        for nr, anteil in enumerate(breiten):
+            if y + hoehe > y1 - rand - max(1, round(n * 0.05)):
+                break
+            balken = n < 32 or nr % 2 == 0
+            ende = innen_x0 + round((innen_x1 - innen_x0) * anteil)
+            zeile_h = hoehe if balken else max(1, round(hoehe * 0.45))
+            versatz = 0 if balken else (hoehe - zeile_h) // 2
+            form.draw_rect(fitz.Rect(innen_x0, y + versatz, ende, y + versatz + zeile_h))
+            form.finish(color=None, fill=schwarz if balken else grau)
+            y += hoehe + abstand
+        form.commit()
+        return seite.get_pixmap(alpha=True).tobytes("png")
+    finally:
+        doc.close()
 
 
 # ----------------------------------------------------------------------
@@ -433,6 +582,186 @@ class SpaltenDialog:
 
 
 # ----------------------------------------------------------------------
+# Hauptknopf mit sichtbarem gesperrten Zustand (Punkt 12)
+# ----------------------------------------------------------------------
+class PrimaerKnopf(tk.Button):
+    """Blauer Hauptknopf. Gesperrt wird er grau mit dunkelgrauer Schrift – vorher blieb er blau und sah wie
+    „bereit“ aus. Die Farbe folgt jedem config(state=…), auch aus Vorschau und Tests."""
+
+    def _farben(self, zustand):
+        gesperrt = str(zustand) == "disabled"
+        tk.Button.configure(self, bg=FARBE_KNOPF_GESPERRT if gesperrt else FARBE_AKZENT,
+                            cursor="arrow" if gesperrt else "hand2")
+
+    def configure(self, cnf=None, **kw):
+        ergebnis = tk.Button.configure(self, cnf, **kw)
+        zustand = kw.get("state", cnf.get("state") if isinstance(cnf, dict) else None)
+        if zustand is not None:
+            self._farben(zustand)
+        return ergebnis
+
+    config = configure
+
+    def __setitem__(self, schluessel, wert):
+        self.configure({schluessel: wert})
+
+
+# ----------------------------------------------------------------------
+# Dialoge: Kennwort (R-12), Hinweis beim ersten Start (M-19)
+# ----------------------------------------------------------------------
+def _modal_machen(fenster):
+    """Dialog vor das Hauptfenster legen und Eingaben dorthin lenken (grab erst, wenn das Fenster sichtbar ist)."""
+    def greifen(versuche=20):
+        try:
+            if fenster.winfo_exists():
+                fenster.grab_set()
+        except tk.TclError:
+            if versuche:
+                fenster.after(50, greifen, versuche - 1)
+    try:
+        fenster.lift()
+        fenster.focus_force()
+    except tk.TclError:
+        pass
+    greifen()
+
+
+class KennwortDialog:
+    """Fragt das Kennwort einer geschützten PDF ab – maskiert, nur für diesen Augenblick im Speicher (nie
+    gespeichert oder protokolliert). ergebnis: das Kennwort oder None (Überspringen)."""
+
+    def __init__(self, app, name: str, fehlversuch: bool = False):
+        self.app = app
+        self.ergebnis: str | None = None
+        self._fertig = False
+        f = self.fenster = tk.Toplevel(app.root)
+        f.title(KENNWORT_TITEL)
+        f.configure(bg=FARBE_KARTE)
+        f.resizable(False, False)
+        try:
+            f.transient(app.root)
+        except tk.TclError:
+            pass
+        rahmen = tk.Frame(f, bg=FARBE_KARTE, padx=16, pady=12)
+        rahmen.pack(fill="both", expand=True)
+        breite = app._px(420)
+        tk.Label(rahmen, text=f"„{name}“ ist mit einem Kennwort geschützt.", font=app.f_fett, bg=FARBE_KARTE,
+                 wraplength=breite, justify="left").pack(anchor="w")
+        tk.Label(rahmen, text="Bitte das Kennwort zum Öffnen eingeben. Es wird nicht gespeichert. Die Ausgabedatei "
+                              "wird OHNE Kennwort gespeichert – sie ist ja zur Weitergabe gedacht.",
+                 font=app.f_normal, bg=FARBE_KARTE, fg=FARBE_TEXT_GRAU, wraplength=breite,
+                 justify="left").pack(anchor="w", pady=(4, 8))
+        self.fehler_label = tk.Label(rahmen, text="Das Kennwort ist falsch. Bitte erneut eingeben oder "
+                                                  "„Überspringen“ wählen." if fehlversuch else "",
+                                     font=app.f_fett, bg=FARBE_KARTE, fg=FARBE_ROT, wraplength=breite,
+                                     justify="left")
+        if fehlversuch:
+            self.fehler_label.pack(anchor="w", pady=(0, 6))
+        zeile = tk.Frame(rahmen, bg=FARBE_KARTE)
+        zeile.pack(fill="x")
+        tk.Label(zeile, text="Kennwort:", font=app.f_normal, bg=FARBE_KARTE).pack(side="left")
+        self.var = tk.StringVar(master=f)
+        self.eingabe = tk.Entry(zeile, textvariable=self.var, show="•", width=30, font=app.f_normal,
+                                relief="flat", highlightthickness=1, highlightbackground=FARBE_RAND)
+        self.eingabe.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        knoepfe = tk.Frame(rahmen, bg=FARBE_KARTE)
+        knoepfe.pack(fill="x", pady=(12, 0))
+        self.ok_knopf = app._knopf(knoepfe, "  Öffnen  ", self.ok, unterstrichen=2)
+        self.ok_knopf.pack(side="right")
+        self.ueberspringen_knopf = app._knopf(knoepfe, "Überspringen", self.abbrechen, True, unterstrichen=0)
+        self.ueberspringen_knopf.pack(side="right", padx=(0, 8))
+        f.bind("<Return>", lambda e: self.ok())
+        f.bind("<KP_Enter>", lambda e: self.ok())
+        f.bind("<Escape>", lambda e: self.abbrechen())
+        f.protocol("WM_DELETE_WINDOW", self.abbrechen)
+        self.eingabe.focus_set()
+
+    def ok(self):
+        if self._fertig:
+            return
+        self.ergebnis = self.var.get()
+        self._schliessen()
+
+    def abbrechen(self):
+        if self._fertig:
+            return
+        self.ergebnis = None
+        self._schliessen()
+
+    def _schliessen(self):
+        self._fertig = True
+        try:
+            self.var.set("")
+            self.fenster.grab_release()
+            self.fenster.destroy()
+        except tk.TclError:
+            pass
+
+    def zeigen(self) -> str | None:
+        """Blockiert (mit laufender Ereignisschleife), bis der Dialog geschlossen ist."""
+        _modal_machen(self.fenster)
+        try:
+            self.eingabe.focus_force()
+        except tk.TclError:
+            pass
+        try:
+            self.app.root.wait_window(self.fenster)
+        except tk.TclError:
+            pass
+        ergebnis, self.ergebnis = self.ergebnis, None
+        return ergebnis
+
+
+class HinweisDialog:
+    """Hinweis beim ersten Start (M-19): Pseudonymisierung, Ergebnis immer ansehen, Verantwortung bleibt beim
+    Makler. „Nicht mehr anzeigen“ ist vorbelegt – der Hinweis erscheint also einmal; über Hilfe → „Hinweise vor der
+    Nutzung …“ ist er jederzeit wieder da."""
+
+    def __init__(self, app):
+        self.app = app
+        self._fertig = False
+        f = self.fenster = tk.Toplevel(app.root)
+        f.title(ERSTSTART_TITEL)
+        f.configure(bg=FARBE_KARTE)
+        f.resizable(False, False)
+        try:
+            f.transient(app.root)
+        except tk.TclError:
+            pass
+        rahmen = tk.Frame(f, bg=FARBE_KARTE, padx=18, pady=14)
+        rahmen.pack(fill="both", expand=True)
+        tk.Label(rahmen, text="Wichtig: Pseudonymisierung, keine vollständige Anonymisierung", font=app.f_karte,
+                 bg=FARBE_KARTE, fg=FARBE_TEXT, wraplength=app._px(480), justify="left").pack(anchor="w")
+        self.text_label = tk.Label(rahmen, text=ERSTSTART_TEXT, font=app.f_normal, bg=FARBE_KARTE, fg=FARBE_TEXT,
+                                   wraplength=app._px(480), justify="left")
+        self.text_label.pack(anchor="w", pady=(8, 10))
+        self.nicht_mehr = tk.BooleanVar(master=f, value=True)
+        tk.Checkbutton(rahmen, text="Nicht mehr anzeigen", variable=self.nicht_mehr, font=app.f_normal,
+                       bg=FARBE_KARTE, activebackground=FARBE_KARTE, underline=0).pack(anchor="w")
+        knoepfe = tk.Frame(rahmen, bg=FARBE_KARTE)
+        knoepfe.pack(fill="x", pady=(10, 0))
+        self.ok_knopf = app._knopf(knoepfe, "  Verstanden  ", self.bestaetigen, unterstrichen=2)
+        self.ok_knopf.pack(side="right")
+        f.bind("<Return>", lambda e: self.bestaetigen())
+        f.bind("<Escape>", lambda e: self.bestaetigen())
+        f.bind("<Alt-n>", lambda e: self.nicht_mehr.set(not self.nicht_mehr.get()))
+        f.protocol("WM_DELETE_WINDOW", self.bestaetigen)
+        _modal_machen(f)
+        self.ok_knopf.focus_set()
+
+    def bestaetigen(self):
+        if self._fertig:
+            return
+        self._fertig = True
+        self.app.hinweis_bestaetigt(bool(self.nicht_mehr.get()))
+        try:
+            self.fenster.grab_release()
+            self.fenster.destroy()
+        except tk.TclError:
+            pass
+
+
+# ----------------------------------------------------------------------
 # Hauptfenster
 # ----------------------------------------------------------------------
 class AnonymisiererApp:
@@ -476,11 +805,25 @@ class AnonymisiererApp:
         self._profil_wird_gesetzt = False
         self._anpassung_geplant = False
         self._alter_threading_haken = threading.excepthook
+        # Arbeitskopien (Bild als PDF, entschlüsselte PDF, PDF ohne Endung): Original -> {"pfad", "art"}; die Engine
+        # liest die Kopie, Liste, Ausgabeordner und Protokoll gehören zum Original
+        self.arbeitskopien: dict[Path, dict] = {}
+        self.nicht_geprueft: dict[Path, str] = {}        # Datei -> Grund (keine PDF, unlesbar, ohne Kennwort …)
+        self._hinzufuegen_laeuft = False
+        self.laufprotokoll: list[dict] = []              # je Lauf eine Zusammenfassung ohne Inhalte (M-61)
+        self.ereignisse: list[tuple[str, str]] = []      # (Uhrzeit, Ereignis) – Freigeben/Verwerfen/Nachschwärzen
+        self._lauf_kontext: dict | None = None
+        self._nach_start: list = []                      # after()-Kennungen, die beim Schließen verworfen werden
+        self._symbole: list = []
+        self.hinweis_dialog = None
+        self.kennwort_dialog = None
+        self.hinweis_gelesen = bool(self.einstellungen.get("hinweis_gelesen", False))
 
         self.skalierung = float(self.root.tk.call("tk", "scaling"))
         self.k = self.skalierung / BASIS_SKALIERUNG     # 1.0 = Windows 100 %
         self._schriften_anlegen()
         self._geometrie_setzen()
+        self._fenstersymbol_setzen()
         self._baue_oberflaeche()
         self._menue_anlegen()
         self._einstellungen_anwenden()
@@ -490,12 +833,14 @@ class AnonymisiererApp:
         self.root.report_callback_exception = self._fehler_melden
         threading.excepthook = self._thread_excepthook
         self.root.bind("<Configure>", self._fenster_geaendert)
-        self.root.bind("<Alt-a>", lambda e: self.analyse_knopf.invoke())
-        self.root.bind("<Alt-s>", lambda e: self.start_knopf.invoke())
-        self.root.bind("<Alt-v>", lambda e: self.vorschau_knopf.invoke())
+        # Alt+Buchstabe (unterstrichen im Knopf); Großbuchstabe für Feststelltaste und Alt+Umschalt (M-67)
+        for name, knopf in (("analyse", self.analyse_knopf), ("start", self.start_knopf),
+                            ("vorschau", self.vorschau_knopf)):
+            for taste in (KUERZEL[name], KUERZEL[name].upper()):
+                self.root.bind(f"<Alt-{taste}>", lambda e, k=knopf: k.invoke())
         self.root.after_idle(self._oben_anpassen)
         if modell_vorladen:
-            self.root.after(VORLADEN_NACH_MS, self.modell_vorladen)
+            self._nach_start.append(self.root.after(VORLADEN_NACH_MS, self.modell_vorladen))
 
     # ------------------------------------------------------------------
     # Aufbau
@@ -515,6 +860,18 @@ class AnonymisiererApp:
     def _px(self, wert: int) -> int:
         """Entwurfsmaß (bei 100 %) in Bildschirmpixel umrechnen."""
         return max(1, round(wert * self.k))
+
+    def _fenstersymbol_setzen(self):
+        """Programmsymbol für dieses und alle später geöffneten Fenster (Vorschau, Dialoge; M-27/M-67). Ein Fehler
+        dabei darf den Start nie verhindern."""
+        try:
+            self._symbole = [tk.PhotoImage(master=self.root, format="png",
+                                           data=base64.b64encode(programm_symbol_png(g)).decode("ascii"))
+                             for g in SYMBOL_GROESSEN]
+            self.root.iconphoto(True, *self._symbole)
+        except Exception:
+            self._symbole = []
+            dateien.fehler_protokollieren(*sys.exc_info())
 
     def _geometrie_setzen(self):
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
@@ -612,9 +969,11 @@ class AnonymisiererApp:
         knoepfe.pack(side="top", fill="x")
         # Beide Hauptaktionen in der unten verankerten Leiste (GR-01): der Analysieren-Knopf lag im
         # scrollbaren Einstellbereich und war auf 1366x768 nur nach Scrollen erreichbar.
-        self.analyse_knopf = self._knopf(knoepfe, ANALYSE_TEXT, self.analysieren)
+        self.analyse_knopf = self._knopf(knoepfe, ANALYSE_TEXT, self.analysieren,
+                                         unterstrichen=_kuerzel_index(ANALYSE_TEXT, KUERZEL["analyse"]))
         self.analyse_knopf.pack(side="left")
-        self.start_knopf = self._knopf(knoepfe, START_TEXT, self.schwaerzen)
+        self.start_knopf = self._knopf(knoepfe, START_TEXT, self.schwaerzen,
+                                       unterstrichen=_kuerzel_index(START_TEXT, KUERZEL["start"]))
         self.start_knopf.pack(side="left", padx=(8, 0))
         self.start_knopf.config(state="disabled")
         self.abbrechen_knopf = self._knopf(knoepfe, "Abbrechen", self.abbrechen, True)
@@ -665,8 +1024,8 @@ class AnonymisiererApp:
                 self.dnd_aktiv = True
             except Exception:
                 self.dnd_aktiv = False
-        self.drop_zone.config(text="⬇  " + ("PDFs oder ganze Ordner hierher ziehen  (oder klicken zum Auswählen)"
-                                            if self.dnd_aktiv else
+        self.drop_zone.config(text="⬇  " + ("PDFs, Fotos oder ganze Ordner hierher ziehen  (oder klicken zum "
+                                            "Auswählen)" if self.dnd_aktiv else
                                             "Drag & Drop nicht verfügbar – klicken zum Auswählen"))
 
         zeile = tk.Frame(karte1, bg=FARBE_KARTE)
@@ -799,7 +1158,8 @@ class AnonymisiererApp:
         b2.pack(side="right", padx=(0, 6))
         b1 = self._knopf(titelzeile, "Alle an", lambda: self.alle_setzen("an"), True)
         b1.pack(side="right", padx=(0, 6))
-        self.vorschau_knopf = self._knopf(titelzeile, "Vorschau …", self.vorschau_auswahl, True)
+        self.vorschau_knopf = self._knopf(titelzeile, VORSCHAU_TEXT, self.vorschau_auswahl, True,
+                                          unterstrichen=_kuerzel_index(VORSCHAU_TEXT, KUERZEL["vorschau"]))
         self.vorschau_knopf.pack(side="right", padx=(0, 6))
         self._sperrbar += [b1, b2, self.entfernen_knopf, self.vorschau_knopf]
         self.baum_hinweis = tk.Label(karte3, text=BAUM_HINWEIS, font=self.f_normal, bg=FARBE_KARTE,
@@ -868,18 +1228,29 @@ class AnonymisiererApp:
 
     def _menue_anlegen(self):
         menue = tk.Menu(self.root)
+        datei = tk.Menu(menue, tearoff=0)
+        datei.add_command(label="Dateien hinzufügen …", command=self.dateien_waehlen, underline=0)
+        datei.add_command(label="Ordner hinzufügen …", command=self.ordner_waehlen, underline=0)
+        datei.add_separator()
+        datei.add_command(label="Protokoll speichern …", command=self.protokoll_speichern, underline=0)
+        datei.add_separator()
+        datei.add_command(label="Beenden", command=self.schliessen, underline=0)
+        menue.add_cascade(label="Datei", menu=datei, underline=0)
         kunden = tk.Menu(menue, tearoff=0)
-        kunden.add_command(label="Kundenliste importieren …", command=self.kundenliste_importieren)
-        kunden.add_command(label="Kundenliste entfernen", command=self.kundenliste_entfernen)
-        menue.add_cascade(label="Kundenliste", menu=kunden)
+        kunden.add_command(label="Kundenliste importieren …", command=self.kundenliste_importieren, underline=12)
+        kunden.add_command(label="Kundenliste entfernen", command=self.kundenliste_entfernen, underline=12)
+        menue.add_cascade(label="Kundenliste", menu=kunden, underline=0)
         hilfe = tk.Menu(menue, tearoff=0)
-        hilfe.add_command(label="Was wird nicht erkannt?", command=self.hilfe_grenzen)
-        hilfe.add_command(label="Ordner des Fehlerprotokolls öffnen", command=self.fehlerlog_oeffnen)
+        hilfe.add_command(label="Hinweise vor der Nutzung …", command=self.hilfe_hinweis, underline=0)
+        hilfe.add_command(label="Was wird nicht erkannt?", command=self.hilfe_grenzen, underline=0)
+        hilfe.add_command(label="Ordner des Fehlerprotokolls öffnen", command=self.fehlerlog_oeffnen, underline=11)
         hilfe.add_separator()
-        hilfe.add_command(label="Über PDF-Anonymisierer …", command=self.hilfe_ueber)
-        menue.add_cascade(label="Hilfe", menu=hilfe)
+        hilfe.add_command(label="Über PDF-Anonymisierer …", command=self.hilfe_ueber, underline=0)
+        menue.add_cascade(label="Hilfe", menu=hilfe, underline=0)
         self.menue = menue
+        self.datei_menue = datei
         self.kunden_menue = kunden
+        self.hilfe_menue = hilfe
         try:
             self.root.config(menu=menue)
         except tk.TclError:
@@ -893,16 +1264,18 @@ class AnonymisiererApp:
         tk.Label(rahmen, text=titel, font=self.f_karte, bg=FARBE_KARTE, fg=FARBE_TEXT).pack(anchor="w", pady=(0, 2))
         return rahmen
 
-    def _knopf(self, eltern, text, befehl, sekundaer=False):
+    def _knopf(self, eltern, text, befehl, sekundaer=False, unterstrichen: int = -1):
+        """Knopf im Stil des Programms; unterstrichen = Index des Buchstabens für Alt+Buchstabe (-1: keiner)."""
         if sekundaer:
             knopf = tk.Button(eltern, text=text, command=befehl, font=self.f_normal,
-                              bg="#eef1f5", fg=FARBE_TEXT, relief="flat",
-                              padx=10, pady=3, cursor="hand2", activebackground="#dde3ea")
+                              bg="#eef1f5", fg=FARBE_TEXT, relief="flat", underline=unterstrichen,
+                              padx=10, pady=3, cursor="hand2", activebackground="#dde3ea",
+                              disabledforeground="#9ca3af")
         else:
-            knopf = tk.Button(eltern, text=text, command=befehl, font=self.f_knopf,
-                              bg=FARBE_AKZENT, fg="white", relief="flat", padx=12, pady=6, cursor="hand2",
-                              activebackground="#134a8e", activeforeground="white",
-                              disabledforeground="#d1d5db")
+            knopf = PrimaerKnopf(eltern, text=text, command=befehl, font=self.f_knopf,
+                                 bg=FARBE_AKZENT, fg="white", relief="flat", padx=12, pady=6, cursor="hand2",
+                                 activebackground="#134a8e", activeforeground="white", underline=unterstrichen,
+                                 disabledforeground=FARBE_KNOPF_GESPERRT_TEXT)
         knopf.bind("<Return>", lambda e: knopf.invoke())
         return knopf
 
@@ -1019,8 +1392,11 @@ class AnonymisiererApp:
         if self.laeuft:
             self._laeuft_hinweis()
             return
-        pfade = filedialog.askopenfilenames(title="PDF-Dateien auswählen",
-                                            filetypes=[("PDF-Dateien", "*.pdf")], parent=self.root)
+        bilder = " ".join(f"*{e}" for e in sorted(dateien.BILD_ENDUNGEN))
+        pfade = filedialog.askopenfilenames(title="PDF-Dateien oder Fotos auswählen",
+                                            filetypes=[("PDF-Dateien und Fotos", f"*.pdf {bilder}"),
+                                                       ("PDF-Dateien", "*.pdf"), ("Fotos und Bild-Scans", bilder),
+                                                       ("Alle Dateien", "*")], parent=self.root)
         if pfade:
             self._pdfs_hinzufuegen(list(pfade))
 
@@ -1028,7 +1404,7 @@ class AnonymisiererApp:
         if self.laeuft:
             self._laeuft_hinweis()
             return
-        ordner = filedialog.askdirectory(title="Ordner mit PDFs auswählen", parent=self.root)
+        ordner = filedialog.askdirectory(title="Ordner mit PDFs oder Fotos auswählen", parent=self.root)
         if ordner:
             self._pdfs_hinzufuegen([ordner])
 
@@ -1041,26 +1417,261 @@ class AnonymisiererApp:
             self.zielordner_var.set(ordner)
             self.zielordner_aktiv.set(True)
 
+    def _beschaeftigt(self, an: bool, text: str | None = None):
+        """Sanduhr während längerer Prüfungen im Hauptthread (großer Ordner, Netzlaufwerk)."""
+        try:
+            self.root.config(cursor="watch" if an else "")
+            if an and text:
+                self.status_label.config(text=text)
+            self.root.update_idletasks()
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _kurzname(pfad) -> str:
+        return Path(dateien.ohne_langpfad(pfad)).name
+
+    def _nicht_geprueft_merken(self, pfad, grund: str):
+        """Datei aus der Auswahl, die NICHT geprüft wird – steht im Abschlussdialog der Schwärzung."""
+        self.nicht_geprueft[Path(pfad)] = grund
+
+    def _namen_liste(self, pfade, anzahl=5, arten: dict | None = None) -> str:
+        teile = []
+        for p in pfade[:anzahl]:
+            art = (arten or {}).get(p)
+            if art and art not in ("endung", "unbekannt") and Path(p).suffix.lower() == ".pdf":
+                teile.append(f"{self._kurzname(p)} (in Wahrheit {dateien.art_beschreibung(art)})")
+            else:
+                teile.append(self._kurzname(p))
+        return ", ".join(teile) + (f" und {len(pfade) - anzahl} weitere" if len(pfade) > anzahl else "")
+
+    def _ausgaben_bestaetigen(self, ausgaben: list) -> bool:
+        """M-63: Datei ist schon eine Ausgabe des Programms – warnen und fragen."""
+        namen = ", ".join(f"„{self._kurzname(p)}“" for p in ausgaben[:3]) + (" …" if len(ausgaben) > 3 else "")
+        einzahl = len(ausgaben) == 1
+        text = (f"{namen} {'ist' if einzahl else 'sind'} bereits {'eine Ausgabe' if einzahl else 'Ausgaben'} "
+                f"dieses Programms (Name „anonym_…“ oder Ordner „{dateien.AUSGABE_ORDNER}“).\n\n"
+                f"Zum Nachschwärzen besser das ORIGINAL wählen und in der Vorschau nachschwärzen. Eine Ausgabe "
+                f"erneut zu bearbeiten, legt eine weitere Ausgabe in „{dateien.AUSGABE_ORDNER}\\"
+                f"{dateien.AUSGABE_ORDNER}“ an.\n\nTrotzdem hinzufügen?")
+        ja = self._frage("Bereits anonymisierte Datei", text, warnung=True, standard_nein=True)
+        if ja:
+            self._log(f"ℹ {namen}: bereits Ausgabe(n) des Programms – auf Wunsch trotzdem hinzugefügt.", "hinweis")
+        else:
+            self._log(f"ℹ {namen}: bereits Ausgabe(n) des Programms – nicht hinzugefügt.", "hinweis")
+        return ja
+
+    def _bilder_bestaetigen(self, bilder: list, arten: dict) -> bool:
+        """R-01: Fotos und Bild-Scans (auch umbenannte) als PDF übernehmen?"""
+        zeilen = [f"  • {self._kurzname(p)}" + (" (ein Bild mit der Endung .pdf)" if Path(p).suffix.lower() == ".pdf"
+                                                 else "") for p in bilder[:8]]
+        if len(bilder) > 8:
+            zeilen.append(f"  … und {len(bilder) - 8} weitere")
+        text = (f"{len(bilder)} Foto(s) bzw. Bild-Scan(s) gefunden:\n" + "\n".join(zeilen) + "\n\n"
+                "In PDFs umwandeln und mitprüfen? Der Text wird dann per Texterkennung (OCR) gelesen – das ist "
+                "unsicherer als bei einer echten PDF; das Ergebnis bitte besonders sorgfältig ansehen. Die Umwandlung "
+                "liegt nur vorübergehend im Programmordner, die Ausgabe heißt wie gewohnt anonym_NN.pdf.\n\n"
+                "„Nein“: Die Bilder werden NICHT geprüft und nicht in die Liste aufgenommen.")
+        return self._frage("Fotos als PDF übernehmen?", text)
+
+    def _bild_umwandeln(self, bild: Path, art: str | None) -> dict | None:
+        """Bild -> PDF-Arbeitskopie im Programmordner für Zwischendateien; None (mit Meldung), wenn es nicht geht."""
+        ziel = None
+        try:
+            ziel = dateien.arbeitskopie_ziel(self._kurzname(bild))
+            seiten = dateien.bild_als_pdf(bild, ziel, art)
+        except Exception as fehler:
+            if ziel is not None:
+                dateien.arbeitskopie_entfernen(ziel)
+            if not isinstance(fehler, (OSError, ValueError)):
+                dateien.fehler_protokollieren(*sys.exc_info())
+            grund = str(fehler) if isinstance(fehler, ValueError) else _verstaendliche_fehlermeldung(fehler, bild)
+            self._log(f"⚠ {self._kurzname(bild)}: konnte nicht als PDF übernommen werden ({grund}) – NICHT geprüft.",
+                      "warnung", zaehlen=False)
+            self._nicht_geprueft_merken(bild, "Bild nicht lesbar")
+            return None
+        return {"pfad": ziel, "art": "bild", "seiten": seiten}
+
+    def _kennwort_abfragen(self, pfad, fehlversuch: bool = False) -> str | None:
+        """Kennwort einer geschützten PDF abfragen (maskierter Dialog); None = überspringen. Nichts wird gespeichert."""
+        dialog = KennwortDialog(self, self._kurzname(pfad), fehlversuch)
+        self.kennwort_dialog = dialog
+        try:
+            return dialog.zeigen()
+        finally:
+            self.kennwort_dialog = None
+
+    def _geschuetzte_pdf_entsperren(self, pdf: Path, bekannt: list) -> dict | None:
+        """R-12: Kennwort abfragen (falsch: erneut fragen, bis „Überspringen“) und eine Kopie OHNE Kennwort im
+        Programmordner für Zwischendateien ablegen. „bekannt“ hält höchstens das zuletzt richtige Kennwort dieser
+        Auswahl (oft gilt eines für mehrere Schreiben) – nur bis zum Ende der Auswahl, nie auf der Festplatte."""
+        ziel = None
+        try:
+            ziel = dateien.arbeitskopie_ziel(self._kurzname(pdf))
+            if bekannt and dateien.pdf_entschluesseln(pdf, bekannt[0], ziel):
+                return {"pfad": ziel, "art": "entschluesselt"}
+            fehlversuch = False
+            while True:
+                kennwort = self._kennwort_abfragen(pdf, fehlversuch)
+                if kennwort is None:
+                    dateien.arbeitskopie_entfernen(ziel)
+                    return None
+                if dateien.pdf_entschluesseln(pdf, kennwort, ziel):
+                    bekannt[:] = [kennwort]
+                    return {"pfad": ziel, "art": "entschluesselt"}
+                fehlversuch = True
+        except Exception as fehler:
+            if ziel is not None:
+                dateien.arbeitskopie_entfernen(ziel)
+            log = dateien.fehler_protokollieren(*sys.exc_info())
+            self._log(f"✖ {self._kurzname(pdf)}: konnte nicht entschlüsselt werden "
+                      f"({_verstaendliche_fehlermeldung(fehler, pdf)}) – NICHT geprüft." + (f" Details: {log}" if log
+                                                                                           else ""),
+                      "fehler", zaehlen=False)
+            return False
+
     def _pdfs_hinzufuegen(self, pfade):
+        """Dateien und Ordner aufnehmen. Jede Datei wird am INHALT geprüft (R-01): echte PDFs kommen in die Liste,
+        Fotos und Bild-Scans auf Wunsch als PDF-Arbeitskopie, geschützte PDFs nach Eingabe des Kennworts (R-12).
+        Alles andere wird mit Namen und Grund gemeldet – nichts fällt still weg (R-10, R-09). Eine Datei, die schon
+        eine Ausgabe des Programms ist, wird nur nach Rückfrage aufgenommen (M-63)."""
         if self.laeuft:
             self._laeuft_hinweis()
             return
-        bericht = dateien.sammle_pdfs_bericht(pfade)
+        if self._hinzufuegen_laeuft:                  # z. B. Drag & Drop, während der Kennwortdialog offen ist
+            self._status("Bitte erst die laufende Auswahl abschließen (Kennwort eingeben oder überspringen).")
+            return
+        self._hinzufuegen_laeuft = True
+        try:
+            self._pdfs_hinzufuegen_ausfuehren(pfade)
+        finally:
+            self._hinzufuegen_laeuft = False
+            self._beschaeftigt(False)
+
+    def _pdfs_hinzufuegen_ausfuehren(self, pfade):
+        self._beschaeftigt(True, "Dateien werden geprüft …")
+        try:
+            bericht = dateien.sammle_pdfs_bericht(pfade)
+        finally:
+            self._beschaeftigt(False)
+        arten = bericht.get("arten", {})
+        gruende = bericht.get("gruende", {})
+        teile = []
+
+        # M-63: einzeln gewählte Ausgaben nur nach Rückfrage
+        pdf_kandidaten = [p for p in bericht["pdfs"] if p not in self.dateien]
+        ausgaben = [p for p in bericht.get("ausgaben_einzeln", []) if p in pdf_kandidaten]
+        if ausgaben and not self._ausgaben_bestaetigen(ausgaben):
+            pdf_kandidaten = [p for p in pdf_kandidaten if p not in ausgaben]
+            teile.append(f"{len(ausgaben)} Ausgabe(n) nicht hinzugefügt")
+        ohne_endung = [p for p in bericht.get("pdf_ohne_endung", []) if p not in self.dateien]
+
+        # Fotos und Bild-Scans: auf Wunsch als PDF-Arbeitskopie
+        kopien: dict[Path, dict] = {}
+        bilder = [p for p in bericht.get("bilder", []) if p not in self.dateien]
+        bilder_neu = 0
+        if bilder:
+            if self._bilder_bestaetigen(bilder, arten):
+                self._beschaeftigt(True, "Fotos werden in PDFs umgewandelt …")
+                try:
+                    for bild in bilder:
+                        eintrag = self._bild_umwandeln(bild, arten.get(bild))
+                        if eintrag is not None:
+                            kopien[bild] = eintrag
+                finally:
+                    self._beschaeftigt(False)
+            else:
+                for bild in bilder:
+                    self._nicht_geprueft_merken(bild, "Bild nicht übernommen")
+                teile.append(f"{len(bilder)} Bild(er) nicht übernommen")
+                self._log(f"⚠ {len(bilder)} Foto(s)/Bild-Scan(s) NICHT übernommen und NICHT geprüft: "
+                          f"{self._namen_liste(bilder, arten=arten)}", "warnung", zaehlen=False)
+
+        # R-12: geschützte PDFs entsperren; PDFs ohne Endung als Kopie mit „.pdf“
+        uebersprungen_kennwort = []
+        ausgelassen: set[Path] = set()
+        bekannt: list[str] = []
+        try:
+            for pdf in pdf_kandidaten + ohne_endung:
+                if dateien.pdf_kennwort_noetig(pdf):
+                    eintrag = self._geschuetzte_pdf_entsperren(pdf, bekannt)
+                    if not eintrag:
+                        ausgelassen.add(pdf)
+                        if eintrag is None:
+                            uebersprungen_kennwort.append(pdf)
+                        self._nicht_geprueft_merken(pdf, "Kennwort nicht eingegeben" if eintrag is None
+                                                    else "nicht entschlüsselbar")
+                        continue
+                    kopien[pdf] = eintrag
+                    self._log(f"ℹ {self._kurzname(pdf)}: mit Kennwort geöffnet – geprüft wird eine Kopie ohne "
+                              f"Kennwort; auch die Ausgabedatei hat KEIN Kennwort.", "hinweis")
+                elif pdf in ohne_endung:
+                    ziel = None
+                    try:
+                        ziel = dateien.arbeitskopie_ziel(self._kurzname(pdf))
+                        dateien.pdf_kopieren(pdf, ziel)
+                    except OSError as fehler:
+                        if ziel is not None:
+                            dateien.arbeitskopie_entfernen(ziel)
+                        self._log(f"⚠ {self._kurzname(pdf)}: {_verstaendliche_fehlermeldung(fehler, pdf)} – NICHT "
+                                  f"geprüft.", "warnung", zaehlen=False)
+                        self._nicht_geprueft_merken(pdf, "nicht lesbar")
+                        ausgelassen.add(pdf)
+                        continue
+                    kopien[pdf] = {"pfad": ziel, "art": "kopie"}
+        finally:
+            bekannt.clear()                  # das Kennwort lebt nicht über die Auswahl hinaus
+
         neu = 0
-        for pdf in bericht["pdfs"]:
-            if pdf not in self.dateien:
-                self.dateien.append(pdf)
-                self._datei_zeile_einfuegen(pdf)
+        for pdf in pdf_kandidaten + ohne_endung + bilder:
+            if pdf in self.dateien or pdf in ausgelassen or (pdf in bilder and pdf not in kopien):
+                continue
+            if pdf in kopien:
+                self.arbeitskopien[pdf] = kopien[pdf]
+            self.nicht_geprueft.pop(pdf, None)          # z. B. jetzt mit Kennwort: doch geprüft
+            self.dateien.append(pdf)
+            self._datei_zeile_einfuegen(pdf)
+            if pdf in bilder:
+                bilder_neu += 1
+            else:
                 neu += 1
         self._beschriftungen_aktualisieren()
 
         # Meldungen zur Auswahl zählen nicht als Warnung eines Laufs (GR-07)
-        teile = [f"{neu} PDF-Datei(en) hinzugefügt" if neu else "Keine neue PDF-Datei"]
+        teile.insert(0, f"{neu} PDF-Datei(en) hinzugefügt" if neu else "Keine neue PDF-Datei")
+        if bilder_neu:
+            teile.insert(1, f"{bilder_neu} Bild(er) als PDF übernommen")
+            self._log(f"ℹ {bilder_neu} Foto(s)/Bild-Scan(s) als PDF übernommen – der Text wird per Texterkennung "
+                      f"gelesen; das Ergebnis bitte besonders sorgfältig prüfen.", "hinweis")
+        if uebersprungen_kennwort:
+            teile.append(f"{len(uebersprungen_kennwort)} ohne Kennwort übersprungen")
+            self._log(f"⚠ Ohne Kennwort übersprungen und NICHT geprüft: {self._namen_liste(uebersprungen_kennwort)} "
+                      f"– zum Prüfen erneut hinzufügen und das Kennwort eingeben (oder die PDF ohne Kennwort "
+                      f"speichern).", "warnung", zaehlen=False)
         if bericht["uebersprungen"]:
-            namen = ", ".join(p.name for p in bericht["uebersprungen"][:5])
+            namen = self._namen_liste(bericht["uebersprungen"], arten=arten)
+            for p in bericht["uebersprungen"]:
+                self._nicht_geprueft_merken(p, "keine PDF")
             teile.append(f"{len(bericht['uebersprungen'])} übersprungen – keine PDF")
             self._log(f"⚠ Übersprungen (keine PDF-Datei; Fotos, Mails oder Office-Dateien bitte zuerst als "
                       f"PDF speichern): {namen}", "warnung", zaehlen=False)
+        keine_pdf = bericht.get("keine_pdf", [])
+        if keine_pdf:
+            for p in keine_pdf:
+                self._nicht_geprueft_merken(p, "keine PDF")
+            teile.append(f"{len(keine_pdf)} keine PDF (nicht geprüft)")
+            satz = ("1 Datei im Ordner ist keine PDF und wurde" if len(keine_pdf) == 1 else
+                    f"{len(keine_pdf)} Dateien im Ordner sind keine PDF und wurden")
+            self._log(f"⚠ {satz} NICHT geprüft: {self._namen_liste(keine_pdf, 8, arten)} – bei Bedarf zuerst "
+                      f"als PDF speichern (z. B. Drucken → „Microsoft Print to PDF“).", "warnung", zaehlen=False)
+        unlesbar = bericht.get("nicht_lesbar", [])
+        if unlesbar:
+            for p in unlesbar:
+                self._nicht_geprueft_merken(p, gruende.get(p, "nicht lesbar"))
+            teile.append(f"{len(unlesbar)} nicht lesbar")
+            liste = ", ".join(f"{self._kurzname(p)} ({gruende.get(p, 'nicht lesbar')})" for p in unlesbar[:5])
+            self._log(f"⚠ {len(unlesbar)} Datei(en)/Ordner konnten nicht gelesen werden und wurden NICHT geprüft: "
+                      f"{liste}" + (" …" if len(unlesbar) > 5 else ""), "warnung", zaehlen=False)
         if bericht["ausgaben"]:
             teile.append(f"{len(bericht['ausgaben'])} bereits anonymisierte Datei(en) ausgelassen")
             self._log(f"ℹ {len(bericht['ausgaben'])} Datei(en) im Ordner sind bereits Ausgaben des Programms "
@@ -1069,15 +1680,16 @@ class AnonymisiererApp:
             self._log(f"ℹ {len(bericht['zwischendateien'])} Zwischendatei(en) einer abgebrochenen Schwärzung "
                       f"(.anonym_tmp_…) ignoriert – sie werden beim nächsten Schwärzen aufgeräumt.", "hinweis")
         if bericht["leere_ordner"]:
-            namen = ", ".join(str(p) for p in bericht["leere_ordner"][:3])
+            namen = ", ".join(dateien.ohne_langpfad(p) for p in bericht["leere_ordner"][:3])
             teile.append("Ordner ohne PDF-Dateien")
             self._log(f"⚠ Ordner enthält keine PDF-Dateien: {namen}", "warnung", zaehlen=False)
         if bericht["fehlend"]:
             teile.append(f"{len(bericht['fehlend'])} nicht gefunden")
-            self._log("⚠ Nicht gefunden: " + ", ".join(str(p) for p in bericht["fehlend"][:3]), "warnung",
-                      zaehlen=False)
+            self._log("⚠ Nicht gefunden: " + ", ".join(
+                dateien.ohne_langpfad(p) + (f" ({gruende[p]} – unter Windows ggf. zu lang)" if p in gruende else "")
+                for p in bericht["fehlend"][:3]), "warnung", zaehlen=False)
         self.datei_hinweis.config(text="; ".join(teile) + f" · insgesamt {len(self.dateien)} Datei(en).")
-        if neu and self.analyse_ergebnisse:
+        if (neu or bilder_neu) and self.analyse_ergebnisse:
             self._log("ℹ Neue Dateien sind noch nicht analysiert – bitte erneut analysieren, bevor geschwärzt wird.",
                       "hinweis")
         self._status_dateien()
@@ -1090,7 +1702,7 @@ class AnonymisiererApp:
             self._status(f"{len(self.dateien)} Datei(en) ausgewählt – jetzt unten „Analysieren“ drücken.")
 
     def _datei_vergessen(self, pdf: Path):
-        """Alles zu einer Datei vergessen (Vorschau, manuelle Markierungen, Ausgabestatus)."""
+        """Alles zu einer Datei vergessen (Vorschau, manuelle Markierungen, Ausgabestatus, Arbeitskopie)."""
         fenster = self.vorschauen.pop(pdf, None)
         if fenster is not None:
             fenster.schliessen(benachrichtigen=False)
@@ -1098,6 +1710,23 @@ class AnonymisiererApp:
         self.manuell.pop(pdf, None)
         self.lauf_immer.pop(pdf, None)
         self.ausgaben.pop(pdf, None)
+        self._arbeitskopie_loeschen(pdf)
+
+    def _arbeitsdatei(self, pdf: Path) -> Path:
+        """Datei, die die Engine liest: die Arbeitskopie (Bild als PDF, entschlüsselte PDF) oder das Original."""
+        eintrag = self.arbeitskopien.get(pdf)
+        return Path(eintrag["pfad"]) if eintrag else pdf
+
+    def _arbeitskopie_loeschen(self, pdf: Path):
+        """Arbeitskopie einer Datei löschen (vorher offene Vorschau-Dokumente freigeben – Windows sperrt sie sonst)."""
+        eintrag = self.arbeitskopien.pop(pdf, None)
+        if not eintrag:
+            return
+        try:
+            self._vorschau_dateien_freigeben(Path(eintrag["pfad"]))
+        except Exception:
+            pass
+        dateien.arbeitskopie_entfernen(eintrag["pfad"])
 
     def liste_leeren(self):
         if self.laeuft:
@@ -1111,6 +1740,7 @@ class AnonymisiererApp:
         self.beschriftungen.clear()
         self.baum.delete(*self.baum.get_children())
         self.analyse_veraltet = False
+        self.nicht_geprueft.clear()
         self.datei_hinweis.config(text="Noch keine Dateien. Die Liste erscheint unten in Schritt 3.")
         self._status_dateien()
         self._start_knopf_aktualisieren()
@@ -1157,18 +1787,21 @@ class AnonymisiererApp:
         return iid
 
     def _beschriftungen_aktualisieren(self):
-        """Dateinamen relativ zum gemeinsamen Stammordner anzeigen (KundeA/Police.pdf, KundeB/Police.pdf)."""
+        """Dateinamen relativ zum gemeinsamen Stammordner anzeigen (KundeA/Police.pdf, KundeB/Police.pdf); Bilder
+        und entsperrte PDFs tragen einen Zusatz („(Bild → PDF)“, „(Kennwort entfernt)“)."""
         stamm = dateien.gemeinsamer_stamm(self.dateien)
-        ein_ordner = len({p.parent for p in self.dateien}) <= 1
+        ein_ordner = len({Path(dateien.ohne_langpfad(p)).parent for p in self.dateien}) <= 1
         for iid, pdf in self.zeilen.items():
+            anzeige = Path(dateien.ohne_langpfad(pdf))
             if stamm is None or ein_ordner:
-                name = pdf.name
+                name = anzeige.name
             else:
                 try:
-                    name = pdf.relative_to(stamm).as_posix()
+                    name = anzeige.relative_to(stamm).as_posix()
                 except ValueError:
-                    name = str(pdf)
-            self.beschriftungen[iid] = name
+                    name = str(anzeige)
+            art = (self.arbeitskopien.get(pdf) or {}).get("art")
+            self.beschriftungen[iid] = name + ANZEIGE_ART.get(art, "")
             self._zeilentext_setzen(iid)
         for fenster in self.vorschauen.values():
             fenster.titel_setzen()
@@ -1292,12 +1925,15 @@ class AnonymisiererApp:
         for mid, eintrag in self.manuell.get(pdf, {}).items():
             self._manuell_zeile_einfuegen(pdf, mid, eintrag)
         codes = meldungs_codes(ergebnis)
+        nebenkanal = _nebenkanal_bezug(ergebnis)
         if ergebnis["fehler"]:
             status = f"Fehler: {ergebnis['fehler']}"
         elif not funde and codes & {"KEIN_TEXT", "KAUM_LESBAR"}:
             status = "0 Funde – kein Text lesbar!"
         else:
             status = f"{len(funde)} Fund(e)"
+        if nebenkanal is not None and not ergebnis["fehler"]:
+            status += " · Personendaten in Metadaten/Anhängen – werden entfernt"
         if ergebnis["warnungen"]:
             status += f" · {len(ergebnis['warnungen'])} Warnung(en)"
         self.baum.set(iid, "kategorie", status)
@@ -1606,8 +2242,16 @@ class AnonymisiererApp:
         return sum(1 for e in self.baum.get_children("") for k in self.baum.get_children(e)
                    if self._zustand(k) in ("an", "teil"))
 
+    def _nebenkanal_dateien(self) -> list[Path]:
+        """Analysierte Dateien mit Personendaten in Metadaten, Lesezeichen, Anhängen oder XFA (R-04): auch ohne
+        Fund auf den Seiten gibt es eine bereinigte Ausgabe."""
+        return [pdf for pdf in self.dateien if pdf in self.analyse_ergebnisse
+                and not self.analyse_ergebnisse[pdf].get("fehler")
+                and _nebenkanal_bezug(self.analyse_ergebnisse[pdf]) is not None]
+
     def _start_knopf_aktualisieren(self):
-        aktiv = not self.laeuft and not self.analyse_veraltet and self._angehakte_funde() > 0
+        aktiv = not self.laeuft and not self.analyse_veraltet and (self._angehakte_funde() > 0
+                                                                   or bool(self._nebenkanal_dateien()))
         self.start_knopf.config(state="normal" if aktiv else "disabled")
 
     # ------------------------------------------------------------------
@@ -1666,6 +2310,13 @@ class AnonymisiererApp:
             self._dialog("info", "Vorschau", f"„{self._anzeigename(pdf)}“ ist noch nicht analysiert – bitte zuerst "
                                              f"unten „Analysieren“ drücken.")
             return None
+        if modus == "vorher":
+            art = dateien.datei_art(self._arbeitsdatei(pdf))
+            if not dateien.fuer_engine_erlaubt(art):          # R-01: nie eine Nicht-PDF an PyMuPDFs Seitenfunktionen
+                self._dialog("error", "Vorschau nicht möglich",
+                             f"„{self._anzeigename(pdf)}“ ist keine PDF mehr, sondern {dateien.art_beschreibung(art)} "
+                             f"(Datei inzwischen ersetzt?). Bitte aus der Liste entfernen und neu hinzufügen.")
+                return None
         fenster = self.vorschauen.get(pdf)
         try:
             if fenster is not None and fenster.existiert():
@@ -1726,6 +2377,7 @@ class AnonymisiererApp:
                          + (f"\n\nDetails: {log}" if log else ""))
             return None
         eintrag.update(pfad=neu, status="fertig", grund="freigegeben", freigegeben=True)
+        self._ereignis(f"{alt.name} freigegeben → {neu.name}")
         self._log(f"✔ {self._anzeigename(pdf)}: freigegeben  →  {neu}", "ok")
         self._ausgabe_zeile_setzen(pdf)
         self._status(f"„{self._anzeigename(pdf)}“ freigegeben: {neu.name}")
@@ -1747,6 +2399,7 @@ class AnonymisiererApp:
                          + (f"\n\nDetails: {log}" if log else ""))
             return False
         eintrag.update(pfad=None, status="verworfen", grund=f"{alt.name} gelöscht")
+        self._ereignis(f"{alt.name} verworfen (gelöscht)")
         self._log(f"ℹ {self._anzeigename(pdf)}: Ausgabe {alt.name} verworfen (gelöscht).", "hinweis")
         self._ausgabe_zeile_setzen(pdf)
         return True
@@ -1921,6 +2574,7 @@ class AnonymisiererApp:
             "zielordner_aktiv": bool(self.zielordner_aktiv.get()),
             "freigabe_erforderlich": bool(self.freigabe_var.get()),
             "maximiert": self._ist_maximiert(),
+            "hinweis_gelesen": bool(self.hinweis_gelesen),
         })
         if not daten["maximiert"]:
             try:
@@ -2129,8 +2783,14 @@ class AnonymisiererApp:
         self.warnungen_anzahl = 0
         self._warnzaehler_anzeigen()
         self._eingaben_sperren(True)
-        self.analyse_knopf.config(state="disabled", text="  Analysiere …  " if art == "analyse" else ANALYSE_TEXT)
-        self.start_knopf.config(state="disabled", text="  Läuft …  " if art == "schwaerzen" else START_TEXT)
+        analyse_text = "  Analysiere …  " if art == "analyse" else ANALYSE_TEXT
+        start_text = "  Läuft …  " if art == "schwaerzen" else START_TEXT
+        self.analyse_knopf.config(state="disabled", text=analyse_text,
+                                  underline=-1 if analyse_text != ANALYSE_TEXT else
+                                  _kuerzel_index(ANALYSE_TEXT, KUERZEL["analyse"]))
+        self.start_knopf.config(state="disabled", text=start_text,
+                                underline=-1 if start_text != START_TEXT else _kuerzel_index(START_TEXT,
+                                                                                             KUERZEL["start"]))
         self.abbrechen_knopf.config(state="normal")
         self.ordner_knopf.config(state="disabled")
         self.fortschritt.config(value=0, maximum=1)
@@ -2144,8 +2804,9 @@ class AnonymisiererApp:
         self.abbruch = None
         self.ocr = None
         self._eingaben_sperren(False)
-        self.analyse_knopf.config(state="normal", text=ANALYSE_TEXT)
-        self.start_knopf.config(text=START_TEXT)
+        self.analyse_knopf.config(state="normal", text=ANALYSE_TEXT,
+                                  underline=_kuerzel_index(ANALYSE_TEXT, KUERZEL["analyse"]))
+        self.start_knopf.config(text=START_TEXT, underline=_kuerzel_index(START_TEXT, KUERZEL["start"]))
         self.abbrechen_knopf.config(state="disabled")
         self.ordner_knopf.config(state="normal" if self.letzte_ausgabeordner else "disabled")
         self._start_knopf_aktualisieren()
@@ -2207,16 +2868,26 @@ class AnonymisiererApp:
         self.root.destroy()
 
     def _aufraeumen(self):
-        """Prozessweite Zustände zurückgeben (KQ-10): threading.excepthook, Einzelinstanz-Sperre."""
+        """Prozessweite Zustände zurückgeben (KQ-10): threading.excepthook, Einzelinstanz-Sperre, ausstehende
+        after()-Aufrufe; Arbeitskopien (Bild als PDF, entschlüsselte PDF) dieser Sitzung löschen."""
+        for kennung in self._nach_start:
+            try:
+                self.root.after_cancel(kennung)
+            except (tk.TclError, ValueError):
+                pass
+        self._nach_start.clear()
         if threading.excepthook == self._thread_excepthook:
             threading.excepthook = self._alter_threading_haken
-        if self.instanz_sperre is not None:
-            self.instanz_sperre.freigeben()
-            self.instanz_sperre = None
         try:
             self._vorschau_dateien_freigeben()
         except Exception:
             pass
+        for pdf in list(self.arbeitskopien):
+            self._arbeitskopie_loeschen(pdf)
+        dateien.sitzung_aufraeumen()
+        if self.instanz_sperre is not None:
+            self.instanz_sperre.freigeben()
+            self.instanz_sperre = None
 
     # ------------------------------------------------------------------
     # Namenserkennung vorladen (PERF-09)
@@ -2275,6 +2946,10 @@ class AnonymisiererApp:
         pdfs = list(self.dateien)                       # Kopie: der Thread arbeitet nie auf der Live-Liste
         immer_je_datei = {pdf: immer + [b for b in self.lauf_immer.get(pdf, []) if b not in immer] for pdf in pdfs}
         zusatz = self._analyse_zusatz()
+        arbeit = {pdf: self._arbeitsdatei(pdf) for pdf in pdfs}
+        self._lauf_kontext = {"aktive": sorted(aktive), "nie": len(nie), "immer": len(immer),
+                              "profil": self.profil_var.get(), "basis_profil": self.basis_profil,
+                              "kundenliste": "kundenliste" in zusatz}
 
         markierungen = sum(len(m) for m in self.manuell.values())
         self._vorschauen_schliessen()
@@ -2294,19 +2969,31 @@ class AnonymisiererApp:
             self._log("ℹ Die Kundenliste wird von dieser Programmversion noch nicht beim Analysieren genutzt.",
                       "hinweis")
         self._status("Analyse startet …")
-        threading.Thread(target=self._analyse_lauf, args=(pdfs, aktive, nie, immer_je_datei, zusatz, self.abbruch),
+        threading.Thread(target=self._analyse_lauf,
+                         args=(pdfs, aktive, nie, immer_je_datei, zusatz, self.abbruch, arbeit),
                          daemon=True, name="Analyse").start()
 
-    def _analyse_lauf(self, pdfs, aktive, nie, immer_je_datei, zusatz, abbruch):
+    @staticmethod
+    def _keine_pdf_ergebnis(pdf: Path, art: str) -> dict:
+        """R-01: Datei ist (inzwischen) keine PDF – nie an PyMuPDFs Seitenfunktionen geben (Absturz im C-Code)."""
+        text = (f"Die Datei ist keine PDF, sondern {dateien.art_beschreibung(art)} – sie wurde NICHT geprüft. Bitte im "
+                f"Ursprungsprogramm als PDF speichern (bei einem Foto: aus der Liste entfernen und erneut hinzufügen, "
+                f"dann wird es als PDF übernommen).")
+        ergebnis = _fehler_ergebnis(pdf, text)
+        ergebnis["meldungen"] = [{"art": "fehler", "code": "KEIN_PDF", "text": text, "seite": None}]
+        return ergebnis
+
+    def _analyse_lauf(self, pdfs, aktive, nie, immer_je_datei, zusatz, abbruch, arbeit=None):
         ergebnisse: dict[Path, dict] = {}
         fehler_intern = None
         erster_fehler = None
         weitergabe_neu = 0
         ocr = None
+        arbeit = dict(arbeit or {})
         try:
             ocr = self._ocr_dienst_anlegen()
             self.ocr = ocr
-            seiten = {pdf: _seitenzahl(pdf) for pdf in pdfs}
+            seiten = {pdf: _seitenzahl(arbeit.get(pdf, pdf)) for pdf in pdfs}
             gesamt_seiten = max(1, sum(seiten.values()))
             self._fortschritt_maximum(gesamt_seiten)
             if "namen" in aktive:
@@ -2337,11 +3024,16 @@ class AnonymisiererApp:
                     self._fortschritt_setzen(_basis + min(int(seite), seiten[_pdf]))
                     self._status(f"Analyse: Datei {_nr}/{len(pdfs)}, Seite {seite}/{gesamt} – {_name}")
 
+                datei = arbeit.get(pdf, pdf)
                 try:                                        # jede Datei für sich (KQ-03)
-                    ergebnis = analysiere_pdf(pdf, aktive, nie, immer_je_datei[pdf],
-                                              melde=lambda t: self._log(t, "grau"), fortschritt=fortschritt,
-                                              abbruch=abbruch, ocr=ocr, **zusatz)
-                    ergebnis = _analyse_ergebnis_pruefen(ergebnis, pdf)
+                    art = dateien.datei_art(datei)
+                    if not dateien.fuer_engine_erlaubt(art):
+                        ergebnis = self._keine_pdf_ergebnis(pdf, art)
+                    else:
+                        ergebnis = analysiere_pdf(datei, aktive, nie, immer_je_datei[pdf],
+                                                  melde=lambda t: self._log(t, "grau"), fortschritt=fortschritt,
+                                                  abbruch=abbruch, ocr=ocr, **zusatz)
+                        ergebnis = _analyse_ergebnis_pruefen(ergebnis, pdf)
                     if ergebnis["fehler"] and ergebnis["fehler"] != "Abgebrochen":
                         ergebnis["fehler"] = _fehlertext_verstaendlich(ergebnis["fehler"])
                 except Exception as fehler:
@@ -2407,6 +3099,7 @@ class AnonymisiererApp:
             self._fehler_dialog(*erster_fehler)
         if fehler_intern:
             self._fehler_melden(*fehler_intern)
+        self._protokoll_analyse(pdfs, ergebnisse, abgebrochen)
         if abgebrochen:
             self.analyse_veraltet = True
             self._start_knopf_aktualisieren()
@@ -2435,8 +3128,24 @@ class AnonymisiererApp:
         gesundheit_sicher = [pdf for pdf in gesundheit if pdf not in vermutet]
         mit_fehler = [(pdf, e["fehler"]) for pdf, e in ergebnisse.items() if e["fehler"]]
         mit_warnung = [(pdf, e["warnungen"]) for pdf, e in ergebnisse.items() if e["warnungen"]]
+        # R-04 (Paket analyse-status): Personendaten nur in Metadaten, Lesezeichen, Anhängen oder XFA – nie
+        # „keine personenbezogenen Daten“ sagen; „Schwärzen starten“ erzeugt eine bereinigte Ausgabe
+        nebenkanal = [(pdf, nk) for pdf, e in ergebnisse.items() if not e["fehler"]
+                      for nk in [_nebenkanal_bezug(e)] if nk is not None]
+        nebenkanal_block = []
+        if nebenkanal:
+            nebenkanal_block = (["Personenbezogene Daten in versteckten Teilen der Datei (Metadaten, Lesezeichen, "
+                                 "Anhänge, Formulardaten) – ein KI-Dienst bekäme sie mit dem Original mit:"]
+                                + [f"  • {self._anzeigename(p)}: {_nebenkanal_text(nk)}" for p, nk in nebenkanal[:10]]
+                                + ["„Schwärzen starten“ erzeugt eine bereinigte Ausgabe ohne diese Teile. Das "
+                                   "Original NICHT weitergeben."])
 
-        if gesamt and angehakt:
+        if gesamt == 0 and nebenkanal:
+            self._log(f"Analyse fertig: auf den Seiten keine Funde, aber Personendaten in Metadaten/Anhängen von "
+                      f"{len(nebenkanal)} Datei(en) – „Schwärzen starten“ erzeugt eine bereinigte Ausgabe.",
+                      "warnung", zaehlen=False)
+            self._status("Personendaten in Metadaten/Anhängen – bitte „Schwärzen starten“: die Ausgabe wird bereinigt.")
+        elif gesamt and angehakt:
             davon = f", davon {len(angeboten_funde)} nur angeboten (nicht angehakt)" if angeboten_funde else ""
             self._log(f"Analyse fertig: {gesamt} Fund(e) in {len(ergebnisse)} Datei(en){davon}. "
                       f"Bitte Liste prüfen (Doppelklick = Vorschau), dann schwärzen.", "ok")
@@ -2444,8 +3153,10 @@ class AnonymisiererApp:
                          f"eine Datei = Vorschau), dann schwärzen.")
         elif gesamt:
             was = "mögliche Gesundheitsangaben" if nur_gesundheit else "Funde"
+            folge = ("Wegen der Personendaten in Metadaten/Anhängen erzeugt „Schwärzen starten“ trotzdem eine "
+                     "bereinigte Ausgabe." if nebenkanal else "Ohne Häkchen wird keine Ausgabedatei erzeugt.")
             self._log(f"Analyse fertig: keine Personendaten zum Schwärzen in {len(ergebnisse)} Datei(en) – nur "
-                      f"{gesamt} {was} angeboten (nicht angehakt). Ohne Häkchen wird keine Ausgabedatei erzeugt.",
+                      f"{gesamt} {was} angeboten (nicht angehakt). {folge}",
                       "ok", zaehlen=False)
             self._status(f"Keine Personendaten zum Schwärzen – nur {was} angeboten (nicht angehakt). Bitte prüfen; "
                          f"zum Schwärzen anhaken.")
@@ -2457,7 +3168,14 @@ class AnonymisiererApp:
         # Abschlussdialog aus Blöcken (je Überschrift mit ihren Punkten), durch Leerzeilen getrennt
         bloecke: list[list[str]] = []
         art = "info"
-        if gesamt == 0:
+        if gesamt == 0 and nebenkanal:
+            art = "warning"
+            bloecke.append(nebenkanal_block)
+            ohne = [p for p, e in ergebnisse.items() if not e["fehler"] and p not in dict(nebenkanal)]
+            if ohne:
+                bloecke.append([f"In {len(ohne)} weiteren Datei(en) wurde nichts gefunden – bitte selbst durchsehen "
+                                f"(Doppelklick = Vorschau):"] + [f"  • {self._anzeigename(p)}" for p in ohne[:10]])
+        elif gesamt == 0:
             bloecke.append(["Es wurden keine personenbezogenen Daten erkannt. Es gibt nichts zu schwärzen, "
                             "deshalb bleibt der Schwärzen-Knopf aus und es wird keine Ausgabedatei erzeugt."])
             if ohne_text:
@@ -2469,10 +3187,18 @@ class AnonymisiererApp:
                 bloecke.append(["Mögliche Gründe: Das Dokument enthält keine Namen, IBANs, Adressen usw. "
                                 "(z. B. ein Bedingungswerk), oder die Daten stehen in Bildern oder Handschrift. "
                                 "Bitte das Dokument selbst durchsehen (Doppelklick = Vorschau)."])
+        elif not angehakt and nebenkanal:
+            art = "warning"
+            bloecke.append(nebenkanal_block)
+            bloecke.append(["Auf den Seiten stehen nur angebotene, NICHT angehakte Stellen – sie bleiben lesbar, "
+                            "wenn sie nicht angehakt werden."])
         elif not angehakt:
             bloecke.append([f"Keine Personendaten zum Schwärzen erkannt (keine Namen, Anschriften, IBANs, Nummern …). "
                             f"In der Fundliste stehen nur angebotene, NICHT angehakte Stellen. Ohne Häkchen bleibt "
                             f"der Schwärzen-Knopf aus, und es wird keine Ausgabedatei erzeugt."])
+        elif nebenkanal:
+            art = "warning"
+            bloecke.append(nebenkanal_block)
         if self.warnungen_anzahl and gesamt:
             art = "warning"
             kopf = (f"Die Analyse hat {gesamt} Fund(e) ergeben und {self.warnungen_anzahl} Warnung(en)/Fehler "
@@ -2512,7 +3238,9 @@ class AnonymisiererApp:
                 if zeilen:
                     zeilen.append("")
                 zeilen += block
-            self._dialog(art, "Analyse abgeschlossen" if gesamt else "Keine Funde", "\n".join(zeilen))
+            titel = "Analyse abgeschlossen" if gesamt else ("Personendaten in Metadaten/Anhängen" if nebenkanal
+                                                             else "Keine Funde")
+            self._dialog(art, titel, "\n".join(zeilen))
 
     @staticmethod
     def _gesundheit_nur_vermutet(ergebnis: dict) -> bool:
@@ -2578,11 +3306,18 @@ class AnonymisiererApp:
             else:
                 stellen.setdefault(eintrag["seite"], []).append(
                     (int(eintrag["start"]), int(eintrag["ende"]), PLATZHALTER_MANUELL))
-        if not funde and not bereiche and not stellen:
+        nebenkanal = None if ergebnis.get("fehler") else _nebenkanal_bezug(ergebnis)
+        if not funde and not bereiche and not stellen and nebenkanal is None:
             return None
+        kopie = self.arbeitskopien.get(pdf)
         return {"pdf": pdf, "funde": funde, "ocr_cache": ergebnis.get("ocr_cache"),
                 "modell": ergebnis.get("modell") if self.einzelstellen_moeglich(pdf) else None,
-                "bereiche": bereiche, "stellen": stellen}
+                "bereiche": bereiche, "stellen": stellen,
+                # die Engine liest die Arbeitskopie; die Ausgabe gehört neben das ORIGINAL (nie in den Temp-Ordner)
+                "datei": Path(kopie["pfad"]) if kopie else pdf,
+                "ziel_ordner": Path(pdf).parent / dateien.AUSGABE_ORDNER if kopie else None,
+                "nebenkanaele": ergebnis.get("nebenkanaele") if nebenkanal is not None else None,
+                "nur_nebenkanal": not funde and not bereiche and not stellen}
 
     def schwaerzen(self, nur: list | None = None, ersetzt: Path | None = None) -> bool:
         """Schwärzt alle angehakten Funde (bzw. nur die Dateien in „nur“, z. B. zum Nachschwärzen; die Ausgabe
@@ -2626,6 +3361,9 @@ class AnonymisiererApp:
         if nur is None:
             self.letzte_ausgabeordner = []
         freigabe = bool(self.freigabe_var.get())
+        self._schwaerz_kontext = {"freigabe": freigabe, "profil": self.profil_var.get(),
+                                  "basis_profil": self.basis_profil, "nachschwaerzen": ersetzt is not None,
+                                  "gemeinsamer_zielordner": ziel_ordner is not None and ersetzt is None}
         self._lauf_starten("schwaerzen")
         self._status("Schwärzung startet …")
         threading.Thread(target=self._schwaerz_lauf,
@@ -2641,9 +3379,10 @@ class AnonymisiererApp:
         try:
             ocr = self._ocr_dienst_anlegen()
             self.ocr = ocr
-            seiten = {a["pdf"]: _seitenzahl(a["pdf"]) for a in auftraege}
+            seiten = {a["pdf"]: _seitenzahl(a.get("datei", a["pdf"])) for a in auftraege}
             self._fortschritt_maximum(max(1, sum(seiten.values())))
-            ordner = {ziel_ordner} if ziel_ordner else {a["pdf"].parent / dateien.AUSGABE_ORDNER for a in auftraege}
+            ordner = {ziel_ordner} if ziel_ordner else {a.get("ziel_ordner") or a["pdf"].parent / dateien.AUSGABE_ORDNER
+                                                        for a in auftraege}
             for o in sorted(ordner):
                 entfernt = dateien.zwischendateien_aufraeumen(o)
                 if entfernt:
@@ -2662,7 +3401,10 @@ class AnonymisiererApp:
                     self._status(f"Schwärzung: Datei {_nr}/{len(auftraege)}, Seite {seite}/{gesamt} – {_name}")
 
                 kwargs = {"melde": lambda t: self._log(t, "grau"), "fortschritt": fortschritt, "abbruch": abbruch,
-                          "ocr": ocr, "ocr_cache": auftrag["ocr_cache"], "ziel_ordner": ziel_ordner}
+                          "ocr": ocr, "ocr_cache": auftrag["ocr_cache"],
+                          "ziel_ordner": ziel_ordner or auftrag.get("ziel_ordner")}
+                if auftrag.get("nebenkanaele") is not None and kann(schwaerze_pdf, "nebenkanaele"):
+                    kwargs["nebenkanaele"] = auftrag["nebenkanaele"]
                 if auftrag["modell"] is not None:
                     kwargs["modell"] = auftrag["modell"]
                 if auftrag["bereiche"]:
@@ -2674,8 +3416,16 @@ class AnonymisiererApp:
                     kwargs["freigabe_erforderlich"] = freigabe
                 if kann(schwaerze_pdf, "profil"):
                     kwargs["profil"] = profil
+                datei = auftrag.get("datei", pdf)
+                art = dateien.datei_art(datei)
                 try:
-                    ergebnis = _schwaerz_ergebnis_pruefen(schwaerze_pdf(pdf, auftrag["funde"], **kwargs), pdf)
+                    if not dateien.fuer_engine_erlaubt(art):      # R-01: nie eine Nicht-PDF an die Schwärzung
+                        keine = self._keine_pdf_ergebnis(pdf, art)
+                        ergebnis = {"original": pdf, "ausgabe": None, "treffer": 0, "uebersprungen": 0,
+                                    "warnungen": [], "hinweise": [], "reste": [], "fehler": keine["fehler"],
+                                    "meldungen": keine["meldungen"]}
+                    else:
+                        ergebnis = _schwaerz_ergebnis_pruefen(schwaerze_pdf(datei, auftrag["funde"], **kwargs), pdf)
                     if ergebnis["fehler"] and ergebnis["fehler"] != "Abgebrochen":
                         ergebnis["fehler"] = _fehlertext_verstaendlich(ergebnis["fehler"])
                     if freigabe and not freigabe_engine:
@@ -2812,6 +3562,10 @@ class AnonymisiererApp:
                 ordner.append(e["ausgabe"].parent)
         self.letzte_ausgabeordner = ordner
         stellen = sum(e["treffer"] for _, e in geschrieben)
+        try:
+            self._protokoll_schwaerzung(auftraege, ergebnisse, abgebrochen)
+        except Exception:                                 # das Laufprotokoll darf den Abschluss nie verhindern
+            dateien.fehler_protokollieren(*sys.exc_info())
         self._lauf_beenden()
         if erster_fehler is not None:
             self._fehler_dialog(*erster_fehler)
@@ -2823,7 +3577,8 @@ class AnonymisiererApp:
             self._nachschwaerzen_fertig(ergebnisse, ersetzt, abgebrochen)
             return
 
-        alles_gut = not ohne_ausgabe and not nicht_verarbeitet and not pruefen and not abgebrochen
+        alles_gut = (not ohne_ausgabe and not nicht_verarbeitet and not pruefen and not abgebrochen
+                     and not self.nicht_geprueft)
         if abgebrochen:
             self._log("Schwärzung abgebrochen.", "fehler", zaehlen=False)
         self._log(f"Fertig: {len(geschrieben)} von {len(auftraege)} Datei(en) geschrieben, "
@@ -2855,6 +3610,13 @@ class AnonymisiererApp:
                 zeilen.append(f"  • {self._anzeigename(pdf)}: {grund}")
             for pdf in nicht_verarbeitet[:10]:
                 zeilen.append(f"  • {self._anzeigename(pdf)}: nicht verarbeitet (abgebrochen)")
+        if self.nicht_geprueft:
+            zeilen.append("")
+            zeilen.append(f"NICHT geprüft (keine PDF, nicht lesbar oder ohne Kennwort): {len(self.nicht_geprueft)} "
+                          f"Datei(en) aus der Auswahl – diese Dateien nicht ungeprüft weitergeben:")
+            zeilen += [f"  • {self._kurzname(pfad)}: {grund}" for pfad, grund in list(self.nicht_geprueft.items())[:5]]
+            if len(self.nicht_geprueft) > 5:
+                zeilen.append(f"  … und {len(self.nicht_geprueft) - 5} weitere (siehe Protokoll)")
         if pruefen:
             zeilen.append("")
             zeilen.append(f"Zu prüfen: {len(pruefen)} Datei(en). {PRUEFEN_ERKLAERUNG}")
@@ -2890,6 +3652,7 @@ class AnonymisiererApp:
                 try:
                     self._vorschau_dateien_freigeben(ersetzt)
                     verwerfen(ersetzt)
+                    self._ereignis(f"{ersetzt.name} nachgeschwärzt → {e['ausgabe'].name} (alte Ausgabe verworfen)")
                     self._log(f"ℹ {self._anzeigename(pdf)}: nachgeschwärzt → {e['ausgabe'].name} "
                               f"(alte Ausgabe {ersetzt.name} verworfen).", "ok")
                 except Exception:
@@ -2943,12 +3706,243 @@ class AnonymisiererApp:
     def hilfe_grenzen(self):
         self._dialog("info", "Was wird nicht erkannt?", GRENZEN_TEXT)
 
+    def hilfe_hinweis(self):
+        """Hilfe → „Hinweise vor der Nutzung …“: der Hinweis vom ersten Start (M-19)."""
+        self.hinweis_zeigen()
+
+    def hinweis_zeigen(self):
+        if self.hinweis_dialog is not None:
+            try:
+                if self.hinweis_dialog.fenster.winfo_exists():
+                    self.hinweis_dialog.fenster.lift()
+                    return self.hinweis_dialog
+            except tk.TclError:
+                pass
+        self.letzter_dialog = ("hinweis", ERSTSTART_TITEL, ERSTSTART_TEXT)
+        self.hinweis_dialog = HinweisDialog(self)
+        return self.hinweis_dialog
+
+    def erststart_hinweis(self):
+        """Beim Start (aus main()): den Hinweis zeigen, solange „Nicht mehr anzeigen“ nicht bestätigt wurde."""
+        if self.beendet or self.hinweis_gelesen:
+            return None
+        try:
+            return self.hinweis_zeigen()
+        except tk.TclError:
+            return None
+
+    def hinweis_bestaetigt(self, nicht_mehr_anzeigen: bool):
+        self.hinweis_dialog = None
+        if bool(nicht_mehr_anzeigen) != self.hinweis_gelesen:
+            self.hinweis_gelesen = bool(nicht_mehr_anzeigen)
+            try:
+                self.einstellungen_speichern()
+            except Exception:
+                dateien.fehler_protokollieren(*sys.exc_info())
+
     def hilfe_ueber(self):
+        versionen = self._versionen()
         self._dialog("info", "Über PDF-Anonymisierer",
-                     f"PDF-Anonymisierer {__version__}\n\nPseudonymisiert PDFs lokal auf diesem Rechner "
-                     f"(PyMuPDF, spaCy, Tesseract). Es werden keine Daten ins Internet übertragen.\n\n"
+                     f"PDF-Anonymisierer {__version__}\n\nPseudonymisiert PDFs lokal auf diesem Rechner. Es werden "
+                     f"keine Daten ins Internet übertragen.\n"
+                     f"PyMuPDF {versionen['pymupdf']} · spaCy {versionen['spacy']} · Sprachmodell "
+                     f"{versionen['modell']}\n\n"
+                     f"Tastenkürzel: Alt+A = Analysieren, Alt+S = Schwärzen starten, Alt+V = Vorschau\n\n"
                      f"Fehlerprotokoll: {dateien.fehlerlog_pfad()}\n(enthält Dateinamen, aber keine Ordner und "
                      f"keine Dokumentinhalte)\nEinstellungen: {dateien.einstellungen_pfad()}")
+
+    # ------------------------------------------------------------------
+    # Laufprotokoll ohne Personendaten (M-61)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _versionen() -> dict:
+        """Programm-, PyMuPDF-, spaCy- und Modellversion (ohne das Modell zu laden)."""
+        def paket(name):
+            try:
+                return importlib.metadata.version(name)
+            except Exception:
+                return "nicht installiert"
+        pymupdf = str(getattr(fitz, "VersionBind", None) or getattr(fitz, "__version__", None) or paket("pymupdf"))
+        mupdf = getattr(fitz, "VersionFitz", None)
+        modell = None
+        try:
+            from . import namen as _namen
+            nlp = getattr(_namen, "_NLP", None)
+            if nlp is not None:
+                meta = getattr(nlp, "meta", {}) or {}
+                modell = f"{meta.get('lang', 'de')}_{meta.get('name', '?')} {meta.get('version', '')}".strip()
+        except Exception:
+            modell = None
+        if modell is None:
+            installiert = paket("de_core_news_md")
+            modell = (f"de_core_news_md {installiert} (noch nicht geladen)" if installiert != "nicht installiert"
+                      else "nicht installiert")
+        return {"programm": __version__, "pymupdf": pymupdf + (f" (MuPDF {mupdf})" if mupdf else ""),
+                "spacy": paket("spacy"), "modell": modell}
+
+    def _ereignis(self, text: str):
+        self.ereignisse.append((datetime.now().strftime("%d.%m.%Y %H:%M:%S"), text))
+
+    def _dokument_nr(self, pdf: Path) -> int:
+        return self.dateien.index(pdf) + 1 if pdf in self.dateien else 0
+
+    def _kategorie_namen(self) -> dict:
+        namen = {e[0]: e[1] for e in KATEGORIEN}
+        namen.update({"begriff": "Begriffe (IMMER-Liste)", "manuell": "manuell markiert"})
+        return namen
+
+    def _protokoll_analyse(self, pdfs, ergebnisse: dict, abgebrochen: bool):
+        """Zusammenfassung einer Analyse fürs Laufprotokoll: Zahlen, Kategorien und Meldungs-Codes – keine Texte,
+        keine Dateinamen."""
+        kontext = dict(self._lauf_kontext or {})
+        dokumente = []
+        for pdf in pdfs:
+            e = ergebnisse.get(pdf)
+            eintrag = {"nr": self._dokument_nr(pdf), "art": (self.arbeitskopien.get(pdf) or {}).get("art")}
+            if e is None:
+                eintrag["status"] = "nicht analysiert"
+            else:
+                angehakt, angeboten = {}, {}
+                for i, fund in enumerate(e["funde"]):
+                    ziel = angeboten if self.fund_zustand(pdf, i) == "aus" else angehakt
+                    ziel[fund.get("kategorie", "?")] = ziel.get(fund.get("kategorie", "?"), 0) + 1
+                nk = _nebenkanal_bezug(e)
+                eintrag.update(status="Fehler" if e["fehler"] else "analysiert", seiten=e.get("seiten") or 0,
+                               ocr_seiten=e.get("ocr_seiten") or 0, angehakt=angehakt, angeboten=angeboten,
+                               codes=sorted(meldungs_codes(e)), nebenkanal=_nebenkanal_text(nk) if nk else None)
+            dokumente.append(eintrag)
+        self.laufprotokoll.append({"art": "Analyse", "zeit": datetime.now(), "abgebrochen": abgebrochen,
+                                   "kontext": kontext, "dokumente": dokumente})
+
+    def _protokoll_schwaerzung(self, auftraege, ergebnisse, abgebrochen: bool):
+        kontext = dict(getattr(self, "_schwaerz_kontext", None) or {})
+        nach_pdf = dict(ergebnisse)
+        dokumente = []
+        for auftrag in auftraege:
+            pdf = auftrag["pdf"]
+            e = nach_pdf.get(pdf)
+            kategorien: dict[str, int] = {}
+            for fund in auftrag["funde"]:
+                kategorien[fund.get("kategorie", "?")] = kategorien.get(fund.get("kategorie", "?"), 0) + 1
+            manuell = sum(len(v) for v in auftrag["bereiche"].values()) + sum(len(v) for v in auftrag["stellen"].values())
+            if manuell:
+                kategorien["manuell"] = manuell
+            eintrag = {"nr": self._dokument_nr(pdf), "kategorien": kategorien,
+                       "art": (self.arbeitskopien.get(pdf) or {}).get("art"),
+                       "nur_nebenkanal": bool(auftrag.get("nur_nebenkanal"))}
+            if e is None:
+                eintrag.update(ausgabe=None, status="nicht verarbeitet", stellen=0, codes=[])
+            else:
+                analyse = self.analyse_ergebnisse.get(pdf) or {}
+                codes = sorted(meldungs_codes(e) | (meldungs_codes(analyse) if analyse else set()))
+                ausgabe = e.get("ausgabe")
+                eintrag.update(ausgabe=Path(ausgabe).name if ausgabe is not None else None,
+                               status=STATUS_TEXT.get(e.get("_status"), e.get("_status") or "?"),
+                               stellen=int(e.get("treffer") or 0), verdacht=len(e.get("verdacht") or []),
+                               codes=codes)
+            dokumente.append(eintrag)
+        self.laufprotokoll.append({"art": "Schwärzung", "zeit": datetime.now(), "abgebrochen": abgebrochen,
+                                   "kontext": kontext, "dokumente": dokumente})
+
+    def laufprotokoll_text(self) -> str:
+        """Laufprotokoll als Text: Datum, Versionen, Schutzstufe, aktive Kategorien, ANZAHL der NIE-/IMMER-Einträge,
+        je Dokument Ausgabename, Status, Anzahl je Kategorie und Meldungs-Codes. Bewusst OHNE Dokumenttext, ohne
+        Originaldateinamen und ohne Ordner (die enthalten oft Kundennamen) – das Protokoll kann aufbewahrt werden."""
+        v = self._versionen()
+        namen = self._kategorie_namen()
+        art_text = {"bild": "Bild → PDF", "entschluesselt": "Kennwort entfernt", "kopie": "PDF ohne Endung"}
+        zeilen = ["PDF-Anonymisierer – Laufprotokoll",
+                  f"Erstellt: {datetime.now():%d.%m.%Y %H:%M:%S}",
+                  f"Programmversion: {v['programm']}",
+                  f"PyMuPDF: {v['pymupdf']}",
+                  f"spaCy: {v['spacy']} · Sprachmodell: {v['modell']}",
+                  "Hinweis: Dieses Protokoll enthält keine Dokumentinhalte, keine Originaldateinamen und keine "
+                  "Ordner. Dokumente sind nach ihrer Position in der Liste nummeriert.", ""]
+
+        def kategorien_text(zahlen: dict) -> str:
+            return ", ".join(f"{namen.get(k, k)} {n}" for k, n in sorted(zahlen.items())) or "keine"
+
+        for nr, lauf in enumerate(self.laufprotokoll, 1):
+            k = lauf["kontext"]
+            kopf = f"──────── Lauf {nr}: {lauf['art']} · {lauf['zeit']:%d.%m.%Y %H:%M:%S}"
+            zeilen.append(kopf + (" · ABGEBROCHEN" if lauf["abgebrochen"] else "") + " ────────")
+            stufe = _profil_name(k.get("profil", ""))
+            if k.get("profil") == attrappen.BENUTZERDEFINIERT:
+                stufe += f" (Erkennungsregeln der Stufe „{_profil_name(k.get('basis_profil', ''))}“)"
+            if stufe:
+                zeilen.append(f"Schutzstufe: {stufe}")
+            if lauf["art"] == "Analyse":
+                zeilen.append("Aktive Kategorien: " + (", ".join(namen.get(a, a) for a in k.get("aktive", []))
+                                                       or "keine"))
+                zeilen.append(f"NIE-Liste: {k.get('nie', 0)} Eintrag/Einträge · IMMER-Liste: {k.get('immer', 0)} "
+                              f"Eintrag/Einträge · Kundenliste: {'genutzt' if k.get('kundenliste') else 'nicht genutzt'}")
+                for d in lauf["dokumente"]:
+                    teile = [f"Dokument {d['nr']}"]
+                    if d.get("art"):
+                        teile.append(f"({art_text.get(d['art'], d['art'])})")
+                    if d["status"] != "analysiert":
+                        teile.append(f"– {d['status']}")
+                    if "seiten" in d:
+                        teile.append(f"– {d['seiten']} Seite(n)" + (f", {d['ocr_seiten']} per OCR"
+                                                                     if d.get("ocr_seiten") else ""))
+                        teile.append(f"– angehakt: {kategorien_text(d['angehakt'])}")
+                        if d["angeboten"]:
+                            teile.append(f"– nur angeboten: {kategorien_text(d['angeboten'])}")
+                        if d.get("nebenkanal"):
+                            teile.append(f"– Personendaten in {d['nebenkanal']}")
+                        if d["codes"]:
+                            teile.append(f"– Meldungen: {', '.join(d['codes'])}")
+                    zeilen.append("  " + " ".join(teile))
+            else:
+                zeilen.append(f"Freigabe vor Weitergabe: {'an' if k.get('freigabe') else 'aus'}"
+                              + (" · Nachschwärzen" if k.get("nachschwaerzen") else "")
+                              + (" · gemeinsamer Zielordner" if k.get("gemeinsamer_zielordner") else ""))
+                for d in lauf["dokumente"]:
+                    name = d["ausgabe"] or f"Dokument {d['nr']} (keine Ausgabe)"
+                    teile = [f"{name} (Dokument {d['nr']})" if d["ausgabe"] else name, f"– {d['status']}"]
+                    if d.get("art"):
+                        teile.append(f"– {art_text.get(d['art'], d['art'])}")
+                    teile.append(f"– {d['stellen']} Stelle(n) ersetzt")
+                    teile.append(f"– geschwärzt: {kategorien_text(d['kategorien'])}")
+                    if d.get("nur_nebenkanal"):
+                        teile.append("– nur Metadaten/Anhänge bereinigt")
+                    if d.get("verdacht"):
+                        teile.append(f"– {d['verdacht']} Verdachtsstelle(n)")
+                    if d["codes"]:
+                        teile.append(f"– Meldungen: {', '.join(d['codes'])}")
+                    zeilen.append("  " + " ".join(teile))
+            zeilen.append("")
+        if self.ereignisse:
+            zeilen.append("──────── Ereignisse (Freigabe, Verwerfen, Nachschwärzen) ────────")
+            zeilen += [f"  {zeit}  {text}" for zeit, text in self.ereignisse]
+            zeilen.append("")
+        if self.nicht_geprueft:
+            zeilen.append(f"Nicht geprüft (keine PDF, nicht lesbar oder ohne Kennwort): {len(self.nicht_geprueft)} "
+                          f"Datei(en) – Namen bewusst nicht im Protokoll.")
+        return "\n".join(zeilen).rstrip() + "\n"
+
+    def protokoll_speichern(self, pfad=None) -> Path | None:
+        """Menü Datei → „Protokoll speichern …“: Laufprotokoll dieser Sitzung als Textdatei (M-61)."""
+        if not self.laufprotokoll:
+            self._dialog("info", "Protokoll speichern", "In dieser Sitzung gab es noch keinen Lauf – bitte zuerst "
+                                                        "analysieren bzw. schwärzen.")
+            return None
+        if pfad is None:
+            vorschlag = f"{dateien.PROTOKOLL_PRAEFIX}{datetime.now():%Y-%m-%d_%H-%M}.txt"
+            ordner = self.letzte_ausgabeordner[0].parent if self.letzte_ausgabeordner else Path.home()
+            pfad = filedialog.asksaveasfilename(title="Laufprotokoll speichern", parent=self.root,
+                                                initialfile=vorschlag, initialdir=str(ordner),
+                                                defaultextension=".txt", filetypes=[("Textdateien", "*.txt")])
+            if not pfad:
+                return None
+        pfad = Path(pfad)
+        try:
+            pfad.write_text(self.laufprotokoll_text(), encoding="utf-8-sig")
+        except OSError as fehler:
+            self._dialog("error", "Protokoll nicht gespeichert", _verstaendliche_fehlermeldung(fehler, pfad))
+            return None
+        self._log(f"✔ Laufprotokoll gespeichert: {pfad.name} (ohne Dokumentinhalte und Originaldateinamen).", "ok")
+        return pfad
 
     def fehlerlog_oeffnen(self):
         pfad = dateien.fehlerlog_pfad()
@@ -2964,6 +3958,7 @@ class AnonymisiererApp:
     # ------------------------------------------------------------------
     def _dialog(self, art, titel, text, eltern=None):
         """Zeigt einen Hinweis (nur im Hauptthread aufrufen) und merkt ihn sich für Tests."""
+        text = _anzeigetext(text)
         self.letzter_dialog = (art, titel, text)
         zeiger = {"info": messagebox.showinfo, "warning": messagebox.showwarning,
                   "error": messagebox.showerror}[art]
@@ -2972,12 +3967,14 @@ class AnonymisiererApp:
         except tk.TclError:
             pass
 
-    def _frage(self, titel, text, warnung=False, eltern=None) -> bool:
-        """Ja/Nein-Frage (nur im Hauptthread); merkt sich den Text für Tests."""
+    def _frage(self, titel, text, warnung=False, eltern=None, standard_nein=False) -> bool:
+        """Ja/Nein-Frage (nur im Hauptthread); merkt sich den Text für Tests. standard_nein: Enter = „Nein“."""
+        text = _anzeigetext(text)
         self.letzter_dialog = ("askyesno", titel, text)
+        optionen = {"default": messagebox.NO} if standard_nein else {}
         try:
             return bool(messagebox.askyesno(titel, text, icon="warning" if warnung else "question",
-                                            parent=eltern or self.root))
+                                            parent=eltern or self.root, **optionen))
         except tk.TclError:
             return False
 
@@ -3035,6 +4032,7 @@ class AnonymisiererApp:
         eigene Statuszeilen (Abbruch, Fertig-Zeile, Zusammenfassungen; GR-07)."""
         if not text:
             return
+        text = _anzeigetext(text)
 
         def einfuegen():
             if zaehlen and stil in ("warnung", "fehler"):
@@ -3101,8 +4099,15 @@ def main(ereignisschleife: bool = True):
             dateien.fehler_protokollieren(type(fehler), fehler, fehler.__traceback__)
     if root is None:
         root = tk.Tk()
+    # Arbeitskopien früherer Sitzungen (z. B. nach einem Absturz) löschen – unter der Einzelinstanz-Sperre läuft
+    # keine andere Sitzung dieses Benutzers
+    try:
+        dateien.alte_sitzungen_aufraeumen()
+    except Exception:
+        dateien.fehler_protokollieren(*sys.exc_info())
     app = AnonymisiererApp(root, modell_vorladen=True)
     app.instanz_sperre = sperre
+    app._nach_start.append(root.after(ERSTSTART_NACH_MS, app.erststart_hinweis))
 
     def zerstoert(ereignis):
         if ereignis.widget is root:
