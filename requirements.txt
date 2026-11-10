@@ -1,0 +1,29 @@
+# PDF-Anonymisierer – Laufzeitabhängigkeiten
+#
+# Installation (immer mit --only-binary, damit pip nie einen Quellbau startet):
+#   python -m pip install --only-binary=:all: -r requirements.txt
+#
+# Bereichs-Pins statt exakter Versionen: pip nimmt je Rechner die neueste Version, für die es
+# ein fertiges Wheel gibt (Stand 11/2026, mit pip --platform geprüft):
+# - Windows x64 mit Python 3.11 bis 3.14: PyMuPDF 2.x (zieht onnxruntime, numpy, PyYAML,
+#   psutil, networkx, tabulate nach). Python 3.10 (2.x verlangt 3.11+) und Python 3.15
+#   (onnxruntime hat noch keine 3.15-Wheels) bekommen PyMuPDF 1.28.2.
+# - Windows ARM64 (ungetestet): alles als fertige ARM64-Wheels für Python 3.11 bis 3.15,
+#   PyMuPDF dann 1.28.2 (2.x hat keine ARM64-Wheels); mit Python 3.10 fehlt spaCy für ARM64.
+# - 32-Bit-Python: keine spaCy-Wheels – nicht installierbar.
+#
+# Untergrenze PyMuPDF 1.24.10: Page.remove_rotation() gibt es erst ab 1.24.3, Document.bake()
+# und apply_redactions(text=...) ab 1.24.2; bis einschließlich 1.24.9 liest die OCR seitlich
+# gedrehte Scans nicht (tests/test_ocr.py::test_dienst_erkennt_seitlich_gedrehten_scan
+# schlägt fehl). Mit 1.24.10, 1.28.2 und 2.1 läuft die komplette Testsuite.
+# Dieselben Grenzen stehen in den Vorab-Prüfungen von Installieren.bat und EXE-bauen.bat
+# (tests/test_auslieferung.py prüft, dass alles zusammenpasst).
+pymupdf>=1.24.10,<3
+spacy>=3.8,<3.9
+tkinterdnd2>=0.4
+
+# Deutsches Sprachmodell für die Namenserkennung – passend zu spaCy 3.8.x,
+# als fertiges Wheel direkt von GitHub (kein "spacy download" nötig).
+# Ohne Zugang zu github.com: diese Datei an einem anderen Rechner laden, in den
+# Programmordner legen und Installieren.bat erneut starten (Offline-Weg).
+de_core_news_md @ https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl

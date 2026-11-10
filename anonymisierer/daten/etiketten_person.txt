@@ -1,0 +1,729 @@
+# Feldbezeichner und Rollenwörter, hinter denen eine PERSON steht
+# (Versicherungsnehmer: …, Name: …, Zeuge: …).
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+Abschleppdienst
+Absender
+Absender(in)
+Absender/-in
+Absender/in
+Absenderin
+abweichender Kontoinhaber
+Account holder
+Adressat
+Adressat(in)
+Adressat/-in
+Adressat/in
+Adressatin
+Agenturinhaber
+Agenturinhaberin
+Angaben zum Fahrer
+Angaben zum Unfallgegner
+Angaben zum Versicherungsnehmer
+Angaben zur Person
+Angaben zur versicherten Person
+Angehörige
+Angehöriger
+Ansprechpartner
+Ansprechpartner vor Ort
+Ansprechpartner(in)
+Ansprechpartner/-in
+Ansprechpartner/in
+Ansprechpartnerin
+Ansprechperson
+Anspruchsgegner
+Anspruchsgegner(in)
+Anspruchsgegner/-in
+Anspruchsgegner/in
+Anspruchsgegnerin
+Anspruchsteller
+Anspruchsteller(in)
+Anspruchsteller/-in
+Anspruchsteller/in
+Anspruchstellerin
+Antragsteller
+Antragsteller(in)
+Antragsteller/-in
+Antragsteller/in
+Antragstellerin
+Anzeigende
+Anzeigender
+Arbeitgeber
+Arbeitgeber(in)
+Arbeitgeber/-in
+Arbeitgeber/in
+Arbeitgeberin
+Arbeitnehmer
+Arbeitnehmer(in)
+Arbeitnehmer/-in
+Arbeitnehmer/in
+Arbeitnehmerin
+Arbeitnehmername
+Arzt
+Arzt/Ärztin
+Arzt/Therapeut
+Ärztin
+Aufsichtsrat
+Aufsichtsratsvorsitzende
+Aufsichtsratsvorsitzender
+Auftraggeber
+Auftraggeber(in)
+Auftraggeber/-in
+Auftraggeber/in
+Auftraggeberin
+Aussteller
+Aussteller(in)
+Aussteller/-in
+Aussteller/in
+Ausstellerin
+Auszubildende
+Auszubildender
+Autohaus
+Autowerkstatt
+Bäckerei
+Bearbeiter
+Bearbeiter(in)
+Bearbeiter/-in
+Bearbeiter/in
+Bearbeiterin
+bearbeitet von
+Begünstigte
+Begünstigter
+behandelnde Ärzte
+behandelnde Ärztin
+behandelnder Arzt
+Behandelnder Arzt/Therapeut
+Behandler
+Behandler(in)
+Behandler/-in
+Behandler/in
+Behandlerin
+Beifahrer
+Beifahrer(in)
+Beifahrer/-in
+Beifahrer/in
+Beifahrerin
+Beirat
+Beitragszahler
+Beitragszahler(in)
+Beitragszahler/-in
+Beitragszahler/in
+Beitragszahlerin
+Beneficiary
+Berater
+Berater(in)
+Berater/-in
+Berater/in
+Beraterin
+Beschäftigte
+Beschäftigter
+Besitzer
+Besitzer(in)
+Besitzer/-in
+Besitzer/in
+Besitzerin
+Beteiligte
+Beteiligter
+Betreuer
+Betreuer im Sinne des Betreuungsrechts
+Betreuer(in)
+Betreuer/-in
+Betreuer/in
+Betreuerin
+Bevollmächtigte
+Bevollmächtigter
+Bezugsberechtigte
+bezugsberechtigte Person
+Bezugsberechtigter
+Bruder
+Bürge
+Bürgin
+Contact person
+Darlehensnehmer
+Darlehensnehmer(in)
+Darlehensnehmer/-in
+Darlehensnehmer/in
+Darlehensnehmerin
+Datenschutzbeauftragte
+Datenschutzbeauftragter
+Depotinhaber
+Depotinhaberin
+Ehefrau
+Ehegatte
+Ehegattin
+Eheleute
+Ehemann
+Ehename
+Ehepaar
+Ehepartner
+Ehepartner(in)
+Ehepartner/-in
+Ehepartner/in
+Ehepartnerin
+Eigentümer
+Eigentümer(in)
+Eigentümer/-in
+Eigentümer/in
+Eigentümerin
+eingetragene Lebenspartnerin
+eingetragener Lebenspartner
+Eltern
+Elternteil
+Empfänger
+Empfänger(in)
+Empfänger/-in
+Empfänger/in
+Empfängerin
+Enkel
+Enkelin
+Erbe
+Erben
+Erbin
+Erblasser
+Erblasser(in)
+Erblasser/-in
+Erblasser/in
+Erblasserin
+Ergotherapie
+Ersteller
+Ersteller(in)
+Ersteller/-in
+Ersteller/in
+Erstellerin
+erstellt von
+Erziehungsberechtigte
+Erziehungsberechtigter
+Fa.
+Facharzt
+Fachärztin
+Fahrer
+Fahrer(in)
+Fahrer/-in
+Fahrer/in
+Fahrerin
+Fahrzeugeigentümer
+Fahrzeugeigentümer(in)
+Fahrzeugeigentümer/-in
+Fahrzeugeigentümer/in
+Fahrzeugeigentümerin
+Fahrzeugführer
+Fahrzeugführer(in)
+Fahrzeugführer/-in
+Fahrzeugführer/in
+Fahrzeugführerin
+Fahrzeughalter
+Fahrzeughalter(in)
+Fahrzeughalter/-in
+Fahrzeughalter/in
+Fahrzeughalterin
+Familienangehörige
+Familienname
+Family name
+Firma/Name
+First name
+Friseursalon
+frühere Namen
+früherer Name
+Führungskraft
+Full name
+Fußgänger
+Fußgänger(in)
+Fußgänger/-in
+Fußgänger/in
+Fußgängerin
+Geburtsname
+Gefahrperson
+Gemeinschaftspraxis
+Generalagentur
+Generalbevollmächtigte
+Generalbevollmächtigter
+Geschädigte
+Geschädigter
+Geschäftsführer
+Geschäftsführer(in)
+Geschäftsführer/-in
+Geschäftsführer/in
+Geschäftsführerin
+Geschäftsführung
+Geschäftsleitung
+Gesellschafter
+Gesellschafterin
+gesetzliche Vertreter
+gesetzliche Vertreterin
+gesetzlicher Vertreter
+Given name
+Gläubiger
+Gläubiger(in)
+Gläubiger/-in
+Gläubiger/in
+Gläubigerin
+Großmutter
+Großvater
+Gutachter
+Gutachter(in)
+Gutachter/-in
+Gutachter/in
+Gutachterbüro
+Gutachterin
+Halter
+Halter(in)
+Halter/-in
+Halter/in
+Halterin
+Hausarzt
+Hausärztin
+Hausarztpraxis
+Hausmeister
+Hausmeister(in)
+Hausmeister/-in
+Hausmeister/in
+Hausmeisterin
+Hausverwalter
+Hausverwalter(in)
+Hausverwalter/-in
+Hausverwalter/in
+Hausverwalterin
+Hausverwaltung
+Hebamme
+Heilpraktiker
+Heilpraktiker(in)
+Heilpraktiker/-in
+Heilpraktiker/in
+Heilpraktikerin
+Hinterbliebene
+Hinterbliebener
+Hundehalter
+Hundehalter(in)
+Hundehalter/-in
+Hundehalter/in
+Hundehalterin
+Ihr Ansprechpartner
+Ihr Berater
+Ihr Betreuer
+Ihre Ansprechpartnerin
+Ihre Beraterin
+Ihre Betreuerin
+Immobilienbüro
+Ingenieurbüro
+Inh.
+Inhaber
+Inhaber(in)
+Inhaber/-in
+Inhaber/in
+Inhaberin
+Insasse
+Insassin
+Insolvenzverwalter
+Insolvenzverwalter(in)
+Insolvenzverwalter/-in
+Insolvenzverwalter/in
+Insolvenzverwalterin
+Insured
+Insured person
+Kanzlei
+Karteninhaber
+Karteninhaberin
+Käufer
+Käufer(in)
+Käufer/-in
+Käufer/in
+Käuferin
+Kfz-Werkstatt
+Kind
+Kind 1
+Kind 2
+Kind 3
+Kinder
+Kontakt im Notfall
+Kontaktperson
+Kontoinhaber
+Kontoinhaber(in)
+Kontoinhaber/-in
+Kontoinhaber/in
+Kontoinhaberin
+Kreditkarteninhaber
+Kreditnehmer
+Kreditnehmer(in)
+Kreditnehmer/-in
+Kreditnehmer/in
+Kreditnehmerin
+Kunde
+Kundenberater
+Kundenberaterin
+Kundenbetreuer
+Kundenbetreuer(in)
+Kundenbetreuer/-in
+Kundenbetreuer/in
+Kundenbetreuerin
+Kundenname
+Kundin
+Last name
+Lebensgefährte
+Lebensgefährtin
+Lebenspartner
+Lebenspartner(in)
+Lebenspartner/-in
+Lebenspartner/in
+Lebenspartnerin
+Leistungsempfänger
+Leistungsempfänger(in)
+Leistungsempfänger/-in
+Leistungsempfänger/in
+Leistungsempfängerin
+Leistungserbringer
+Logopädie
+Mädchenname
+Makler
+Makler(in)
+Makler/-in
+Makler/in
+Maklerbüro
+Maklerin
+Malerbetrieb
+Mandant
+Mandant(in)
+Mandant/-in
+Mandant/in
+Mandantin
+Melder
+Melder(in)
+Melder/-in
+Melder/in
+Melderin
+Metzgerei
+Mieter
+Mieter(in)
+Mieter/-in
+Mieter/in
+Mieterin
+Mitantragsteller
+Mitantragsteller(in)
+Mitantragsteller/-in
+Mitantragsteller/in
+Mitantragstellerin
+Mitarbeiter
+Mitarbeiter(in)
+Mitarbeiter/-in
+Mitarbeiter/in
+Mitarbeiterin
+Mitarbeitername
+Miterbe
+Miterbin
+Mitreisende
+Mitreisender
+Mitschuldner
+Mitschuldnerin
+Mitversicherte
+mitversicherte Person
+mitversicherte Personen
+Mitversicherter
+Mutter
+Nachbar
+Nachbar(in)
+Nachbar/-in
+Nachbar/in
+Nachbarin
+Nachlassverwalter
+Nachlassverwalter(in)
+Nachlassverwalter/-in
+Nachlassverwalter/in
+Nachlassverwalterin
+Nachname
+Nachname, Vorname
+Name
+Name der Kundin
+Name der Mitarbeiterin
+Name der versicherten Person
+Name des Arbeitnehmers
+Name des Ehepartners
+Name des Fahrers
+Name des Geschädigten
+Name des Halters
+Name des Kindes
+Name des Kontoinhabers
+Name des Kunden
+Name des Mitarbeiters
+Name des Patienten
+Name des Unfallgegners
+Name des Versicherten
+Name des Versicherungsnehmers
+Name des Zeugen
+Name und Anschrift
+Name und Vorname
+Name VN
+Name VP
+Name, Anschrift
+Name, Vorname
+Name/Firma
+Notar
+Notarin
+Notfallkontakt
+Partner
+Partner(in)
+Partner/-in
+Partner/in
+Partnerin
+Patient
+Patient(in)
+Patient/-in
+Patient/in
+Patientenname
+Patientin
+Person
+Personalien
+Personendaten
+Persönliche Daten
+Pflegebedürftige
+Pflegebedürftiger
+pflegende Person
+Pflegeperson
+Pfleger
+Pfleger(in)
+Pfleger/-in
+Pfleger/in
+Pflegerin
+Physiotherapie
+Physiotherapiepraxis
+Policyholder
+Prämienzahler
+Prämienzahler(in)
+Prämienzahler/-in
+Prämienzahler/in
+Prämienzahlerin
+Prokurist
+Prokurist(in)
+Prokurist/-in
+Prokurist/in
+Prokuristin
+Radfahrer
+Radfahrer(in)
+Radfahrer/-in
+Radfahrer/in
+Radfahrerin
+Rechnungsaussteller
+Rechnungsausstellerin
+Rechnungssteller
+Rechnungsstellerin
+Rechtsanwalt
+Rechtsanwältin
+Reisende
+Reisender
+Rentenempfänger
+Rentenempfänger(in)
+Rentenempfänger/-in
+Rentenempfänger/in
+Rentenempfängerin
+Rufname
+Sachbearbeiter
+Sachbearbeiter(in)
+Sachbearbeiter/-in
+Sachbearbeiter/in
+Sachbearbeiterin
+Sachbearbeitung
+Sachverständige
+Sachverständigenbüro
+Sachverständiger
+Sanitätshaus
+Schadenmelder
+Schadenmelder(in)
+Schadenmelder/-in
+Schadenmelder/in
+Schadenmelderin
+Schädiger
+Schädiger(in)
+Schädiger/-in
+Schädiger/in
+Schädigerin
+Schreinerei
+Schuldner
+Schuldner(in)
+Schuldner/-in
+Schuldner/in
+Schuldnerin
+Schüler
+Schüler(in)
+Schüler/-in
+Schüler/in
+Schülerin
+Schwester
+Signature
+Sohn
+Sorgeberechtigte
+Sorgeberechtigter
+Spender
+Spender(in)
+Spender/-in
+Spender/in
+Spenderin
+Steuerberater
+Steuerberaterin
+Student
+Student(in)
+Student/-in
+Student/in
+Studentin
+Surname
+Testamentsvollstrecker
+Testamentsvollstrecker(in)
+Testamentsvollstrecker/-in
+Testamentsvollstrecker/in
+Testamentsvollstreckerin
+Therapeut
+Therapeut(in)
+Therapeut/-in
+Therapeut/Arzt
+Therapeut/in
+Therapeutin
+Tierhalter
+Tierhalter(in)
+Tierhalter/-in
+Tierhalter/in
+Tierhalterin
+Titel, Vorname, Name
+Tochter
+Treuhänder
+Treuhänder(in)
+Treuhänder/-in
+Treuhänder/in
+Treuhänderin
+überweisende Ärztin
+überweisender Arzt
+Unfallbeteiligte
+Unfallbeteiligter
+Unfallgegner
+Unfallgegner(in)
+Unfallgegner/-in
+Unfallgegner/in
+Unfallgegnerin
+Unfallverursacher
+Unfallverursacher(in)
+Unfallverursacher/-in
+Unfallverursacher/in
+Unfallverursacherin
+Unfallzeuge
+Unfallzeugin
+Untermieter
+Untermieter(in)
+Untermieter/-in
+Untermieter/in
+Untermieterin
+Unterschrift
+Unterschrift der versicherten Person
+Unterschrift des Antragstellers
+Unterschrift des Versicherungsnehmers
+Unterzeichnende
+Unterzeichnender
+Unterzeichner
+Unterzeichner(in)
+Unterzeichner/-in
+Unterzeichner/in
+Unterzeichnerin
+Vater
+Verfasser
+Verfasser(in)
+Verfasser/-in
+Verfasser/in
+Verfasserin
+Verfügungsberechtigte
+Verfügungsberechtigter
+Verkäufer
+Verkäufer(in)
+Verkäufer/-in
+Verkäufer/in
+Verkäuferin
+Vermieter
+Vermieter(in)
+Vermieter/-in
+Vermieter/in
+Vermieterin
+Vermittler
+Vermittler(in)
+Vermittler/-in
+Vermittler/in
+Vermittlerin
+Versicherte
+versicherte Person
+Versichertenname
+Versicherter
+Versicherungsbüro
+Versicherungsmakler
+Versicherungsmakler(in)
+Versicherungsmakler/-in
+Versicherungsmakler/in
+Versicherungsmaklerin
+Versicherungsnehmer
+Versicherungsnehmer(in)
+Versicherungsnehmer/-in
+Versicherungsnehmer/in
+Versicherungsnehmerin
+Verstorbene
+Verstorbener
+vertreten durch
+Vertreter
+Vertreter(in)
+Vertreter/-in
+Vertreter/in
+Vertreterin
+Vertretungsberechtigte
+Vertretungsberechtigter
+Verursacher
+Verursacher(in)
+Verursacher/-in
+Verursacher/in
+Verursacherin
+Verwalter
+Verwalter(in)
+Verwalter/-in
+Verwalter/in
+Verwalterin
+Verwaltungsrat
+VN
+Vollmachtgeber
+Vollmachtgeber(in)
+Vollmachtgeber/-in
+Vollmachtgeber/in
+Vollmachtgeberin
+vollständiger Name
+Vor- und Nachname
+Vor- und Zuname
+Vorgesetzte
+Vorgesetzter
+Vormund
+Vorname
+Vorname und Name
+Vorname, Name
+Vornamen
+Vorsitz Aufsichtsrat
+Vorsitzende des Aufsichtsrats
+Vorsitzende des Vorstands
+Vorsitzender des Aufsichtsrates
+Vorsitzender des Aufsichtsrats
+Vorsitzender des Vorstands
+Vorstand
+Vorstände
+Vorstandsvorsitzende
+Vorstandsvorsitzender
+VP
+Waise
+Werkstatt
+Witwe
+Witwer
+Zahlungsempfänger
+Zahlungsempfänger(in)
+Zahlungsempfänger/-in
+Zahlungsempfänger/in
+Zahlungsempfängerin
+Zahlungspflichtige
+Zahlungspflichtiger
+Zahnarzt
+Zahnärztin
+Zahnarztpraxis
+Zeuge
+Zeuge/Zeugin
+Zeugen
+Zeugin
+zu versichernde Person
+Zuname
+Zustellungsbevollmächtigte
+Zustellungsbevollmächtigter

@@ -1,0 +1,339 @@
+{
+ "dokument": "c_schadenmeldung",
+ "pii": [
+  {
+   "id": "c-01",
+   "text": "Olumide Adeyemi",
+   "kategorie": "namen",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "nigerianischer Name; Tabelle als 'Adeyemi, Olumide', Fließtext normal"
+  },
+  {
+   "id": "c-02",
+   "text": "Adeyemi",
+   "kategorie": "namen",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Nachname allein"
+  },
+  {
+   "id": "c-03",
+   "text": "Carl-Zeiss-Straße 12",
+   "kategorie": "strasse",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Bindestrich-Straße mit großem 'Straße'"
+  },
+  {
+   "id": "c-04",
+   "text": "07745 Jena",
+   "kategorie": "plzort",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "c-05",
+   "text": "0176 / 23 45 67 89",
+   "kategorie": "telefon",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Mobil mit ' / ' und Gruppen"
+  },
+  {
+   "id": "c-06",
+   "text": "KH 0815 4471 2",
+   "kategorie": "vertrag",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Etikett 'Versicherungsschein-' / 'Nr.' über zwei Tabellenzellen"
+  },
+  {
+   "id": "c-07",
+   "text": "o.adeyemi@gmx.de",
+   "kategorie": "email",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "c-08",
+   "text": "J-OA 4711",
+   "kategorie": "kfz",
+   "seite": 1,
+   "erwartung": "standard aus",
+   "bemerkung": "Kfz-Kennzeichen (Kategorie standardmäßig aus)"
+  },
+  {
+   "id": "c-09",
+   "text": "Nguyen Van Thanh",
+   "kategorie": "namen",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "vietnamesischer Name"
+  },
+  {
+   "id": "c-10",
+   "text": "17.02.1990",
+   "kategorie": "geburt",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "c-11",
+   "text": "J123456789",
+   "kategorie": "ausweis",
+   "seite": 1,
+   "erwartung": "nicht vorgesehen",
+   "bemerkung": "Führerschein-Nr."
+  },
+  {
+   "id": "c-12",
+   "text": "Jean-Pierre Dubois",
+   "kategorie": "namen",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "französischer Name"
+  },
+  {
+   "id": "c-13",
+   "text": "Rue de la Paix 4",
+   "kategorie": "strasse",
+   "seite": 1,
+   "erwartung": "nicht vorgesehen",
+   "bemerkung": "ausländische Adresse"
+  },
+  {
+   "id": "c-14",
+   "text": "67000 Strasbourg",
+   "kategorie": "plzort",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "5-stellige PLZ + Ort (Muster passt formal)"
+  },
+  {
+   "id": "c-15",
+   "text": "+33 6 12 34 56 78",
+   "kategorie": "telefon",
+   "seite": 1,
+   "erwartung": "nicht vorgesehen",
+   "bemerkung": "ausländische Rufnummer"
+  },
+  {
+   "id": "c-16",
+   "text": "ES-123-AB",
+   "kategorie": "kfz",
+   "seite": 1,
+   "erwartung": "standard aus",
+   "bemerkung": ""
+  },
+  {
+   "id": "c-17",
+   "text": "7781-2290-FR",
+   "kategorie": "vertrag",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Police-Nr. des Gegners"
+  },
+  {
+   "id": "c-18",
+   "text": "Peter Lang",
+   "kategorie": "namen",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": "Zeuge"
+  },
+  {
+   "id": "c-19",
+   "text": "Am Alten Bahnhof 3",
+   "kategorie": "strasse",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": "Straße ohne Schlüsselwort am Ende"
+  },
+  {
+   "id": "c-20",
+   "text": "99423 Weimar",
+   "kategorie": "plzort",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "c-21",
+   "text": "03643 / 90 12 34",
+   "kategorie": "telefon",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "c-22",
+   "text": "Sandra Klein-Hoffmann",
+   "kategorie": "namen",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": "Zeugin, Doppelname"
+  },
+  {
+   "id": "c-23",
+   "text": "Goethestraße 21",
+   "kategorie": "strasse",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "c-24",
+   "text": "0151 12345678",
+   "kategorie": "telefon",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "c-25",
+   "text": "Kowalczyk",
+   "kategorie": "namen",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": "Werkstatt-Ansprechpartner"
+  },
+  {
+   "id": "c-26",
+   "text": "03641 / 55 44 33",
+   "kategorie": "telefon",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "c-27",
+   "text": "Rainer Vogt",
+   "kategorie": "namen",
+   "seite": 2,
+   "erwartung": "schwärzen",
+   "bemerkung": "Sachverständiger"
+  },
+  {
+   "id": "c-28",
+   "text": "DE75 5121 0800 1245 1261 99",
+   "kategorie": "iban",
+   "seite": 3,
+   "erwartung": "schwärzen",
+   "bemerkung": ""
+  },
+  {
+   "id": "c-29",
+   "text": "0911 123456",
+   "kategorie": "telefon",
+   "seite": 3,
+   "erwartung": "schwärzen",
+   "bemerkung": "Telefon, direkt darunter eine Zeile, die mit Ziffern beginnt (45,90 EUR)"
+  },
+  {
+   "id": "c-30",
+   "text": "Weber",
+   "kategorie": "namen",
+   "seite": 3,
+   "erwartung": "schwärzen",
+   "bemerkung": "Sachbearbeiterin"
+  },
+  {
+   "id": "c-31",
+   "text": "Rückruf Herr Adeyemi (0176 / 23 45 67 89)",
+   "kategorie": "annotation",
+   "seite": 3,
+   "erwartung": "schwärzen",
+   "bemerkung": "Notiz-Annotation (Sticky Note) mit Name + Telefon"
+  },
+  {
+   "id": "c-32",
+   "text": "2025/0815-JE",
+   "kategorie": "vertrag",
+   "seite": 2,
+   "erwartung": "nicht vorgesehen",
+   "bemerkung": "Polizei-Tagebuch-Nr."
+  },
+  {
+   "id": "c-33",
+   "text": "KH-2025-004711",
+   "kategorie": "vertrag",
+   "seite": 1,
+   "erwartung": "schwärzen",
+   "bemerkung": "Schaden-Nr., gefolgt von 'vom 12.03.2025'"
+  }
+ ],
+ "erhalten_soll": [
+  {
+   "text": "11.03.2025",
+   "seite": 2,
+   "bem": "Unfalldatum"
+  },
+  {
+   "text": "17:40 Uhr",
+   "seite": 2
+  },
+  {
+   "text": "Bundesstraße 7",
+   "seite": 2,
+   "bem": "Unfallort (Straße ohne Hausnummer-Charakter)"
+  },
+  {
+   "text": "Berkaer Straße / Belvederer Allee",
+   "seite": 2,
+   "bem": "Kreuzung"
+  },
+  {
+   "text": "2.874,19 EUR",
+   "seite": 2
+  },
+  {
+   "text": "VW Golf VIII",
+   "seite": 1
+  },
+  {
+   "text": "Peugeot 308",
+   "seite": 1
+  },
+  {
+   "text": "langfristige",
+   "seite": 2,
+   "bem": "Fließtext (enthält 'lang')"
+  },
+  {
+   "text": "Kleinreparatur",
+   "seite": 2,
+   "bem": "Fließtext (enthält 'klein')"
+  },
+  {
+   "text": "verlangen",
+   "seite": 2,
+   "bem": "Fließtext (enthält 'lang')"
+  },
+  {
+   "text": "Alkoholtest verlief negativ",
+   "seite": 2
+  },
+  {
+   "text": "Stoßstange",
+   "seite": 2
+  },
+  {
+   "text": "45,90 EUR",
+   "seite": 3,
+   "bem": "Verwaltungskosten"
+  },
+  {
+   "text": "12.03.2025",
+   "seite": 1,
+   "bem": "Schadendatum"
+  }
+ ],
+ "metadaten": {
+  "title": "Schadenanzeige KH-2025-004711 Adeyemi",
+  "author": "Olumide Adeyemi"
+ }
+}

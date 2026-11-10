@@ -1,0 +1,6 @@
+# Zusätzliche Pakete für Tests und den EXE-Bau (nicht für die normale Nutzung nötig)
+#   python -m pip install --only-binary=:all: -r requirements.txt -r requirements-dev.txt
+pytest>=8,<10
+pyinstaller>=6.10,<7
+markdown-it-py>=3
+pytest-timeout>=2.3
