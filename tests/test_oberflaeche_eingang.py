@@ -257,6 +257,9 @@ def test_ordner_scan_meldet_unlesbare_unterordner(tmp_path, monkeypatch):
     assert b["leere_ordner"] == [] and len(b["nicht_lesbar"]) == 1
 
 
+@pytest.mark.skipif(os.mkdir not in os.supports_dir_fd or os.open not in os.supports_dir_fd,
+                    reason="Linux-Analogon: legt den zu langen Pfad über Verzeichnis-Deskriptoren (dir_fd) an, die es "
+                           "unter Windows nicht gibt; dort prüft test_lange_windows_pfade_mit_praefix das \\\\?\\-Präfix")
 def test_linux_analogon_sehr_langer_pfad_wird_gemeldet(tmp_path):
     """Linux-Analogon zu MAX_PATH: ein Pfad über 4096 Zeichen. Früher fehlte die Datei ohne jede Meldung."""
     basis = tmp_path / "kundenordner"

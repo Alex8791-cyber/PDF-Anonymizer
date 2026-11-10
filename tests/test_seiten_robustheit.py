@@ -918,9 +918,16 @@ ALLE_ZEILEN = set(range(len(BRIEF)))
 ADRESSBLOCK = {1, 2, 3, 4}
 
 
+def textebene(seite, rect=None) -> str:
+    """Text der Seite (oder des Rechtecks) mit NBSP als Leerzeichen: Windows-Schriften (z. B. Segoe UI) legen
+    Leerzeichen und NBSP auf eine Glyphe, die Textebene liefert dann "Pda\\xa0Pxvwhupdqq" statt "Pda Pxvwhupdqq"."""
+    text = seite.get_text() if rect is None else seite.get_textbox(rect)
+    return text.replace("\xa0", " ")
+
+
 def zeilen_lesbar(seite, zeilen) -> bool:
     """Liefert die Textebene die Zeilen `zeilen` des Briefs richtig (dann gibt es nichts zu prüfen)?"""
-    return any(BRIEF[i] and BRIEF[i] in seite.get_textbox(fitz.Rect(60, 90 + i * 16 - 12, 560, 90 + i * 16 + 4))
+    return any(BRIEF[i] and BRIEF[i] in textebene(seite, fitz.Rect(60, 90 + i * 16 - 12, 560, 90 + i * 16 + 4))
                for i in zeilen)
 
 
@@ -959,7 +966,7 @@ def test_falsche_buchstabenzuordnung_kurzer_laeufe_entscheidet_die_ocr_probe(zei
     "Max Mustermann", die Textebene sagt "Pda Pxvwhupdqq": unlesbar."""
     doc = brief_mit_eigener_schrift(zeilen, "caesar")
     seite = doc[0]
-    assert not zeilen_lesbar(seite, zeilen) and "Pda Pxvwhupdqq" in seite.get_text()
+    assert not zeilen_lesbar(seite, zeilen) and "Pda Pxvwhupdqq" in textebene(seite)
     befund = ocr.textebene_pruefen(seite)
     assert befund.unlesbar and "Helvetica" not in befund.unlesbar
     assert ocr.seiten_pruefung(seite).modus == "seite"
