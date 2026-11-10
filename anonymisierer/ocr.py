@@ -5,10 +5,14 @@
     seiten_pruefung(seite)                  EINE Heuristik für Analyse, Schwärzung und Kontrolle:
                                             SeitenPruefung(modus, bereiche, zeichen, bildanteil, meldungen);
                                             auch unlesbare Textebene, Text in Mustern, Text als Vektorpfade
-    textebene_pruefen(seite), schrift_unlesbar(text), vektortext_bereiche(seite)
-                                            Bausteine dieser Entscheidung (Befunde R-02, R-03)
+    textebene_pruefen(seite), schrift_unlesbar(text), paar_bewertung(text), vektortext_bereiche(seite),
+    muster_mit_text(seite)                  Bausteine dieser Entscheidung (Befunde R-02, R-03; verdächtige Schriften
+                                            entscheidet eine OCR-Probe ihrer Textläufe)
+    pruefung_merken()                       Kontext: Seitenprüfung je Seite nur einmal (Seitenmodell)
     drehung_entfernen(seite)                /Rotate entfernen, sichtbarer Ausschnitt bleibt exakt (Befund R-05)
-    render_dpi(seite, clip, dpi)            Renderauflösung der OCR, riesige Seiten begrenzt (Befund R-06)
+    strukturbaum_entfernen(doc)             vor dem Rendern: Strukturbaum-Zyklen lassen MuPDF 1.28 hängen
+    render_dpi(seite, clip, dpi), render_aufloesung(...)
+                                            Renderauflösung der OCR (mit Grund), riesige Seiten begrenzt (Befund R-06)
     ocr_noetig(seite, meldungen=None)       "nein" | "seite" | "bilder"   (= seiten_pruefung(...).modus)
     bild_bereiche(seite, meldungen=None)    relevante Bildbereiche (= seiten_pruefung(...).bereiche)
     woerter_zu_zeilen(woerter, winkel=None, schraeg=None)
@@ -104,15 +108,72 @@ SALAT_SONDER_ANTEIL = 0.05    # … und >= 5 % Sonderzeichen (# { } ^ _ [ ] = | 
 SALAT_WORTLAENGE = 20.0       # … mittlerer "Wortlänge" ab 20 (Leerzeichen sind mitverschlüsselt)
 _SALAT_SONDERZEICHEN = frozenset("#{}^_][=|~`\\<>$!")
 _SYMBOLSCHRIFTEN = ("wingding", "webding", "dingbat", "symbol", "marlett")  # Aufzählungszeichen in Private Use
+# Zeichensalat aus druckbaren Zeichen (Befund R-02, Runde 2): Erzeuger, die Glyphennummern als Unicode ausgeben
+# (Identitäts-ToUnicode, /ToUnicode /Identity-H: "Muster" -> "0XVWHU", Leerzeichen und Ziffern werden Steuerzeichen),
+# und falsche Zuordnungen Buchstabe -> Buchstabe ("Pxvwhupdqq"). Gemessen je Schrift: ganze Seiten liegen bei 21-23 %
+# seltsamen Zeichen, ein fetter Name bei 1 von 14 – zu wenig für die Regeln oben. Verdächtig ist deshalb jede
+# Schrift mit seltsamen Zeichen, mit Unicode = Glyphennummer oder mit Buchstabenpaaren wie Salat (Paarbewertung
+# unten); ob die Textebene zu den gezeichneten Glyphen passt, entscheidet eine OCR-Probe ihrer Textläufe. Gemessen
+# auf den Entwicklungskorpora (364 Schrift-Seiten) und 188 fremden PDFs (1042 Schrift-Seiten): deutsche Texte
+# bewerten 0,75-3,0 (Ausnahme maschinenlesbare Ausweiszeilen), Caesar-/Zufallsersetzungen und Glyphennummern zu
+# 96-100 % unter 0,5; Glyphennummern als Unicode gab es nur bei Schriften, deren Glyphen nach Unicode geordnet sind
+# (lesbar – die Probe bestätigt das).
+IDENTITAET_ANTEIL = 0.8       # so viele sichtbare Zeichen mit Unicode == Glyphennummer: verdächtig
+PAAR_MIN = 6                  # Buchstabenpaare (mit Wortanfang/-ende), ab denen die Paarbewertung zählt …
+PAAR_SCHWELLE = 0.5           # … und darunter verdächtig ist; unter 0 (ab 16 Paaren) gilt das als starkes Zeichen
+PAAR_STARK_MIN = 16
+PROBE_MIN_ZEICHEN = 3         # Schriften mit weniger sichtbaren Zeichen werden nicht geprüft (Aufzählungszeichen)
+PROBE_MAX_LAEUFE = 3          # je Schrift höchstens so viele Textläufe per OCR lesen …
+PROBE_GENUG = 12              # … und aufhören, sobald die OCR so viele Buchstaben/Ziffern gelesen hat
+PROBE_MAX_SCHRIFTEN = 6       # je Seite höchstens so viele Schriften prüfen (übrige verdächtige: siehe _schrift_stufe)
+PROBE_ZEILE_PX = 48           # die Probe rendert eine Zeile etwa so hoch (150-400 dpi, höchstens 4 MP)
+PROBE_MIN_DPI, PROBE_MAX_DPI, PROBE_MAX_PIXEL = 150, 400, 4_000_000
+PROBE_GLEICH = 0.5            # Ähnlichkeit OCR <-> Textebene (Buchstaben und Ziffern in Lesefolge), ab der sie passen
+PROBE_MIN_GELESEN = 3         # die OCR muss mindestens so viele Buchstaben/Ziffern lesen, sonst keine Aussage
+# Bewertung der Buchstabenpaare: log2(Anteil des Paars x Anzahl möglicher Paare), gerundet auf -6..+4 und als
+# Zeichen chr(ord("a") + Wert + 6) abgelegt; "a" = unbekannt. Zeilen: erstes Zeichen "^" (Wortanfang), a-z, ä, ö,
+# ü, ß; Spalten: zweites Zeichen "$" (Wortende), a-z, ä, ö, ü, ß. Gezählt über die Wörter (Typen) der Wortlisten
+# in anonymisierer/daten (Allerwelts-, Formular-, Berufs- und Diagnosewörter dreifach, Vor- und Nachnamen aller
+# Herkunftsländer einfach) und _HAEUFIGE_WOERTER (Stand Runde 2).
+_PAAR_ERSTE = "^abcdefghijklmnopqrstuvwxyzäöüß"
+_PAAR_ZWEITE = "$abcdefghijklmnopqrstuvwxyzäöüß"
+_PAARE = (
+    "ajjghiiiihgiiihgieijigihcehcdea iehhhdhiifdgihjdgajiiiedeeeaaae ehdadjccdgcbfbegaaggdgacaccecfa "
+    "ceacafaakeahcaafaacacdaaabcaaaa hhdadjcdeiadfdffbaggehddaebbaba kghihfghhkcgjhkfgakiihffedfaaac "
+    "gidaahgcbgachddgcahfhgccaacfefa jgcackcddhafgdeebahjehbbaccdbda hieacjdcdhaehghgcaifihdfaecgfea "
+    "hgfigjghecdhigkhecgjjdfcbdgbaab cfaaaeaaadaaaaaeaaaaaeaaaaadaaa gicacicdegadgdeiaahfhhcdabcddea "
+    "hifdhjgfdicfifeheaeghhfdaeefdea hiebdiccbiaddhdgfacffgadadcdeca kigejihkfichffhgebgiihffachebca "
+    "gegfgdfgfddfhhiegaihgfffccfaaac ehaaahhafgabgabggahefeaaabadaaa aaaaaaaaabaaaaaaaaaaaeaaaaaaaaa "
+    "jjhehjghgjdhghgifagiiifgadhgdga iihjfjgggichfgfhhbgikhgfagfebda jifbdkefhjaegefheaiihiffadigeea "
+    "fefgfghgeebfghkdgahihdcccbdaaae egaaajaaagaababgaabaabbaaaaabaa ehaaaiaaahaababfaabdaeaaaaaebba "
+    "ccaaacaaaeabaaaabaaadaaaaaaaaaa ffadcdabacacddedeacgddaaaaaaaaa hgebbicdchaddccecacdfhdeadccbea "
+    "aaaefaeffaaaeegaaagegeaaaaaaaaa aabdbaceeaaccacabagdbaaaaabaaab aaffaafdgaaaecfaaafedaaaaaaaaab "
+    "cabaaeabaaaaaadaaaabaaaaaaaaaaa "
+)
+_PAAR_WERT = {(a, b): ord(zeile[j]) - ord("a") - 6
+              for a, zeile in zip(_PAAR_ERSTE, _PAARE.split()) for j, b in enumerate(_PAAR_ZWEITE)}
+_PAAR_WORT = re.compile(r"[a-zäöüß]+")
 VERBORGEN_MIN_ZEICHEN = 10    # sichtbar gezeichnete Zeichen, die die Textextraktion nicht liefert (Kachelmuster)
-# Text als Vektorpfade (Befund R-03: "Text als Grafik drucken", Druckdaten mit Kurven): viele kleine gefüllte
-# Pfade mit Kurven. Gemessen: Korpora 0 solche Pfade je Seite, eine Textseite als Kurven 415.
-VEKTORTEXT_MIN_PFADE = 30     # so viele glyphenartige Pfade (gefüllt, mit Kurve, <= 60 x 40 pt) = Text als Grafik
-VEKTORTEXT_MAX_BREITE = 60.0
-VEKTORTEXT_MAX_HOEHE = 40.0
-VEKTORTEXT_ABSTAND_PT = 12.0  # glyphenartige Pfade bis zu diesem Abstand bilden einen Bereich (Wörter, Zeilen)
-VEKTORTEXT_MIN_GRUPPE = 8     # ein Bereich braucht mindestens 8 solcher Pfade (sonst Symbol, Logo, Unterschrift)
-VEKTORTEXT_MAX_PFADE = 20000  # mehr gefüllte Pfade: Plan/Karte, get_drawings wäre zu teuer (eine Textseite ~3000)
+# Text als Vektorpfade (Befund R-03: "Text als Grafik drucken", Druckdaten mit Kurven): viele kleine Umrisse. Gezählt
+# werden Glyphenformen – Teilpfade gefüllter UND gestrichener Pfade mit mindestens zwei Kurven- oder Schrägsegmenten,
+# höchstens 60 x 40 pt groß; Kurven sind keine Pflicht (Druckertreiber und "In Polygon umwandeln" lösen sie in
+# Linienzüge auf), ein Pfad darf eine Zeile, einen Textblock oder die ganze Seite umfassen (zusammengesetzte Umrisse,
+# "In Pfade umwandeln") und Strichschrift (CAD/SHX) ist nur gestrichen. Rechtecke, waagerechte und senkrechte Linien
+# (Tabellen) zählen nicht. Gemessen: Korpora 0 solche Bereiche je Seite, eine Textseite als Kurven, Polygone,
+# Zeilenpfade oder Striche 362-415 Formen in 1-415 Pfaden.
+VEKTORTEXT_MAX_BREITE = 60.0  # eine Glyphenform (Teilpfad) ist höchstens so breit …
+VEKTORTEXT_MAX_HOEHE = 40.0   # … und so hoch
+VEKTORTEXT_ABSTAND_PT = 12.0  # Glyphenformen bis zu diesem Abstand bilden einen Bereich (Wörter, Zeilen)
+VEKTORTEXT_MIN_GRUPPE = 8     # ein Bereich braucht mindestens 8 Formen (sonst Symbol, Logo-Bogen, Unterschrift)
+VEKTORTEXT_GLEICHFORM = 0.7   # haben so viele Formen eines Bereichs dieselbe Größe, ist es ein Symbolraster (Streu-,
+                              # Lage-, Baumplan), kein Text – Glyphen sind verschieden breit
+VEKTORTEXT_VIELFALT = 5       # ab 13 Formen braucht ein Bereich so viele verschiedene Größen (0,5 pt): gemessen Text
+                              # 7-32, Diagramm-Marker einer fremden Fachzeitschrift 1-4
+VEKTORTEXT_STARK_GRUPPE = 20  # "sicher Text" (Warnung, wenn die OCR dort nichts liest): so viele Formen …
+VEKTORTEXT_STARK_VIELFALT = 6  # … in so vielen Größen
+VEKTORTEXT_GRUNDLINIE = 0.8   # Formen aus großen gefüllten Pfaden (zusammengesetzte Umrisse): so viele müssen auf
+VEKTORTEXT_GRUNDLINIE_TOLERANZ = 0.06  # gemeinsamen Grundlinien stehen (auf 6 % der Formhöhe genau)
+VEKTORTEXT_MAX_PFADE = 20000  # mehr Pfade: Plan/Karte, get_drawings wäre zu teuer (eine Textseite ~3000)
 
 # ----------------------------------------------------------------------
 # Ausrichtung / Plausibilität der OCR-Wörter
@@ -154,7 +215,11 @@ GROSS_MIN_DPI = 72             # große Seiten: mindestens 1 Pixel je Punkt (sof
 GROSS_HOCHSKALIERUNG = 2.0     # … kleine Bilder höchstens doppelt so fein wie ihre eigenen Pixel; sonst die echte
                                # Auflösung des Seitenbilds (gemessen 12-MP-Foto: 72 dpi 64 Wörter, 2,4 s, 329 MB;
                                # 144 dpi dieselben 64 Wörter, 4,6 s, 992 MB)
-GROSS_BILD_ANTEIL = 0.25       # ein Bild prägt die Auflösung, wenn es mindestens 25 % der Fläche bedeckt
+GROSS_BILD_ANTEIL = 0.25       # ein Bild prägt die Auflösung, wenn es mindestens 25 % der Fläche bedeckt – aber nur,
+                               # wenn außer Bildern nichts auf der Seite liegt (_nur_bild, Befund R-06, Runde 2)
+GROSS_WARN_DPI = 100           # reicht der Arbeitsspeicher nur für weniger, ist das eine Warnung (kleine Schrift)
+GROSS_BILD_NAH = 0.75          # mindestens 75 % der eigenen Auflösung eines Seitenbilds: "mit seiner Auflösung gelesen"
+SPEICHER_MIN_DPI = 50          # Wiederholung nach Speichermangel: halbe Auflösung, aber nicht unter 50 dpi
 _SPEICHER_FEHLER = ("FzErrorLimit", "FzErrorMemory", "MemoryError")
 
 # ----------------------------------------------------------------------
@@ -183,6 +248,15 @@ HINTERGRUND_BLOCK = 16        # Blockgröße (Pixel) der Hintergrund-Schätzung 
 HINTERGRUND_SPANNE = 40       # Grauwert-Spanne des Hintergrunds (5.-95. Perzentil), ab der er ungleichmäßig
                               # ist (Schatten, Fotos, Kopierränder) und vor der OCR herausgerechnet wird.
                               # Gleichmäßiges Papier bleibt unverändert (gemessen: dort kein Gewinn).
+HINTERGRUND_STREIFEN_PIXEL = 2_000_000  # Bildrechnungen in Streifen dieser Größe (Spitzenspeicher, Befund R-06)
+# Speicher großer Aufträge (Befund R-06, Runde 2): Bis zu drei Arbeiter lasen gleichzeitig je bis zu 40 MP – mit
+# Schattenentfernung je rund 1 GB, zusammen 3,5-3,8 GB. Aufträge ab GROSS_AUFTRAG_PIXEL laufen deshalb nacheinander
+# (eine Sperre für alle Arbeiter eines Dienstes), ihr OCR-PDF wird komprimiert erzeugt (gemessen 40 MP: 530 ->
+# 418 MB Spitze, +0,5 s).
+GROSS_AUFTRAG_PIXEL = 15_000_000
+GROSS_GLEICHZEITIG = 1
+GROSS_WARTEN_S = OCR_ZEITLIMIT_S / 3   # höchstens so lange auf die Sperre warten, dann ohne – das Zeitlimit
+                                       # eines Auftrags zählt ab Beginn des Wartens, Warten darf es nicht aufbrauchen
 
 _RANDZEICHEN = ".,;:!?()[]{}\"'„“”‚‘’«»/\\|<>*-–—_•·"
 
@@ -588,6 +662,8 @@ class SeitenPruefung(NamedTuple):
     zeichen: int            # sichtbare Textzeichen
     bildanteil: float       # Fläche der Bereiche / Seitenfläche
     meldungen: list         # strukturierte Meldungen (z. B. fehlgeschlagene Bildanalyse)
+    vektor: tuple = ()      # Bereiche, die sicher Text als Vektorpfade tragen (_vektortext) – liest die OCR dort
+                            # nichts, meldet das Seitenmodell eine Warnung
 
 
 def _vereinige(rechtecke, abstand: float = BILD_ABSTAND_PT) -> list:
@@ -701,46 +777,290 @@ def schrift_unlesbar(text: str) -> bool:
     return sonder >= SALAT_SONDER_ANTEIL or laenge >= SALAT_WORTLAENGE
 
 
+def paar_bewertung(text: str) -> tuple:
+    """Mittlere Bewertung der Buchstabenpaare eines Texts (Wortanfang und -ende eingeschlossen, siehe _PAARE) und ihre
+    Anzahl: deutscher Text, Namen und Anschriften liegen gemessen bei 0,75-3,0, Buchstabensalat (falsche Zuordnung
+    Buchstabe -> Buchstabe, Glyphennummern als Unicode) fast immer unter 0,5. (None, 0) ohne Buchstabenpaare."""
+    summe = anzahl = 0
+    for wort in _PAAR_WORT.findall(unicodedata.normalize("NFC", text).lower()):
+        if len(wort) < 2:
+            continue
+        wort = "^" + wort + "$"
+        for a, b in zip(wort, wort[1:]):
+            summe += _PAAR_WERT[(a, b)]
+            anzahl += 1
+    return (summe / anzahl if anzahl else None), anzahl
+
+
+def _schrift_stufe(text: str, sichtbar: int, seltsam: int, identisch: int) -> tuple:
+    """("lesbar" | "pruefen" | "unlesbar", stark) für den Text EINER Schrift (Befund R-02). "unlesbar": eindeutiger
+    Zeichensalat (schrift_unlesbar). "pruefen": verdächtig – seltsame Zeichen (Glyphennummern als Unicode machen
+    Leer-, Satzzeichen und Ziffern zu Steuerzeichen), Unicode = Glyphennummer oder Buchstabenpaare wie Salat; ob die
+    Textebene zu den Glyphen passt, entscheidet die OCR-Probe. stark: das Zeichen ist auch ohne Probe deutlich (gilt,
+    wenn keine Probe möglich ist)."""
+    if schrift_unlesbar(text):
+        return "unlesbar", True
+    if sichtbar < PROBE_MIN_ZEICHEN:
+        return "lesbar", False
+    if seltsam:
+        return "pruefen", True
+    if identisch >= IDENTITAET_ANTEIL * sichtbar:
+        return "pruefen", True
+    wert, paare = paar_bewertung(text)
+    if wert is not None and paare >= PAAR_MIN and wert < PAAR_SCHWELLE:
+        return "pruefen", paare >= PAAR_STARK_MIN and wert < 0
+    return "lesbar", False
+
+
+_MERKER = threading.local()           # pruefung_merken(): Ergebnisse je (Dokument, Seite) während eines Aufbaus
+
+
+class pruefung_merken:
+    """Kontext, in dem textebene_pruefen und seiten_pruefung ihr Ergebnis je Seite eines Dokuments behalten (Befund
+    R-03/Laufzeit: das Seitenmodell fragte jede Seite 2- bis 4-mal). Nur für Abschnitte, in denen die Seiten nicht
+    verändert werden (dokument_aufbauen); verschachtelbar, je Thread."""
+
+    def __enter__(self):
+        stapel = getattr(_MERKER, "stapel", None)
+        if stapel is None:
+            stapel = _MERKER.stapel = []
+        stapel.append({})
+        return self
+
+    def __exit__(self, *_):
+        _MERKER.stapel.pop()
+        return False
+
+
+def _gemerkt(art: str, seite, berechnen):
+    stapel = getattr(_MERKER, "stapel", None)
+    if not stapel:
+        return berechnen()
+    schluessel = (art, id(seite.parent), seite.number)
+    speicher = stapel[-1]
+    if schluessel not in speicher:
+        speicher[schluessel] = (seite.parent, berechnen())     # Dokument festhalten: id() bleibt eindeutig
+    return speicher[schluessel][1]
+
+
+_PROBE_SPRACHE: list = []             # [(tessdata, sprache)] – einmal je Prozess ermittelt
+_PROBE_ERGEBNISSE: dict = {}          # (Schrift, Läufe) -> True/False/None (Analyse und Schwärzung lesen gleich)
+_PROBE_MAX_EINTRAEGE = 4096
+
+
+def _probe_sprache():
+    if not _PROBE_SPRACHE:
+        tessdata = _tessdata_finden()
+        sprache, _ = _ocr_sprache(tessdata)
+        _PROBE_SPRACHE.append((tessdata, sprache))
+    return _PROBE_SPRACHE[0]
+
+
+def _probe_kern(text: str) -> str:
+    """Buchstaben und Ziffern eines Texts in Lesefolge (klein, NFKC) – Vergleichsform der OCR-Probe."""
+    return "".join(c for c in unicodedata.normalize("NFKC", text).casefold() if c.isalnum())
+
+
+def strukturbaum_entfernen(doc) -> None:
+    """Den Strukturbaum (Tagged PDF) aus dem Katalog des geöffneten Dokuments nehmen, bevor gerendert wird: MuPDF
+    1.28 hängt beim Rendern einer Seite, deren Strukturbaum einen Zyklus hat (gemessen: über 10 Minuten für eine
+    Seite, die ohne Strukturbaum in 0,01 s gerendert ist; Textauszug und Zeichenspur sind nicht betroffen). Nur für
+    Dokumente, die nicht gespeichert werden oder deren Strukturbaum ohnehin entfällt (die Ausgabe trägt keinen)."""
+    try:
+        katalog = doc.pdf_catalog()
+        if doc.xref_get_key(katalog, "StructTreeRoot")[0] != "null":
+            doc.xref_set_key(katalog, "StructTreeRoot", "null")
+    except Exception as e:
+        _protokollieren(e)
+
+
+def _probe_seite(seite):
+    """Einseitige Kopie der Seite zum Rendern der OCR-Probe – ohne Strukturbaum (siehe strukturbaum_entfernen) und
+    ohne Änderung am Dokument, das gerade geprüft wird."""
+    kopie = fitz.open()
+    kopie.insert_pdf(seite.parent, from_page=seite.number, to_page=seite.number, links=False, annots=False)
+    return kopie
+
+
+def _probe_lesen(seite, rect, richtung, tessdata, sprache) -> str:
+    """OCR eines Textlaufs (Rechteck, Schreibrichtung (cos, sin)) im eigenen Prozess: klein und kurz (gemessen
+    0,06 s für einen Namen), deshalb ohne Prozess-Pool. seite: die Seite der einseitigen Kopie (_probe_seite)."""
+    winkel = math.degrees(math.atan2(richtung[1], richtung[0])) if richtung else 0.0
+    gerade = round(winkel / 90.0) * 90.0
+    if abs(winkel - gerade) > 3.0:
+        return ""                                       # schräger Text: keine Aussage
+    r = (fitz.Rect(rect) + (-2, -2, 2, 2)) & seite.rect
+    if r.is_empty or r.width < 2 or r.height < 2:
+        return ""
+    hoehe = r.height if int(gerade) % 180 == 0 else r.width
+    dpi = max(PROBE_MIN_DPI, min(PROBE_MAX_DPI, 72.0 * PROBE_ZEILE_PX / max(hoehe, 1.0)))
+    dpi = min(dpi, 72.0 * math.sqrt(PROBE_MAX_PIXEL / max(abs(r), 1.0)))
+    matrix = fitz.Matrix(dpi / 72.0, dpi / 72.0).prerotate(-gerade)
+    pix = seite.get_pixmap(matrix=matrix, clip=r, colorspace=fitz.csRGB, alpha=False)
+    pix.set_dpi(int(dpi), int(dpi))
+    ocr_doc = fitz.open("pdf", pix.pdfocr_tobytes(compress=False, language=sprache, tessdata=tessdata))
+    try:
+        return " ".join(w[4] for w in ocr_doc[0].get_text("words"))
+    finally:
+        ocr_doc.close()
+
+
+def _schrift_probe(seite, name: str, laeufe: list):
+    """OCR-Probe einer verdächtigen Schrift (Befund R-02): Lesen die gezeichneten Glyphen ihrer längsten Textläufe
+    dasselbe wie ihre Textebene? laeufe: [(Rechteck, Text, Richtung)]. True = die Textebene passt nicht (unlesbar),
+    False = sie passt, None = keine Aussage (die OCR liest dort nichts, z. B. Aufzählungszeichen, oder ist nicht
+    verfügbar)."""
+    auswahl = sorted(laeufe, key=lambda lauf: -len(_probe_kern(lauf[1]) or lauf[1].strip()))[:PROBE_MAX_LAEUFE]
+    schluessel = (name, tuple((tuple(round(v, 1) for v in r), t) for r, t, _ in auswahl))
+    if schluessel in _PROBE_ERGEBNISSE:
+        return _PROBE_ERGEBNISSE[schluessel]
+    tessdata, sprache = _probe_sprache()
+    if not sprache:
+        return None
+    import difflib
+    try:
+        kopie = _probe_seite(seite)
+    except Exception as e:
+        _protokollieren(e)
+        return None
+    gleich = gesamt = gelesen = 0
+    try:
+        for r, text, richtung in auswahl:
+            try:
+                lesung = _probe_kern(_probe_lesen(kopie[0], r, richtung, tessdata, sprache))
+            except Exception as e:      # Probe gescheitert: keine Aussage aus diesem Lauf
+                _protokollieren(e)
+                continue
+            if len(lesung) < PROBE_MIN_GELESEN:
+                continue
+            ebene = _probe_kern(text)
+            treffer = sum(b.size for b in difflib.SequenceMatcher(None, lesung, ebene, autojunk=False)
+                          .get_matching_blocks())
+            gleich += 2 * treffer
+            gesamt += len(lesung) + len(ebene)
+            gelesen += len(lesung)
+            if gelesen >= PROBE_GENUG:
+                break
+    finally:
+        kopie.close()
+    ergebnis = None if not gesamt else gleich / gesamt < PROBE_GLEICH
+    if len(_PROBE_ERGEBNISSE) >= _PROBE_MAX_EINTRAEGE:
+        _PROBE_ERGEBNISSE.clear()
+    _PROBE_ERGEBNISSE[schluessel] = ergebnis
+    return ergebnis
+
+
 class TextebenenBefund(NamedTuple):
     zeichen: int            # sichtbare Textzeichen (wie _sichtbare_zeichen)
     unlesbar: list          # Schriften, deren Text Zeichensalat ist
     unlesbar_zeichen: int   # sichtbare Zeichen in diesen Schriften
-    verborgen: int          # sichtbar gezeichnete Zeichen, die die Textextraktion nicht liefert (Kachelmuster)
+    verborgen: int          # sichtbar gezeichnete Zeichen, die die Textextraktion nicht liefert (Kachelmuster,
+                            # abgeschnittener Text)
+    geprueft: tuple = ()    # verdächtige Schriften, die als lesbar gelten: von der OCR-Probe bestätigt oder (ohne
+                            # OCR) nur schwach verdächtig
+    muster: bool = False    # die verborgenen Zeichen können aus einem Kachelmuster stammen (muster_mit_text); sonst
+                            # schneidet ein Beschneidungspfad sie ab (unsichtbar, für Textprogramme aber lesbar)
 
 
 def textebene_pruefen(seite) -> TextebenenBefund:
     """Ein Durchlauf über die gezeichneten Zeichen (get_texttrace): sichtbare Zeichen zählen, je Schrift auf
-    Zeichensalat prüfen (schrift_unlesbar) und Zeichen finden, die get_text nicht liefert – Text in Kachelmustern
-    (Befund R-03). Unsichtbarer Text (Rendermodus 3, OCR-Ebene eines Kopierers) zählt nicht."""
-    rect = seite.rect
+    Zeichensalat prüfen (_schrift_stufe; verdächtige Schriften per OCR-Probe ihrer Textläufe) und Zeichen finden,
+    die get_text nicht liefert – Text in Kachelmustern (Befund R-03). Unsichtbarer Text (Rendermodus 3, OCR-Ebene
+    eines Kopierers) zählt nicht."""
+    return _gemerkt("textebene", seite, lambda: _textebene_pruefen(seite))
+
+
+def _zeichenspur(seite) -> tuple:
+    """Ein Durchlauf über die gezeichneten Zeichen (get_texttrace): (je Schrift {text, sichtbar, seltsam, identisch,
+    laeufe}, Ursprünge der sichtbaren Glyphen, Anzahl sichtbarer Zeichen). Textläufe: [(Rechteck, Text, Richtung)].
+    Kästen werden als Zahlen geführt, nicht als fitz.Rect je Zeichen (gemessen: halbe Laufzeit auf Tabellenseiten)."""
+    px0, py0, px1, py1 = seite.rect
     je_schrift: dict = {}
     mitten: list = []
     zeichen = 0
+    unendlich = math.inf
     for span in seite.get_texttrace():
         if span.get("type", 0) == 3 or span.get("opacity", 1) == 0:
             continue
         name = str(span.get("font") or "")
-        liste = je_schrift.setdefault(name, [])
+        eintrag = je_schrift.setdefault(name, {"text": [], "sichtbar": 0, "seltsam": 0, "identisch": 0,
+                                               "laeufe": []})
+        liste, laeufe = eintrag["text"], eintrag["laeufe"]
+        richtung = tuple(span.get("dir") or (1.0, 0.0))
+        rc, rs = richtung[0], richtung[1]
+        groesse = float(span.get("size") or 10.0) or 10.0
+        quer_max, vor_min, vor_max = 0.3 * groesse, -0.5 * groesse, 3.0 * groesse
+        sichtbar = seltsam = identisch = 0
+        lauf_text, voriger = [], None
+        lx0 = ly0 = unendlich                       # Rechteck des Textlaufs (leer, solange lx0 >= lx1)
+        lx1 = ly1 = -unendlich
         for z in span["chars"]:
             c = chr(z[0])
             liste.append(c)
+            ursprung = z[2] if len(z) > 2 else None
+            if ursprung is not None:
+                if voriger is not None:
+                    # Ein Span der Zeichenspur kann mehrere Zeilen umfassen (Td ohne Schriftwechsel): neuer
+                    # Textlauf, wo die Grundlinie springt oder eine große Lücke ist – die Probe liest Zeile für Zeile
+                    dx, dy = ursprung[0] - voriger[0], ursprung[1] - voriger[1]
+                    vor = dx * rc + dy * rs
+                    if abs(dy * rc - dx * rs) > quer_max or not vor_min <= vor <= vor_max:
+                        if lx0 < lx1 and ly0 < ly1:
+                            laeufe.append((fitz.Rect(lx0, ly0, lx1, ly1), "".join(lauf_text), richtung))
+                        lauf_text = []
+                        lx0 = ly0 = unendlich
+                        lx1 = ly1 = -unendlich
+                voriger = ursprung
+            lauf_text.append(c)
             if c.isspace():
                 continue
-            box = fitz.Rect(z[3]) if len(z) > 3 else None
-            if box is not None and not box.is_empty and not box.intersects(rect):
-                continue
+            b = z[3] if len(z) > 3 else None
+            voll = b is not None and b[0] < b[2] and b[1] < b[3]                 # Glyphenkasten nicht leer
+            if voll and not (b[0] < px1 and px0 < b[2] and b[1] < py1 and py0 < b[3]):
+                continue                                                         # außerhalb der Seite
             zeichen += 1
-            if len(z) > 2 and z[2] is not None:
-                mitten.append((float(z[2][0]), float(z[2][1])))       # Ursprung (Grundlinie) der Glyphe
+            sichtbar += 1
+            if _seltsam(c):
+                seltsam += 1
+            if len(z) > 1 and z[1] == z[0]:
+                identisch += 1
+            if voll and (b[2] - b[0]) * (b[3] - b[1]) < 1e6:
+                lx0, ly0 = min(lx0, b[0]), min(ly0, b[1])
+                lx1, ly1 = max(lx1, b[2]), max(ly1, b[3])
+            if ursprung is not None:
+                mitten.append((float(ursprung[0]), float(ursprung[1])))     # Ursprung (Grundlinie) der Glyphe
         liste.append(" ")
-    unlesbar, unlesbar_zeichen = [], 0
-    for name, liste in je_schrift.items():
+        if lx0 < lx1 and ly0 < ly1:
+            laeufe.append((fitz.Rect(lx0, ly0, lx1, ly1), "".join(lauf_text), richtung))
+        eintrag["sichtbar"] += sichtbar
+        eintrag["seltsam"] += seltsam
+        eintrag["identisch"] += identisch
+    return je_schrift, mitten, zeichen
+
+
+def _textebene_pruefen(seite) -> TextebenenBefund:
+    je_schrift, mitten, zeichen = _zeichenspur(seite)
+    unlesbar, unlesbar_zeichen, geprueft = [], 0, []
+    pruefen = []
+    for name, eintrag in je_schrift.items():
         if any(s in name.lower() for s in _SYMBOLSCHRIFTEN):
             continue
-        text = "".join(liste)
-        if schrift_unlesbar(text):
+        text = "".join(eintrag["text"])
+        stufe, stark = _schrift_stufe(text, eintrag["sichtbar"], eintrag["seltsam"], eintrag["identisch"])
+        if stufe == "unlesbar":
             unlesbar.append(name)
-            unlesbar_zeichen += sum(1 for c in text if not c.isspace())
+            unlesbar_zeichen += eintrag["sichtbar"]
+        elif stufe == "pruefen":
+            pruefen.append((not stark, name, eintrag, stark))
+    for nummer, (_, name, eintrag, stark) in enumerate(sorted(pruefen, key=lambda p: (p[0], p[1]))):
+        ergebnis = _schrift_probe(seite, name, eintrag["laeufe"]) if nummer < PROBE_MAX_SCHRIFTEN else None
+        if ergebnis is None and _probe_sprache()[1] and nummer < PROBE_MAX_SCHRIFTEN:
+            ergebnis = False         # die OCR liest an den Glyphen nichts (Aufzählungszeichen, Symbole)
+        if ergebnis or (ergebnis is None and stark):
+            unlesbar.append(name)
+            unlesbar_zeichen += eintrag["sichtbar"]
+        else:
+            geprueft.append(name)
     verborgen = 0
     if len(mitten) >= VERBORGEN_MIN_ZEICHEN:
         bekannt: set = set()
@@ -755,44 +1075,219 @@ def textebene_pruefen(seite) -> TextebenenBefund:
             rx, ry = round(x), round(y)
             if not any((rx + dx, ry + dy) in bekannt for dx in (-1, 0, 1) for dy in (-1, 0, 1)):
                 verborgen += 1
-    return TextebenenBefund(zeichen, unlesbar, unlesbar_zeichen, verborgen)
+    muster = verborgen >= VERBORGEN_MIN_ZEICHEN and muster_mit_text(seite)
+    return TextebenenBefund(zeichen, unlesbar, unlesbar_zeichen, verborgen, tuple(geprueft), muster)
+
+
+_TEXT_OPERATOR = re.compile(rb"(?:^|[\s\]\)>])BT(?=[\s/\[(<])")
+
+
+def muster_mit_text(seite) -> bool:
+    """Zeichnet ein Kachelmuster der Seite Text – im Musterstrom selbst oder in einem Form-XObject in seinen
+    Ressourcen (Befund R-03)? Unterscheidet Text in Füllmustern (die Seite wird per OCR gelesen, der Mustertext
+    entfernt) von Text, den ein Beschneidungspfad abschneidet (überlanger Formularwert, Tabellenzelle): beide liefert
+    get_text nicht, die Zeichenspur schon. Im Fehlerfall True (vorsichtig: wie bisher per OCR lesen)."""
+    doc = seite.parent
+    try:
+        stapel = [(seite.xref, False)] + [(x[0], False) for x in seite.get_xobjects()]
+        gesehen: set = set()
+        while stapel:
+            xref, im_muster = stapel.pop()
+            if (xref, im_muster) in gesehen or xref <= 0 or len(gesehen) > 1000:
+                continue
+            gesehen.add((xref, im_muster))
+            if im_muster and doc.xref_is_stream(xref) and _TEXT_OPERATOR.search(doc.xref_stream(xref) or b""):
+                return True
+            for schluessel in ("Resources/Pattern", "Resources/XObject"):
+                art, wert = doc.xref_get_key(xref, schluessel)
+                if art == "xref":
+                    wert = doc.xref_object(int(wert.split()[0]), compressed=True)
+                elif art != "dict":
+                    continue
+                for nummer in re.findall(r"(\d+)\s+0\s+R", wert):
+                    stapel.append((int(nummer), im_muster or schluessel.endswith("Pattern")))
+        return False
+    except Exception as e:
+        _protokollieren(e)
+        return True
+
+
+def _glyphenformen(pfad) -> list:
+    """Teilpfade eines gezeichneten Pfads, die eine Glyphe sein können: mindestens zwei Kurven- oder Schrägsegmente,
+    höchstens VEKTORTEXT_MAX_BREITE x VEKTORTEXT_MAX_HOEHE. Ein Teilpfad beginnt, wo ein Segment nicht am Ende des
+    vorigen ansetzt (ein Zeilenpfad enthält so jede Glyphe einzeln). Rückgabe: [(x0, y0, x1, y1)]."""
+    formen = []
+    x0 = y0 = x1 = y1 = None
+    form = 0
+    ende = None
+
+    def abschliessen():
+        if form >= 2 and x0 is not None and 0 < x1 - x0 <= VEKTORTEXT_MAX_BREITE \
+                and 0 < y1 - y0 <= VEKTORTEXT_MAX_HOEHE:
+            formen.append((x0, y0, x1, y1))
+
+    for item in pfad.get("items", ()):
+        art = item[0]
+        if art in ("re", "qu"):                           # Rechteck/Viereck: eigener Teilpfad, keine Glyphenform
+            abschliessen()
+            x0 = y0 = x1 = y1 = None
+            form, ende = 0, None
+            continue
+        punkte = item[1:]
+        anfang = punkte[0]
+        if ende is None or abs(anfang.x - ende.x) > 0.01 or abs(anfang.y - ende.y) > 0.01:
+            abschliessen()
+            x0 = y0 = x1 = y1 = None
+            form = 0
+        for p in punkte:
+            x0 = p.x if x0 is None else min(x0, p.x)
+            y0 = p.y if y0 is None else min(y0, p.y)
+            x1 = p.x if x1 is None else max(x1, p.x)
+            y1 = p.y if y1 is None else max(y1, p.y)
+        if art == "c" or (abs(punkte[-1].x - anfang.x) > 0.3 and abs(punkte[-1].y - anfang.y) > 0.3):
+            form += 1
+        ende = punkte[-1]
+    abschliessen()
+    return formen
+
+
+def _nahe_gruppen(rechtecke, abstand: float) -> list:
+    """Gruppen (Listen von Indizes) nahe beieinander liegender kleiner Rechtecke in linearer Zeit: jedes Rechteck,
+    um abstand/2 vergrößert, wird in die Zellen eines Gitters der Weite `abstand` eingetragen; was sich eine Zelle
+    teilt, gehört zusammen (Union-Find). So liegen Formen bis `abstand` sicher, bis etwa 2 x `abstand` höchstens in
+    einer Gruppe – Befund R-03/Laufzeit: das paarweise Zählen kostete bei 4000 Symbolen 84 s je Aufruf."""
+    eltern = list(range(len(rechtecke)))
+
+    def wurzel(i):
+        while eltern[i] != i:
+            eltern[i] = eltern[eltern[i]]
+            i = eltern[i]
+        return i
+
+    zellen: dict = {}
+    halb = abstand / 2.0
+    for i, (x0, y0, x1, y1) in enumerate(rechtecke):
+        for gx in range(int(math.floor((x0 - halb) / abstand)), int(math.floor((x1 + halb) / abstand)) + 1):
+            for gy in range(int(math.floor((y0 - halb) / abstand)), int(math.floor((y1 + halb) / abstand)) + 1):
+                erster = zellen.setdefault((gx, gy), i)
+                if erster != i:
+                    a, b = wurzel(i), wurzel(erster)
+                    if a != b:
+                        eltern[a] = b
+    gruppen: dict = {}
+    for i in range(len(rechtecke)):
+        gruppen.setdefault(wurzel(i), []).append(i)
+    return list(gruppen.values())
+
+
+def _grundlinien_anteil(formen: list) -> float:
+    """Anteil der äußeren Formen einer Gruppe, deren Unterkante mit mindestens zwei anderen übereinstimmt (auf
+    VEKTORTEXT_GRUNDLINIE_TOLERANZ der mittleren Formhöhe, mindestens 0,8 pt): Glyphen einer Zeile stehen auf einer
+    Grundlinie, Diagramm-Marker und Fehlerbalken nicht. Innenformen (Punzen von o, A, B: liegen ganz in einer
+    anderen Form) zählen nicht – ihre Unterkanten liegen je Buchstabe anders. Gemessen: Textblöcke 8-36 pt in
+    Helvetica, Times und Courier 0,87-1,00; Diagramme 0,00-0,67, ein Logo 0,71."""
+    zellen: dict = {}
+    for i, (x0, y0, _, _) in enumerate(formen):
+        zellen.setdefault((int(math.floor(x0 / VEKTORTEXT_MAX_BREITE)), int(math.floor(y0 / VEKTORTEXT_MAX_HOEHE))),
+                          []).append(i)
+    unten = []
+    for i, (x0, y0, x1, y1) in enumerate(formen):
+        gx, gy = int(math.floor(x0 / VEKTORTEXT_MAX_BREITE)), int(math.floor(y0 / VEKTORTEXT_MAX_HOEHE))
+        # eine umschließende Form beginnt links oberhalb und ist höchstens 60 x 40 pt groß: eigene oder Nachbarzelle
+        innen = any(o != i and formen[o][0] <= x0 and formen[o][1] <= y0 and formen[o][2] >= x1
+                    and formen[o][3] >= y1
+                    and (formen[o][2] - formen[o][0]) * (formen[o][3] - formen[o][1]) > (x1 - x0) * (y1 - y0)
+                    for zx in (gx - 1, gx) for zy in (gy - 1, gy) for o in zellen.get((zx, zy), ()))
+        if not innen:
+            unten.append((y1, y1 - y0))
+    if len(unten) < 3:
+        return 0.0
+    hoehen = sorted(h for _, h in unten)
+    toleranz = max(0.8, VEKTORTEXT_GRUNDLINIE_TOLERANZ * hoehen[len(hoehen) // 2])
+    werte = sorted(u for u, _ in unten)
+    links = rechts = treffer = 0
+    for i, v in enumerate(werte):
+        while werte[links] < v - toleranz:
+            links += 1
+        rechts = max(rechts, i)
+        while rechts + 1 < len(werte) and werte[rechts + 1] <= v + toleranz:
+            rechts += 1
+        if rechts - links >= 2:                          # mindestens zwei andere auf derselben Höhe
+            treffer += 1
+    return treffer / len(werte)
+
+
+def _vektortext(seite) -> tuple:
+    """(Bereiche, sichere Bereiche) mit Text als Vektorpfaden (Befund R-03): Glyphenformen (_glyphenformen)
+    gefüllter und gestrichener Pfade, zu Bereichen zusammengefasst. Eine Gruppe braucht VEKTORTEXT_MIN_GRUPPE Formen
+    in mindestens drei Größen, von denen keine VEKTORTEXT_GLEICHFORM ausmacht, und ab 13 Formen
+    VEKTORTEXT_VIELFALT Größen – Glyphen sind verschieden groß, Diagramm-Marker, Streu- und Lagepläne nicht.
+    "Sicher" ist ein Bereich mit einer Gruppe ab VEKTORTEXT_STARK_GRUPPE Formen in VEKTORTEXT_STARK_VIELFALT Größen
+    (liest die OCR dort nichts, warnt das Seitenmodell). Auch große gefüllte Pfade zählen: ein zusammengesetzter
+    Umriss kann einen ganzen Textblock tragen (gemessen: Anschrift als EIN Pfad, 54 pt hoch, und eine ganze
+    Briefseite als ein Pfad blieben sonst unerkannt). Ihre Formen bilden eigene Gruppen, die zusätzlich auf
+    gemeinsamen Grundlinien stehen müssen (_grundlinien_anteil) – sonst sind es Diagramme mit Markern und
+    Fehlerbalken. Große gestrichene Pfade sind Zeichnungen (Strichschrift steht je Glyphe oder Zeile). Gemessen an
+    fremden PDFs: technische Zeichnung, Diagramme einer Fachzeitschrift. Seiten ohne Pfade oder mit über
+    VEKTORTEXT_MAX_PFADE (Bounding-Box-Protokoll) werden nicht genauer angesehen (get_drawings ist teurer)."""
+    try:
+        pfade = sum(1 for art, _ in seite.get_bboxlog() if art in ("fill-path", "stroke-path"))
+    except Exception as e:
+        _protokollieren(e)
+        return [], []
+    if not pfade or pfade > VEKTORTEXT_MAX_PFADE:
+        return [], []
+    formen, formen_gross = [], []
+    try:
+        for pfad in seite.get_drawings():
+            art = pfad.get("type")
+            if art not in ("f", "s", "fs"):
+                continue
+            if 0 < fitz.Rect(pfad["rect"]).height <= VEKTORTEXT_MAX_HOEHE:
+                formen.extend(_glyphenformen(pfad))
+            elif art != "s":
+                formen_gross.extend(_glyphenformen(pfad))
+    except Exception as e:
+        _protokollieren(e)
+        return [], []
+    if len(formen) + len(formen_gross) < VEKTORTEXT_MIN_GRUPPE:
+        return [], []
+    seitenrect = fitz.Rect(seite.rect)
+    kandidaten, stark = [], []
+    for menge, zusammengesetzt in ((formen, False), (formen_gross, True)):
+        for gruppe in _nahe_gruppen(menge, VEKTORTEXT_ABSTAND_PT):
+            if len(gruppe) < VEKTORTEXT_MIN_GRUPPE:
+                continue                                 # einzelnes Symbol, Logo-Bogen, Unterschrift
+            groessen: dict = {}
+            for i in gruppe:
+                x0, y0, x1, y1 = menge[i]
+                schluessel = (round(2 * (x1 - x0)), round(2 * (y1 - y0)))
+                groessen[schluessel] = groessen.get(schluessel, 0) + 1
+            # Glyphen sind verschieden groß; Diagramm-Marker, Streu- und Lagepläne haben eine bis vier Formen
+            if max(groessen.values()) >= VEKTORTEXT_GLEICHFORM * len(gruppe) or len(groessen) < 3 \
+                    or (len(groessen) < VEKTORTEXT_VIELFALT and len(gruppe) > 12):
+                continue
+            if zusammengesetzt and _grundlinien_anteil([menge[i] for i in gruppe]) < VEKTORTEXT_GRUNDLINIE:
+                continue
+            x0 = min(menge[i][0] for i in gruppe)
+            y0 = min(menge[i][1] for i in gruppe)
+            x1 = max(menge[i][2] for i in gruppe)
+            y1 = max(menge[i][3] for i in gruppe)
+            kandidaten.append(fitz.Rect(x0, y0, x1, y1))
+            if len(gruppe) >= VEKTORTEXT_STARK_GRUPPE and len(groessen) >= VEKTORTEXT_STARK_VIELFALT:
+                stark.append(fitz.Rect(x0, y0, x1, y1))
+    aus = []
+    for bereich in _vereinige(kandidaten, VEKTORTEXT_ABSTAND_PT):
+        r = (bereich + (-2, -2, 2, 2)) & seitenrect
+        if not r.is_empty and min(r.width, r.height) >= 4.0:   # auch eine einzelne Namenszeile zählt
+            aus.append(r)
+    return aus, [r for r in aus if any(r.intersects(s) for s in stark)]
 
 
 def vektortext_bereiche(seite) -> list:
-    """Bereiche mit Text als Vektorpfaden (Befund R-03): glyphenartige gefüllte Pfade mit Kurven, zusammengefasst.
-    Leer, wenn es weniger als VEKTORTEXT_MIN_PFADE gibt. Nur Seiten mit vielen gefüllten Pfaden werden genauer
-    angesehen (get_drawings ist teurer als das Bounding-Box-Protokoll)."""
-    try:
-        gefuellt = sum(1 for art, _ in seite.get_bboxlog() if art == "fill-path")
-    except Exception as e:
-        _protokollieren(e)
-        return []
-    if gefuellt < VEKTORTEXT_MIN_PFADE or gefuellt > VEKTORTEXT_MAX_PFADE:
-        return []
-    glyphen = []
-    try:
-        for pfad in seite.get_drawings():
-            if pfad.get("fill") is None or pfad.get("type") not in ("f", "fs"):
-                continue
-            r = fitz.Rect(pfad["rect"])
-            if not (0 < r.width <= VEKTORTEXT_MAX_BREITE and 0 < r.height <= VEKTORTEXT_MAX_HOEHE):
-                continue
-            if any(item[0] == "c" for item in pfad.get("items", ())):
-                glyphen.append(r)
-    except Exception as e:
-        _protokollieren(e)
-        return []
-    if len(glyphen) < VEKTORTEXT_MIN_PFADE:
-        return []
-    seitenrect = fitz.Rect(seite.rect)
-    aus = []
-    for bereich in _vereinige(glyphen, VEKTORTEXT_ABSTAND_PT):
-        if sum(1 for g in glyphen if bereich.contains(g)) < VEKTORTEXT_MIN_GRUPPE:
-            continue                                     # einzelnes Symbol, Logo-Bogen, Unterschrift
-        r = (bereich + (-2, -2, 2, 2)) & seitenrect
-        if not r.is_empty and _relevant(r, seitenrect):
-            aus.append(r)
-    return aus
+    """Bereiche mit Text als Vektorpfaden (Befund R-03): Glyphenformen (_glyphenformen) gefüllter und gestrichener
+    Pfade, zu Bereichen zusammengefasst (siehe _vektortext)."""
+    return _vektortext(seite)[0]
 
 
 def seiten_pruefung(seite) -> SeitenPruefung:
@@ -812,6 +1307,11 @@ def seiten_pruefung(seite) -> SeitenPruefung:
     Vektorpfade auf textarmen Seiten (Befund R-03). Text als Vektorpfade auf Seiten mit viel echtem Text: diese
     Bereiche werden wie Bildbereiche gelesen (modus "bilder").
     """
+    p = _gemerkt("seite", seite, lambda: _seiten_pruefung(seite))
+    return p._replace(bereiche=list(p.bereiche), meldungen=[dict(m) for m in p.meldungen])
+
+
+def _seiten_pruefung(seite) -> SeitenPruefung:
     meldungen: list = []
     seitenrect = fitz.Rect(seite.rect)
     nr = seite.number
@@ -851,26 +1351,39 @@ def seiten_pruefung(seite) -> SeitenPruefung:
             f"Seite {nr + 1}: Der Text ist im PDF falsch gespeichert (Schrift ohne gültige Zeichenzuordnung) – die "
             f"Seite wird deshalb per Texterkennung gelesen und geschwärzt. Bitte das Ergebnis dieser Seite besonders "
             f"sorgfältig prüfen.", nr))
-    elif zeichen and modus != "seite" and befund is not None and befund.verborgen >= VERBORGEN_MIN_ZEICHEN:
+    elif zeichen and modus != "seite" and befund is not None and befund.verborgen >= VERBORGEN_MIN_ZEICHEN \
+            and befund.muster:
         modus = "seite"
         meldungen.append(_meldung(
             "hinweis", "OCR_GELESEN",
-            f"Seite {nr + 1}: enthält Text, der sich nicht auslesen lässt (z. B. in einem Füllmuster) – die Seite "
-            f"wird per Texterkennung gelesen.", nr))
-    elif zeichen and modus != "seite":
-        vektor = vektortext_bereiche(seite)
+            f"Seite {nr + 1}: enthält Text in einem Füllmuster, der sich nicht auslesen lässt – die Seite wird per "
+            f"Texterkennung gelesen.", nr))
+    if zeichen and befund is not None and befund.verborgen >= VERBORGEN_MIN_ZEICHEN and not befund.muster:
+        # Befund R-03, Runde 2: abgeschnittener Text (überlanger Formularwert, Tabellenzelle) – unsichtbar, die OCR
+        # sieht ihn nicht, Textprogramme lesen ihn aber; die Schwärzung entfernt ihn (keine Ganzseiten-OCR)
+        meldungen.append(_meldung(
+            "warnung", "TEXT_ABGESCHNITTEN",
+            f"Seite {nr + 1}: enthält abgeschnittenen Text (z. B. einen zu langen Formularwert), der unsichtbar ist, "
+            f"von Programmen aber mitgelesen wird – er wird nicht geprüft und beim Schwärzen entfernt. Ohne "
+            f"Schwärzung die Datei so nicht weitergeben.", nr))
+    vektor: list = []
+    sicher: list = []
+    if zeichen and modus != "seite":
+        vektor, sicher = _vektortext(seite)
         if vektor:
             if zeichen < WENIG_TEXT_ZEICHEN:
                 modus = "seite"
             else:
-                bereiche = [r for r in _vereinige(bereiche + vektor) if _relevant(r, seitenrect)]
+                # Vektortext-Bereiche zählen auch unter der Mindestgröße der Bildbereiche (eine Namenszeile)
+                bereiche = [r for r in _vereinige(bereiche + vektor)
+                            if _relevant(r, seitenrect) or any(r.intersects(v) for v in vektor)]
                 bildanteil = sum(abs(r) for r in bereiche) / flaeche
                 modus = "bilder"
             meldungen.append(_meldung(
                 "hinweis", "OCR_GELESEN",
-                f"Seite {nr + 1}: Text als Grafik (Kurven statt Schrift) – per Texterkennung gelesen und geprüft.",
+                f"Seite {nr + 1}: enthält Text als Grafik (Kurven statt Schrift) – er wird per Texterkennung gelesen.",
                 nr))
-    return SeitenPruefung(modus, bereiche, zeichen, bildanteil, meldungen)
+    return SeitenPruefung(modus, bereiche, zeichen, bildanteil, meldungen, tuple(sicher))
 
 
 def bild_bereiche(seite, meldungen=None) -> list:
@@ -998,12 +1511,21 @@ def _numpy():
 
 
 def _grauwerte(pix):
-    """Pixmap -> 2D-Array uint8 (Graustufen)."""
+    """Pixmap -> 2D-Array uint8 (Graustufen). Liest die Pixel ohne Kopie (samples_mv) und rechnet Farbbilder in
+    Streifen um (Befund R-06, Runde 2: bei 40 MP lagen sonst rund 300 MB Zwischenwerte im Speicher)."""
     np = _numpy()
-    a = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+    daten = getattr(pix, "samples_mv", None)
+    if daten is None:
+        daten = pix.samples
+    a = np.frombuffer(daten, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
     if pix.n >= 3:
-        return ((a[:, :, 0].astype(np.uint16) * 77 + a[:, :, 1].astype(np.uint16) * 150
-                 + a[:, :, 2].astype(np.uint16) * 29) >> 8).astype(np.uint8)
+        aus = np.empty((pix.height, pix.width), dtype=np.uint8)
+        schritt = max(1, HINTERGRUND_STREIFEN_PIXEL // max(1, pix.width))
+        for r0 in range(0, pix.height, schritt):
+            b = a[r0:r0 + schritt]
+            aus[r0:r0 + schritt] = (b[:, :, 0].astype(np.uint16) * 77 + b[:, :, 1].astype(np.uint16) * 150
+                                    + b[:, :, 2].astype(np.uint16) * 29) >> 8
+        return aus
     return a[:, :, 0].copy()
 
 
@@ -1061,13 +1583,23 @@ def hintergrund_ungleichmaessig(grau) -> bool:
 
 def hintergrund_herausrechnen(grau, block: int = HINTERGRUND_BLOCK):
     """Graustufenbild durch den geschätzten Hintergrund teilen: Schatten und Papierton werden weiß,
-    Schrift bleibt dunkel (vor der Binarisierung durch Tesseract)."""
+    Schrift bleibt dunkel (vor der Binarisierung durch Tesseract). Gerechnet wird in Streifen von höchstens
+    HINTERGRUND_STREIFEN_PIXEL Pixeln (Befund R-06, Runde 2: in einem Stück brauchte ein 40-MP-Foto 505 MB
+    Zwischenspeicher, in Streifen rund 50 MB); das Ergebnis ist bitgleich."""
     np = _numpy()
     h, w = grau.shape
     bg = _hintergrund(grau, block)
-    voll = np.repeat(np.repeat(bg, block, axis=0), block, axis=1)[:h, :w]
-    norm = grau.astype(np.float32) / np.maximum(voll, 1.0) * 255.0
-    return np.clip(norm, 0, 255).astype(np.uint8)
+    aus = np.empty((h, w), dtype=np.uint8)
+    schritt = block * max(1, HINTERGRUND_STREIFEN_PIXEL // max(1, w * block))
+    for r0 in range(0, h, schritt):
+        r1 = min(h, r0 + schritt)
+        voll = np.repeat(np.repeat(bg[r0 // block:(r1 + block - 1) // block], block, axis=0), block, axis=1)
+        stueck = grau[r0:r1].astype(np.float32)
+        stueck /= np.maximum(voll[:r1 - r0, :w], 1.0)
+        stueck *= 255.0
+        np.clip(stueck, 0, 255, out=stueck)
+        aus[r0:r1] = stueck
+    return aus
 
 
 def _flaeche_pt(seite, clip) -> float:
@@ -1101,20 +1633,46 @@ def _bild_aufloesung(seite, clip=None):
     return beste
 
 
-def render_dpi(seite, clip=None, dpi: int = OCR_DPI) -> int:
-    """Auflösung, mit der die OCR die Seite bzw. den Ausschnitt rendert (Befund R-06). Normale Seiten: `dpi`.
-    Ergäbe das mehr als MAX_RENDER_PIXEL Pixel (Handyfotos mit 1 px = 1 pt, A0-Pläne): die echte Auflösung des
-    Seitenbilds (kleine Bilder bis doppelt so fein, mindestens GROSS_MIN_DPI), ohne prägendes Bild die Grenze –
-    nie mehr als MAX_RENDER_PIXEL. Dieselbe Regel gilt für Lesung, Proben und Kontroll-OCR."""
+def _nur_bild(seite, clip=None) -> bool:
+    """Trägt die Seite bzw. der Ausschnitt außer Bildern keinen Inhalt – keinen sichtbaren Text und keine
+    Vektorgrafik (Befund R-06, Runde 2)? Nur dann bestimmt die Auflösung des Bilds, wie fein es sich lesen lässt;
+    liegt Text oder ein Schriftfeld als Kurven über einer groben Unterlage, braucht er die volle Auflösung.
+    Unsichtbarer Text (Rendermodus 3, OCR-Ebene) und Beschneidungspfade zählen nicht. Im Fehlerfall False."""
+    bereich = fitz.Rect(clip) & seite.rect if clip is not None else fitz.Rect(seite.rect)
+    try:
+        for art, box in seite.get_bboxlog():
+            if art in ("fill-text", "stroke-text", "fill-path", "stroke-path"):
+                r = fitz.Rect(box)
+                if not r.is_empty and r.intersects(bereich):
+                    return False
+        return True
+    except Exception as e:
+        _protokollieren(e)
+        return False
+
+
+def render_aufloesung(seite, clip=None, dpi: int = OCR_DPI) -> tuple:
+    """(Auflösung, Grund) der OCR-Lesung (Befund R-06). Normale Seiten: (`dpi`, "voll"). Ergäbe `dpi` mehr als
+    MAX_RENDER_PIXEL Pixel (Handyfotos mit 1 px = 1 pt, A0-Pläne): Besteht die Seite bzw. der Ausschnitt nur aus
+    Bildern, die echte Auflösung des prägenden Bilds (kleine Bilder bis doppelt so fein, mindestens
+    GROSS_MIN_DPI) – Grund "bild"; sonst die höchste Auflösung innerhalb der Grenze – Grund "speicher". Gemessen
+    (Befund R-06, Runde 2): ein Schriftfeld als Kurven über einer Unterlage mit 17 dpi wurde mit 34 dpi gelesen
+    (0 Wörter), mit der Grenze (227 dpi auf A1) vollständig. Dieselbe Regel gilt für Lesung, Proben und Kontroll-OCR."""
     grenze = dpi_grenze(seite, clip)
     if dpi <= grenze:
-        return int(dpi)
-    nativ = _bild_aufloesung(seite, clip)
+        return int(dpi), "voll"
+    nativ = _bild_aufloesung(seite, clip) if _nur_bild(seite, clip) else None
     if nativ is None:
-        ziel = grenze
-    else:
-        ziel = max(nativ, min(GROSS_MIN_DPI, GROSS_HOCHSKALIERUNG * nativ))
-    return max(1, int(min(dpi, grenze, ziel)))
+        return max(1, int(min(dpi, grenze))), "speicher"
+    ziel = max(nativ, min(GROSS_MIN_DPI, GROSS_HOCHSKALIERUNG * nativ))
+    aufloesung = max(1, int(min(dpi, grenze, ziel)))
+    # fast die eigene Auflösung des Bilds (48-MP-Foto: 65 statt 72 dpi) verliert nichts; deutlich darunter schon
+    return aufloesung, ("bild" if aufloesung >= GROSS_BILD_NAH * nativ else "speicher")
+
+
+def render_dpi(seite, clip=None, dpi: int = OCR_DPI) -> int:
+    """Auflösung, mit der die OCR die Seite bzw. den Ausschnitt rendert (render_aufloesung ohne Grund)."""
+    return render_aufloesung(seite, clip, dpi)[0]
 
 
 def _bildanalyse(seite, clip, winkel: int, dpi_max: int = SCHRAEG_DPI) -> dict:
@@ -1310,19 +1868,27 @@ def _ocr_durchlauf(seite, dpi, clip, winkel, sprache, tessdata, hintergrund=Fals
     if hintergrund and _numpy() is not None:
         try:
             grau_pix = seite.get_pixmap(matrix=matrix, clip=clip, colorspace=fitz.csGRAY, alpha=False)
-            grau = hintergrund_herausrechnen(_grauwerte(grau_pix), max(4, HINTERGRUND_BLOCK * dpi // OCR_DPI))
-            np = _numpy()
-            rgb = np.repeat(grau[:, :, None], 3, axis=2)
-            pix = fitz.Pixmap(fitz.csRGB, grau.shape[1], grau.shape[0], rgb.tobytes(), False)
-            pix.set_origin(grau_pix.x, grau_pix.y)
+            ursprung = (grau_pix.x, grau_pix.y)
+            grau = _grauwerte(grau_pix)
+            del grau_pix
+            grau = hintergrund_herausrechnen(grau, max(4, HINTERGRUND_BLOCK * dpi // OCR_DPI))
+            grau_pix = fitz.Pixmap(fitz.csGRAY, grau.shape[1], grau.shape[0], grau.tobytes(), False)
+            del grau
+            # RGB ist Pflicht (siehe unten); MuPDF wandelt Grau -> RGB ohne den Umweg über numpy (Befund R-06)
+            pix = fitz.Pixmap(fitz.csRGB, grau_pix)
+            del grau_pix
+            pix.set_origin(*ursprung)
         except Exception as e:
+            if _speicherfehler(e):
+                raise
             _protokollieren(e)
             pix = None
     if pix is None:
         # RGB ist Pflicht: mit Graustufen-Pixmaps liefert pdfocr_tobytes keine Wörter (MuPDF 1.28)
         pix = seite.get_pixmap(matrix=matrix, clip=clip, colorspace=fitz.csRGB, alpha=False)
     pix.set_dpi(dpi, dpi)
-    ocr_bytes = pix.pdfocr_tobytes(compress=False, language=sprache, tessdata=tessdata)
+    gross = pix.width * pix.height >= GROSS_AUFTRAG_PIXEL      # unkomprimiert läge das Bild ein zweites Mal im Speicher
+    ocr_bytes = pix.pdfocr_tobytes(compress=gross, language=sprache, tessdata=tessdata)
     return _woerter_aus_ocr_pdf(ocr_bytes, dpi, pix.x, pix.y, matrix, pix, zaehler)
 
 
@@ -1352,27 +1918,48 @@ def _ohne_textebene(woerter, seite, clip):
     return behalten
 
 
+_SPEICHER_TEXT = re.compile(r"overly large|too large|out of memory|insufficient memory|memoryerror|cannot allocate"
+                            r"|\b(?:malloc|calloc|realloc)\b[^\n]*\bfailed", re.IGNORECASE)
+
+
 def _speicherfehler(fehler: BaseException) -> bool:
-    """MuPDF-Grenze ("Overly large image") oder Speichermangel beim Rendern/Lesen."""
-    return isinstance(fehler, MemoryError) or any(n in type(fehler).__name__ for n in _SPEICHER_FEHLER) \
-        or "overly large" in str(fehler).lower()
+    """Speichermangel beim Rendern/Lesen (Befund R-06, Runde 2): MemoryError, MuPDF-Grenze ("Overly large image"),
+    fehlgeschlagene Anforderung ("FzErrorSystem: malloc (117343056 bytes) failed") und MemoryError im Schreibrückruf
+    des OCR-PDF ("FzErrorGeneric: Director error: <class 'MemoryError'>"). So kommen echte Engpässe unter Windows an
+    (Anforderungen schlagen fehl, kein OOM-Abbruch). Ein- und Ausgabefehler (FzErrorSystem "cannot open") und
+    "exception stack overflow" zählen nicht."""
+    if isinstance(fehler, MemoryError) or type(fehler).__name__ in _SPEICHER_FEHLER[1:]:
+        return True
+    return _SPEICHER_TEXT.search(str(fehler)) is not None
+
+
+def _fehlertext(fehler: BaseException) -> str:
+    """Fehlertext für die Meldung OCR_FEHLER: Art und erste Zeile, ohne Traceback und ohne Dateipfade (die Nutzerin
+    sah vorher "Director error … Traceback … /…/site-packages/pymupdf/__init__.py:24360:write()")."""
+    zeilen = [z.strip() for z in str(fehler).splitlines() if z.strip()]
+    text = zeilen[0] if zeilen else ""
+    text = re.split(r"\s*Traceback\b", text)[0]
+    text = re.sub(r"(?:[A-Za-z]:)?[\\/][^\s:]*[\\/][^\s:]*", "…", text).strip(" :")
+    if len(text) > 160:
+        text = text[:157] + "…"
+    return f"{type(fehler).__name__}: {text}" if text else type(fehler).__name__
 
 
 def _ocr_worker(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pruefen=True,
                 nur_bilder=False, winkel_fest=None):
     """Modulfunktion für den Kindprozess (muss per Import erreichbar sein – Start-Methode "spawn").
 
-    Liest die Seite mit _ocr_lesen (Beschreibung dort). Reicht der Speicher nicht (MuPDF-Grenze, MemoryError),
-    wird einmal mit halber Auflösung (mindestens 50 dpi) wiederholt. Jede Ausnahme verlässt den Arbeiter als
-    RuntimeError mit lesbarem Text: MuPDF-Ausnahmen lassen sich nicht zwischen Prozessen übertragen, sonst sähe
-    die Nutzerin nur "cannot pickle 'SwigPyObject'" (Befund R-06)."""
+    Liest die Seite mit _ocr_lesen (Beschreibung dort). Reicht der Speicher nicht (_speicherfehler), wird einmal
+    mit halber Auflösung (mindestens SPEICHER_MIN_DPI, nie höher als zuvor) wiederholt. Jede Ausnahme verlässt den
+    Arbeiter als RuntimeError mit lesbarem Text: MuPDF-Ausnahmen lassen sich nicht zwischen Prozessen übertragen,
+    sonst sähe die Nutzerin nur "cannot pickle 'SwigPyObject'" (Befund R-06)."""
     warnings.simplefilter("ignore")
     try:
         return _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pruefen, nur_bilder,
                           winkel_fest)
     except Exception as e:
         if not _speicherfehler(e):
-            raise RuntimeError(f"{type(e).__name__}: {e}") from None
+            raise RuntimeError(_fehlertext(e)) from None
     try:
         ergebnis = _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pruefen, nur_bilder,
                               winkel_fest, verkleinern=0.5)
@@ -1381,7 +1968,7 @@ def _ocr_worker(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_p
     except Exception as e:
         if _speicherfehler(e):
             raise RuntimeError("die Seite ist zu groß für den verfügbaren Arbeitsspeicher") from None
-        raise RuntimeError(f"{type(e).__name__}: {e}") from None
+        raise RuntimeError(_fehlertext(e)) from None
 
 
 def _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pruefen=True,
@@ -1407,7 +1994,9 @@ def _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pr
     (Wiederholung nach Speichermangel).
     """
     doc = fitz.open(pdf_pfad)
+    gesperrt = False
     try:
+        strukturbaum_entfernen(doc)          # eigene Kopie im Arbeiter: Zyklen im Strukturbaum ließen MuPDF hängen
         seite = doc[seite_nr0]
         if seite.rotation:
             _anmerkungen_einbrennen(doc, seite)
@@ -1415,9 +2004,15 @@ def _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pr
             drehung_entfernen(seite)
         clip_rect = fitz.Rect(clip) if clip else None
         angefragt = int(dpi)
-        dpi = render_dpi(seite, clip_rect, angefragt)
+        dpi, aufloesung_grund = render_aufloesung(seite, clip_rect, angefragt)
         if verkleinern < 1.0:
-            dpi = max(50, int(dpi * verkleinern))
+            # Wiederholung nach Speichermangel: die Auflösung nur senken, nie anheben (Befund R-06, Runde 2: aus
+            # 34 dpi wurden 50); lässt sie sich nicht weiter senken, ist die Seite zu groß
+            kleiner = min(dpi, max(SPEICHER_MIN_DPI, int(dpi * verkleinern)))
+            if kleiner >= dpi:
+                raise MemoryError("Auflösung lässt sich nicht weiter senken")
+            dpi, aufloesung_grund = kleiner, "speicher"
+        gesperrt = _gross_sperre_holen(_flaeche_pt(seite, clip_rect) * (dpi / 72.0) ** 2)
         suchen = winkel_fest is None and ausrichtung_pruefen
         if suchen and clip_rect is not None:
             suchen = abs(clip_rect & seite.rect) >= AUSRICHTUNG_BILD_ANTEIL * abs(seite.rect)
@@ -1456,6 +2051,8 @@ def _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pr
                     woerter = _ocr_durchlauf(seite, aufloesung, clip_rect, winkel - korr, sprache, tessdata_voll,
                                              analyse["hintergrund"], zaehler)
                 except Exception as e:     # abgeleitete Sprachdatei unbrauchbar: Voreinstellung
+                    if _speicherfehler(e):
+                        raise                # Speichermangel: halbe Auflösung (_ocr_worker), nicht dieselbe noch mal
                     _protokollieren(e)
                     seitenaufteilung["psm"] = 6
                     zaehler = {}
@@ -1554,8 +2151,11 @@ def _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pr
                 "wortquote": round(bewertung["quote"], 4), "treffer": bewertung["treffer"],
                 "tokens": bewertung["tokens"], "laeufe": len(protokoll), "lesungen": protokoll,
                 "unplausibel": unplausibel, "aufloesung": dpi, "angefragt": angefragt,
+                "aufloesung_grund": aufloesung_grund,
                 "seitengroesse": (round(seite.rect.width), round(seite.rect.height))}
     finally:
+        if gesperrt:
+            _gross_sperre_freigeben()
         doc.close()
 
 
@@ -1563,6 +2163,35 @@ def _ping_worker():
     """Selbsttest des Pools: liefert (PID, Start-Methode, ist Kindprozess)."""
     return (os.getpid(), multiprocessing.get_start_method(allow_none=True),
             multiprocessing.parent_process() is not None)
+
+
+_GROSS_SPERRE = None                  # im Arbeiter: Semaphore der großen Aufträge seines Dienstes (_arbeiter_start)
+
+
+def _gross_sperre_holen(pixel: float) -> bool:
+    """Große Aufträge (ab GROSS_AUFTRAG_PIXEL) laufen nacheinander: wartet auf die Sperre des Dienstes (höchstens
+    GROSS_WARTEN_S, dann ohne). True, wenn sie gehalten wird (freigeben mit _gross_sperre_freigeben)."""
+    if pixel < GROSS_AUFTRAG_PIXEL or _GROSS_SPERRE is None:
+        return False
+    try:
+        return bool(_GROSS_SPERRE.acquire(timeout=GROSS_WARTEN_S))
+    except Exception as e:
+        _protokollieren(e)
+        return False
+
+
+def _gross_sperre_freigeben():
+    try:
+        _GROSS_SPERRE.release()
+    except Exception as e:
+        _protokollieren(e)
+
+
+def _arbeiter_start(sperre=None):
+    """Initialisierer jedes Arbeitsprozesses: Sperre der großen Aufträge übernehmen, Elternwächter starten."""
+    global _GROSS_SPERRE
+    _GROSS_SPERRE = sperre
+    _eltern_waechter()
 
 
 def _eltern_waechter():
@@ -1712,9 +2341,17 @@ class OcrDienst:
         with self._lock:
             if self._pool is None and self._pool_fehler is None:
                 try:
+                    kontext = multiprocessing.get_context("spawn")
+                    # je Pool eine neue Sperre: ein abgestürzter Arbeiter kann die alte nicht mehr freigeben
+                    sperre = None
+                    if self.prozesse > 1:
+                        try:
+                            sperre = kontext.Semaphore(GROSS_GLEICHZEITIG)
+                        except Exception as e:      # ohne Sperre lesen große Seiten eben gleichzeitig
+                            _protokollieren(e)
                     self._pool = concurrent.futures.ProcessPoolExecutor(
-                        max_workers=self.prozesse, mp_context=multiprocessing.get_context("spawn"),
-                        initializer=_eltern_waechter)
+                        max_workers=self.prozesse, mp_context=kontext, initializer=_arbeiter_start,
+                        initargs=(sperre,))
                 except Exception as e:  # z. B. eingeschränkte Umgebung ohne Prozessstart
                     self._pool = None
                     self._pool_fehler = str(e) or type(e).__name__
@@ -1980,14 +2617,25 @@ class OcrDienst:
             ort = "Bildbereich auf Seite" if clip is not None else "Seite"
             breite, hoehe = roh.get("seitengroesse") or (0, 0)
             groesse = f" ({breite * 2.54 / 72:.0f} x {hoehe * 2.54 / 72:.0f} cm)" if breite and hoehe else ""
+            grund = roh.get("aufloesung_grund")
             if roh.get("speicher_knapp"):
                 text = (f"{ort} {seite_nr0 + 1}{groesse}: Arbeitsspeicher knapp – mit nur {aufloesung} dpi gelesen, "
                         f"die Texterkennung kann dort mehr übersehen. Bitte prüfen!")
                 warnungen.append(text)
                 meldungen.append(_meldung("warnung", "OCR_FEHLER", text, seite_nr0))
+            elif grund == "bild":
+                # die Seite ist ein Bild: feiner als seine eigenen Pixel lässt es sich nicht lesen
+                text = (f"{ort} {seite_nr0 + 1} ist sehr groß{groesse}, z. B. ein Handyfoto – mit der Auflösung des "
+                        f"Bilds gelesen ({aufloesung} dpi).")
+                meldungen.append(_meldung("hinweis", "OCR_GELESEN", text, seite_nr0))
+            elif aufloesung < GROSS_WARN_DPI:
+                text = (f"{ort} {seite_nr0 + 1} ist sehr groß{groesse} – der Arbeitsspeicher reicht nur für "
+                        f"{aufloesung} dpi, kleine Schrift kann die Texterkennung dort übersehen. Bitte prüfen!")
+                warnungen.append(text)
+                meldungen.append(_meldung("warnung", "OCR_FEHLER", text, seite_nr0))
             else:
-                text = (f"{ort} {seite_nr0 + 1} ist sehr groß{groesse}, z. B. ein Handyfoto – für die Texterkennung "
-                        f"mit {aufloesung} dpi gelesen, damit der Arbeitsspeicher reicht.")
+                text = (f"{ort} {seite_nr0 + 1} ist sehr groß{groesse} – für die Texterkennung mit {aufloesung} statt "
+                        f"{angefragt} dpi gelesen, damit der Arbeitsspeicher reicht.")
                 meldungen.append(_meldung("hinweis", "OCR_GELESEN", text, seite_nr0))
         if roh.get("zeilen_unsicher"):
             ort = "Bildbereich auf Seite" if clip is not None else "Seite"

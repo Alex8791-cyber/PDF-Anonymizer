@@ -45,6 +45,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+import time
 import unicodedata
 from array import array
 from bisect import bisect_left, bisect_right
@@ -71,6 +72,8 @@ OCR_RAND = 1.5                    # pt Rand um OCR-Wortboxen
 OCR_STUFE_TOLERANZ = 1.0          # schräge OCR-Zeile: ein Rechteckstück darf so viel höher sein als seine Zeichen
 LUECKE_TAB = 1.5                  # Lücke > 1,5 x mittlere Zeichenbreite ohne Leerzeichen -> "\t"
 ETIKETT_ABSTAND = 250             # pt: so weit links vom Formularfeld darf sein Etikett stehen
+VORAB_MELDEN_S = 2.0              # dauert die Prüfung aller Seiten vor der OCR länger, steht das im Protokoll
+VEKTOR_MIN_WOERTER = 2            # liest die OCR in einem Bereich mit Text als Grafik weniger Wörter: Warnung
 ZEILEN_VEREINEN = True            # MuPDF-Zeilen gleicher Grundlinie eines Blocks verbinden
 
 _LIGATUREN = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl",
@@ -1952,6 +1955,17 @@ def unlesbare_schriften(seite) -> frozenset:
         return frozenset()
 
 
+def vektortext_bereiche_der_seite(seite) -> list:
+    """Bereiche mit Text als Vektorpfaden (ocr.seiten_pruefung(...).vektor); leer im Zweifel."""
+    pruefen = getattr(_ocr, "seiten_pruefung", None)
+    if pruefen is None:
+        return []
+    try:
+        return list(getattr(pruefen(seite), "vektor", ()) or ())
+    except Exception:
+        return []
+
+
 def bildbereiche(seite) -> list:
     """Relevante Bildbereiche der Seite (ocr.bild_bereiche; eine Schwelle für alle)."""
     if hasattr(_ocr, "bild_bereiche"):
@@ -2034,7 +2048,20 @@ def dokument_aufbauen(doc, pfad, ocr=None, ocr_cache=None, melde=None, fortschri
     ocr: OcrDienst (oder Attrappe mit woerter()); ocr_cache: {seite: Wörter} – wird benutzt und gefüllt
     (Wörter als Tupel (x0, y0, x1, y1, text[, block, zeile, wort])). warnungen/hinweise/meldungen: Listen,
     in die Meldungen zum Lesen (OCR) geschrieben werden; analyse_meldungen=False lässt die nur für die
-    Analyse gedachten Hinweise weg (Schwärzung). Abbruch -> Ausnahme Abgebrochen."""
+    Analyse gedachten Hinweise weg (Schwärzung). Abbruch -> Ausnahme Abgebrochen.
+    Die Seitenprüfung (ocr.seiten_pruefung) läuft je Seite nur einmal: ocr.pruefung_merken hält ihr Ergebnis für
+    Entscheidung, Bildbereiche und unlesbare Schriften fest."""
+    merken = getattr(_ocr, "pruefung_merken", None)
+    if merken is None:
+        return _dokument_aufbauen(doc, pfad, ocr, ocr_cache, melde, fortschritt, abbruch, warnungen, hinweise,
+                                  meldungen, vorbereitung, analyse_meldungen)
+    with merken():
+        return _dokument_aufbauen(doc, pfad, ocr, ocr_cache, melde, fortschritt, abbruch, warnungen, hinweise,
+                                  meldungen, vorbereitung, analyse_meldungen)
+
+
+def _dokument_aufbauen(doc, pfad, ocr, ocr_cache, melde, fortschritt, abbruch, warnungen, hinweise, meldungen,
+                       vorbereitung, analyse_meldungen) -> Dokument:
     pfad = Path(pfad) if pfad else None
     if vorbereitung is None:
         vorbereitung = dokument_vorbereiten(doc)
@@ -2052,8 +2079,16 @@ def dokument_aufbauen(doc, pfad, ocr=None, ocr_cache=None, melde=None, fortschri
     entscheidungs_meldungen: dict = {}       # Seite -> Meldungen der OCR-Entscheidung (TEXTEBENE_UNLESBAR …)
     vorab = getattr(ocr, "vorab", None)
     if vorab is not None and pfad is not None:
-        # Scan-Seiten parallel einreihen (Gutachten PERF-05); ergebnis() wartet dann nur noch
+        # Scan-Seiten parallel einreihen (Gutachten PERF-05); ergebnis() wartet dann nur noch. Abbruch wirkt schon
+        # hier (Befund R-03/Laufzeit: die Vorab-Prüfung aller Seiten lief vorher ohne Abbruch durch)
+        beginn = time.monotonic()
+        gemeldet = False
         for nr in range(gesamt):
+            if abbruch is not None and abbruch.is_set():
+                raise Abgebrochen()
+            if melde and not gemeldet and time.monotonic() - beginn > VORAB_MELDEN_S:
+                melde(f"   Seiten werden geprüft: {pfad.name}, Seite {nr + 1}/{gesamt} …")
+                gemeldet = True
             entscheidungen[nr] = ocr_entscheidung(doc[nr], entscheidungs_meldungen.setdefault(nr, []))
         offen = [nr for nr, m in entscheidungen.items() if m == "seite" and nr not in ocr_cache]
         if offen:
@@ -2136,6 +2171,15 @@ def dokument_aufbauen(doc, pfad, ocr=None, ocr_cache=None, melde=None, fortschri
         if analyse_meldungen and modus == "bilder" and woerter:
             _melden(hinweise, meldungen, "hinweis", "OCR_GELESEN",
                     f"Seite {nr + 1}: Text in Bildern per OCR gelesen und mitgeprüft.", nr)
+        if analyse_meldungen and modus == "bilder" and ocr_gelaufen:
+            # Text als Grafik, aus dem die OCR (fast) nichts gelesen hat (Befund R-06, Runde 2: zu grob gelesen) –
+            # dort kann ungeprüft etwas stehen
+            ungelesen = [v for v in vektortext_bereiche_der_seite(seite)
+                         if sum(1 for w in woerter or () if fitz.Rect(w[:4]).intersects(v)) < VEKTOR_MIN_WOERTER]
+            if ungelesen:
+                _melden(warnungen, meldungen, "warnung", "OCR_FEHLER",
+                        f"Seite {nr + 1}: Text als Grafik (Kurven statt Schrift) konnte per Texterkennung nicht "
+                        f"gelesen werden – dort wurde nichts geprüft. Bitte selbst ansehen!", nr)
         seiten.append(m)
         felder.extend(m.felder)
     if analyse_meldungen:

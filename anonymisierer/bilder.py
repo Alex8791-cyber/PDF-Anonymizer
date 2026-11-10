@@ -268,6 +268,12 @@ def seite_als_bild_schwaerzen(doc, seite, fuellen, leeren=(), farbe=(0.92, 0.92,
     flaeche = max(abs(rect), 1.0)
     dpi = min(dpi, int(72 * (BILDSEITE_MAX_PIXEL / flaeche) ** 0.5))
     matrix = fitz.Matrix(dpi / 72.0, dpi / 72.0)
+    try:   # Zyklen im Strukturbaum lassen MuPDF 1.28 beim Rendern hängen; die Ausgabe trägt ohnehin keinen Strukturbaum
+        katalog = doc.pdf_catalog()
+        if doc.xref_get_key(katalog, "StructTreeRoot")[0] != "null":
+            doc.xref_set_key(katalog, "StructTreeRoot", "null")
+    except Exception:
+        pass
     pix = seite.get_pixmap(matrix=matrix, colorspace=fitz.csRGB, alpha=False, annots=False)
     grau = tuple(int(round(255 * c)) for c in farbe)
     for liste, wert in ((leeren, (255, 255, 255)), (fuellen, grau)):

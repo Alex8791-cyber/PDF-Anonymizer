@@ -256,10 +256,13 @@ def _nebenkanaele_bereinigen(lauf, doc, zaehler: dict) -> str:
 
 def _beschnitt_nachholen(lauf, doc) -> None:
     """Rückfall, wenn das Nebenkanal-Modul scheitert: Inhalte außerhalb des Beschnitts (S-05) hier entfernen,
-    denn die Seitenschleife hat sie dem Modul überlassen."""
+    denn die Seitenschleife hat sie dem Modul überlassen. Scheitert MuPDF an einer Seite (zyklisches Form-XObject,
+    Befund R-08), wird sie als Bild ihres sichtbaren Bereichs neu erzeugt – nie bleibt der Inhalt still stehen;
+    lässt sie sich auch nicht rendern, entsteht keine Ausgabe (_seite_als_bild)."""
     lauf.beschnitt_lokal = True
     for nr in range(len(doc)):
         seite = doc[nr]
+        rechtecke = []
         try:
             rechtecke = _beschnitt_rechtecke(seite)
             if not rechtecke:
@@ -271,9 +274,8 @@ def _beschnitt_nachholen(lauf, doc) -> None:
                                    text=fitz.PDF_REDACT_TEXT_REMOVE)
             lauf.beschnitt_seiten.append(nr + 1)
         except Exception as e:
-            lauf.melden("fehler", "NEBENKANAL_ENTFERNT",
-                        f"Seite {nr + 1}: Inhalte außerhalb des sichtbaren Seitenbereichs konnten nicht entfernt "
-                        f"werden ({e}).", nr)
+            modell = lauf.modell.seiten[nr] if lauf.modell is not None and nr < len(lauf.modell.seiten) else None
+            _seite_als_bild(lauf, nr, seite, modell, [], rechtecke, e)
 
 
 def _beschnitt_rechtecke(seite) -> list:
@@ -863,20 +865,24 @@ def _platzhalter_kaesten_zeichnen(seite, kaesten: list) -> None:
 def _muster_text_entfernen(doc, seite) -> int:
     """Text in Kachelmustern (Füllmuster) der Seite entfernen (Befund R-03): die Textextraktion liefert ihn nicht,
     apply_redactions erreicht ihn nicht – er bliebe im Bild und im Rohstrom. Entfernt werden die BT…ET-Abschnitte
-    der Musterströme; das übrige Muster (Linien, Flächen) bleibt. Rückgabe: Anzahl geänderter Muster."""
+    der Musterströme und der Form-XObjects, die nur über ein Muster erreicht werden (Befund R-03, Runde 2: Muster
+    ruft /Fm1 Do auf, der Text steht im XObject); das übrige Muster (Linien, Flächen) bleibt. Form-XObjects, die
+    die Seite auch direkt zeichnet, bleiben unverändert (dort erreicht apply_redactions den Text, und sichtbarer
+    Text der Seite ginge sonst verloren). Rückgabe: Anzahl geänderter Ströme."""
     geaendert = 0
     try:
         verweise = [x[0] for x in seite.get_xobjects()]
     except Exception:
         verweise = []
-    kandidaten: set = set()
-    stapel = [seite.xref] + verweise
+    direkt: set = set(verweise)      # ohne Muster erreichbar
+    im_muster: set = set()           # Muster und alles, was in ihren Ressourcen steht
+    stapel = [(seite.xref, False)] + [(x, False) for x in verweise]
     gesehen: set = set()
     while stapel:
-        xref = stapel.pop()
-        if xref in gesehen or xref <= 0 or len(gesehen) > 500:
+        xref, unter_muster = stapel.pop()
+        if (xref, unter_muster) in gesehen or xref <= 0 or len(gesehen) > 1000:
             continue
-        gesehen.add(xref)
+        gesehen.add((xref, unter_muster))
         for schluessel in ("Resources/Pattern", "Resources/XObject"):
             try:
                 art, wert = doc.xref_get_key(xref, schluessel)
@@ -888,13 +894,15 @@ def _muster_text_entfernen(doc, seite) -> int:
                 continue
             for nummer in re.findall(r"(\d+)\s+0\s+R", wert):
                 nummer = int(nummer)
-                if schluessel.endswith("Pattern"):
-                    kandidaten.add(nummer)
-                stapel.append(nummer)
-    for xref in kandidaten:
+                kind_unter_muster = unter_muster or schluessel.endswith("Pattern")
+                (im_muster if kind_unter_muster else direkt).add(nummer)
+                stapel.append((nummer, kind_unter_muster))
+    for xref in sorted(im_muster - direkt):
         try:
-            if doc.xref_get_key(xref, "PatternType")[1] != "1" or not doc.xref_is_stream(xref):
+            if not doc.xref_is_stream(xref):
                 continue
+            if doc.xref_get_key(xref, "PatternType")[1] != "1" and doc.xref_get_key(xref, "Subtype")[1] != "/Form":
+                continue                                   # Bilder, Schattierungen
             strom = doc.xref_stream(xref)
             neu = _text_abschnitte_entfernen(strom)
             if neu != strom:
@@ -1082,7 +1090,8 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
     #     nicht erkannt hat, wäre sonst ungeprüft in der Ausgabe
     if modus == "seite" and hasattr(sm._ocr, "textebene_pruefen"):
         try:
-            if sm._ocr.textebene_pruefen(seite).verborgen >= getattr(sm._ocr, "VERBORGEN_MIN_ZEICHEN", 10):
+            befund = sm._ocr.textebene_pruefen(seite)
+            if befund.verborgen >= getattr(sm._ocr, "VERBORGEN_MIN_ZEICHEN", 10) and getattr(befund, "muster", True):
                 if _muster_text_entfernen(doc, seite):
                     lauf.melden("hinweis", "NEBENKANAL_ENTFERNT",
                                 f"Seite {nr + 1}: Text in Füllmustern entfernt (nicht auslesbar).", nr)
@@ -1092,6 +1101,7 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
     # 4) Anwenden (Text UND Bildpixel), Teilreste prüfen, Kästen und Platzhalter an der gemessenen Lage
     #    zeichnen, Kollateralschaden prüfen. Scheitert MuPDF an der Seite (zyklische Form-XObjects, Befund R-08),
     #    wird sie als Bild geschwärzt.
+    als_bild = False
     if bereits:
         bild_vorher = None
         if _bilder is not None and hasattr(_bilder, "bildzustand") and hasattr(_bilder, "nach_schwaerzung"):
@@ -1101,7 +1111,6 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
                 bild_vorher = None
         beweglich = [k for k, v in zip(kaesten, verschiebbar) if v]
         zeilen_vorher = _platzhalter_zeilen_vorher(m, beweglich) if (textglyphen and beweglich) else {}
-        als_bild = False
         try:
             seite.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS,
                                    graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
@@ -1161,6 +1170,29 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
                 pass
         if modus == "seite" or als_bild:
             lauf.scan_seiten_seit_speichern += 1
+
+    # 4a) Inhalte außerhalb des Beschnitts (Gutachten S-05) entfernt das Nebenkanal-Modul – hier schon je Seite:
+    #     Scheitert MuPDF an der Seite (zyklische oder zu tief verschachtelte Form-XObjects, Befund R-08), wird sie
+    #     als Bild ihres sichtbaren Bereichs neu erzeugt, auch ohne Treffer. Vorher blieb der Inhalt außerhalb der
+    #     CropBox (Name, IBAN) still in der Ausgabe, und die Nebenkanal-Bereinigung brach für das ganze Dokument ab.
+    if not lauf.beschnitt_lokal and not als_bild and _nebenkanaele is not None:
+        entfernen = getattr(_nebenkanaele, "beschnitt_entfernen", None)
+        if entfernen is not None:
+            try:
+                if entfernen(doc, seite):
+                    lauf.beschnitt_seiten.append(nr + 1)
+            except Exception as fehler:
+                als_bild = True
+                _seite_als_bild(lauf, nr, seite, m, [], [], fehler)
+                seite = doc[nr]
+                lauf.scan_seiten_seit_speichern += 1
+
+    # 4b) Abgeschnittener Text (Befund R-03, Runde 2): Zeichen, die ein Beschneidungspfad unsichtbar macht (überlanger
+    #     Formularwert, Tabellenzelle), liest pdftotext trotzdem – sie werden entfernt, ohne Sichtbares anzutasten
+    if not als_bild:
+        seite, als_bild = _abgeschnittenen_text_entfernen(lauf, nr, seite, m)
+        if als_bild:
+            lauf.scan_seiten_seit_speichern += 1
     lauf.rects_je_seite[nr] = bereits + [k for k in kaesten if k not in bereits]
 
     # 5) Hinweise zu Grafiken/Bildern (Unterschriften, Stempel, Fotos werden nicht geprüft)
@@ -1170,7 +1202,100 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
         lauf.grafik_seiten.append(nr + 1)
 
 
-def _seite_als_bild(lauf: _Lauf, nr: int, seite, m, einbrennen: list, leeren: list, fehler: BaseException):
+ABGESCHNITTEN_RAND = 0.15     # Rechteck je abgeschnittener Glyphe: so viel der Breite (und 0,2 der Höhe) eingerückt –
+                              # MuPDF entfernt jede Glyphe, die ein Rechteck auch nur zu ~10 % berührt (gemessen)
+
+
+def _glyphen_aus(seite, flags) -> list:
+    """[(Ursprung, Kasten als Zahlen)] der Zeichen, die get_text mit diesen flags liefert."""
+    return [(ch.get("origin") or (0.0, 0.0), ch["bbox"])
+            for block in seite.get_text("rawdict", flags=flags).get("blocks", ())
+            for zeile in block.get("lines", ()) for sp in zeile.get("spans", ()) for ch in sp.get("chars", ())]
+
+
+_NACHBARN = ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1))
+
+
+def _drin(menge: set, o) -> bool:
+    """Liegt ein Glyphenursprung (auf 1 pt gerundet, ±1) in der Menge?"""
+    rx, ry = round(o[0]), round(o[1])
+    return any((rx + dx, ry + dy) in menge for dx, dy in _NACHBARN)
+
+
+def _abgeschnittene_glyphen(seite) -> tuple:
+    """(abgeschnitten, sichtbar): Kästen der gezeichneten Glyphen (Zeichenspur), die ein Beschneidungspfad unsichtbar
+    macht – get_text liefert sie mit Beschneidung nicht, ohne schon (überlanger Formularwert, Tabellenzelle, Form-
+    XObject mit kleiner BBox) –, und die Kästen der sichtbaren Glyphen (nur, wenn es abgeschnittene gibt).
+    Unsichtbarer Text (Rendermodus 3) und Text außerhalb der Seite zählen nicht (Beschnitt: Schritt 4a). Kästen
+    werden als Zahlen geprüft, nicht als fitz.Rect je Zeichen (läuft auf jeder Seite)."""
+    sichtbar = _glyphen_aus(seite, sm.TEXT_FLAGS)
+    if not sichtbar:
+        return [], []
+    bekannt = {(round(o[0]), round(o[1])) for o, _ in sichtbar}
+    kandidaten = []
+    px0, py0, px1, py1 = seite.rect
+    for span in seite.get_texttrace():
+        if span.get("type", 0) == 3 or span.get("opacity", 1) == 0:
+            continue
+        for z in span["chars"]:
+            if len(z) < 4 or z[2] is None or chr(z[0]).isspace():
+                continue
+            b = z[3]
+            if not (b[0] < b[2] and b[1] < b[3]) or not (b[0] < px1 and px0 < b[2] and b[1] < py1 and py0 < b[3]):
+                continue                            # leerer Kasten oder außerhalb der Seite
+            if not _drin(bekannt, z[2]):
+                kandidaten.append((z[2], fitz.Rect(b)))
+    if not kandidaten:                              # der Normalfall: alles Gezeichnete ist auch auslesbar
+        return [], []
+    ohne = {(round(o[0]), round(o[1])) for o, _ in _glyphen_aus(seite, sm.TEXT_FLAGS & ~fitz.TEXT_MEDIABOX_CLIP)}
+    return [box for o, box in kandidaten if _drin(ohne, o)], [fitz.Rect(b) for _, b in sichtbar]
+
+
+def _abgeschnittenen_text_entfernen(lauf: _Lauf, nr: int, seite, m):
+    """Abgeschnittenen Text der Seite entfernen (Befund R-03, Runde 2): je Glyphe ein eingerücktes Rechteck, nur Text
+    (Bilder und Linien bleiben). Berührt ein Rechteck eine sichtbare Glyphe, oder bleibt danach etwas übrig, wird die
+    Seite als Bild ihres sichtbaren Bereichs neu erzeugt – Sichtbares bleibt, Unsichtbares verschwindet.
+    Rückgabe: (Seite, als Bild)."""
+    try:
+        abgeschnitten, sichtbar = _abgeschnittene_glyphen(seite)
+    except Exception:
+        abgeschnitten, sichtbar = [], []
+    if not abgeschnitten:
+        return seite, False
+    zeilen: dict = {}                               # sichtbare Glyphen nach 10-pt-Streifen (schnelle Nachbarsuche)
+    for v in sichtbar:
+        for k in range(int(v.y0 // 10), int(v.y1 // 10) + 1):
+            zeilen.setdefault(k, []).append(v)
+    rechtecke, beruehrt = [], False
+    for b in abgeschnitten:
+        r = b + (ABGESCHNITTEN_RAND * b.width, 0.2 * b.height, -ABGESCHNITTEN_RAND * b.width, -0.2 * b.height)
+        nachbarn = {id(v): v for k in range(int(r.y0 // 10), int(r.y1 // 10) + 1) for v in zeilen.get(k, ())}
+        if r.is_empty or any(r.intersects(v) for v in nachbarn.values()):
+            beruehrt = True
+            continue
+        rechtecke.append(r)
+    fehler = None
+    if not beruehrt:
+        try:
+            for r in rechtecke:
+                seite.add_redact_annot(r, fill=False, cross_out=False)
+            seite.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+                                   text=fitz.PDF_REDACT_TEXT_REMOVE)
+            if not _abgeschnittene_glyphen(seite)[0]:
+                lauf.melden("hinweis", "NEBENKANAL_ENTFERNT",
+                            f"Seite {nr + 1}: {len(abgeschnitten)} abgeschnittene, unsichtbare Zeichen entfernt (z. B. "
+                            f"ein zu langer Formularwert).", nr)
+                return seite, False
+        except Exception as e:
+            fehler = e
+    _seite_als_bild(lauf, nr, seite, m, [], [], fehler or RuntimeError("abgeschnittener Text"),
+                    grund=f"enthielt abgeschnittenen, unsichtbaren Text ({len(abgeschnitten)} Zeichen), der sich "
+                          f"nicht einzeln entfernen ließ")
+    return lauf.doc[nr], True
+
+
+def _seite_als_bild(lauf: _Lauf, nr: int, seite, m, einbrennen: list, leeren: list, fehler: BaseException,
+                    grund: str = "ist im PDF fehlerhaft aufgebaut und ließ sich nicht direkt bereinigen"):
     """Rückfall, wenn apply_redactions an der Seite scheitert (zyklisches oder zu tief verschachteltes
     Form-XObject: "exception stack overflow", Befund R-08): Seite rendern, Schwärzungen (mit den vollen
     Glyphenboxen der Treffer) einbrennen, Seite durch das Bild ersetzen. Die Kontroll-OCR prüft die Seite danach
@@ -1193,11 +1318,11 @@ def _seite_als_bild(lauf: _Lauf, nr: int, seite, m, einbrennen: list, leeren: li
                            f"(z. B. über „Drucken als PDF“) und erneut versuchen.") from e
     lauf.ocr_modus[nr] = "seite"
     lauf.bildbereiche[nr] = []
-    if m.ocr_winkel is None:
+    if m is not None and m.ocr_winkel is None:
         m.ocr_winkel = 0
     lauf.melden("hinweis", "SEITE_ALS_BILD",
-                f"Seite {nr + 1} ist im PDF fehlerhaft aufgebaut und ließ sich nicht direkt schwärzen – sie wurde "
-                f"als Bild geschwärzt (Text dort nicht mehr markierbar, für Menschen und KI aber lesbar).", nr)
+                f"Seite {nr + 1} {grund} – sie wurde als Bild neu erzeugt und dabei geschwärzt (Text dort nicht mehr "
+                f"markierbar, für Menschen und KI aber lesbar).", nr)
 
 
 def _unbedeckt(m, start: int, ende: int, rects: list) -> list:
