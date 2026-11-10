@@ -3,7 +3,12 @@
 Öffentliche Schnittstelle (CONTRACT.md, CONTRACT_V2.md 12.3):
     _tessdata_finden()                      Sprachdaten-Ordner suchen (Projekt-tessdata zuerst)
     seiten_pruefung(seite)                  EINE Heuristik für Analyse, Schwärzung und Kontrolle:
-                                            SeitenPruefung(modus, bereiche, zeichen, bildanteil, meldungen)
+                                            SeitenPruefung(modus, bereiche, zeichen, bildanteil, meldungen);
+                                            auch unlesbare Textebene, Text in Mustern, Text als Vektorpfade
+    textebene_pruefen(seite), schrift_unlesbar(text), vektortext_bereiche(seite)
+                                            Bausteine dieser Entscheidung (Befunde R-02, R-03)
+    drehung_entfernen(seite)                /Rotate entfernen, sichtbarer Ausschnitt bleibt exakt (Befund R-05)
+    render_dpi(seite, clip, dpi)            Renderauflösung der OCR, riesige Seiten begrenzt (Befund R-06)
     ocr_noetig(seite, meldungen=None)       "nein" | "seite" | "bilder"   (= seiten_pruefung(...).modus)
     bild_bereiche(seite, meldungen=None)    relevante Bildbereiche (= seiten_pruefung(...).bereiche)
     woerter_zu_zeilen(woerter, winkel=None, schraeg=None)
@@ -21,7 +26,8 @@
 Kompatibilität für ältere Aufrufer: ist_scan_seite(seite), ocr_textpage(seite).
 
 Koordinaten: Alle Wörter (x0, y0, x1, y1, text[, block, zeile, wort, winkel, schraeg]) beziehen sich auf die
-Seite NACH page.remove_rotation(). Ein Wort ist ein 5-Tupel (woerter()) bzw. 10-Tupel (ergebnis()["woerter"]):
+Seite NACH drehung_entfernen() (= Koordinaten der gedrehten Ansicht, wie get_text sie auf der Originalseite
+liefert). Ein Wort ist ein 5-Tupel (woerter()) bzw. 10-Tupel (ergebnis()["woerter"]):
 die letzten beiden Werte sind die erkannte Ausrichtung (0/90/180/270) und die für die OCR herausgedrehte
 Schräglage in Grad (0, wenn die Seite nicht gerade gerückt wurde) – so trägt jede Wortliste (auch der ocr_cache
 zwischen Analyse und Schwärzung) alles, was die Zeilenbildung braucht, und Analyse, Schwärzung und Kontrolle
@@ -85,6 +91,29 @@ SCAN_BILD_ANTEIL = 0.20       # ab 20 % Bildfläche (in Summe) gilt eine textarm
 WENIG_TEXT_ZEICHEN = 200      # weniger sichtbare Zeichen = textarm (Stempel, Faxkopf, Seitenzahl, DMS-Fuß)
 AUSRICHTUNG_BILD_ANTEIL = 0.20  # Bildbereiche ab dieser Größe bekommen ebenfalls die Ausrichtungssuche
 
+# Textebene ohne lesbare Zeichen (Befund R-02: falsche/fehlende ToUnicode, Type3 ohne Unicode). Gemessen je Schrift
+# einer Seite: Entwicklungs- und Prüfkorpora (über 700 Schrift-Seiten) liegen bei 0 % seltsamen Zeichen, höchstens
+# 1,5 % Sonderzeichen (E-Mail-Ausdrucke: "<", ">", "_") und finden in jedem Fließtext häufige Wörter; Überschriften
+# ("Besondere Vereinbarungen") haben keine, aber höchstens 11 Wörter ohne Sonderzeichen. Zeichensalat: 100 %
+# U+FFFD, bzw. 0 häufige Wörter bei 12-32 % Sonderzeichen ("Pd{#Pxvwhupdqq", "AMn!AecdQb^M__").
+SALAT_SELTSAM_MIN = 8         # so viele U+FFFD-/Steuer-/Private-Use-Zeichen einer Schrift …
+SALAT_SELTSAM_ANTEIL = 0.25   # … mit diesem Anteil an ihren Zeichen: Textebene unlesbar
+SALAT_MIN_ZEICHEN = 30        # Zeichensalat ohne seltsame Zeichen: Schrift mit mindestens 30 Zeichen …
+SALAT_MIN_WOERTER = 6         # … und 6 Wörtern, keinem häufigen Wort …
+SALAT_SONDER_ANTEIL = 0.05    # … und >= 5 % Sonderzeichen (# { } ^ _ [ ] = | ~ ` \ < > $ !) oder …
+SALAT_WORTLAENGE = 20.0       # … mittlerer "Wortlänge" ab 20 (Leerzeichen sind mitverschlüsselt)
+_SALAT_SONDERZEICHEN = frozenset("#{}^_][=|~`\\<>$!")
+_SYMBOLSCHRIFTEN = ("wingding", "webding", "dingbat", "symbol", "marlett")  # Aufzählungszeichen in Private Use
+VERBORGEN_MIN_ZEICHEN = 10    # sichtbar gezeichnete Zeichen, die die Textextraktion nicht liefert (Kachelmuster)
+# Text als Vektorpfade (Befund R-03: "Text als Grafik drucken", Druckdaten mit Kurven): viele kleine gefüllte
+# Pfade mit Kurven. Gemessen: Korpora 0 solche Pfade je Seite, eine Textseite als Kurven 415.
+VEKTORTEXT_MIN_PFADE = 30     # so viele glyphenartige Pfade (gefüllt, mit Kurve, <= 60 x 40 pt) = Text als Grafik
+VEKTORTEXT_MAX_BREITE = 60.0
+VEKTORTEXT_MAX_HOEHE = 40.0
+VEKTORTEXT_ABSTAND_PT = 12.0  # glyphenartige Pfade bis zu diesem Abstand bilden einen Bereich (Wörter, Zeilen)
+VEKTORTEXT_MIN_GRUPPE = 8     # ein Bereich braucht mindestens 8 solcher Pfade (sonst Symbol, Logo, Unterschrift)
+VEKTORTEXT_MAX_PFADE = 20000  # mehr gefüllte Pfade: Plan/Karte, get_drawings wäre zu teuer (eine Textseite ~3000)
+
 # ----------------------------------------------------------------------
 # Ausrichtung / Plausibilität der OCR-Wörter
 # ----------------------------------------------------------------------
@@ -114,6 +143,19 @@ PLAUSIBEL_WARNUNG = 0.40      # unter 0,40 (= Quote 0,10) melden alte Ergebnisse
 OCR_ZEITLIMIT_S = 900         # Sekunden je Auftrag (ab Beginn des Wartens), danach gilt er als gescheitert
 OCR_DPI = 300
 MAX_FEHLVERSUCHE = 2          # ein Auftrag, der den Arbeiter zweimal abstürzen lässt, wird übersprungen
+
+# ----------------------------------------------------------------------
+# Riesige Seiten (Befund R-06): Fotos, die mit 1 px = 1 pt ins PDF gewandelt wurden (4032 x 3024 pt und mehr)
+# ----------------------------------------------------------------------
+MAX_RENDER_PIXEL = 40_000_000  # höchstens 40 Megapixel je Rendering (A2 bei 300 dpi = 35 MP bleibt unverändert):
+                               # 300 dpi auf einer 12-MP-Fotoseite wären 212 MP (gemessen 3,1 GB je Arbeiter, ab
+                               # ~1 GiB Pixmap bricht MuPDF mit "Overly large image" ab)
+GROSS_MIN_DPI = 72             # große Seiten: mindestens 1 Pixel je Punkt (sofern die Grenze das erlaubt) …
+GROSS_HOCHSKALIERUNG = 2.0     # … kleine Bilder höchstens doppelt so fein wie ihre eigenen Pixel; sonst die echte
+                               # Auflösung des Seitenbilds (gemessen 12-MP-Foto: 72 dpi 64 Wörter, 2,4 s, 329 MB;
+                               # 144 dpi dieselben 64 Wörter, 4,6 s, 992 MB)
+GROSS_BILD_ANTEIL = 0.25       # ein Bild prägt die Auflösung, wenn es mindestens 25 % der Fläche bedeckt
+_SPEICHER_FEHLER = ("FzErrorLimit", "FzErrorMemory", "MemoryError")
 
 # ----------------------------------------------------------------------
 # Tesseract-Einstellungen der vollen Lesungen (siehe Modulbeschreibung "Seitenaufteilung")
@@ -344,6 +386,200 @@ def tessdata_mit_einstellungen(tessdata, sprache, einstellungen=None):
 
 
 # ----------------------------------------------------------------------
+# Seitendrehung (/Rotate) entfernen – der sichtbare Ausschnitt bleibt exakt erhalten (Befund R-05)
+# ----------------------------------------------------------------------
+_PDF_ZAHL_RE = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)")
+_PDF_VERWEIS_RE = re.compile(r"(\d+)\s+(\d+)\s+R")
+_VERERBBARE_BOXEN = frozenset({"MediaBox", "CropBox"})
+_PUNKT_SCHLUESSEL = ("QuadPoints", "Vertices", "L", "CL")
+_NICHT_DREHEN = 16                  # Anmerkungs-Flag NoRotate
+
+
+def _pdf_zahl(v: float) -> str:
+    text = f"{float(v):.4f}".rstrip("0").rstrip(".")
+    return "0" if text in ("-0", "") else text
+
+
+def _pdf_wert(doc, typ, wert):
+    """Wert eines Schlüssels (xref_get_key) – indirekte Objekte aufgelöst."""
+    if typ == "xref":
+        try:
+            nummer = int(wert.split()[0])
+            if doc.xref_is_stream(nummer):
+                return "stream", nummer
+            return "objekt", doc.xref_object(nummer, compressed=True)
+        except Exception:
+            return None, None
+    return typ, wert
+
+
+def _pdf_rechteck(doc, typ, wert):
+    """[a b c d] (auch indirekt) -> (x0, y0, x1, y1) normalisiert oder None."""
+    typ, wert = _pdf_wert(doc, typ, wert)
+    if typ not in ("array", "objekt") or not isinstance(wert, str):
+        return None
+    zahlen = _PDF_ZAHL_RE.findall(wert)
+    if len(zahlen) != 4:
+        return None
+    a, b, c, d = (float(z) for z in zahlen)
+    return (min(a, c), min(b, d), max(a, c), max(b, d))
+
+
+def _seitenbox(doc, xref: int, name: str):
+    """Seitenbox in PDF-Koordinaten (MediaBox und CropBox werden über /Parent geerbt) oder None."""
+    gesehen: set = set()
+    while xref > 0 and xref not in gesehen and len(gesehen) < 64:
+        gesehen.add(xref)
+        typ, wert = doc.xref_get_key(xref, name)
+        if typ not in ("null", None):
+            return _pdf_rechteck(doc, typ, wert)
+        if name not in _VERERBBARE_BOXEN:
+            return None
+        typ, wert = doc.xref_get_key(xref, "Parent")
+        if typ != "xref":
+            return None
+        xref = int(wert.split()[0])
+    return None
+
+
+def _neuer_strom(doc, daten: bytes) -> int:
+    xref = doc.get_new_xref()
+    doc.update_object(xref, "<<>>")
+    doc.update_stream(xref, daten)
+    return xref
+
+
+def _inhalts_verweise(doc, xref: int) -> list:
+    """Verweise ("12 0 R") der Inhaltsströme einer Seite (einzeln, Feld oder indirektes Feld)."""
+    typ, wert = doc.xref_get_key(xref, "Contents")
+    if typ == "xref":
+        nummer = int(wert.split()[0])
+        if doc.xref_is_stream(nummer):
+            return [wert.strip()]
+        wert = doc.xref_object(nummer, compressed=True)
+    elif typ != "array":
+        return []
+    return [f"{a} {b} R" for a, b in _PDF_VERWEIS_RE.findall(wert)]
+
+
+def _anmerkungen_drehen(doc, xref: int, matrix, drehung) -> None:
+    """Rechtecke, Punktlisten und Erscheinungsbilder der Anmerkungen einer Seite mitdrehen (nach dem
+    Einbrennen sind das meist nur noch Links)."""
+    typ, wert = _pdf_wert(doc, *doc.xref_get_key(xref, "Annots"))
+    if typ not in ("array", "objekt") or not isinstance(wert, str):
+        return
+    for a, _ in _PDF_VERWEIS_RE.findall(wert):
+        annot = int(a)
+        try:
+            rect = _pdf_rechteck(doc, *doc.xref_get_key(annot, "Rect"))
+            if rect is None:
+                continue
+            neu = fitz.Rect(rect) * matrix
+            doc.xref_set_key(annot, "Rect", "[" + " ".join(_pdf_zahl(v) for v in neu) + "]")
+            for schluessel in _PUNKT_SCHLUESSEL:
+                t, w = _pdf_wert(doc, *doc.xref_get_key(annot, schluessel))
+                if t not in ("array", "objekt") or not isinstance(w, str):
+                    continue
+                zahlen = [float(z) for z in _PDF_ZAHL_RE.findall(w)]
+                if len(zahlen) < 2 or len(zahlen) % 2:
+                    continue
+                punkte = [fitz.Point(zahlen[i], zahlen[i + 1]) * matrix for i in range(0, len(zahlen), 2)]
+                doc.xref_set_key(annot, schluessel, "[" + " ".join(f"{_pdf_zahl(p.x)} {_pdf_zahl(p.y)}"
+                                                                   for p in punkte) + "]")
+            t, w = doc.xref_get_key(annot, "F")
+            if t == "int" and int(w) & _NICHT_DREHEN:
+                continue
+            # Erscheinungsbild mitdrehen: Matrix des Formulars um die Seitendrehung ergänzen
+            t, w = doc.xref_get_key(annot, "AP/N")
+            ziele = []
+            if t == "xref":
+                ziele = [int(w.split()[0])]
+            elif t == "dict":
+                ziele = [int(x) for x, _ in _PDF_VERWEIS_RE.findall(w)]
+            for ap in ziele:
+                if not doc.xref_is_stream(ap):
+                    continue
+                t, w = doc.xref_get_key(ap, "Matrix")
+                alt = [float(z) for z in _PDF_ZAHL_RE.findall(w)] if t == "array" else []
+                alt_matrix = fitz.Matrix(*alt) if len(alt) == 6 else fitz.Matrix(1, 0, 0, 1, 0, 0)
+                m = alt_matrix * drehung
+                doc.xref_set_key(ap, "Matrix", "[" + " ".join(_pdf_zahl(v) for v in m) + "]")
+        except Exception as e:
+            _protokollieren(e)
+
+
+def _anmerkungen_einbrennen(doc, seite) -> None:
+    """Arbeiter der OCR (Originaldatei): Trägt eine gedrehte Seite Anmerkungen oder Formularfelder, werden sie wie
+    in der Vorbereitung des Seitenmodells eingebrannt – dann sieht die OCR genau den Seiteninhalt des Modells, und
+    drehung_entfernen muss keine Erscheinungsbilder umrechnen."""
+    try:
+        if next(iter(seite.annots()), None) is None and next(iter(seite.widgets()), None) is None:
+            return
+        doc.bake()
+    except Exception as e:
+        _protokollieren(e)
+
+
+def drehung_entfernen(seite) -> bool:
+    """Setzt die Seitendrehung (/Rotate) auf 0, ohne dass sich das Aussehen der Seite ändert.
+
+    Der Inhalt bekommt eine vorangestellte Drehung (q … cm … Q), MediaBox, CropBox, TrimBox, BleedBox und ArtBox
+    und die Anmerkungen werden mitgedreht. page.remove_rotation() von PyMuPDF dreht nur die MediaBox: bei
+    90°/270° setzt es die CropBox auf die ganze Seite zurück, bei 180° bleibt sie ungedreht, und der Inhalt
+    verschiebt sich um den Unterschied von CropBox und MediaBox – weggeschnittene Inhalte würden sichtbar,
+    sichtbare gingen verloren (Befund R-05). Danach gelten die Koordinaten der gedrehten Ansicht, genau wie
+    get_text() sie auf der Originalseite liefert. Rückgabe: True, wenn gedreht wurde."""
+    winkel = int(seite.rotation or 0) % 360
+    if not winkel:
+        return False
+    doc = seite.parent
+    xref = seite.xref
+    try:
+        mb = _seitenbox(doc, xref, "MediaBox")
+        crop = _seitenbox(doc, xref, "CropBox")
+        weitere = {name: _seitenbox(doc, xref, name) for name in ("TrimBox", "BleedBox", "ArtBox")}
+        verweise = _inhalts_verweise(doc, xref)
+    except Exception as e:                  # Seitenbaum nicht lesbar: Verfahren von PyMuPDF
+        _protokollieren(e)
+        mb = None
+    if winkel not in (90, 180, 270) or mb is None or mb[2] - mb[0] <= 0 or mb[3] - mb[1] <= 0:
+        seite.remove_rotation()             # unbekannter Aufbau: Verfahren von PyMuPDF
+        return True
+    x0, y0, x1, y1 = mb
+    if winkel == 90:
+        werte = (0, -1, 1, 0, -y0, x1)
+        neu_mb = (0, 0, y1 - y0, x1 - x0)
+    elif winkel == 180:
+        werte = (-1, 0, 0, -1, x1, y1)
+        neu_mb = (0, 0, x1 - x0, y1 - y0)
+    else:
+        werte = (0, 1, -1, 0, y1, -x0)
+        neu_mb = (0, 0, y1 - y0, x1 - x0)
+    matrix = fitz.Matrix(*werte)
+    drehung = fitz.Matrix(*werte[:4], 0, 0)
+
+    def abgebildet(box):
+        r = fitz.Rect(box) * matrix
+        return "[" + " ".join(_pdf_zahl(v) for v in (r.x0, r.y0, r.x1, r.y1)) + "]"
+
+    crop = fitz.Rect(crop) & fitz.Rect(mb) if crop is not None else fitz.Rect(mb)
+    if crop.is_empty:
+        crop = fitz.Rect(mb)
+    if verweise:
+        vor = _neuer_strom(doc, ("q\n" + " ".join(_pdf_zahl(v) for v in werte) + " cm\n").encode("ascii"))
+        nach = _neuer_strom(doc, b"\nQ\n")
+        doc.xref_set_key(xref, "Contents", "[" + " ".join([f"{vor} 0 R"] + verweise + [f"{nach} 0 R"]) + "]")
+    doc.xref_set_key(xref, "MediaBox", "[" + " ".join(_pdf_zahl(v) for v in neu_mb) + "]")
+    doc.xref_set_key(xref, "CropBox", abgebildet(crop))
+    for name, box in weitere.items():
+        if box is not None:
+            doc.xref_set_key(xref, name, abgebildet(box))
+    doc.xref_set_key(xref, "Rotate", "0")
+    _anmerkungen_drehen(doc, xref, matrix, drehung)
+    return True
+
+
+# ----------------------------------------------------------------------
 # Seiten-Heuristik: EINE Entscheidung für Analyse, Schwärzung und Kontrolle (KQ-06/S-15)
 # ----------------------------------------------------------------------
 class SeitenPruefung(NamedTuple):
@@ -436,6 +672,129 @@ def _hat_zeichnungen(seite) -> bool:
         return True
 
 
+def _seltsam(c: str) -> bool:
+    """Zeichen ohne Bedeutung: Ersatzzeichen U+FFFD, Steuerzeichen, Private Use, nicht zugewiesen."""
+    if c == "�":
+        return True
+    kategorie = unicodedata.category(c)
+    return kategorie in ("Co", "Cn", "Cs") or (kategorie == "Cc" and not c.isspace())
+
+
+def schrift_unlesbar(text: str) -> bool:
+    """Ist der Text EINER Schrift Zeichensalat (Befund R-02)? Dieselbe Wortquote wie _lesung_bewerten (häufige
+    Wörter), dazu der Anteil seltsamer Zeichen (U+FFFD, Steuerzeichen, Private Use: Schrift ohne ToUnicode) und
+    der Anteil von Sonderzeichen bzw. die Wortlänge (verschobene Zuordnung, bei der auch das Leerzeichen zu "#"
+    wird). Kurze Texte (Überschriften, Firmennamen) gelten nie als Salat."""
+    sichtbar = [c for c in text if not c.isspace()]
+    if not sichtbar:
+        return False
+    seltsam = sum(1 for c in sichtbar if _seltsam(c))
+    if seltsam >= SALAT_SELTSAM_MIN and seltsam >= SALAT_SELTSAM_ANTEIL * len(sichtbar):
+        return True
+    if len(sichtbar) < SALAT_MIN_ZEICHEN:
+        return False
+    woerter = "".join(" " if (c.isspace() or _seltsam(c)) else c for c in text).split()
+    if len(woerter) < SALAT_MIN_WOERTER or _lesung_bewerten(woerter)["treffer"]:
+        return False
+    sonder = sum(1 for c in sichtbar if c in _SALAT_SONDERZEICHEN) / len(sichtbar)
+    laenge = sum(len(w) for w in woerter) / len(woerter)
+    return sonder >= SALAT_SONDER_ANTEIL or laenge >= SALAT_WORTLAENGE
+
+
+class TextebenenBefund(NamedTuple):
+    zeichen: int            # sichtbare Textzeichen (wie _sichtbare_zeichen)
+    unlesbar: list          # Schriften, deren Text Zeichensalat ist
+    unlesbar_zeichen: int   # sichtbare Zeichen in diesen Schriften
+    verborgen: int          # sichtbar gezeichnete Zeichen, die die Textextraktion nicht liefert (Kachelmuster)
+
+
+def textebene_pruefen(seite) -> TextebenenBefund:
+    """Ein Durchlauf über die gezeichneten Zeichen (get_texttrace): sichtbare Zeichen zählen, je Schrift auf
+    Zeichensalat prüfen (schrift_unlesbar) und Zeichen finden, die get_text nicht liefert – Text in Kachelmustern
+    (Befund R-03). Unsichtbarer Text (Rendermodus 3, OCR-Ebene eines Kopierers) zählt nicht."""
+    rect = seite.rect
+    je_schrift: dict = {}
+    mitten: list = []
+    zeichen = 0
+    for span in seite.get_texttrace():
+        if span.get("type", 0) == 3 or span.get("opacity", 1) == 0:
+            continue
+        name = str(span.get("font") or "")
+        liste = je_schrift.setdefault(name, [])
+        for z in span["chars"]:
+            c = chr(z[0])
+            liste.append(c)
+            if c.isspace():
+                continue
+            box = fitz.Rect(z[3]) if len(z) > 3 else None
+            if box is not None and not box.is_empty and not box.intersects(rect):
+                continue
+            zeichen += 1
+            if len(z) > 2 and z[2] is not None:
+                mitten.append((float(z[2][0]), float(z[2][1])))       # Ursprung (Grundlinie) der Glyphe
+        liste.append(" ")
+    unlesbar, unlesbar_zeichen = [], 0
+    for name, liste in je_schrift.items():
+        if any(s in name.lower() for s in _SYMBOLSCHRIFTEN):
+            continue
+        text = "".join(liste)
+        if schrift_unlesbar(text):
+            unlesbar.append(name)
+            unlesbar_zeichen += sum(1 for c in text if not c.isspace())
+    verborgen = 0
+    if len(mitten) >= VERBORGEN_MIN_ZEICHEN:
+        bekannt: set = set()
+        flags = fitz.TEXT_PRESERVE_LIGATURES | fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_MEDIABOX_CLIP  # wie das Modell
+        for block in seite.get_text("rawdict", flags=flags).get("blocks", ()):
+            for zeile in block.get("lines", ()):
+                for sp in zeile.get("spans", ()):
+                    for ch in sp.get("chars", ()):
+                        o = ch.get("origin") or (0.0, 0.0)
+                        bekannt.add((round(o[0]), round(o[1])))
+        for x, y in mitten:
+            rx, ry = round(x), round(y)
+            if not any((rx + dx, ry + dy) in bekannt for dx in (-1, 0, 1) for dy in (-1, 0, 1)):
+                verborgen += 1
+    return TextebenenBefund(zeichen, unlesbar, unlesbar_zeichen, verborgen)
+
+
+def vektortext_bereiche(seite) -> list:
+    """Bereiche mit Text als Vektorpfaden (Befund R-03): glyphenartige gefüllte Pfade mit Kurven, zusammengefasst.
+    Leer, wenn es weniger als VEKTORTEXT_MIN_PFADE gibt. Nur Seiten mit vielen gefüllten Pfaden werden genauer
+    angesehen (get_drawings ist teurer als das Bounding-Box-Protokoll)."""
+    try:
+        gefuellt = sum(1 for art, _ in seite.get_bboxlog() if art == "fill-path")
+    except Exception as e:
+        _protokollieren(e)
+        return []
+    if gefuellt < VEKTORTEXT_MIN_PFADE or gefuellt > VEKTORTEXT_MAX_PFADE:
+        return []
+    glyphen = []
+    try:
+        for pfad in seite.get_drawings():
+            if pfad.get("fill") is None or pfad.get("type") not in ("f", "fs"):
+                continue
+            r = fitz.Rect(pfad["rect"])
+            if not (0 < r.width <= VEKTORTEXT_MAX_BREITE and 0 < r.height <= VEKTORTEXT_MAX_HOEHE):
+                continue
+            if any(item[0] == "c" for item in pfad.get("items", ())):
+                glyphen.append(r)
+    except Exception as e:
+        _protokollieren(e)
+        return []
+    if len(glyphen) < VEKTORTEXT_MIN_PFADE:
+        return []
+    seitenrect = fitz.Rect(seite.rect)
+    aus = []
+    for bereich in _vereinige(glyphen, VEKTORTEXT_ABSTAND_PT):
+        if sum(1 for g in glyphen if bereich.contains(g)) < VEKTORTEXT_MIN_GRUPPE:
+            continue                                     # einzelnes Symbol, Logo-Bogen, Unterschrift
+        r = (bereich + (-2, -2, 2, 2)) & seitenrect
+        if not r.is_empty and _relevant(r, seitenrect):
+            aus.append(r)
+    return aus
+
+
 def seiten_pruefung(seite) -> SeitenPruefung:
     """Entscheidet je Seite, ob und wie OCR nötig ist (dokumentierte Schwellen oben).
 
@@ -448,9 +807,14 @@ def seiten_pruefung(seite) -> SeitenPruefung:
     modus "nein":   reiner Text.
     Schlägt die Bildanalyse fehl, wird die ganze Seite als Bildbereich behandelt (vorsorglich OCR) und eine
     Meldung BILDER_UNGEPRUEFT erzeugt – nie still "kein Bild" (Gutachten KQ-12).
+    Textseiten, deren Text sich nicht verlässlich auslesen lässt, werden wie Scans gelesen (modus "seite"):
+    Zeichensalat in der Textebene (Befund R-02, Meldung TEXTEBENE_UNLESBAR), Text in Kachelmustern und Text als
+    Vektorpfade auf textarmen Seiten (Befund R-03). Text als Vektorpfade auf Seiten mit viel echtem Text: diese
+    Bereiche werden wie Bildbereiche gelesen (modus "bilder").
     """
     meldungen: list = []
     seitenrect = fitz.Rect(seite.rect)
+    nr = seite.number
     try:
         infos = seite.get_image_info()
         rechtecke = []
@@ -462,18 +826,50 @@ def seiten_pruefung(seite) -> SeitenPruefung:
     except Exception as e:
         _protokollieren(e)
         meldungen.append(_meldung("warnung", "BILDER_UNGEPRUEFT",
-                                  f"Seite {seite.number + 1}: Bildanalyse fehlgeschlagen ({e}) – die ganze "
-                                  f"Seite wird vorsorglich per OCR gelesen, bitte prüfen.", seite.number))
+                                  f"Seite {nr + 1}: Bildanalyse fehlgeschlagen ({e}) – die ganze "
+                                  f"Seite wird vorsorglich per OCR gelesen, bitte prüfen.", nr))
         bereiche = [seitenrect]
     flaeche = abs(seitenrect) or 1.0
     bildanteil = sum(abs(r) for r in bereiche) / flaeche
-    zeichen = _sichtbare_zeichen(seite, meldungen)
+    try:
+        befund = textebene_pruefen(seite)
+        zeichen = befund.zeichen
+    except Exception as e:
+        _protokollieren(e)
+        befund = None
+        zeichen = _sichtbare_zeichen(seite, meldungen)
     if zeichen == 0:
         modus = "seite" if bereiche or _hat_zeichnungen(seite) else "nein"
     elif zeichen < WENIG_TEXT_ZEICHEN and bildanteil >= SCAN_BILD_ANTEIL:
         modus = "seite"
     else:
         modus = "bilder" if bereiche else "nein"
+    if zeichen and befund is not None and befund.unlesbar:
+        modus = "seite"
+        meldungen.append(_meldung(
+            "warnung", "TEXTEBENE_UNLESBAR",
+            f"Seite {nr + 1}: Der Text ist im PDF falsch gespeichert (Schrift ohne gültige Zeichenzuordnung) – die "
+            f"Seite wird deshalb per Texterkennung gelesen und geschwärzt. Bitte das Ergebnis dieser Seite besonders "
+            f"sorgfältig prüfen.", nr))
+    elif zeichen and modus != "seite" and befund is not None and befund.verborgen >= VERBORGEN_MIN_ZEICHEN:
+        modus = "seite"
+        meldungen.append(_meldung(
+            "hinweis", "OCR_GELESEN",
+            f"Seite {nr + 1}: enthält Text, der sich nicht auslesen lässt (z. B. in einem Füllmuster) – die Seite "
+            f"wird per Texterkennung gelesen.", nr))
+    elif zeichen and modus != "seite":
+        vektor = vektortext_bereiche(seite)
+        if vektor:
+            if zeichen < WENIG_TEXT_ZEICHEN:
+                modus = "seite"
+            else:
+                bereiche = [r for r in _vereinige(bereiche + vektor) if _relevant(r, seitenrect)]
+                bildanteil = sum(abs(r) for r in bereiche) / flaeche
+                modus = "bilder"
+            meldungen.append(_meldung(
+                "hinweis", "OCR_GELESEN",
+                f"Seite {nr + 1}: Text als Grafik (Kurven statt Schrift) – per Texterkennung gelesen und geprüft.",
+                nr))
     return SeitenPruefung(modus, bereiche, zeichen, bildanteil, meldungen)
 
 
@@ -674,14 +1070,63 @@ def hintergrund_herausrechnen(grau, block: int = HINTERGRUND_BLOCK):
     return np.clip(norm, 0, 255).astype(np.uint8)
 
 
-def _bildanalyse(seite, clip, winkel: int) -> dict:
+def _flaeche_pt(seite, clip) -> float:
+    r = fitz.Rect(clip) & seite.rect if clip is not None else fitz.Rect(seite.rect)
+    return max(abs(r), 1.0) if not r.is_empty else 1.0
+
+
+def dpi_grenze(seite, clip=None) -> float:
+    """Höchste Auflösung (dpi), mit der Seite bzw. Ausschnitt höchstens MAX_RENDER_PIXEL Pixel ergeben."""
+    return 72.0 * math.sqrt(MAX_RENDER_PIXEL / _flaeche_pt(seite, clip))
+
+
+def _bild_aufloesung(seite, clip=None):
+    """Echte Auflösung (dpi) des Bilds, das die Seite bzw. den Ausschnitt prägt (bedeckt mindestens
+    GROSS_BILD_ANTEIL der Fläche), sonst None – z. B. 72 dpi bei einem Handyfoto, das mit 1 px = 1 pt
+    gewandelt wurde."""
+    bereich = fitz.Rect(clip) & seite.rect if clip is not None else fitz.Rect(seite.rect)
+    flaeche = _flaeche_pt(seite, clip)
+    beste = None
+    try:
+        for info in seite.get_image_info():
+            box = fitz.Rect(info["bbox"])
+            sichtbar = box & bereich
+            if sichtbar.is_empty or abs(sichtbar) < GROSS_BILD_ANTEIL * flaeche or box.width <= 0 or box.height <= 0:
+                continue
+            dpi = 72.0 * max(info.get("width", 0) / box.width, info.get("height", 0) / box.height)
+            if dpi > 0 and (beste is None or dpi > beste):
+                beste = dpi
+    except Exception as e:
+        _protokollieren(e)
+    return beste
+
+
+def render_dpi(seite, clip=None, dpi: int = OCR_DPI) -> int:
+    """Auflösung, mit der die OCR die Seite bzw. den Ausschnitt rendert (Befund R-06). Normale Seiten: `dpi`.
+    Ergäbe das mehr als MAX_RENDER_PIXEL Pixel (Handyfotos mit 1 px = 1 pt, A0-Pläne): die echte Auflösung des
+    Seitenbilds (kleine Bilder bis doppelt so fein, mindestens GROSS_MIN_DPI), ohne prägendes Bild die Grenze –
+    nie mehr als MAX_RENDER_PIXEL. Dieselbe Regel gilt für Lesung, Proben und Kontroll-OCR."""
+    grenze = dpi_grenze(seite, clip)
+    if dpi <= grenze:
+        return int(dpi)
+    nativ = _bild_aufloesung(seite, clip)
+    if nativ is None:
+        ziel = grenze
+    else:
+        ziel = max(nativ, min(GROSS_MIN_DPI, GROSS_HOCHSKALIERUNG * nativ))
+    return max(1, int(min(dpi, grenze, ziel)))
+
+
+def _bildanalyse(seite, clip, winkel: int, dpi_max: int = SCHRAEG_DPI) -> dict:
     """Schräglage (in Leserichtung `winkel`) und Hintergrund der Seite bzw. des Ausschnitts, aus einem
-    Rendering mit SCHRAEG_DPI. Fehler oder fehlendes numpy: {"schraeg": 0.0, "hintergrund": False}."""
+    Rendering mit SCHRAEG_DPI (höchstens dpi_max, auf großen Seiten weniger). Fehler oder fehlendes numpy:
+    {"schraeg": 0.0, "hintergrund": False}."""
     ergebnis = {"schraeg": 0.0, "hintergrund": False, "tinte": None}
     if _numpy() is None:
         return ergebnis
     try:
-        matrix = fitz.Matrix(SCHRAEG_DPI / 72.0, SCHRAEG_DPI / 72.0).prerotate(winkel)
+        aufloesung = min(SCHRAEG_DPI, dpi_max)
+        matrix = fitz.Matrix(aufloesung / 72.0, aufloesung / 72.0).prerotate(winkel)
         pix = seite.get_pixmap(matrix=matrix, clip=clip, colorspace=fitz.csGRAY, alpha=False)
         grau = _grauwerte(pix)
         ergebnis["schraeg"] = schraeglage_schaetzen(grau)
@@ -907,16 +1352,49 @@ def _ohne_textebene(woerter, seite, clip):
     return behalten
 
 
+def _speicherfehler(fehler: BaseException) -> bool:
+    """MuPDF-Grenze ("Overly large image") oder Speichermangel beim Rendern/Lesen."""
+    return isinstance(fehler, MemoryError) or any(n in type(fehler).__name__ for n in _SPEICHER_FEHLER) \
+        or "overly large" in str(fehler).lower()
+
+
 def _ocr_worker(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pruefen=True,
                 nur_bilder=False, winkel_fest=None):
     """Modulfunktion für den Kindprozess (muss per Import erreichbar sein – Start-Methode "spawn").
+
+    Liest die Seite mit _ocr_lesen (Beschreibung dort). Reicht der Speicher nicht (MuPDF-Grenze, MemoryError),
+    wird einmal mit halber Auflösung (mindestens 50 dpi) wiederholt. Jede Ausnahme verlässt den Arbeiter als
+    RuntimeError mit lesbarem Text: MuPDF-Ausnahmen lassen sich nicht zwischen Prozessen übertragen, sonst sähe
+    die Nutzerin nur "cannot pickle 'SwigPyObject'" (Befund R-06)."""
+    warnings.simplefilter("ignore")
+    try:
+        return _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pruefen, nur_bilder,
+                          winkel_fest)
+    except Exception as e:
+        if not _speicherfehler(e):
+            raise RuntimeError(f"{type(e).__name__}: {e}") from None
+    try:
+        ergebnis = _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pruefen, nur_bilder,
+                              winkel_fest, verkleinern=0.5)
+        ergebnis["speicher_knapp"] = True
+        return ergebnis
+    except Exception as e:
+        if _speicherfehler(e):
+            raise RuntimeError("die Seite ist zu groß für den verfügbaren Arbeitsspeicher") from None
+        raise RuntimeError(f"{type(e).__name__}: {e}") from None
+
+
+def _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pruefen=True,
+               nur_bilder=False, winkel_fest=None, verkleinern: float = 1.0):
+    """OCR einer Seite bzw. eines Ausschnitts (im Arbeiter; aufgerufen von _ocr_worker).
 
     Rückgabe: {"woerter": [(x0, y0, x1, y1, text, block, zeile, nr, winkel, schraeg), ...],
                "winkel": 0|90|180|270, "schraeg": Schräglage in Grad (Leserichtung), "hintergrund": bool
                (ungleichmäßiger Hintergrund herausgerechnet), "seitenaufteilung": PSM der vollen Lesung,
                "plausibel": 0..1, "wortquote": Anteil starker Wörter, "treffer", "tokens",
                "laeufe": Anzahl OCR-Durchläufe, "lesungen": [{winkel, dpi, quote, treffer, tokens, dauer}],
-               "unplausibel": bool}. Koordinaten beziehen sich auf die Seite nach remove_rotation().
+               "unplausibel": bool, "aufloesung": tatsächlich gelesene dpi}. Koordinaten beziehen sich auf die
+    Seite nach drehung_entfernen().
     Ablauf: 0° bei voller Auflösung; ist das klar plausibel, fertig (Normalfall, ein Lauf). Sonst
     Ausrichtungsproben bei PROBE_DPI (0°, 180°, ggf. 90°/270° nach _naechster_winkel) und – falls eine
     Drehung gewinnt – ein Lauf bei voller Auflösung in dieser Ausrichtung.
@@ -925,14 +1403,21 @@ def _ocr_worker(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_p
     Seitenkoordinaten = Umriss des schrägen Worts); darunter findet Tesseract die schrägen Zeilen selbst.
     winkel_fest: Ausrichtung vorgeben (Kontroll-OCR der Ausgabe) statt sie zu suchen.
     Ausschnitte (clip) bekommen die Ausrichtungssuche erst ab AUSRICHTUNG_BILD_ANTEIL der Seitenfläche.
+    Riesige Seiten liest render_dpi mit geringerer Auflösung (Befund R-06); verkleinern < 1 senkt sie weiter
+    (Wiederholung nach Speichermangel).
     """
-    warnings.simplefilter("ignore")
     doc = fitz.open(pdf_pfad)
     try:
         seite = doc[seite_nr0]
         if seite.rotation:
-            seite.remove_rotation()
+            _anmerkungen_einbrennen(doc, seite)
+            seite = doc[seite_nr0]
+            drehung_entfernen(seite)
         clip_rect = fitz.Rect(clip) if clip else None
+        angefragt = int(dpi)
+        dpi = render_dpi(seite, clip_rect, angefragt)
+        if verkleinern < 1.0:
+            dpi = max(50, int(dpi * verkleinern))
         suchen = winkel_fest is None and ausrichtung_pruefen
         if suchen and clip_rect is not None:
             suchen = abs(clip_rect & seite.rect) >= AUSRICHTUNG_BILD_ANTEIL * abs(seite.rect)
@@ -940,7 +1425,7 @@ def _ocr_worker(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_p
         tessdata_voll = tessdata_mit_einstellungen(tessdata, sprache) or tessdata
         seitenaufteilung = {"psm": SEITENAUFTEILUNG if tessdata_voll != tessdata else 6}
         start_winkel = int(winkel_fest or 0) % 360
-        analyse = _bildanalyse(seite, clip_rect, start_winkel)
+        analyse = _bildanalyse(seite, clip_rect, start_winkel, dpi)
         schraeg_je_lage = {start_winkel % 180: analyse["schraeg"]}
 
         def korrektur(winkel) -> float:
@@ -951,7 +1436,7 @@ def _ocr_worker(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_p
                 return 0.0
             lage = winkel % 180
             if lage not in schraeg_je_lage:      # 90°/270°: die Zeilen liefen in der ersten Analyse senkrecht
-                schraeg_je_lage[lage] = _bildanalyse(seite, clip_rect, winkel)["schraeg"]
+                schraeg_je_lage[lage] = _bildanalyse(seite, clip_rect, winkel, dpi)["schraeg"]
             s = float(schraeg_je_lage[lage] or 0.0)  # (180° ändert die Steigung der Zeilen nicht)
             return s if abs(s) >= SCHRAEG_KORREKTUR_AB else 0.0
 
@@ -1068,7 +1553,8 @@ def _ocr_worker(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_p
                 "plausibel": min(1.0, bewertung["quote"] / PLAUSIBEL_SKALA),
                 "wortquote": round(bewertung["quote"], 4), "treffer": bewertung["treffer"],
                 "tokens": bewertung["tokens"], "laeufe": len(protokoll), "lesungen": protokoll,
-                "unplausibel": unplausibel}
+                "unplausibel": unplausibel, "aufloesung": dpi, "angefragt": angefragt,
+                "seitengroesse": (round(seite.rect.width), round(seite.rect.height))}
     finally:
         doc.close()
 
@@ -1211,6 +1697,7 @@ class OcrDienst:
         self._lock = threading.RLock()
         self._abbruch = threading.Event()
         self._cache: dict = {}
+        self._vorgaben: dict = {}         # (Datei, Seite, Ausschnitt) -> vorgegebene Ausrichtung (Kontroll-OCR)
         self._laufend: dict = {}          # Schlüssel -> _Auftrag (vorab eingereiht)
         self.tessdata = _tessdata_finden()
         self.sprache, self.sprach_warnung = _ocr_sprache(self.tessdata)
@@ -1370,8 +1857,19 @@ class OcrDienst:
         return tuple(round(float(v), 1) for v in fitz.Rect(clip)) if clip is not None else None
 
     def _schluessel(self, pdf_pfad, seite_nr0, dpi, clip, winkel):
+        datei, ausschnitt = self._datei_schluessel(pdf_pfad), self._clip_tupel(clip)
         w = None if winkel is None else int(winkel) % 360
-        return (self._datei_schluessel(pdf_pfad), int(seite_nr0), int(dpi), self._clip_tupel(clip), w)
+        if w is None and self._vorgaben:
+            w = self._vorgaben.get((datei, int(seite_nr0), ausschnitt))
+        return (datei, int(seite_nr0), int(dpi), ausschnitt, w)
+
+    def winkel_vorgeben(self, pdf_pfad, seite_nr0: int, clip, winkel) -> None:
+        """Kontroll-OCR einer Ausgabe (Befund M-51): Anfragen OHNE Ausrichtung für diese Datei, Seite und diesen
+        Ausschnitt lesen mit `winkel` – keine zweite Ausrichtungssuche, und Selbstkontrolle und Restrisiko-Prüfung
+        teilen sich das Ergebnis im Zwischenspeicher."""
+        schluessel = (self._datei_schluessel(pdf_pfad), int(seite_nr0), self._clip_tupel(clip))
+        with self._lock:
+            self._vorgaben[schluessel] = int(winkel or 0) % 360
 
     def _auftrag_fuer(self, pdf_pfad, seite_nr0, dpi, clip_tupel, winkel) -> _Auftrag:
         # _ocr_worker wird erst hier nachgeschlagen (Tests ersetzen ihn im Modul)
@@ -1432,7 +1930,8 @@ class OcrDienst:
                     "unplausibel": False, "warnung": "Abgebrochen",
                     "meldungen": [_meldung("hinweis", "ABGEBROCHEN", "Abgebrochen", seite_nr0)]}
         except Exception as e:
-            text = f"Seite {seite_nr0 + 1}: OCR fehlgeschlagen ({e}) – Seite nicht lesbar."
+            text = (f"Seite {seite_nr0 + 1}: OCR fehlgeschlagen ({e}) – Seite nicht lesbar, bitte selbst prüfen "
+                    f"und nicht ungeprüft weitergeben.")
             ergebnis = {"woerter": [], "winkel": 0, "plausibel": 0.0, "wortquote": 0.0, "laeufe": 0,
                         "unplausibel": False, "warnung": text, "fehler": True,
                         "meldungen": [_meldung("warnung", "OCR_FEHLER", text, seite_nr0)]}
@@ -1443,7 +1942,7 @@ class OcrDienst:
             with self._lock:
                 if self._laufend.get(schluessel) is auftrag:
                     del self._laufend[schluessel]
-        ergebnis = self._ergebnis_aufbereiten(roh, seite_nr0, clip, winkel)
+        ergebnis = self._ergebnis_aufbereiten(roh, seite_nr0, clip, schluessel[4])
         with self._lock:
             self._cache[schluessel] = ergebnis
         return ergebnis
@@ -1476,6 +1975,20 @@ class OcrDienst:
                         f"oder verdreht?) – Bildbereich bitte ansehen.")
                 meldungen.append(_meldung("hinweis", "OCR_UNPLAUSIBEL", text, seite_nr0))
         self.statistik["laeufe"] += int(roh.get("laeufe", 1) or 1)
+        aufloesung, angefragt = roh.get("aufloesung"), roh.get("angefragt")
+        if winkel is None and aufloesung and angefragt and aufloesung < angefragt:
+            ort = "Bildbereich auf Seite" if clip is not None else "Seite"
+            breite, hoehe = roh.get("seitengroesse") or (0, 0)
+            groesse = f" ({breite * 2.54 / 72:.0f} x {hoehe * 2.54 / 72:.0f} cm)" if breite and hoehe else ""
+            if roh.get("speicher_knapp"):
+                text = (f"{ort} {seite_nr0 + 1}{groesse}: Arbeitsspeicher knapp – mit nur {aufloesung} dpi gelesen, "
+                        f"die Texterkennung kann dort mehr übersehen. Bitte prüfen!")
+                warnungen.append(text)
+                meldungen.append(_meldung("warnung", "OCR_FEHLER", text, seite_nr0))
+            else:
+                text = (f"{ort} {seite_nr0 + 1} ist sehr groß{groesse}, z. B. ein Handyfoto – für die Texterkennung "
+                        f"mit {aufloesung} dpi gelesen, damit der Arbeitsspeicher reicht.")
+                meldungen.append(_meldung("hinweis", "OCR_GELESEN", text, seite_nr0))
         if roh.get("zeilen_unsicher"):
             ort = "Bildbereich auf Seite" if clip is not None else "Seite"
             text = (f"{ort} {seite_nr0 + 1}: Lage von {roh['zeilen_unsicher']} OCR-Zeile(n) unsicher – dort wird "
@@ -1545,6 +2058,7 @@ class OcrDienst:
         self._pool_verwerfen(hart=True)
         with self._lock:
             self._cache.clear()
+            self._vorgaben.clear()
             self._laufend.clear()
 
     def __enter__(self):
@@ -1887,7 +2401,7 @@ def ocr_textpage(seite, melde=None):
         return None, warnung
     try:
         if seite.rotation:
-            seite.remove_rotation()
+            drehung_entfernen(seite)
         tp = seite.get_textpage_ocr(language=sprache, dpi=300, full=True, tessdata=tessdata)
         return tp, warnung
     except Exception as e:

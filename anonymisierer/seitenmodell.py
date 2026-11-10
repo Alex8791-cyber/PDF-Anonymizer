@@ -32,8 +32,12 @@ Regeln für den logischen Text (nur hier implementiert, für alle Nutzer identis
     Wort. Dokument.felder liefert Feldname, Etikett, Wert und die Stelle im Seitentext.
   * Inhalte außerhalb des sichtbaren Seitenbereichs (CropBox) liefert MuPDF nicht; sie gehören nicht
     zum Modell und werden von der Schwärzung aus der Ausgabe ENTFERNT (Entscheidung zu Gutachten S-05).
+  * Schriften, deren Text Zeichensalat ist (falsche/fehlende ToUnicode, Befund R-02), gehören nicht zum Modell:
+    die Seite wird per OCR gelesen (ocr.seiten_pruefung), die Schwärzung entfernt ihre Glyphen über die
+    OCR-Wortkästen.
 
-Koordinaten: Seite nach page.remove_rotation() (bei Seiten mit /Rotate also in der gedrehten Ansicht).
+Koordinaten: Seite nach ocr.drehung_entfernen() (bei Seiten mit /Rotate also in der gedrehten Ansicht; anders als
+page.remove_rotation() bleibt der sichtbare Ausschnitt – CropBox – exakt erhalten, Befund R-05).
 """
 
 from __future__ import annotations
@@ -64,6 +68,7 @@ OCR_DPI = 300
 OBERKANTE = 0.70                  # Schwärzungsrechteck: Anteil der Schriftgröße über der Grundlinie
 UNTERKANTE = 0.02                 # … und unter der Grundlinie
 OCR_RAND = 1.5                    # pt Rand um OCR-Wortboxen
+OCR_STUFE_TOLERANZ = 1.0          # schräge OCR-Zeile: ein Rechteckstück darf so viel höher sein als seine Zeichen
 LUECKE_TAB = 1.5                  # Lücke > 1,5 x mittlere Zeichenbreite ohne Leerzeichen -> "\t"
 ETIKETT_ABSTAND = 250             # pt: so weit links vom Formularfeld darf sein Etikett stehen
 ZEILEN_VEREINEN = True            # MuPDF-Zeilen gleicher Grundlinie eines Blocks verbinden
@@ -579,6 +584,7 @@ class Seite:
         self.textebene_versatz = None         # (dx, dy) Textebene -> Bild in pt
         self._zeilen_start = [z.start for z in zeilen]
         self._fingerabdruck = None
+        self._wort_glyphen = None             # OCR-Wort -> Glyphen (für _ocr_stufen, bei Bedarf aufgebaut)
 
     @property
     def fingerabdruck(self) -> str:
@@ -647,10 +653,22 @@ class Seite:
                 box = _box_von(self.ocr_boxen[w] for w in woerter)
                 if box is None:
                     continue
-                r = fitz.Rect(box.x0 - OCR_RAND, box.y0 - OCR_RAND, box.x1 + OCR_RAND, box.y1 + OCR_RAND) & self.rect
-                if r.is_empty:
-                    continue
-                ergebnis.append((r, fitz.Rect(box), box.height / 1.6, None))
+                stufen = self._ocr_stufen(gs, box)
+                if stufen:
+                    # schräge Zeile (Befund M-20): treppenförmige Rechtecke entlang der Zeile statt eines
+                    # Rechtecks über die ganze Höhe der schrägen Zeile (das träfe die Nachbarzeilen); das breiteste
+                    # Stück zuerst – dort steht der Platzhalter
+                    for stufe in sorted(stufen, key=lambda b: -max(b.width, b.height)):
+                        r = fitz.Rect(stufe.x0 - OCR_RAND, stufe.y0 - OCR_RAND, stufe.x1 + OCR_RAND,
+                                      stufe.y1 + OCR_RAND) & self.rect
+                        if not r.is_empty:
+                            ergebnis.append((r, fitz.Rect(stufe), min(stufe.width, stufe.height) / 1.6, None))
+                else:
+                    r = fitz.Rect(box.x0 - OCR_RAND, box.y0 - OCR_RAND, box.x1 + OCR_RAND,
+                                  box.y1 + OCR_RAND) & self.rect
+                    if r.is_empty:
+                        continue
+                    ergebnis.append((r, fitz.Rect(box), box.height / 1.6, None))
                 for w in sorted(woerter):
                     for streifen, partner in self.textebene_partner.get(w, ()):
                         ergebnis.append((fitz.Rect(streifen), fitz.Rect(partner), box.height / 1.6, None))
@@ -679,6 +697,62 @@ class Seite:
                 r = fitz.Rect(box.x0 - 1, box.y0 - 1, box.x1 + 1, box.y1 + 1)
             ergebnis.append((r, fitz.Rect(box), groesse, grundlinie))
         return ergebnis
+
+    def _ocr_stufen(self, gs: list, box) -> list:
+        """Schräg gelesene OCR-Zeile (Befund M-20): Die Zeichenrechtecke liegen entlang der schrägen Grundlinie,
+        das Rechteck über alle Wörter der Stelle ist dagegen um Breite x sin(Schräglage) höher – bei 2-3° und
+        einzeiligem Abstand reicht es in die Nachbarzeilen. Liefert aufeinanderfolgende Zeichengruppen, deren
+        gemeinsames Rechteck höchstens OCR_STUFE_TOLERANZ höher ist als ihr niedrigstes Zeichen (bei senkrecht
+        laufenden Zeilen entsprechend breiter); [] bei gerader Zeile (dann bleibt es bei einem Rechteck).
+        Verwendet werden ALLE Zeichen der berührten OCR-Wörter (nicht nur die der Stelle): die Lage einzelner
+        Glyphen im Wort ist nur anteilig geschätzt, die Stücke müssen zusammen jedes Wort ganz bedecken."""
+        if self._wort_glyphen is None:
+            self._wort_glyphen = {}
+            for g, w in enumerate(self.wort_ids):
+                if w >= 0:
+                    self._wort_glyphen.setdefault(w, []).append(g)
+        woerter = {self.wort_ids[g] for g in gs if self.wort_ids[g] >= 0}
+        alle = sorted({g for w in woerter for g in self._wort_glyphen.get(w, ())})
+        zs = [self.zeichen[g] for g in alle if not self.zeichen[g].c.isspace() and _gueltig(self.zeichen[g].rect)]
+        if len(zs) < 2:
+            return []
+        # Leserichtung aus der Folge der Zeichen INNERHALB der Wörter (sie sind Scheiben der Wortbox in
+        # Leserichtung) – die Ausdehnung allein hielte ein kurzes Wort wie "6." (schmaler als hoch) für senkrecht
+        dx = dy = 0.0
+        for w in woerter:
+            folge = [self.zeichen[g].rect for g in self._wort_glyphen.get(w, ())
+                     if not self.zeichen[g].c.isspace() and _gueltig(self.zeichen[g].rect)]
+            for a, b in zip(folge, folge[1:]):
+                dx += abs((b.x0 + b.x1) - (a.x0 + a.x1))
+                dy += abs((b.y0 + b.y1) - (a.y0 + a.y1))
+        if dx or dy:
+            waagerecht = dx >= dy
+        else:
+            waagerecht = (max(z.rect.x1 for z in zs) - min(z.rect.x0 for z in zs)
+                          >= max(z.rect.y1 for z in zs) - min(z.rect.y0 for z in zs))
+
+        def quer(r):
+            return r.height if waagerecht else r.width
+
+        quer_werte = sorted(quer(z.rect) for z in zs)
+        if quer(box) <= quer_werte[len(quer_werte) // 2] + OCR_STUFE_TOLERANZ:
+            return []
+        zs.sort(key=lambda z: (z.rect.x0 + z.rect.x1) if waagerecht else (z.rect.y0 + z.rect.y1))
+        stufen, aktuell, kleinste = [], None, 0.0
+        for z in zs:
+            r = fitz.Rect(z.rect)
+            if aktuell is None:
+                aktuell, kleinste = r, quer(r)
+                continue
+            neu = aktuell | r
+            k = min(kleinste, quer(r))
+            if quer(neu) <= k + OCR_STUFE_TOLERANZ:
+                aktuell, kleinste = neu, k
+            else:
+                stufen.append(aktuell)
+                aktuell, kleinste = r, quer(r)
+        stufen.append(aktuell)
+        return stufen if len(stufen) > 1 else []
 
     def _rechtecke_textebene_scan(self, gs: list) -> list:
         """rechtecke() für Glyphen der unsichtbaren Textebene eines durchsuchbaren Scans (eine Zeile):
@@ -997,8 +1071,10 @@ def _mittlere_breite(zeichen) -> float:
     return sum(breiten) / len(breiten) if breiten else 0.0
 
 
-def _textzeilen(seite, textpage=None) -> list:
-    """Rohzeilen der Textebene (rawdict ohne Bilder), nur Zeichen im sichtbaren Seitenbereich."""
+def _textzeilen(seite, textpage=None, ohne_schriften=()) -> list:
+    """Rohzeilen der Textebene (rawdict ohne Bilder), nur Zeichen im sichtbaren Seitenbereich. ohne_schriften:
+    Schriften, deren Text Zeichensalat ist (Befund R-02) – sie gehören nicht ins Modell, die Seite wird per OCR
+    gelesen (ihre Glyphen entfernt die Schwärzung über die OCR-Wortkästen)."""
     try:
         if textpage is not None:
             rd = seite.get_text("rawdict", textpage=textpage)
@@ -1020,6 +1096,8 @@ def _textzeilen(seite, textpage=None) -> list:
             roh = []
             breiten, n_breiten = 0.0, 0
             for span in zeile.get("spans", ()):
+                if ohne_schriften and span.get("font") in ohne_schriften:
+                    continue
                 groesse = float(span.get("size") or 0)
                 for ch in span.get("chars", ()):
                     b = ch["bbox"]
@@ -1566,10 +1644,11 @@ def _seite_aus_zeilen(nr, rect, zeilen, bilder=(), ocr_boxen=None, felder_roh=()
 
 
 def seite_aufbauen(seite, nr: int, ocr_woerter=None, ocr_quelle: str = "ocr", felder_roh=(), bilder=None,
-                   textpage=None) -> Seite:
+                   textpage=None, ohne_schriften=()) -> Seite:
     """Modell einer (vorbereiteten) PDF-Seite: Textebene, Formularwerte hinter ihren Etiketten,
-    dahinter die OCR-Wörter (quelle "ocr" bei Scans, "bild" bei Bildbereichen einer Textseite)."""
-    zeilen = _textzeilen(seite, textpage)
+    dahinter die OCR-Wörter (quelle "ocr" bei Scans, "bild" bei Bildbereichen einer Textseite).
+    ohne_schriften: Schriften mit Zeichensalat (unlesbare_schriften), die nicht ins Modell gehören."""
+    zeilen = _textzeilen(seite, textpage, ohne_schriften)
     zeilen, etiketten = _feldzeilen_einordnen(zeilen, list(felder_roh or []))
     zeilen = _zeilen_vereinen(zeilen)
     ocr_boxen: list = []
@@ -1746,6 +1825,33 @@ def _wortmenge(seite) -> set:
     return {(w[4], tuple(round(v, 1) for v in w[:4])) for w in seite.get_text("words")}
 
 
+DREHUNG_TOLERANZ_PT = 0.6         # so weit darf ein Wort nach dem Entfernen der Drehung abweichen (Rundung)
+
+
+def _drehung_entfernen_geprueft(seite) -> bool:
+    """Seitendrehung entfernen (ocr.drehung_entfernen: sichtbarer Ausschnitt bleibt exakt, Befund R-05) und
+    nachprüfen, dass jedes sichtbare Wort an derselben Stelle der Ansicht steht wie vorher. False, wenn Wörter
+    fehlen oder wandern (z. B. ein Inhaltsstrom mit überzähligen Q-Operatoren) – die Seite wird dann gemeldet."""
+    try:
+        matrix = seite.rotation_matrix
+        vorher = sorted((w[4], tuple(fitz.Rect(w[:4]) * matrix)) for w in seite.get_text("words"))
+    except Exception:
+        vorher = None
+    _ocr.drehung_entfernen(seite)
+    if vorher is None:
+        return True
+    try:
+        nachher = sorted((w[4], tuple(fitz.Rect(w[:4]))) for w in seite.get_text("words"))
+    except Exception:
+        return False
+    if len(vorher) != len(nachher):
+        return False
+    for (t1, r1), (t2, r2) in zip(vorher, nachher):
+        if t1 != t2 or max(abs(a - b) for a, b in zip(r1, r2)) > DREHUNG_TOLERANZ_PT:
+            return False
+    return True
+
+
 def _bildmenge(seite) -> set:
     try:
         return {tuple(round(v, 1) for v in i["bbox"]) for i in seite.get_image_info()}
@@ -1782,7 +1888,8 @@ def dokument_vorbereiten(doc) -> dict:
         seite = doc[nr]
         if seite.rotation:
             info["rotation"][nr] = seite.rotation
-            seite.remove_rotation()
+            if not _drehung_entfernen_geprueft(seite):
+                info.setdefault("drehung_abweichung", []).append(nr)
     # Ebenen VOR der Markierungs-Bereinigung: die löst benannte Properties (/OC /oc1 BDC) auf und
     # würde ausgeblendete Inhalte schon vor dem Vergleich sichtbar machen
     try:
@@ -1819,13 +1926,30 @@ def dokument_vorbereiten(doc) -> dict:
 # ----------------------------------------------------------------------
 # OCR-Entscheidung (eine Heuristik für alle: ocr.py)
 # ----------------------------------------------------------------------
-def ocr_entscheidung(seite) -> str:
-    """'nein' | 'seite' | 'bilder' (ocr.ocr_noetig; Rückfall auf ist_scan_seite)."""
+def ocr_entscheidung(seite, meldungen=None) -> str:
+    """'nein' | 'seite' | 'bilder' (ocr.ocr_noetig; Rückfall auf ist_scan_seite). meldungen: Liste für die
+    Meldungen der Entscheidung (z. B. TEXTEBENE_UNLESBAR)."""
     if hasattr(_ocr, "ocr_noetig"):
-        return _ocr.ocr_noetig(seite)
+        if meldungen is None:
+            return _ocr.ocr_noetig(seite)
+        try:
+            return _ocr.ocr_noetig(seite, meldungen=meldungen)
+        except TypeError:                     # ersetzte Entscheidung ohne Meldungen (Tests, alte Fassung)
+            return _ocr.ocr_noetig(seite)
     if hasattr(_ocr, "ist_scan_seite"):
         return "seite" if _ocr.ist_scan_seite(seite) else "nein"
     return "nein"
+
+
+def unlesbare_schriften(seite) -> frozenset:
+    """Schriften der Seite, deren Text Zeichensalat ist (ocr.textebene_pruefen, Befund R-02); leer im Zweifel."""
+    pruefen = getattr(_ocr, "textebene_pruefen", None)
+    if pruefen is None:
+        return frozenset()
+    try:
+        return frozenset(pruefen(seite).unlesbar)
+    except Exception:
+        return frozenset()
 
 
 def bildbereiche(seite) -> list:
@@ -1925,11 +2049,12 @@ def dokument_aufbauen(doc, pfad, ocr=None, ocr_cache=None, melde=None, fortschri
     ocr_fehlt_gemeldet = False
     gesamt = len(doc)
     entscheidungen: dict = {}
+    entscheidungs_meldungen: dict = {}       # Seite -> Meldungen der OCR-Entscheidung (TEXTEBENE_UNLESBAR …)
     vorab = getattr(ocr, "vorab", None)
     if vorab is not None and pfad is not None:
         # Scan-Seiten parallel einreihen (Gutachten PERF-05); ergebnis() wartet dann nur noch
         for nr in range(gesamt):
-            entscheidungen[nr] = ocr_entscheidung(doc[nr])
+            entscheidungen[nr] = ocr_entscheidung(doc[nr], entscheidungs_meldungen.setdefault(nr, []))
         offen = [nr for nr, m in entscheidungen.items() if m == "seite" and nr not in ocr_cache]
         if offen:
             try:
@@ -1942,7 +2067,13 @@ def dokument_aufbauen(doc, pfad, ocr=None, ocr_cache=None, melde=None, fortschri
         if fortschritt:
             fortschritt(nr + 1, gesamt)
         seite = doc[nr]
-        modus = entscheidungen.get(nr) or ocr_entscheidung(seite)
+        modus = entscheidungen.get(nr) or ocr_entscheidung(seite, entscheidungs_meldungen.setdefault(nr, []))
+        if analyse_meldungen:
+            for m_ in entscheidungs_meldungen.get(nr, ()):
+                if isinstance(m_, dict) and m_.get("code"):
+                    liste = warnungen if m_.get("art") in ("warnung", "fehler") else hinweise
+                    _melden(liste, meldungen, m_.get("art", "hinweis"), m_["code"], m_.get("text", ""), nr)
+        ohne_schriften = unlesbare_schriften(seite) if modus == "seite" else frozenset()
         bilder = bildbereiche(seite) if modus != "nein" else []
         woerter, winkel, quelle = None, None, "ocr"
         ocr_gelaufen, ocr_warnung = False, False
@@ -1989,7 +2120,7 @@ def dokument_aufbauen(doc, pfad, ocr=None, ocr_cache=None, melde=None, fortschri
                 if woerter:
                     ocr_cache[nr] = list(woerter)
         m = seite_aufbauen(seite, nr, ocr_woerter=woerter, ocr_quelle=quelle,
-                           felder_roh=felder_je_seite.get(nr, ()), bilder=bilder)
+                           felder_roh=felder_je_seite.get(nr, ()), bilder=bilder, ohne_schriften=ohne_schriften)
         m.ocr_modus = modus
         m.ocr_winkel = winkel
         m.ocr_woerter = len(woerter or [])
@@ -2007,6 +2138,11 @@ def dokument_aufbauen(doc, pfad, ocr=None, ocr_cache=None, melde=None, fortschri
                     f"Seite {nr + 1}: Text in Bildern per OCR gelesen und mitgeprüft.", nr)
         seiten.append(m)
         felder.extend(m.felder)
+    if analyse_meldungen:
+        for nr in vorbereitung.get("drehung_abweichung") or ():
+            _melden(warnungen, meldungen, "warnung", "DREHUNG",
+                    f"Seite {nr + 1}: Die Seite ist gedreht gespeichert, und die Drehung ließ sich nicht verlustfrei "
+                    f"herausrechnen – Fundstellen und Ausgabe dieser Seite bitte genau prüfen.", nr)
     dok = Dokument(pfad, seiten, felder)
     dok.vorbereitung = vorbereitung
     return dok
