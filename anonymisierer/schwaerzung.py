@@ -280,10 +280,13 @@ def _nebenkanaele_bereinigen(lauf, doc, zaehler: dict) -> str:
 
 def _beschnitt_nachholen(lauf, doc) -> None:
     """Rückfall, wenn das Nebenkanal-Modul scheitert: Inhalte außerhalb des Beschnitts (S-05) hier entfernen,
-    denn die Seitenschleife hat sie dem Modul überlassen."""
+    denn die Seitenschleife hat sie dem Modul überlassen. Scheitert MuPDF an einer Seite (zyklisches Form-XObject,
+    Befund R-08), wird sie als Bild ihres sichtbaren Bereichs neu erzeugt – nie bleibt der Inhalt still stehen;
+    lässt sie sich auch nicht rendern, entsteht keine Ausgabe (_seite_als_bild)."""
     lauf.beschnitt_lokal = True
     for nr in range(len(doc)):
         seite = doc[nr]
+        rechtecke = []
         try:
             rechtecke = _beschnitt_rechtecke(seite)
             if not rechtecke:
@@ -295,9 +298,8 @@ def _beschnitt_nachholen(lauf, doc) -> None:
                                    text=fitz.PDF_REDACT_TEXT_REMOVE)
             lauf.beschnitt_seiten.append(nr + 1)
         except Exception as e:
-            lauf.melden("fehler", "NEBENKANAL_ENTFERNT",
-                        f"Seite {nr + 1}: Inhalte außerhalb des sichtbaren Seitenbereichs konnten nicht entfernt "
-                        f"werden ({e}).", nr)
+            modell = lauf.modell.seiten[nr] if lauf.modell is not None and nr < len(lauf.modell.seiten) else None
+            _seite_als_bild(lauf, nr, seite, modell, [], rechtecke, e)
 
 
 def _beschnitt_rechtecke(seite) -> list:
@@ -744,21 +746,300 @@ def _vergleichstext(text: str) -> str:
 # ----------------------------------------------------------------------
 # Seite bearbeiten
 # ----------------------------------------------------------------------
+KURVEN_SCHRAEGE_LINIEN = 4    # so viele schräge Liniensegmente ergeben einen Linienzug (Unterschriftenpad, Ink)
+
+
 def _hat_kurven(seite) -> bool:
-    """Vektorzeichnungen mit Kurven (Unterschrift, Stempel, Logo) – Linien und Rechtecke zählen nicht."""
+    """Vektorzeichnungen, die eine Unterschrift, ein Stempel oder ein Logo sein können: schon EINE Bézierkurve
+    (ein Namenszug aus 1-2 Kurven, Befund M-66) oder ein Linienzug aus mehreren schrägen Segmenten
+    (Unterschriftenpad, eingebrannte Freihand-Anmerkung). Rechtecke sowie waagerechte und senkrechte Linien
+    (Tabellen, Unterstreichungen) zählen nicht."""
     try:
         if len(seite.read_contents()) > 1_500_000:
             return False
-        kurven = 0
+        schraeg = 0
         for pfad in seite.get_drawings():
             for item in pfad.get("items", []):
                 if item[0] == "c":
-                    kurven += 1
-                    if kurven >= 3:
-                        return True
+                    return True
+                if item[0] == "l":
+                    p, q = item[1], item[2]
+                    if abs(p.x - q.x) > 0.5 and abs(p.y - q.y) > 0.5:
+                        schraeg += 1
+                        if schraeg >= KURVEN_SCHRAEGE_LINIEN:
+                            return True
     except Exception:
         pass
     return False
+
+
+def _platzhalter_zeilen_vorher(m, rects: list) -> dict:
+    """Vor apply_redactions: je waagerechter Textzeile des Modells, die ein Kasten berührt, ihre sichtbaren
+    Textglyphen [(x0, x1, Zeichen)] nach x sortiert, Grundlinie und Schriftgröße – Grundlage für
+    _platzhalter_verschiebung."""
+    zeilen: dict = {}
+    for g, z in enumerate(m.zeichen):
+        if z.quelle != "text" or z.c.isspace() or not (z.rect.x1 > z.rect.x0):
+            continue
+        zeilen.setdefault(z.zeile, []).append(z)
+    aus = {}
+    for zid, zs in zeilen.items():
+        if not all(z.horizontal for z in zs):
+            continue
+        box = fitz.Rect(min(z.rect.x0 for z in zs), min(z.rect.y0 for z in zs),
+                        max(z.rect.x1 for z in zs), max(z.rect.y1 for z in zs))
+        if not any(min(r.y1, box.y1) - max(r.y0, box.y0) > 0.3 * min(r.height, box.height) and
+                   r.x1 > box.x0 - 1 and r.x0 < box.x1 + 1 for r in rects):
+            continue
+        zs = sorted(zs, key=lambda z: z.rect.x0)
+        grund = sorted(z.grundlinie for z in zs)[len(zs) // 2]
+        aus[zid] = {"glyphen": [(z.rect.x0, z.rect.x1, z.c) for z in zs], "grundlinie": grund,
+                    "groesse": max(z.groesse for z in zs) or 10.0, "box": box}
+    return aus
+
+
+def _platzhalter_verschiebung(seite, zeilen_vorher: dict, rects: list) -> list:
+    """Nach apply_redactions: MuPDF 1.28.5/1.28.6 (PyMuPDF 2.0/2.1) lässt beim Entfernen von Glyphen mitten in
+    einem TJ-Feld die Breite der ersten entfernten Glyphe weg – der Rest der Zeile rutscht nach links unter den
+    grauen Kasten (Befund M-31: "[PERSON A]/ersicherungsmakler", in der Textebene "[P,A]Ihr"). Gemessen wird die
+    tatsächliche Lage der verbliebenen Zeichen jeder betroffenen Zeile (Zeichenfolge vor/nach dem Schwärzen
+    abgeglichen); je Kasten (dl, dr, frei_links, frei_rechts): Verschiebung des linken bzw. rechten
+    Nachbarzeichens und die neue rechte Kante des linken bzw. linke Kante des rechten Nachbarzeichens (None =
+    kein Nachbar) – so weit darf ein Platzhalter wachsen. Ohne Messung (0, 0, None, None)."""
+    aus = [(0.0, 0.0, None, None)] * len(rects)
+    if not zeilen_vorher:
+        return aus
+    import difflib
+    try:
+        rd = seite.get_text("rawdict", flags=sm.TEXT_FLAGS)
+    except Exception:
+        return aus
+    nachher = []
+    for block in rd.get("blocks", []):
+        for zeile in block.get("lines", []):
+            for sp in zeile.get("spans", []):
+                for ch in sp.get("chars", []):
+                    if not ch["c"].isspace():
+                        b = ch["bbox"]
+                        nachher.append((b[0], b[2], ch["c"], ch["origin"][1]))
+    verschiebung: dict = {}           # zid -> [(x0_vorher, x1_vorher, dx)] der wiedergefundenen Glyphen
+    for zid, info in zeilen_vorher.items():
+        vorher = info["glyphen"]
+        box, grund, groesse = info["box"], info["grundlinie"], info["groesse"]
+        kandidaten = sorted((c for c in nachher if abs(c[3] - grund) <= 0.3 * groesse
+                             and c[1] > box.x0 - 2 and c[0] < box.x1 + 2), key=lambda c: c[0])
+        abgleich = difflib.SequenceMatcher(None, [g[2] for g in vorher], [c[2] for c in kandidaten],
+                                           autojunk=False)
+        paare = []
+        for a, b, n in abgleich.get_matching_blocks():
+            for k in range(n):
+                v, c = vorher[a + k], kandidaten[b + k]
+                paare.append((v[0], v[1], c[0] - v[0], c[0], c[1]))
+        verschiebung[zid] = paare
+    for i, r in enumerate(rects):
+        beste, ueberlappung = None, 0.0
+        for zid, info in zeilen_vorher.items():
+            box = info["box"]
+            u = min(r.y1, box.y1) - max(r.y0, box.y0)
+            if u > ueberlappung and r.x1 > box.x0 - 1 and r.x0 < box.x1 + 1:
+                beste, ueberlappung = zid, u
+        if beste is None:
+            continue
+        paare = verschiebung.get(beste) or []
+        links = [p for p in paare if p[1] <= r.x0 + 0.5]
+        rechts = [p for p in paare if p[0] >= r.x1 - 0.5]
+        nachbar_l = max(links, key=lambda p: p[1]) if links else None
+        nachbar_r = min(rechts, key=lambda p: p[0]) if rechts else None
+        dl = nachbar_l[2] if nachbar_l else 0.0
+        dr = nachbar_r[2] if nachbar_r else dl
+        if abs(dl) > r.width + 50 or abs(dr) > r.width + 50:      # Abgleich unplausibel: nicht verschieben
+            continue
+        aus[i] = (dl, dr, nachbar_l[4] if nachbar_l else None, nachbar_r[3] if nachbar_r else None)
+    return aus
+
+
+def _platzhalter_treppe(rects: list):
+    """Bilden die Rechtecke einer Stelle eine Treppe auf EINER Zeile (schräge OCR-Zeile, seitenmodell._ocr_stufen:
+    Stücke, die sich senkrecht mindestens zur Hälfte überlappen und waagerecht aneinanderstoßen, ohne sich
+    nennenswert zu überdecken), liefert das ihr gemeinsames Rechteck – dort steht der Platzhalter. Sonst None
+    (gewöhnliche Stelle, eine Zeile = ein Rechteck). Die schmalen Streifen über der unsichtbaren Textebene eines
+    durchsuchbaren Scans liegen im Bildrechteck der Stelle (waagerecht fast ganz überdeckt) und sind keine Treppe:
+    dort bleibt der Platzhalter im ersten Rechteck wie bisher."""
+    if len(rects) < 2:
+        return None
+    zone = fitz.Rect(rects[0])
+    offen = list(rects[1:])
+    # Nachbarstücke einer Treppe überdecken sich nur um ihre Ränder (2 x OCR_RAND) und die geschätzten Glyphen
+    stoss = 2 * OCR_RAND + 2.0
+    gewachsen = True
+    while gewachsen and offen:
+        gewachsen = False
+        for k in list(offen):
+            senkrecht = min(zone.y1, k.y1) - max(zone.y0, k.y0)
+            waagerecht = min(zone.x1, k.x1) - max(zone.x0, k.x0)       # Überdeckung; negativ = Lücke
+            if (senkrecht >= 0.5 * min(zone.height, k.height)
+                    and -2 <= waagerecht <= min(stoss, 0.5 * min(k.width, zone.width))):
+                zone |= k
+                offen.remove(k)
+                gewachsen = True
+    if zone == rects[0] or zone.height > 1.6 * rects[0].height:
+        return None
+    return zone
+
+
+def _platzhalter_neu_planen(rect, text, ersatz, max_pt):
+    """Platzhalter für einen durch die Verschiebung kleiner gewordenen Kasten: (Text, Schriftgröße oder None)."""
+    for variante in (text, ersatz, _platzhalter_kurz(ersatz or "")):
+        if not variante:
+            continue
+        fs = _platzhalter_schrift(rect, variante, max(PLATZHALTER_MIN_PT, min(max_pt, PLATZHALTER_MAX_PT)))
+        if fs >= PLATZHALTER_MIN_PT:
+            return variante, fs
+    return text, None
+
+
+def _platzhalter_verdeckung_pruefen(lauf, nr, seite, kaesten: list) -> None:
+    """Nach dem Zeichnen: Kein verbliebenes Wort darf teilweise unter einem grauen Kasten liegen (sonst wäre
+    "Versicherungsmakler" als "/ersicherungsmakler" zu lesen). Ganz im Kasten liegende Wörter sind Platzhalter."""
+    if not kaesten:
+        return
+    try:
+        woerter = seite.get_text("words", flags=sm.TEXT_FLAGS)
+    except Exception:
+        return
+    verdeckt = []
+    for w in woerter:
+        r = fitz.Rect(w[:4])
+        if r.width <= 0:
+            continue
+        for k in kaesten:
+            if min(r.y1, k.y1) - max(r.y0, k.y0) <= 0.4 * r.height:
+                continue
+            anteil = max(0.0, min(r.x1, k.x1) - max(r.x0, k.x0)) / r.width
+            if 0.15 < anteil < 0.9:
+                verdeckt.append(w[4])
+                break
+    if verdeckt:
+        beispiel = ", ".join(repr(v) for v in verdeckt[:3])
+        lauf.kollateral.append(f"Seite {nr + 1}: {len(verdeckt)} Wort/Wörter teilweise unter einem Platzhalter, "
+                               f"z. B. {beispiel}")
+
+
+def _platzhalter_kaesten_zeichnen(seite, kaesten: list) -> None:
+    """Graue Kästen der Treffer zeichnen wie apply_redactions sie zeichnete: gefüllt und mit 1 pt Rand in derselben
+    Farbe (der Rand deckt Tintenreste am Rechteckrand eines Scans ab) – je Kasten ein eigener Pfad, damit die
+    Restrisiko-Prüfung jeden einzeln erkennt."""
+    if not kaesten:
+        return
+    form = seite.new_shape()
+    for r in kaesten:
+        form.draw_rect(r)
+        form.finish(color=FUELLFARBE, fill=FUELLFARBE, width=1)
+    form.commit()
+
+
+def _muster_text_entfernen(doc, seite) -> int:
+    """Text in Kachelmustern (Füllmuster) der Seite entfernen (Befund R-03): die Textextraktion liefert ihn nicht,
+    apply_redactions erreicht ihn nicht – er bliebe im Bild und im Rohstrom. Entfernt werden die BT…ET-Abschnitte
+    der Musterströme und der Form-XObjects, die nur über ein Muster erreicht werden (Befund R-03, Runde 2: Muster
+    ruft /Fm1 Do auf, der Text steht im XObject); das übrige Muster (Linien, Flächen) bleibt. Form-XObjects, die
+    die Seite auch direkt zeichnet, bleiben unverändert (dort erreicht apply_redactions den Text, und sichtbarer
+    Text der Seite ginge sonst verloren). Rückgabe: Anzahl geänderter Ströme."""
+    geaendert = 0
+    try:
+        verweise = [x[0] for x in seite.get_xobjects()]
+    except Exception:
+        verweise = []
+    direkt: set = set(verweise)      # ohne Muster erreichbar
+    im_muster: set = set()           # Muster und alles, was in ihren Ressourcen steht
+    stapel = [(seite.xref, False)] + [(x, False) for x in verweise]
+    gesehen: set = set()
+    while stapel:
+        xref, unter_muster = stapel.pop()
+        if (xref, unter_muster) in gesehen or xref <= 0 or len(gesehen) > 1000:
+            continue
+        gesehen.add((xref, unter_muster))
+        for schluessel in ("Resources/Pattern", "Resources/XObject"):
+            try:
+                art, wert = doc.xref_get_key(xref, schluessel)
+                if art == "xref":
+                    wert = doc.xref_object(int(wert.split()[0]), compressed=True)
+                elif art != "dict":
+                    continue
+            except Exception:
+                continue
+            for nummer in re.findall(r"(\d+)\s+0\s+R", wert):
+                nummer = int(nummer)
+                kind_unter_muster = unter_muster or schluessel.endswith("Pattern")
+                (im_muster if kind_unter_muster else direkt).add(nummer)
+                stapel.append((nummer, kind_unter_muster))
+    for xref in sorted(im_muster - direkt):
+        try:
+            if not doc.xref_is_stream(xref):
+                continue
+            if doc.xref_get_key(xref, "PatternType")[1] != "1" and doc.xref_get_key(xref, "Subtype")[1] != "/Form":
+                continue                                   # Bilder, Schattierungen
+            strom = doc.xref_stream(xref)
+            neu = _text_abschnitte_entfernen(strom)
+            if neu != strom:
+                doc.update_stream(xref, neu)
+                geaendert += 1
+        except Exception:
+            continue
+    return geaendert
+
+
+def _text_abschnitte_entfernen(strom: bytes) -> bytes:
+    """BT … ET aus einem Inhaltsstrom entfernen; Zeichenketten, Kommentare und Inline-Bilder werden beim
+    Suchen übersprungen."""
+    aus, i, n, start = [], 0, len(strom), None
+    trenner = b" \t\r\n\x0c\x00()<>[]{}/%"
+    while i < n:
+        c = strom[i:i + 1]
+        if c == b"(":
+            tiefe = 0
+            while i < n:
+                z = strom[i:i + 1]
+                if z == b"\\":
+                    i += 2
+                    continue
+                tiefe += (z == b"(") - (z == b")")
+                i += 1
+                if tiefe == 0:
+                    break
+            continue
+        if c == b"<" and strom[i + 1:i + 2] != b"<":
+            j = strom.find(b">", i)
+            i = n if j < 0 else j + 1
+            continue
+        if c == b"%":
+            j = strom.find(b"\n", i)
+            i = n if j < 0 else j + 1
+            continue
+        if c.isalpha():
+            j = i
+            while j < n and strom[j:j + 1] not in trenner:
+                j += 1
+            wort = strom[i:j]
+            if wort == b"BI":                                    # Inline-Bild: bis EI überspringen
+                k = strom.find(b"EI", j)
+                j = n if k < 0 else k + 2
+            elif wort == b"BT" and start is None:
+                start = i
+            elif wort == b"ET" and start is not None:
+                aus.append((start, j))
+                start = None
+            i = j
+            continue
+        i += 1
+    if not aus:
+        return strom
+    teile, pos = [], 0
+    for a, b in aus:
+        teile.append(strom[pos:a])
+        pos = b
+    teile.append(strom[pos:])
+    return b"".join(teile)
 
 
 def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, versteckt: list):
@@ -766,7 +1047,8 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
     doc = lauf.doc
     seite = doc[nr]
     if seite.rotation:          # nur nach einem Zwischenstand denkbar – Vorbereitung entfernt sie
-        seite.remove_rotation()
+        from .ocr import drehung_entfernen
+        drehung_entfernen(seite)
     modus = m.ocr_modus
     textglyphen = any(z.quelle == "text" for z in m.zeichen)
     woerter_vorher = seite.get_text("words", flags=sm.TEXT_FLAGS) if textglyphen else []
@@ -787,8 +1069,12 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
             if not teile:
                 continue
         rects = [t[0] for t in teile]
-        hits.append({"fund": fund, "ersatz": ersatz, "rects": rects, "groesse": teile[0][2],
-                     "grundlinie": teile[0][3], "freiraum": m.freiraum(s, e, rects[0])})
+        # Nur sichtbarer Text rutscht nach dem Anwenden (M-31); Kästen über Scans, Bildern und der unsichtbaren
+        # Textebene eines durchsuchbaren Scans bleiben, wo die Bildpixel entfernt wurden
+        verschiebbar = modus != "seite" and all(m.zeichen[g].quelle == "text" for g in m.glyphen(s, e))
+        hits.append({"fund": fund, "ersatz": ersatz, "rects": rects, "boxen": [t[1] for t in teile],
+                     "groesse": teile[0][2], "grundlinie": teile[0][3], "freiraum": m.freiraum(s, e, rects[0]),
+                     "verschiebbar": verschiebbar})
         getroffen_text |= {g for g in m.glyphen(s, e) if m.zeichen[g].quelle == "text"}
 
     if modus in ("seite", "bilder"):
@@ -797,29 +1083,48 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
         if modus == "seite":
             _schluesselwoerter_pruefen(lauf, nr, m, kategorien)
 
-    # 2) Redaktionen und Platzhalter planen (nur ENTHALTENE Rechtecke verwerfen)
+    # 2) Redaktionen und Platzhalter planen (nur ENTHALTENE Rechtecke verwerfen). Treffer werden OHNE Füllung
+    #    angewendet; die grauen Kästen zeichnet _platzhalter_kaesten_zeichnen danach an der gemessenen Lage
+    #    (MuPDF verschiebt den Rest einer Zeile, Befund M-31).
     bereits: list = []
-    platzhalter: list = []      # (Rechteck, Text, Schriftgröße, Grundlinie)
+    kaesten: list = []          # graue Kästen der Treffer (werden nach dem Anwenden gezeichnet)
+    verschiebbar: list = []     # je Kasten: darf er der verschobenen Zeile folgen (sichtbarer Text, kein Bild)?
+    platzhalter: list = []      # [Kasten-Index oder None, Rechteck, Text, Schriftgröße, Grundlinie, Ersatz, max_pt]
+    einbrennen: list = []       # Rückfall "Seite als Bild": zusätzlich die vollen Glyphenboxen der Treffer
     for hit in hits:
-        rects = [r for r in hit["rects"] if not r.is_empty and not any(alt.contains(r) for alt in bereits)]
-        if not rects:
+        paare = [(r, b) for r, b in zip(hit["rects"], hit["boxen"])
+                 if not r.is_empty and not any(alt.contains(r) for alt in bereits)]
+        if not paare:
             continue
+        rects = [r for r, _ in paare]
         lauf.treffer += 1
         lauf.stellen_geschwaerzt += 1
         ersatz = hit["ersatz"]
         if ersatz:
             max_pt = hit["groesse"] if hit["groesse"] > 0 else rects[0].height / 1.6
-            r, text, fs = _platzhalter_planen(rects[0], ersatz, max_pt, hit["freiraum"], seite.rect)
+            zone = _platzhalter_treppe(rects)
+            if zone is None:
+                r, text, fs = _platzhalter_planen(rects[0], ersatz, max_pt, hit["freiraum"], seite.rect)
+            else:
+                # schräge Scanzeile in Treppenstücken (M-20): Platzhalter über die ganze Stelle, nicht über die
+                # Stücke hinaus (dort ist nichts geschwärzt)
+                r = zone
+                text, fs = _platzhalter_neu_planen(zone, ersatz, ersatz, max_pt)
             if fs is None:
                 lauf.ohne_platzhalter += 1
             else:
                 if text != ersatz:
                     lauf.abgekuerzt[text] = ersatz
-                rects[0] = r
-                platzhalter.append((r, text, fs, hit["grundlinie"]))
-        for r in rects:
+                if zone is None:
+                    rects[0] = r
+                platzhalter.append([len(kaesten) if zone is None else None, r, text, fs, hit["grundlinie"], ersatz,
+                                    max_pt])
+        for r, (_, box) in zip(rects, paare):
             bereits.append(r)
-            seite.add_redact_annot(r, fill=FUELLFARBE)
+            kaesten.append(r)
+            verschiebbar.append(hit["verschiebbar"] and not any(r.intersects(b) for b in m.bilder))
+            einbrennen.append(r | (fitz.Rect(box) + (-0.5, -0.5, 0.5, 0.5)))
+            seite.add_redact_annot(r, fill=False)
     for eintrag in bereiche:              # manuelle Bereiche: Text UND Bildpixel, Platzhalter
         r, ersatz = (eintrag if isinstance(eintrag, tuple) else (eintrag, PLATZHALTER_BEREICH))
         r = fitz.Rect(r) & seite.rect
@@ -828,8 +1133,9 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
         lauf.treffer += 1
         fs = _platzhalter_schrift(r, ersatz, PLATZHALTER_MAX_PT)
         if fs >= PLATZHALTER_MIN_PT:
-            platzhalter.append((r, ersatz, fs, None))
+            platzhalter.append([None, r, ersatz, fs, None, ersatz, PLATZHALTER_MAX_PT])
         bereits.append(r)
+        einbrennen.append(r)
         seite.add_redact_annot(r, fill=FUELLFARBE)
     if kategorien:
         lauf.kategorien_je_seite[nr] = kategorien
@@ -837,22 +1143,41 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
     # 3) Versteckte Ebenen-Inhalte (ohne Platzhalter) und Inhalte außerhalb des Beschnitts
     for r in versteckt:
         bereits.append(r)
+        einbrennen.append(r)
         seite.add_redact_annot(r, fill=FUELLFARBE)
     if versteckt:
         lauf.melden("hinweis", "NEBENKANAL_ENTFERNT",
                     f"Seite {nr + 1}: {len(versteckt)} ausgeblendete Inhalt(e) einer Ebene entfernt.", nr)
+    leeren: list = []
     if lauf.beschnitt_lokal:
         beschnitt = _beschnitt_rechtecke(seite)
         for r in beschnitt:
             try:
                 seite.add_redact_annot(r, fill=False)
                 bereits.append(r)
+                leeren.append(r)
             except Exception:
                 pass
         if beschnitt:
             lauf.beschnitt_seiten.append(nr + 1)
 
-    # 4) Anwenden (Text UND Bildpixel), Teilreste prüfen, Platzhalter schreiben, Kollateralschaden prüfen
+    # 3a) Text in Kachelmustern erreicht apply_redactions nicht (Befund R-03): auf Seiten, deren Text sich nicht
+    #     vollständig auslesen lässt, wird er aus den Mustern entfernt – auch ohne Treffer, denn was die OCR dort
+    #     nicht erkannt hat, wäre sonst ungeprüft in der Ausgabe
+    if modus == "seite" and hasattr(sm._ocr, "textebene_pruefen"):
+        try:
+            befund = sm._ocr.textebene_pruefen(seite)
+            if befund.verborgen >= getattr(sm._ocr, "VERBORGEN_MIN_ZEICHEN", 10) and getattr(befund, "muster", True):
+                if _muster_text_entfernen(doc, seite):
+                    lauf.melden("hinweis", "NEBENKANAL_ENTFERNT",
+                                f"Seite {nr + 1}: Text in Füllmustern entfernt (nicht auslesbar).", nr)
+        except Exception:
+            pass
+
+    # 4) Anwenden (Text UND Bildpixel), Teilreste prüfen, Kästen und Platzhalter an der gemessenen Lage
+    #    zeichnen, Kollateralschaden prüfen. Scheitert MuPDF an der Seite (zyklische Form-XObjects, Befund R-08),
+    #    wird sie als Bild geschwärzt.
+    als_bild = False
     if bereits:
         bild_vorher = None
         if _bilder is not None and hasattr(_bilder, "bildzustand") and hasattr(_bilder, "nach_schwaerzung"):
@@ -860,23 +1185,58 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
                 bild_vorher = _bilder.bildzustand(seite)
             except Exception:
                 bild_vorher = None
-        seite.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS,
-                               graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
-                               text=fitz.PDF_REDACT_TEXT_REMOVE)
-        if bild_vorher is not None:
-            try:
-                lauf.bilder_neu_kodiert += int(_bilder.nach_schwaerzung(doc, seite, bild_vorher) or 0)
-            except Exception as e:
-                lauf.melden("hinweis", "BILDER_UNGEPRUEFT", f"Geschwärzte Bilder auf Seite {nr + 1} konnten nicht "
-                                                            f"neu komprimiert werden ({e}) – die Datei wird größer.", nr)
-        if getroffen_text:
-            _glyphreste_pruefen(lauf, nr, seite, m, getroffen_text)
-        for r, text, fs, grundlinie in platzhalter:
+        beweglich = [k for k, v in zip(kaesten, verschiebbar) if v]
+        zeilen_vorher = _platzhalter_zeilen_vorher(m, beweglich) if (textglyphen and beweglich) else {}
+        try:
+            seite.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS,
+                                   graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
+                                   text=fitz.PDF_REDACT_TEXT_REMOVE)
+        except Exception as fehler:
+            als_bild = True
+            _seite_als_bild(lauf, nr, seite, m, einbrennen, leeren, fehler)
+            seite = doc[nr]
+        if not als_bild:
+            if bild_vorher is not None:
+                try:
+                    lauf.bilder_neu_kodiert += int(_bilder.nach_schwaerzung(doc, seite, bild_vorher) or 0)
+                except Exception as e:
+                    lauf.melden("hinweis", "BILDER_UNGEPRUEFT", f"Geschwärzte Bilder auf Seite {nr + 1} konnten "
+                                                                f"nicht neu komprimiert werden ({e}) – die Datei wird "
+                                                                f"größer.", nr)
+            if getroffen_text:
+                _glyphreste_pruefen(lauf, nr, seite, m, getroffen_text)
+            verschiebung = _platzhalter_verschiebung(seite, zeilen_vorher, kaesten)
+            verschiebung = [v if ok else (0.0, 0.0, None, None) for v, ok in zip(verschiebung, verschiebbar)]
+            kaesten = [fitz.Rect(r.x0 + v[0], r.y0, max(r.x1 + v[1], r.x0 + v[0] + 1.0), r.y1)
+                       for r, v in zip(kaesten, verschiebung)]
+            for eintrag in platzhalter:              # verschobene Kästen: Platzhalter neu einpassen
+                index = eintrag[0]
+                if index is None or kaesten[index] == eintrag[1]:
+                    continue
+                r, text, ersatz, max_pt = kaesten[index], eintrag[2], eintrag[5], eintrag[6]
+                neu_text, fs = _platzhalter_neu_planen(r, text, ersatz, max_pt)
+                if fs is None:                       # in die freie Lücke zu den Nachbarzeichen wachsen
+                    links, rechts = verschiebung[index][2], verschiebung[index][3]
+                    weit = fitz.Rect(min(r.x0, links + 1.0) if links is not None else r.x0, r.y0,
+                                     max(r.x1, rechts - 1.0) if rechts is not None else r.x1, r.y1)
+                    neu_text, fs = _platzhalter_neu_planen(weit, text, ersatz, max_pt)
+                    if fs is not None:
+                        r = kaesten[index] = weit
+                eintrag[1], eintrag[2], eintrag[3] = r, neu_text, fs
+            _platzhalter_kaesten_zeichnen(seite, kaesten)
+        for index, r, text, fs, grundlinie, ersatz, _ in platzhalter:
+            if fs is None:
+                lauf.ohne_platzhalter += 1
+                continue
+            if text != ersatz:
+                lauf.abgekuerzt[text] = ersatz
             if not _platzhalter_zeichnen(seite, r, text, fs, grundlinie):
                 lauf.ohne_platzhalter += 1
-        if woerter_vorher:
+        if woerter_vorher and not als_bild:
             _kollateral_pruefen(lauf, nr, seite, woerter_vorher, bereits)
-        if bild_vorher is None:
+            if modus != "seite":            # Scans: unsichtbare Textebene unter den Kästen ist gewollt
+                _platzhalter_verdeckung_pruefen(lauf, nr, seite, kaesten)
+        if bild_vorher is None and not als_bild:
             try:
                 for info in seite.get_image_info(xrefs=True):
                     xref = info.get("xref") or 0
@@ -884,15 +1244,161 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
                         lauf.bild_xrefs.add(xref)
             except Exception:
                 pass
-        if modus == "seite":
+        if modus == "seite" or als_bild:
             lauf.scan_seiten_seit_speichern += 1
-    lauf.rects_je_seite[nr] = bereits
+
+    # 4a) Inhalte außerhalb des Beschnitts (Gutachten S-05) entfernt das Nebenkanal-Modul – hier schon je Seite:
+    #     Scheitert MuPDF an der Seite (zyklische oder zu tief verschachtelte Form-XObjects, Befund R-08), wird sie
+    #     als Bild ihres sichtbaren Bereichs neu erzeugt, auch ohne Treffer. Vorher blieb der Inhalt außerhalb der
+    #     CropBox (Name, IBAN) still in der Ausgabe, und die Nebenkanal-Bereinigung brach für das ganze Dokument ab.
+    if not lauf.beschnitt_lokal and not als_bild and _nebenkanaele is not None:
+        entfernen = getattr(_nebenkanaele, "beschnitt_entfernen", None)
+        if entfernen is not None:
+            try:
+                if entfernen(doc, seite):
+                    lauf.beschnitt_seiten.append(nr + 1)
+            except Exception as fehler:
+                als_bild = True
+                _seite_als_bild(lauf, nr, seite, m, [], [], fehler)
+                seite = doc[nr]
+                lauf.scan_seiten_seit_speichern += 1
+
+    # 4b) Abgeschnittener Text (Befund R-03, Runde 2): Zeichen, die ein Beschneidungspfad unsichtbar macht (überlanger
+    #     Formularwert, Tabellenzelle), liest pdftotext trotzdem – sie werden entfernt, ohne Sichtbares anzutasten
+    if not als_bild:
+        seite, als_bild = _abgeschnittenen_text_entfernen(lauf, nr, seite, m)
+        if als_bild:
+            lauf.scan_seiten_seit_speichern += 1
+    lauf.rects_je_seite[nr] = bereits + [k for k in kaesten if k not in bereits]
 
     # 5) Hinweise zu Grafiken/Bildern (Unterschriften, Stempel, Fotos werden nicht geprüft)
     if m.bilder and modus == "bilder":
         lauf.bild_seiten.append(nr + 1)
     if _hat_kurven(seite):
         lauf.grafik_seiten.append(nr + 1)
+
+
+ABGESCHNITTEN_RAND = 0.15     # Rechteck je abgeschnittener Glyphe: so viel der Breite (und 0,2 der Höhe) eingerückt –
+                              # MuPDF entfernt jede Glyphe, die ein Rechteck auch nur zu ~10 % berührt (gemessen)
+
+
+def _glyphen_aus(seite, flags) -> list:
+    """[(Ursprung, Kasten als Zahlen)] der Zeichen, die get_text mit diesen flags liefert."""
+    return [(ch.get("origin") or (0.0, 0.0), ch["bbox"])
+            for block in seite.get_text("rawdict", flags=flags).get("blocks", ())
+            for zeile in block.get("lines", ()) for sp in zeile.get("spans", ()) for ch in sp.get("chars", ())]
+
+
+_NACHBARN = ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1))
+
+
+def _drin(menge: set, o) -> bool:
+    """Liegt ein Glyphenursprung (auf 1 pt gerundet, ±1) in der Menge?"""
+    rx, ry = round(o[0]), round(o[1])
+    return any((rx + dx, ry + dy) in menge for dx, dy in _NACHBARN)
+
+
+def _abgeschnittene_glyphen(seite) -> tuple:
+    """(abgeschnitten, sichtbar): Kästen der gezeichneten Glyphen (Zeichenspur), die ein Beschneidungspfad unsichtbar
+    macht – get_text liefert sie mit Beschneidung nicht, ohne schon (überlanger Formularwert, Tabellenzelle, Form-
+    XObject mit kleiner BBox) –, und die Kästen der sichtbaren Glyphen (nur, wenn es abgeschnittene gibt).
+    Unsichtbarer Text (Rendermodus 3) und Text außerhalb der Seite zählen nicht (Beschnitt: Schritt 4a). Kästen
+    werden als Zahlen geprüft, nicht als fitz.Rect je Zeichen (läuft auf jeder Seite)."""
+    sichtbar = _glyphen_aus(seite, sm.TEXT_FLAGS)
+    if not sichtbar:
+        return [], []
+    bekannt = {(round(o[0]), round(o[1])) for o, _ in sichtbar}
+    kandidaten = []
+    px0, py0, px1, py1 = seite.rect
+    for span in seite.get_texttrace():
+        if span.get("type", 0) == 3 or span.get("opacity", 1) == 0:
+            continue
+        for z in span["chars"]:
+            if len(z) < 4 or z[2] is None or chr(z[0]).isspace():
+                continue
+            b = z[3]
+            if not (b[0] < b[2] and b[1] < b[3]) or not (b[0] < px1 and px0 < b[2] and b[1] < py1 and py0 < b[3]):
+                continue                            # leerer Kasten oder außerhalb der Seite
+            if not _drin(bekannt, z[2]):
+                kandidaten.append((z[2], fitz.Rect(b)))
+    if not kandidaten:                              # der Normalfall: alles Gezeichnete ist auch auslesbar
+        return [], []
+    ohne = {(round(o[0]), round(o[1])) for o, _ in _glyphen_aus(seite, sm.TEXT_FLAGS & ~fitz.TEXT_MEDIABOX_CLIP)}
+    return [box for o, box in kandidaten if _drin(ohne, o)], [fitz.Rect(b) for _, b in sichtbar]
+
+
+def _abgeschnittenen_text_entfernen(lauf: _Lauf, nr: int, seite, m):
+    """Abgeschnittenen Text der Seite entfernen (Befund R-03, Runde 2): je Glyphe ein eingerücktes Rechteck, nur Text
+    (Bilder und Linien bleiben). Berührt ein Rechteck eine sichtbare Glyphe, oder bleibt danach etwas übrig, wird die
+    Seite als Bild ihres sichtbaren Bereichs neu erzeugt – Sichtbares bleibt, Unsichtbares verschwindet.
+    Rückgabe: (Seite, als Bild)."""
+    try:
+        abgeschnitten, sichtbar = _abgeschnittene_glyphen(seite)
+    except Exception:
+        abgeschnitten, sichtbar = [], []
+    if not abgeschnitten:
+        return seite, False
+    zeilen: dict = {}                               # sichtbare Glyphen nach 10-pt-Streifen (schnelle Nachbarsuche)
+    for v in sichtbar:
+        for k in range(int(v.y0 // 10), int(v.y1 // 10) + 1):
+            zeilen.setdefault(k, []).append(v)
+    rechtecke, beruehrt = [], False
+    for b in abgeschnitten:
+        r = b + (ABGESCHNITTEN_RAND * b.width, 0.2 * b.height, -ABGESCHNITTEN_RAND * b.width, -0.2 * b.height)
+        nachbarn = {id(v): v for k in range(int(r.y0 // 10), int(r.y1 // 10) + 1) for v in zeilen.get(k, ())}
+        if r.is_empty or any(r.intersects(v) for v in nachbarn.values()):
+            beruehrt = True
+            continue
+        rechtecke.append(r)
+    fehler = None
+    if not beruehrt:
+        try:
+            for r in rechtecke:
+                seite.add_redact_annot(r, fill=False, cross_out=False)
+            seite.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+                                   text=fitz.PDF_REDACT_TEXT_REMOVE)
+            if not _abgeschnittene_glyphen(seite)[0]:
+                lauf.melden("hinweis", "NEBENKANAL_ENTFERNT",
+                            f"Seite {nr + 1}: {len(abgeschnitten)} abgeschnittene, unsichtbare Zeichen entfernt (z. B. "
+                            f"ein zu langer Formularwert).", nr)
+                return seite, False
+        except Exception as e:
+            fehler = e
+    _seite_als_bild(lauf, nr, seite, m, [], [], fehler or RuntimeError("abgeschnittener Text"),
+                    grund=f"enthielt abgeschnittenen, unsichtbaren Text ({len(abgeschnitten)} Zeichen), der sich "
+                          f"nicht einzeln entfernen ließ")
+    return lauf.doc[nr], True
+
+
+def _seite_als_bild(lauf: _Lauf, nr: int, seite, m, einbrennen: list, leeren: list, fehler: BaseException,
+                    grund: str = "ist im PDF fehlerhaft aufgebaut und ließ sich nicht direkt bereinigen"):
+    """Rückfall, wenn apply_redactions an der Seite scheitert (zyklisches oder zu tief verschachteltes
+    Form-XObject: "exception stack overflow", Befund R-08): Seite rendern, Schwärzungen (mit den vollen
+    Glyphenboxen der Treffer) einbrennen, Seite durch das Bild ersetzen. Die Kontroll-OCR prüft die Seite danach
+    wie einen Scan. Lässt sich die Seite auch nicht rendern, endet die Schwärzung mit einer verständlichen
+    Meldung – eine Ausgabe entsteht dann nicht."""
+    try:
+        from .ocr import _protokollieren
+        _protokollieren(fehler)
+    except Exception:
+        pass
+    if _bilder is None or not hasattr(_bilder, "seite_als_bild_schwaerzen"):
+        raise RuntimeError(f"Seite {nr + 1} ließ sich nicht schwärzen ({type(fehler).__name__}: {fehler})") from fehler
+    try:
+        for annot in list(seite.annots()):            # noch nicht angewendete Schwärzungs-Anmerkungen
+            seite.delete_annot(annot)
+        _bilder.seite_als_bild_schwaerzen(lauf.doc, seite, einbrennen, leeren, FUELLFARBE)
+    except Exception as e:
+        raise RuntimeError(f"Seite {nr + 1} ist im PDF fehlerhaft aufgebaut und ließ sich weder schwärzen noch als "
+                           f"Bild schwärzen ({type(e).__name__}: {e}) – bitte die Datei neu als PDF speichern "
+                           f"(z. B. über „Drucken als PDF“) und erneut versuchen.") from e
+    lauf.ocr_modus[nr] = "seite"
+    lauf.bildbereiche[nr] = []
+    if m is not None and m.ocr_winkel is None:
+        m.ocr_winkel = 0
+    lauf.melden("hinweis", "SEITE_ALS_BILD",
+                f"Seite {nr + 1} {grund} – sie wurde als Bild neu erzeugt und dabei geschwärzt (Text dort nicht mehr "
+                f"markierbar, für Menschen und KI aber lesbar).", nr)
 
 
 def _unbedeckt(m, start: int, ende: int, rects: list) -> list:
@@ -1161,13 +1667,16 @@ def _kontroll_woerter(lauf: _Lauf, ausgabe: Path, nr: int, rects: list):
         return None
     lauf.melde(f"   Kontroll-OCR: Seite {nr + 1} …")
     woerter = []
+    ergebnis_fn = getattr(lauf.ocr, "ergebnis", None)
+    ausgefallen = False
     if modus == "seite":
         # dieselbe Ausrichtung wie beim Original (Gutachten S-08): die Ausgabe enthält zu wenige Wörter,
         # um sie neu zu bestimmen. Vollständiges Ergebnis (10-Tupel mit Ausrichtung und Schräglagen-Korrektur),
         # damit das Kontrollmodell die Zeilen genauso bildet wie das der Analyse
-        ergebnis_fn = getattr(lauf.ocr, "ergebnis", None)
         if ergebnis_fn is not None:
-            w = ergebnis_fn(ausgabe, nr, OCR_DPI, winkel=lauf.winkel(nr)).get("woerter")
+            e = ergebnis_fn(ausgabe, nr, OCR_DPI, winkel=lauf.winkel(nr))
+            ausgefallen = bool(e.get("fehler"))
+            w = e.get("woerter")
         else:
             try:
                 w, _ = lauf.ocr.woerter(ausgabe, nr, OCR_DPI, winkel=lauf.winkel(nr))
@@ -1175,12 +1684,42 @@ def _kontroll_woerter(lauf: _Lauf, ausgabe: Path, nr: int, rects: list):
                 w, _ = lauf.ocr.woerter(ausgabe, nr, OCR_DPI)
         woerter += list(w or [])
     else:
+        # Bildbereiche ebenfalls mit der Ausrichtung der Analyse (Befund M-51: sonst lief die volle
+        # Ausrichtungssuche – bis zu 8 OCR-Läufe je Foto – ein zweites Mal); als Vorgabe für die Ausgabe hinterlegt,
+        # damit die Restrisiko-Prüfung dasselbe Ergebnis aus dem Zwischenspeicher bekommt
+        bekannt = getattr(lauf.ocr, "winkel_falls_bekannt", None)
+        vorgeben = getattr(lauf.ocr, "winkel_vorgeben", None)
         for bereich in lauf.bildbereiche.get(nr, []):
-            try:
-                w, _ = lauf.ocr.woerter(ausgabe, nr, OCR_DPI, clip=bereich)
-            except TypeError:
-                w, _ = lauf.ocr.woerter(ausgabe, nr)
+            winkel = None
+            if bekannt is not None and vorgeben is not None:
+                try:
+                    winkel = bekannt(lauf.pdf_pfad, nr, OCR_DPI, clip=bereich)
+                    if winkel is not None:          # unbekannt (z. B. OCR-Fehler der Analyse): wie bisher suchen
+                        winkel = int(winkel)
+                        vorgeben(ausgabe, nr, bereich, winkel)
+                except Exception:
+                    winkel = None
+            e = None
+            if ergebnis_fn is not None:
+                try:
+                    e = ergebnis_fn(ausgabe, nr, OCR_DPI, clip=bereich, winkel=winkel)
+                except TypeError:                   # ältere Dienste/Attrappen ohne diese Parameter
+                    e = None
+            if e is not None:
+                ausgefallen = ausgefallen or bool(e.get("fehler"))
+                w = e.get("woerter")
+            else:
+                try:
+                    w, _ = lauf.ocr.woerter(ausgabe, nr, OCR_DPI, clip=bereich)
+                except TypeError:
+                    w, _ = lauf.ocr.woerter(ausgabe, nr)
             woerter += list(w or [])
+    if ausgefallen:
+        # Befund R-06: ein Ausfall der Kontroll-OCR darf nicht verschluckt werden – die Seite ist dann ungeprüft
+        lauf.restrisiko_fehler = True
+        lauf.melden("warnung", "OCR_FEHLER",
+                    f"Seite {nr + 1}: Die Kontroll-Texterkennung der Ausgabe ist fehlgeschlagen – die Schwärzung "
+                    f"dieser Seite ist ungeprüft. Ausgabe bitte selbst prüfen.", nr)
     lauf.abbruch_pruefen()
     return [w for w in woerter if not _innerhalb(fitz.Rect(w[:4]), rects)]
 

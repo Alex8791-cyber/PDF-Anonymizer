@@ -13,6 +13,9 @@ Stempelmasken). Die Schwärzung selbst bleibt erhalten: kodiert wird das bereits
         xrefs: Menge von xrefs oder dict aus geaenderte_bilder (dann zählt der Filter des Originals);
         Rückgabe: Anzahl neu kodierter Bilder.
     nach_schwaerzung(doc, seite, vorher, qualitaet=85) -> int   (geaenderte_bilder + bilder_neu_kodieren)
+    seite_als_bild_schwaerzen(doc, seite, fuellen, leeren=(), farbe=…, dpi=200) -> xref
+        Rückfall, wenn apply_redactions an einer Seite scheitert (Befund R-08): Seite durch ein Bild mit
+        eingebrannten Schwärzungen ersetzen.
 
 Ablauf beim Aufrufer:  vorher = bildzustand(seite); seite.apply_redactions(...);
                        nach_schwaerzung(doc, seite, vorher)
@@ -232,3 +235,69 @@ def nach_schwaerzung(doc, seite, vorher: dict, qualitaet: int = JPEG_QUALITAET) 
     """Nach apply_redactions einer Seite: geänderte Bilder finden und neu kodieren."""
     geaendert = geaenderte_bilder(seite, vorher)
     return bilder_neu_kodieren(doc, geaendert, qualitaet) if geaendert else 0
+
+
+# ----------------------------------------------------------------------
+# Rückfall: Seite als Bild schwärzen (Befund R-08)
+# ----------------------------------------------------------------------
+BILDSEITE_DPI = 200           # Auflösung der als Bild geschwärzten Seite (Text bleibt für Menschen und KI lesbar)
+BILDSEITE_MAX_PIXEL = 40_000_000
+BILDSEITE_GRAU_TOLERANZ = 12  # Farbabstand, bis zu dem ein Pixel als grau gilt (Seite ohne Farbe -> Graustufen-PNG)
+
+
+def _ohne_farbe(pix) -> bool:
+    """Hat das RGB-Bild keine nennenswerte Farbe (Stichprobe)? Dann reicht ein Graustufenbild."""
+    proben = pix.samples
+    schritt = max(3, (len(proben) // 3 // 20000) * 3)
+    for i in range(0, len(proben) - 2, schritt):
+        r, g, b = proben[i], proben[i + 1], proben[i + 2]
+        if max(r, g, b) - min(r, g, b) > BILDSEITE_GRAU_TOLERANZ:
+            return False
+    return True
+
+
+def seite_als_bild_schwaerzen(doc, seite, fuellen, leeren=(), farbe=(0.92, 0.92, 0.92),
+                              dpi: int = BILDSEITE_DPI) -> int:
+    """Ersetzt den Inhalt der Seite durch ein Bild ihres sichtbaren Bereichs, in das die Rechtecke eingebrannt
+    sind: `fuellen` in `farbe` (Schwärzungen), `leeren` weiß (ausgeblendete Inhalte). Rückfall, wenn MuPDF die
+    Seite nicht schwärzen kann (zyklische oder zu tief verschachtelte Form-XObjects: "exception stack overflow",
+    Befund R-08) – das Rendern kommt mit solchen Seiten zurecht. Inhalte außerhalb des sichtbaren Bereichs,
+    Textebene, Anmerkungen und Schwärzungs-Anmerkungen der Seite entfallen. Rückgabe: xref des neuen Bilds.
+    Ausnahmen (auch das Rendern scheitert) gehen an den Aufrufer – dann entsteht keine Ausgabe."""
+    rect = fitz.Rect(seite.rect)
+    flaeche = max(abs(rect), 1.0)
+    dpi = min(dpi, int(72 * (BILDSEITE_MAX_PIXEL / flaeche) ** 0.5))
+    matrix = fitz.Matrix(dpi / 72.0, dpi / 72.0)
+    try:   # Zyklen im Strukturbaum lassen MuPDF 1.28 beim Rendern hängen; die Ausgabe trägt ohnehin keinen Strukturbaum
+        katalog = doc.pdf_catalog()
+        if doc.xref_get_key(katalog, "StructTreeRoot")[0] != "null":
+            doc.xref_set_key(katalog, "StructTreeRoot", "null")
+    except Exception:
+        pass
+    pix = seite.get_pixmap(matrix=matrix, colorspace=fitz.csRGB, alpha=False, annots=False)
+    grau = tuple(int(round(255 * c)) for c in farbe)
+    for liste, wert in ((leeren, (255, 255, 255)), (fuellen, grau)):
+        for r in liste:
+            r = fitz.Rect(r) & rect
+            if r.is_empty:
+                continue
+            p = fitz.Rect(r.x0 - rect.x0, r.y0 - rect.y0, r.x1 - rect.x0, r.y1 - rect.y0) * matrix
+            ir = fitz.IRect(int(p.x0) - 1 + pix.x, int(p.y0) - 1 + pix.y,          # Kanten sicher mitnehmen
+                            int(p.x1 + 0.999) + 1 + pix.x, int(p.y1 + 0.999) + 1 + pix.y) & pix.irect
+            if not ir.is_empty:
+                pix.set_rect(ir, wert)
+    if _ohne_farbe(pix):
+        pix = fitz.Pixmap(fitz.csGRAY, pix)
+        daten = pix.tobytes("png")
+    else:
+        daten = pix.tobytes("jpeg", jpg_quality=JPEG_QUALITAET)
+    for annot in list(seite.annots()):
+        try:
+            seite.delete_annot(annot)
+        except Exception:
+            pass
+    doc.xref_set_key(seite.xref, "Contents", "[]")
+    doc.xref_set_key(seite.xref, "Resources", "<<>>")
+    for schluessel in ("Annots", "Group", "Thumb", "PieceInfo"):
+        doc.xref_set_key(seite.xref, schluessel, "null")
+    return seite.insert_image(rect, stream=daten, keep_proportion=False)
