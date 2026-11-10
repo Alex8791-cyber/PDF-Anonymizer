@@ -686,6 +686,16 @@ def test_plz_ort_nie_ueber_spaltentrenner(text, erwartet):
     ("Kunden-Nr.\t\t12345\t\tAllianz", []),
     ("Vertrag\t\t12345\t\tGenerali", []),
     ("12345\t\tUSt-IdNr. DE123", []),
+    # Review-Befund: die PLZ beendet ihre Zelle hinter Straße/Anschrift-Etikett, der Ort steht daneben
+    ("Anschrift: Hauptstraße 5, 79098\t\tFreiburg im Breisgau", ["79098\t\tFreiburg im Breisgau"]),
+    ("Hauptstraße 5 79098\t\tFreiburg", ["79098\t\tFreiburg"]),
+    ("Hauptstraße 5, D-79098\t\tFreiburg", ["D-79098\t\tFreiburg"]),
+    ("Wohnort: 79098\t\tFreiburg\t\tTelefon: 0761 123456", ["79098\t\tFreiburg"]),
+    ("PLZ, Ort: 12345\t\tMusterstadt", ["12345\t\tMusterstadt"]),
+    # Gegenproben: vor der PLZ steht keine Anschrift
+    ("Fahrzeug: VW Golf, 45000\t\tBenzin", []),
+    ("Tarif Komfort, 12000\t\tSelbstbeteiligung", []),
+    ("Kunden-Nr. 12345\t\tAllianz", []),
 ])
 def test_plz_und_ort_in_nachbarzellen(text, erwartet):
     assert mu.finde_plz_ort(text) == erwartet
@@ -765,4 +775,30 @@ def test_geburtsdatum_mit_monatsnamen_ueber_zeilenumbruch():
     ("Steuer-ID der Person und Telefon: 0911 1234567", []),
 ])
 def test_steuer_id_hinter_laengerer_wendung(text, erwartet):
+    assert mu.finde_steuer_id(text) == erwartet
+
+
+@pytest.mark.parametrize("text, erwartet", [
+    # Review-Befund: "-Nr."/"-Nummer" gehören zum Etikett, Zusätze zur Person sind kein fremdes Etikett
+    ("Steuer-ID-Nr.: 89 323 416 709", ["89 323 416 709"]),
+    ("Steuer-ID-Nr.: 12 345 678 901", ["12 345 678 901"]),
+    ("Steuer-ID-Nummer: 12 345 678 901", ["12 345 678 901"]),
+    ("Steuer-Id-Nummer: 12345678901", ["12345678901"]),
+    ("Steuer-ID Nr. 12345678901", ["12345678901"]),
+    ("Steuer-ID-Nr. 89 323 416 709", ["89 323 416 709"]),
+    ("Steuer-Id-Nr.: 12 345 678 901", ["12 345 678 901"]),
+    ("Steuer-ID-Nr.:\t\t89 323 416 709", ["89 323 416 709"]),
+    ("Steuer-ID-Nr.:\n89 323 416 709", ["89 323 416 709"]),
+    ("Steuer-ID des Kunden: 12 345 678 901", ["12 345 678 901"]),
+    ("Steuer-ID Kontoinhaber: 12 345 678 901", ["12 345 678 901"]),
+    ("Steuer-ID des Vertragspartners: 12 345 678 901", ["12 345 678 901"]),
+    ("Steuer-ID (VN): 12 345 678 901", ["12 345 678 901"]),
+    ("TIN-Nr.: 12345678901", ["12345678901"]),
+    # Gegenproben: ein fremdes Etikett vor der Zahl
+    ("Steuer-ID und Telefon: 0911 1234567", []),
+    ("Steuer-ID wurde nicht übermittelt, Konto: 12345678901", []),
+    ("Steuer-ID fehlt, Kunden-Nr.: 12345678901", []),
+    ("Steuer-ID fehlt, Kundennummer: 12345678901", []),
+])
+def test_steuer_id_mit_nummer_im_etikett(text, erwartet):
     assert mu.finde_steuer_id(text) == erwartet

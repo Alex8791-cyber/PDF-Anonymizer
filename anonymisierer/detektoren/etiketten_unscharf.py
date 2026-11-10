@@ -1,20 +1,27 @@
 """Unscharfe Etiketten auf OCR-Text: ein Feldbezeichner der Wissensbasis (daten/etiketten_*.txt) zählt auch dann,
-wenn die OCR ihn verlesen hat – "Name, Vomame:", "Kundenntimmer 76183905", "Versicherungsmummen".
+wenn die OCR ihn verlesen hat – "Name, Vomame:", "Kundenntimmer 76183905", "Geburtsdaturn:", "Anschrlft:".
 
 Regeln (nur für OCR-Text – die Aufrufer prüfen die Quelle der Zeichen im Seitenmodell):
-  * Editierabstand 1 (Vertauschung zweier Nachbarn zählt 1), bei Etikettwörtern ab 12 Buchstaben 2.
-  * Typische OCR-Verwechslungen mehrerer Zeichen kosten ebenfalls nur 1: "rn"/"m", "cl"/"d", "vv"/"w"
-    ("Vomame" = "Vorname").
-  * Personen- und Anschrift-Etiketten (ihr Wert hat keine feste Form) nur mit typischem Lesefehler: eine
-    Ersetzung zählt dort nur innerhalb der OCR-Verwechslungsgruppen (i/l/j/t/f, n/m/u/h/r, e/c/o, v/y/w) –
-    "Unfallart" ist ein anderes Wort, kein verlesener "Unfallort".
+  * Es zählen nur TYPISCHE OCR-Lesefehler, für alle Arten von Etiketten gleich:
+      - Ersetzung innerhalb einer Verwechslungsgruppe (i/l/j/t/f, n/m/u/h/r, e/c/o, v/y/w),
+      - ein schmaler Strich zu viel oder zu wenig (i, l, j, t, f, r: "Verscherungsnchmer"),
+      - Verwechslung mehrerer Zeichen: "rn"/"m", "cl"/"d", "vv"/"w", "ii"/"u", "ti"/"u" ("Vomame" = "Vorname").
+    Ein Lesefehler bei Etikettwörtern unter 12 Buchstaben, zwei ab 12. Andere Abweichungen (fremde Buchstaben,
+    Vertauschungen) machen ein anderes Wort: "Unfallart" ist kein verlesener "Unfallort", "Vertragssumme" keine
+    "Vertragsnummer", "Patientenzimmer" keine "Patientennummer".
   * Nie für kurze Etiketten: Wörter unter 7 Buchstaben ("Name", "Ort", "Tel.", "Nr.") gelten nur exakt.
-  * Ein Wort, das selbst ein bekanntes Wort ist (Allerweltswort, Vor-/Nachname, exaktes Etikettwort), ist kein
-    verlesenes Etikett ("Strasser" ist ein Name, nicht "Strasse").
+  * Nur großgeschriebene Wörter ("gehören" ist kein verlesenes "geboren").
+  * Ein bekanntes Wort ist nie ein verlesenes Etikett: Allerweltswort, Vor-/Nachname, exaktes Etikettwort – und
+    jedes Wort, das das Sprachmodell kennt (Wortvektor in de_core_news_md: "Schulter", "Pflege", "Patent",
+    "Nachnahme", "Wasserzeichen", "Seitennummer"). OCR-Lesefehler sind fast nie echte Wörter. Ohne Sprachmodell
+    gelten Personen- und Anschrift-Etiketten (Wert ohne feste Form) nur exakt.
+  * Wörter für Beträge und Räume (…summe, …betrag, …zimmer, …kammer) sind nie verlesene Etiketten.
   * Das Etikett muss als Etikett stehen: Doppelpunkt dahinter, Zeilen-/Zellenende oder – bei Kennungen – eine
     Ziffernfolge dahinter ("Kundenntimmer 76183905").
 
 Die Diakritika-Faltung der Wissensbasis gilt schon beim exakten Vergleich ("Gebürtsdatum" = "Geburtsdatum").
+Verlesene Etiketten, die die KI für Namen hält ("Vomame:"), verwirft detektoren/ocr_lesart.py über
+namen.verlesenes_etikett_statt_name – ebenfalls nur auf OCR-Text.
 """
 
 from __future__ import annotations
@@ -28,14 +35,18 @@ except Exception:  # pragma: no cover - Wissensbasis fehlt
     _wissen = None
 
 MIN_BUCHSTABEN = 7          # kürzere Etikettwörter nur exakt
-LANG = 12                   # ab dieser Länge Abstand 2
-_OCR_GRUPPEN = (("rn", "m"), ("cl", "d"), ("vv", "w"))
+LANG = 12                   # ab dieser Länge zwei Lesefehler
+# Verwechslung mehrerer Zeichen (kostet 1): "Vomame" = "Vorname", "Kundenntimmer" = "Kundennummer"
+_OCR_GRUPPEN = (("rn", "m"), ("cl", "d"), ("vv", "w"), ("ii", "u"), ("ti", "u"))
 _WORT_RE = re.compile(r"[^\W\d_]+")
 _ETIKETT_STELLUNG_RE = re.compile(r"[ \t]*(?:\([^()\n]{0,25}\)[ \t]*)?(?::|\t|\n|$)")
 _ZIFFERN_DANACH_RE = re.compile(r"[ \t]*(?:-?[ \t]*(?:Nr\.?|Nummer)[ \t]*)?:?[ \t]*[A-Z]{0,4}[ \t./-]?\d{2}")
 ARTEN = ("person", "kennung", "datum_geburt", "adresse", "kontakt", "vertragsdaten")
-# Etiketten, deren Wert keine feste Form hat (Name, Ort, Straße): nur mit typischem OCR-Lesefehler
-_NUR_STRENG = frozenset({"person", "adresse"})
+# Etiketten, deren Wert keine feste Form hat (Name, Ort, Straße): ohne Sprachmodell nur exakt
+_OHNE_FESTE_FORM = frozenset({"person", "adresse"})
+# Beträge und Räume: "Vertragssumme", "Erstattungsbetrag", "Dienstzimmer", "Versorgungskammer"
+_KEIN_ETIKETT_ENDE = ("summe", "betrag", "zimmer", "kammer")
+_UNTYPISCH = 3              # Kosten eines untypischen Schritts: mehr als je erlaubt
 
 
 def _kanon(wort: str) -> str:
@@ -45,51 +56,71 @@ def _kanon(wort: str) -> str:
 
 
 # Zeichen, die die OCR untereinander verwechselt (Striche, Bögen, Rundungen): Ersetzungen innerhalb einer Gruppe
-# sind typische Lesefehler, andere ("Unfallart"/"Unfallort", "Patienten"/"Patientin") eher ein anderes Wort
+# sind typische Lesefehler, andere ("Unfallart"/"Unfallort", "Patienten"/"Patientin") ein anderes Wort
 _OCR_GRUPPE = {}
 for _gruppe in ("iljtf", "nmuhr", "eco", "vyw"):
     for _c in _gruppe:
         _OCR_GRUPPE[_c] = _gruppe
+# schmale Striche, die die OCR verliert oder hinzuliest
+_DUENN = frozenset("iljtfr")
 
 
-def _ersetzung(a: str, b: str, streng: bool) -> int:
+def _ersetzung(a: str, b: str) -> int:
     if a == b:
         return 0
-    if not streng:
-        return 1
-    return 1 if _OCR_GRUPPE.get(a) is not None and _OCR_GRUPPE.get(a) == _OCR_GRUPPE.get(b) else 2
+    return 1 if _OCR_GRUPPE.get(a) is not None and _OCR_GRUPPE.get(a) == _OCR_GRUPPE.get(b) else _UNTYPISCH
 
 
-def _abstand(a: str, b: str, grenze: int, streng: bool = False) -> int:
-    """Damerau-Levenshtein (Vertauschung benachbarter Zeichen = 1) mit Abbruch über `grenze`. streng=True:
-    Ersetzungen außerhalb der OCR-Verwechslungsgruppen kosten 2."""
+def _einfuegen(c: str) -> int:
+    return 1 if c in _DUENN else _UNTYPISCH
+
+
+def _abstand(a: str, b: str, grenze: int) -> int:
+    """Gewichteter Editierabstand (nur typische OCR-Lesefehler kosten 1, alles andere mehr als erlaubt) mit Abbruch
+    über `grenze`."""
     if abs(len(a) - len(b)) > grenze:
         return grenze + 1
-    vorvorher = None
-    vorher = list(range(len(b) + 1))
+    vorher = [0]
+    for j in range(1, len(b) + 1):
+        vorher.append(vorher[-1] + _einfuegen(b[j - 1]))
     for i in range(1, len(a) + 1):
-        aktuell = [i] + [0] * len(b)
+        aktuell = [vorher[0] + _einfuegen(a[i - 1])] + [0] * len(b)
         kleinste = aktuell[0]
         for j in range(1, len(b) + 1):
-            wert = min(vorher[j] + 1, aktuell[j - 1] + 1, vorher[j - 1] + _ersetzung(a[i - 1], b[j - 1], streng))
-            if (vorvorher is not None and i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]):
-                wert = min(wert, vorvorher[j - 2] + 1)
+            wert = min(vorher[j] + _einfuegen(a[i - 1]), aktuell[j - 1] + _einfuegen(b[j - 1]),
+                       vorher[j - 1] + _ersetzung(a[i - 1], b[j - 1]))
             aktuell[j] = wert
             kleinste = min(kleinste, wert)
         if kleinste > grenze:
             return grenze + 1
-        vorvorher, vorher = vorher, aktuell
-    return vorher[-1]
+        vorher = aktuell
+    return min(vorher[-1], grenze + 1)
 
 
-def ocr_abstand(wort: str, etikettwort: str, grenze: int = 2, streng: bool = False) -> int:
-    """Abstand zweier (normalisierter) Wörter, OCR-Verwechslungen mehrerer Zeichen ("rn"/"m") kosten 1.
-    streng=True: Ersetzungen außerhalb der OCR-Verwechslungsgruppen kosten 2 ("Unfallart" ist kein "Unfallort")."""
-    d = _abstand(wort, etikettwort, grenze, streng)
+def ocr_abstand(wort: str, etikettwort: str, grenze: int = 2) -> int:
+    """Anzahl typischer OCR-Lesefehler zwischen zwei (normalisierten) Wörtern; grenze + 1, wenn ein untypischer
+    Schritt nötig ist oder es mehr Fehler sind. Verwechslungen mehrerer Zeichen ("rn"/"m") zählen 1."""
+    d = _abstand(wort, etikettwort, grenze)
     ka, kb = _kanon(wort), _kanon(etikettwort)
-    if (ka, kb) != (wort, etikettwort) and ka != kb or (ka == kb and wort != etikettwort):
-        d = min(d, _abstand(ka, kb, grenze, streng) + 1)
-    return d
+    if (ka, kb) != (wort, etikettwort):
+        d = min(d, _abstand(ka, kb, grenze) + 1)
+    return min(d, grenze + 1)
+
+
+def _abstand_einfach(a: str, b: str, grenze: int) -> int:
+    """Gewöhnlicher Editierabstand (jeder Schritt 1) mit Abbruch über `grenze` – nur für die nachsichtige Prüfung
+    langer Wörter (siehe etikettwort_fuer)."""
+    if abs(len(a) - len(b)) > grenze:
+        return grenze + 1
+    vorher = list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        aktuell = [i] + [0] * len(b)
+        for j in range(1, len(b) + 1):
+            aktuell[j] = min(vorher[j] + 1, aktuell[j - 1] + 1, vorher[j - 1] + (a[i - 1] != b[j - 1]))
+        if min(aktuell) > grenze:
+            return grenze + 1
+        vorher = aktuell
+    return min(vorher[-1], grenze + 1)
 
 
 def _erlaubt(etikettwort: str) -> int:
@@ -132,15 +163,53 @@ def _index() -> tuple:
     return frozenset(woerter), varianten
 
 
+@functools.lru_cache(maxsize=1)
+def _wortschatz():
+    """(Schlüssel der Wortvektoren, Hash-Funktion) des Sprachmodells oder None (kein Modell, Modell ohne Vektoren)."""
+    try:
+        from ..namen import lade_ner
+        nlp = lade_ner()
+        if nlp is None:
+            return None
+        from spacy.strings import hash_string
+        schluessel = nlp.vocab.vectors.key2row
+        if not schluessel:
+            return None                               # z. B. de_core_news_sm: keine Wortvektoren
+    except Exception:
+        return None
+    return schluessel, hash_string
+
+
+def sprachmodell_kennt(wort: str) -> bool | None:
+    """Kennt das Sprachmodell das Wort (Wortvektor, auch klein oder mit großem Anfangsbuchstaben)? None ohne
+    Wortschatz. Echte Wörter ("Schulter", "Vertragssumme") sind keine OCR-Lesefehler."""
+    ws = _wortschatz()
+    if ws is None:
+        return None
+    schluessel, h = ws
+    for form in {wort, wort.lower(), wort[:1].upper() + wort[1:].lower()}:
+        try:
+            if h(form) in schluessel:
+                return True
+        except Exception:  # pragma: no cover - unerwartete Zeichen
+            continue
+    return False
+
+
 @functools.lru_cache(maxsize=16384)
-def etikettwort_fuer(wort: str):
-    """(Etikettwort der Wissensbasis (normalisiert), Abstand, strenger Abstand) für ein verlesenes OCR-Wort – oder
-    None (auch bei exakter Übereinstimmung, bei bekannten Wörtern und wenn zwei Etikettwörter gleich gut passen).
-    Der strenge Abstand wertet Ersetzungen außerhalb der OCR-Verwechslungsgruppen doppelt."""
-    if _wissen is None:
+def etikettwort_fuer(wort: str, nachsichtig: bool = False):
+    """(Etikettwort der Wissensbasis (normalisiert), Anzahl Lesefehler) für ein verlesenes OCR-Wort – oder None:
+    bei exakter Übereinstimmung, bei bekannten Wörtern und Namen, bei kleingeschriebenen Wörtern, bei untypischen
+    Abweichungen und wenn zwei Etikettwörter gleich gut passen (Regeln im Modulkopf).
+
+    nachsichtig=True (nur für die Frage "verlesenes Etikett statt Name?", namen.verlesenes_etikett_statt_name): bei
+    langen Wörtern (Wort und Etikettwort ab 12 Buchstaben, Komposita wie "Versicherungsnuarmmer") zählt jeder
+    Lesefehler, nicht nur die typischen – Nachnamen dieser Länge, die nur zwei Zeichen neben einem Feldbezeichner
+    liegen, gibt es praktisch nicht. Etiketten selbst (unscharfe_etiketten) bleiben streng."""
+    if _wissen is None or not wort[:1].isupper():
         return None
     n = _wissen.normalisieren(wort)
-    if len(n) < MIN_BUCHSTABEN - 1 or not n.isalpha():
+    if len(n) < MIN_BUCHSTABEN - 1 or not n.isalpha() or n.endswith(_KEIN_ETIKETT_ENDE):
         return None
     woerter, varianten = _index()
     if n in woerter:
@@ -154,20 +223,23 @@ def etikettwort_fuer(wort: str):
     kandidaten = set()
     for v in _loeschungen(_kanon(n), 2 if len(n) >= LANG - 2 else 1):
         kandidaten |= varianten.get(v, set())
-    beste, bester, gleichstand = None, (99, 99), False
+    beste, bester, gleichstand = None, 99, False
     for w in kandidaten:
         erlaubt = _erlaubt(w)
         d = ocr_abstand(n, w, erlaubt)
+        if nachsichtig and d > erlaubt and len(n) >= LANG and len(w) >= LANG:
+            d = min(_abstand_einfach(n, w, erlaubt), _abstand_einfach(_kanon(n), _kanon(w), erlaubt) + 1)
         if d == 0 or d > erlaubt:
             continue
-        guete = (ocr_abstand(n, w, erlaubt, streng=True), d)
-        if guete < bester:
-            beste, bester, gleichstand = w, guete, False
-        elif guete == bester and w != beste:
+        if d < bester:
+            beste, bester, gleichstand = w, d, False
+        elif d == bester and w != beste:
             gleichstand = True
     if beste is None or gleichstand:
         return None
-    return beste, bester[1], bester[0]
+    if sprachmodell_kennt(wort):
+        return None                                   # ein echtes Wort, kein Lesefehler
+    return beste, bester
 
 
 def unscharfe_etiketten(text: str, start: int = 0, ende: int | None = None) -> list:
@@ -177,6 +249,7 @@ def unscharfe_etiketten(text: str, start: int = 0, ende: int | None = None) -> l
         return []
     ende = len(text) if ende is None else ende
     aus = []
+    mit_wortschatz = None
     for zm in re.finditer(r"[^\n]+", text[start:ende]):
         z0 = start + zm.start()
         zeile = zm.group(0)
@@ -184,12 +257,15 @@ def unscharfe_etiketten(text: str, start: int = 0, ende: int | None = None) -> l
             treffer = etikettwort_fuer(wm.group(0))
             if treffer is None:
                 continue
-            ziel, abstand, streng = treffer
+            ziel = treffer[0]
             korrigiert = zeile[:wm.start()] + ziel + zeile[wm.end():]
             verschiebung = len(ziel) - (wm.end() - wm.start())
             for art in ARTEN:
-                if art in _NUR_STRENG and streng > _erlaubt(ziel):
-                    continue                      # "Unfallart" ist kein verlesener "Unfallort"
+                if art in _OHNE_FESTE_FORM:
+                    if mit_wortschatz is None:
+                        mit_wortschatz = _wortschatz() is not None
+                    if not mit_wortschatz:
+                        continue                      # ohne Sprachmodell: "Schulter" ließe sich nicht ausschließen
                 try:
                     vorkommen = _wissen.finde(korrigiert, f"etiketten_{art}")
                 except Exception:

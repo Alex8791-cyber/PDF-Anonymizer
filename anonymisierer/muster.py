@@ -18,7 +18,8 @@ Die Muster laufen bewusst nicht über Zeilenumbrüche (Ausnahmen: IBAN und PLZ+O
 Telefonnummern hinter einem Etikett, Daten mit ausgeschriebenem Monat und Aktenzeichen, die am Zeilenende
 umbrechen), und alle Wiederholungen sind nach oben begrenzt, damit lange Zeilen nicht zu quadratischer Laufzeit
 führen. Über den Spaltentrenner "\\t\\t" des Seitenmodells läuft kein Muster in eine Nachbarzelle (einzige Stelle
-mit Trenner: eine reine PLZ-Zelle mit der Ort-Zelle daneben, siehe plz_ort_zellenpaar). Lesefehler-Toleranz für
+mit Trenner: eine PLZ-Zelle – allein oder hinter Straße/Anschrift-Etikett – mit der Ort-Zelle daneben, siehe
+plz_ort_zellenpaar). Lesefehler-Toleranz für
 OCR-Text (O/0, I/1, eingefügte Doppelpunkte …) liegt in detektoren/ocr_lesart.py – nur dort ist bekannt, welcher
 Text aus der OCR stammt.
 
@@ -720,6 +721,17 @@ _PLZ_ZELLE_ORT_RE = re.compile(
     r"(?:^|(?<=\t\t)|(?<=\n))[ ]*((?:(?:D|DE)[-\s]?)?(?!00)\d{5})[ ]*\t\t[ ]*"
     r"(" + _ORT_STOPP + _ORT_WORT + r"(?:" + _IN_ZELLE + "+" + _ORT_STOPP + _ORT_WORT + r"){0,3})(?![\wäöüß])"
     r"(?=[ ]*(?:\t\t|\n|$|,))")
+# Die PLZ beendet ihre Zelle hinter Straße und Hausnummer oder einem Anschrift-Etikett, der Ort steht in der
+# Nachbarzelle ("Anschrift: Hauptstraße 5, 79098 ⇥⇥ Freiburg im Breisgau": Formular mit getrennten Feldern, breite
+# OCR-Lücke) – ebenfalls EINE Stelle über genau diesen Trenner (_anschrift_vor_plz_in_zelle prüft das Davor)
+_PLZ_ZELLENENDE_ORT_RE = re.compile(
+    r"(?<=[ ,;·•|/–\-:])((?:(?:D|DE)[-\s]?)?(?!00)\d{5})[ ]*\t\t[ ]*"
+    r"(" + _ORT_STOPP + _ORT_WORT + r"(?:" + _IN_ZELLE + "+" + _ORT_STOPP + _ORT_WORT + r"){0,3})(?![\wäöüß])"
+    r"(?=[ ]*(?:\t\t|\n|$|,))")
+_ANSCHRIFT_ETIKETT_DAVOR_RE = re.compile(
+    r"(?i)(?<![\wäöüß])(?:[\wäöüß\-]*anschrift|[\wäöüß\-]*adresse|address|wohnort|wohnsitz|"
+    r"wohnhaft(?:[ ]+in)?|wohnt[ ]+in|(?:plz|postleitzahl)(?:[ ]*(?:[,/]|und)?[ ]*ort)?)[ ]*:?[ ]*$")
+_TRENNER_VOR_PLZ_RE = re.compile(r"[ \t,;·•|/–\-]*$")
 # Registernummer statt PLZ: hinter HRB/HRA, Amtsgericht, Registergericht oder Handelsregister – auch mit dem Ort
 # des Gerichts dazwischen ("Amtsgericht Frankfurt am Main 12345", "Registergericht: Amtsgericht Lübeck, 45650",
 # OCR "HR B 16963", "HR8 16963") und über das Zeilenende ("… HRB" ⏎ "16963 …")
@@ -824,29 +836,51 @@ def _plz_ort_spannen(text: str) -> list:
     if "\t\t" in text:
         # PLZ-Zelle und Ort-Zelle nebeneinander: eine Stelle über genau den Trenner dazwischen
         belegt = [(st.start, st.ende) for st in ergebnisse]
-        for m in _PLZ_ZELLE_ORT_RE.finditer(text):
-            s = m.start(1)
-            if any(a < m.end(2) and s < b for a, b in belegt) or _plz_davor_ausgeschlossen(text, s):
-                continue
-            woerter = list(re.finditer(r"\S+", m.group(2)))
-            anzahl = _ort_wortzahl([w.group(0) for w in woerter])
-            if anzahl < len(woerter):
-                continue                                # die Zelle enthält mehr als einen Ort ("Mateusz Grabowski")
-            ergebnisse.append(Stelle(s, m.start(2) + woerter[anzahl - 1].end(), 0.7))
+        for regel in (_PLZ_ZELLE_ORT_RE, _PLZ_ZELLENENDE_ORT_RE):
+            for m in regel.finditer(text):
+                s = m.start(1)
+                if any(a < m.end(2) and s < b for a, b in belegt) or _plz_davor_ausgeschlossen(text, s):
+                    continue
+                if regel is _PLZ_ZELLENENDE_ORT_RE and not _anschrift_vor_plz_in_zelle(text, s):
+                    continue                            # "VW Golf, 45000 ⇥⇥ Benzin": keine Anschrift davor
+                woerter = list(re.finditer(r"\S+", m.group(2)))
+                anzahl = _ort_wortzahl([w.group(0) for w in woerter])
+                if anzahl < len(woerter):
+                    continue                            # die Zelle enthält mehr als einen Ort ("Mateusz Grabowski")
+                ergebnisse.append(Stelle(s, m.start(2) + woerter[anzahl - 1].end(), 0.7))
+                belegt.append((s, m.end(2)))
         ergebnisse.sort()
     return ergebnisse
 
 
+def _zellenanfang(text: str, pos: int) -> int:
+    zeilenanfang = text.rfind("\n", 0, pos) + 1
+    zelle = text.rfind("\t\t", zeilenanfang, pos)
+    return zelle + 2 if zelle >= 0 else zeilenanfang
+
+
+def _anschrift_vor_plz_in_zelle(text: str, s: int) -> bool:
+    """Steht vor der PLZ an `s` in ihrer Zelle eine Anschrift: Straße mit Hausnummer direkt davor ("Hauptstraße 5,
+    79098") oder ein Anschrift-Etikett ("Anschrift: 79098", "PLZ/Ort: 79098")? Nur dann gehört die Ort-Zelle
+    daneben zur PLZ – "VW Golf, 45000 ⇥⇥ Benzin" und "Tarif Komfort, 12000 ⇥⇥ Selbstbeteiligung" sind keine
+    Anschriften."""
+    davor = text[_zellenanfang(text, s):s]
+    if _ANSCHRIFT_ETIKETT_DAVOR_RE.search(davor):
+        return True
+    kern = davor[:_TRENNER_VOR_PLZ_RE.search(davor).start()]
+    return bool(kern.strip()) and any(st.ende == len(kern) for st in _strasse_spannen(kern))
+
+
 def plz_ort_zellenpaar(text: str, start: int, ende: int) -> bool:
-    """Ist text[start:ende] eine PLZ-Zelle mit der ganzen Ort-Zelle daneben ("53285 ⇥⇥ Bonn")? Dann ist ihr
-    Spaltentrenner der einzige erlaubte: PLZ + Ort reicht sonst nie über einen Spaltentrenner."""
+    """Ist text[start:ende] eine PLZ-Zelle mit der ganzen Ort-Zelle daneben ("53285 ⇥⇥ Bonn") – oder eine PLZ am
+    Ende ihrer Zelle hinter Straße und Hausnummer bzw. einem Anschrift-Etikett ("Hauptstraße 5, 79098 ⇥⇥ Freiburg
+    im Breisgau")? Dann ist ihr Spaltentrenner der einzige erlaubte: PLZ + Ort reicht sonst nie über einen
+    Spaltentrenner."""
     m = _ZELLENPAAR_RE.fullmatch(text, start, ende)
     if m is None:
         return False
-    zeilenanfang = text.rfind("\n", 0, start) + 1
-    zelle = text.rfind("\t\t", zeilenanfang, start)
-    if text[(zelle + 2 if zelle >= 0 else zeilenanfang):start].strip(" "):
-        return False                                    # vor der PLZ steht etwas in ihrer Zelle
+    if text[_zellenanfang(text, start):start].strip(" ") and not _anschrift_vor_plz_in_zelle(text, start):
+        return False                                    # vor der PLZ steht etwas anderes in ihrer Zelle
     if not _ZELLENENDE_RE.match(text, ende):
         return False                                    # die Ort-Zelle geht weiter ("73610 ⇥⇥ Mateusz Grabowski")
     woerter = m.group(2).split()
@@ -867,7 +901,9 @@ def finde_plz_ort(text):
     (D-90402, A-1010, CH-8001). Keine Beträge ('50000 Euro'), keine Registernummern ('HRB 16963',
     'Amtsgericht Lübeck, 45650') und keine Nummern vor einem Zeilenumbruch ('Vermittler-Nr. 55123 /
     Stuttgart, 14.03.2025'). Nie über einen Spaltentrenner in Nachbarzellen; nur eine reine PLZ-Zelle mit der
-    Ort-Zelle daneben ('53285 ⇥⇥ Bonn') ist eine Stelle über genau diesen Trenner."""
+    Ort-Zelle daneben ('53285 ⇥⇥ Bonn') oder eine PLZ am Ende ihrer Zelle hinter Straße und Hausnummer bzw.
+    einem Anschrift-Etikett ('Hauptstraße 5, 79098 ⇥⇥ Freiburg im Breisgau') ist eine Stelle über genau diesen
+    Trenner."""
     return [text[s:e] for s, e in finde_plz_ort_stellen(text)]
 
 
@@ -1123,14 +1159,22 @@ def _steuer_id_struktur(nummer: str) -> bool:
     return len(mehrfach) == 1 and mehrfach[0] in (2, 3)
 
 
+# Etikett: "Steuer-ID", "Steuer-ID-Nr.", "Steuer-ID Nr.", "Steuer-ID-Nummer", "Steuer-IdNr.", "IdNr.", "TIN-Nr." …
+# ("-Nr."/"-Nummer" gehören zum Etikett, nicht zum Zwischentext)
 _STEUER_ID_ETIKETT_RE = re.compile(
-    r"(?:Steuer[\s\-]?(?:Identifikationsnummer|IdNr\.?|ID|Id|id)|IdNr\.?|Identifikationsnummer|TIN)(?![A-Za-zäöü])"
+    r"(?:Steuer[\s\-]?(?:Identifikationsnummer|IdNr\.?|ID|Id|id)|IdNr\.?|Identifikationsnummer|TIN)"
+    r"(?:[ \-]?(?:Nr\.?|Nummer|No\.?)(?![A-Za-zäöü]))?(?![A-Za-zäöü])"
     r"(?P<zwischen>[^\d\n]{0,12}?\n?[^\d\n]{0,12}?|[^\d\n:.;]{0,45}:[ \t]*)"
     r"(\d[\d ]{1,13}(?:\n[ \t]*)?[\d ]{0,13}\d)(?!\d)")
 
 
-_ANDERES_ETIKETT_RE = re.compile(r"(?i:tel(?:efon)?|fax|mobil|handy|iban|konto|vertrag|kunden|versicherungs|"
-                                 r"nr\.|nummer|datum|geb\.|geboren)")
+# Ein fremdes Etikett zwischen "Steuer-ID" und der Zahl: die Zahl gehört dazu ("Steuer-ID und Telefon: 0911 …",
+# "Steuer-ID fehlt, Konto: …", "Steuer-ID siehe unten, Kunden-Nr.: …"). Zusätze zur Person ("des Kunden",
+# "Kontoinhaber", "der versicherten Person", "des Vertragspartners") sind kein fremdes Etikett.
+_ANDERES_ETIKETT_RE = re.compile(
+    r"(?i)(?<![a-zäöüß])(?:tel(?:efon|efax)?|fax|mobil(?:funk|telefon)?|handy|iban|bic|e-?mail|datum|geb\.?|"
+    r"geboren|konto|bankverbindung)(?:nummer|-?nr\.?)?(?![a-zäöüß])"
+    r"|(?i:kunden|konto|vertrags?|versicherungs|schaden|mitglieds|personal|steuer)[-\s]?(?:nr\.?|nummer)")
 
 
 def _steuerid_spannen(text: str) -> list:

@@ -580,6 +580,24 @@ def test_adressblock_ohne_strassenwort_und_zeile_mit_trennern(tmp_path):
     assert not any("München" in w for w in _texte(dok, "muster.plzort"))
 
 
+def test_plz_am_zellenende_ort_in_der_nachbarzelle(tmp_path):
+    """Review-Befund: "Anschrift: Hauptstraße 5, 79098" und "Freiburg im Breisgau" mit breiter Lücke auf derselben
+    Grundlinie (Modelltext "…, 79098 ⇥⇥ Freiburg im Breisgau") – PLZ + Ort ist EINE Stelle über den Trenner,
+    wie vor der Spaltentrenner-Regel. Gegenprobe: ohne Straße/Anschrift-Etikett davor ("VW Golf, 45000 ⇥⇥
+    Benzin") gehört die Nachbarzelle nicht zur Zahl."""
+    from anonymisierer import analyse
+    inhalt = [(60, 100, "Versicherungsnehmer: Max Mustermann"), (60, 120, "Anschrift: Hauptstraße 5, 79098"),
+              (260, 120, "Freiburg im Breisgau"), (60, 160, "Fahrzeug: VW Golf, 45000"), (260, 160, "Benzin"),
+              (60, 180, "Tarif Komfort, 12000"), (260, 180, "Selbstbeteiligung")]
+    dok = _modell(_pdf(tmp_path / "formular.pdf", [inhalt]))
+    assert "79098\t\tFreiburg im Breisgau" in dok.text
+    assert "79098\t\tFreiburg im Breisgau" in _texte(dok, "muster.plzort")
+    funde = analyse._analysiere_dokument(dok, ALLE, [], [])
+    plz = {st["text"] for f in funde if f["kategorie"] == "plzort" for st in f["stellen"]}
+    assert "79098\t\tFreiburg im Breisgau" in plz
+    assert not any("45000" in t or "12000" in t for t in plz)
+
+
 def test_adressblock_formular_mit_versicherer_im_block(tmp_path):
     """Ein Versicherer in einer Formularzeile macht die Anschrift des Unfallgegners nicht zur Firma."""
     inhalt = [(57, 320, "Name:"), (200, 320, "Frau Eva-Maria Grünewald"),

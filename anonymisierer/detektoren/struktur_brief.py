@@ -146,7 +146,9 @@ def _namen_ueber_rollen(seite, lg) -> list:
     Zeile mit Namen in derselben Spalte (Unterschriftsblock)."""
     text = seite.text
     aus = []
-    ets = [et for et in etiketten(seite) if "person" in et.arten]
+    # nur exakt erkannte Rollen: ein von der OCR verlesenes Etikett ist zu unsicher, um die Zeile darüber zum Namen
+    # zu machen ("Verletzte Körperteile" über "Schulter:")
+    ets = [et for et in etiketten(seite) if "person" in et.arten and not getattr(et, "unscharf", False)]
     if not ets:
         return aus
     gesehen = set()

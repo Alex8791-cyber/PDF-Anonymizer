@@ -358,6 +358,7 @@ class Etikett(NamedTuple):
                            #  "neutral", "laufend"}
     kategorie: str | None  # Zielkategorie einer Kennung (vertrag, iban, kfz …) bzw. telefon/email
     eintrag: str           # Listeneintrag (bzw. das Wort selbst)
+    unscharf: bool = False  # nur als von der OCR verlesenes Etikett erkannt (detektoren/etiketten_unscharf.py)
 
 
 # Kennungs-Etikett -> Kategorie (auf der Vergleichsform: klein, ohne Diakritika, Trenner = Leerzeichen)
@@ -490,7 +491,11 @@ def etiketten(seite) -> list:
         return zw[1]
     text = seite.text
     lg = lage(seite)
-    roh = _etiketten_roh(text) + _etiketten_ocr_unscharf(seite)
+    unscharf_roh = _etiketten_ocr_unscharf(seite)
+    unscharf = {(s, e) for s, e, *_ in unscharf_roh}
+    roh = _etiketten_roh(text)
+    unscharf -= {(s, e) for s, e, *_ in roh}           # exakt erkannt geht vor
+    roh += unscharf_roh
     # neutrale Spaltenköpfe und laufende Nummern
     for m in re.finditer(r"(?<![\w.])([A-Za-zÄÖÜäöüß][\w.\-äöüß]*|#)(?![\w])", text):
         w = m.group(1)
@@ -545,7 +550,7 @@ def etiketten(seite) -> list:
                 kategorie = kennung_kategorie(f"{stamm} Nr.")
                 if kategorie is not None:
                     arten, eintrag = {"kennung"}, f"{stamm} Nr."
-        aus.append(Etikett(s, e, frozenset(arten), kategorie, eintrag))
+        aus.append(Etikett(s, e, frozenset(arten), kategorie, eintrag, (s, e) in unscharf))
     try:
         seite._struktur_etiketten = (text, aus)
     except AttributeError:

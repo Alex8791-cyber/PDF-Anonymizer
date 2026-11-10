@@ -15,26 +15,43 @@ Etiketten, Mindestlängen) bleiben unverändert streng – die Lesart macht nur 
 
 Reparaturen (nur innerhalb von OCR-Zeilen):
   * Buchstaben in Ziffernfolgen: ein Lauf aus Ziffern und verwechselbaren Buchstaben, mindestens zur Hälfte
-    Ziffern, wird ganz zu Ziffern ("8O331" -> "80331", "O171" -> "0171", "S081827865" -> "5081827865"); Läufe mit
-    anderen Buchstaben bleiben ("SV197328226", "L8S0NZWEM31", "DE36").
+    Ziffern, wird ganz zu Ziffern ("8O331" -> "80331", "O171" -> "0171", "S081827865" -> "5081827865") – Buchstaben
+    zwischen Ziffern oder EIN Buchstabe am Rand; ein Block aus mehreren Buchstaben am Rand nur aus O/I/l
+    ("OO49"), sonst ist es ein Kürzel ("ZB100", "SB150", "BS100" bleiben). Läufe mit anderen Buchstaben bleiben
+    ("SV197328226", "L8S0NZWEM31", "DE36").
   * Doppelpunkt zwischen Zifferngruppen (zusammen mindestens 5 Ziffern, keine Uhrzeit) -> Leerzeichen;
-    Doppelpunkt hinter einer PLZ vor dem Ort und zwischen Kennzeichen-Buchstaben und -Ziffern -> Leerzeichen.
+    Doppelpunkt zwischen Kennzeichen-Buchstaben und -Ziffern -> Leerzeichen.
   * Komma statt Punkt in gegliederten Nummern ("37.211.169,7" – kein Betrag: nur eine Nachkommastelle).
   * "%" zwischen Ziffern -> "-", Apostroph/Anführung zwischen Ziffern und Klammern -> Leerzeichen,
     Punkt/Komma zwischen den Vierergruppen einer IBAN -> Leerzeichen, "©" vor Ziffern -> "0".
   * Rauschzeichen ([ ] { } _ \\) am Anfang einer Zeile oder Tabellenzelle -> Leerzeichen.
-  * Kleingeschriebener Ort direkt hinter einer PLZ am Zeilen-/Zellenanfang -> Großbuchstabe ("97070 würzburg").
+  * Nur im Anschrift-Kontext (anschrift_kontext: Straße mit Hausnummer davor, Anschrift-Etikett davor, Straße in
+    der Zeile darüber): Doppelpunkt hinter einer PLZ vor dem Ort -> Leerzeichen ("27568: Bremerhaven"),
+    kleingeschriebener Ort direkt hinter einer PLZ -> Großbuchstabe ("Wohnort: 97070 würzburg"). Ohne Anschrift
+    bleiben Positionen, Beträge und Mengen stehen ("20231: Zahnbehandlung", "15000 jährlich").
 Dazu eine Form, die sich nicht durch Ersetzen darstellen lässt: Kennzeichen hinter dem Etikett mit Rauschen
 zwischen den Teilen ("Kennzeichen: B-]JY 743").
+
+PLZ + Ort, die erst die Lesart liefert, zählt nur im Anschrift-Kontext ("Z1000 Sport" ist ein Modellname).
+Außerdem verwirft das Modul verlesene Feldbezeichner, die die KI für Namen hält ("Name, Vomame:"), aus den Treffern
+des Namens-Detektors "ner" – nur auf OCR-Text (namen.verlesenes_etikett_statt_name).
 """
 
 from __future__ import annotations
 
+import bisect
 import copy
 import re
 
 from ..seitenmodell import SPALTENTRENNER
-from . import REGISTER, Treffer, detektor
+from . import REGISTER, Treffer, detektor, registrieren
+
+try:
+    from .. import muster as _muster
+    from .. import wissen as _wissen
+except Exception:  # pragma: no cover - Muster/Wissensbasis fehlen
+    _muster = None
+    _wissen = None
 
 OCR_QUELLEN = frozenset({"ocr", "bild"})
 
@@ -110,6 +127,13 @@ _PLZ_KLEIN_RE = re.compile(r"(?:^|(?<=\t\t)|(?<=\n))[ ]*(?:(?:D|DE)-)?\d{5}[ ]+(
                            r"(?:[ -][A-Za-zÄÖÜäöüß.()]+){0,3}[ ]*(?:$|\t\t|\n|,))")
 
 
+def _randblock(lauf: str) -> tuple:
+    """(Buchstaben am Anfang, Buchstaben am Ende) eines Laufs."""
+    vorn = len(lauf) - len(lauf.lstrip("".join(_VERWECHSLUNG)))
+    hinten = len(lauf) - len(lauf.rstrip("".join(_VERWECHSLUNG)))
+    return lauf[:vorn], lauf[len(lauf) - hinten:]
+
+
 def _ziffern_laeufe(t: str, z: list) -> None:
     for m in _LAUF_RE.finditer(t):
         lauf = m.group(0)
@@ -124,9 +148,78 @@ def _ziffern_laeufe(t: str, z: list) -> None:
             continue                                  # Tabellenlinie am Rand, keine "1"
         if len(lauf) <= 3 and any(not c.isdigit() and c not in _KURZ_VERWECHSLUNG for c in lauf):
             continue                                  # "B1", "S2", "Z1": kurze Kürzel bleiben (nur "O7" -> "07")
+        if any(len(block) >= 2 and any(c not in _KURZ_VERWECHSLUNG for c in block) for block in _randblock(lauf)):
+            continue                                  # "ZB100", "SB150", "BS100": Tarifkürzel, kein Lesefehler
         for k, c in enumerate(lauf):
             if not c.isdigit():
                 z[m.start() + k] = _VERWECHSLUNG[c]
+
+
+# ----------------------------------------------------------------------
+# Anschrift-Kontext einer PLZ
+# ----------------------------------------------------------------------
+# Trenner zwischen Straße und PLZ ("Birkenallee 119, 27568", "Hauptstraße 5 · 79098", Zellen)
+_TRENNER_VOR_PLZ_RE = re.compile(r"[ \t,;·•|/–\-]*$")
+# Anschrift-Etiketten der Wissensbasis, hinter denen eine PLZ steht (nicht: Hausnummer, Etage, Land …)
+_ANSCHRIFT_EINTRAG_RE = re.compile(r"anschrift|adress|address|plz|postleitzahl|postcode|zip|wohn|ort\b|city|"
+                                   r"gemeinde|postfach|c/o|belegenheit|lage des risikos")
+
+
+def _anschrift_etikett_in(zeile: str, am_ende: bool = False) -> bool:
+    """Steht in der Zeile ein Anschrift-Etikett (auch verlesen: "Anschrlft:")? am_ende=True: nur als Abschluss der
+    Zeile ("Anschrift:" mit dem Wert in der Zeile darunter)."""
+    if _wissen is None or not zeile.strip():
+        return False
+    ende = len(zeile.rstrip(" \t:")) if am_ende else 0
+    try:
+        eintraege = [v.eintrag for v in _wissen.finde(zeile, "etiketten_adresse") if v.ende >= ende]
+    except Exception:
+        eintraege = []
+    if not eintraege and re.search(r"[^\W\d_]{7,}", zeile):
+        try:
+            from .etiketten_unscharf import unscharfe_etiketten
+            eintraege = [eintrag for _, e, art, eintrag in unscharfe_etiketten(zeile) if art == "adresse" and e >= ende]
+        except Exception:  # pragma: no cover - Modul fehlt
+            eintraege = []
+    return any(_ANSCHRIFT_EINTRAG_RE.search(_wissen.normalisieren(e)) for e in eintraege)
+
+
+def _strasse_am_ende(text: str) -> bool:
+    """Endet der Text (ohne Trenner) mit Straße und Hausnummer, ohne Spaltentrenner in der Straße?"""
+    kern = text[:_TRENNER_VOR_PLZ_RE.search(text).start()]
+    if not kern.strip() or _muster is None:
+        return False
+    try:
+        stellen = _muster.stellen("strasse", kern)
+    except Exception:  # pragma: no cover - Muster defekt
+        return False
+    return any(st.ende >= len(kern) and SPALTENTRENNER not in kern[st.start:st.ende] for st in stellen)
+
+
+def _strasse_in(zeile: str) -> bool:
+    if _muster is None or not zeile.strip():
+        return False
+    try:
+        stellen = _muster.stellen("strasse", zeile)
+    except Exception:  # pragma: no cover - Muster defekt
+        return False
+    return any(SPALTENTRENNER not in zeile[st.start:st.ende] for st in stellen)
+
+
+def anschrift_kontext(text: str, pos: int) -> bool:
+    """Steht die Zahl an `pos` dort, wo eine PLZ steht? Straße mit Hausnummer direkt davor ("Birkenallee 119,
+    27568: Bremerhaven") oder ein Anschrift-Etikett davor in derselben Zeile ("Wohnort: 97070 würzburg"); am
+    Zeilen- oder Zellenanfang auch eine Straße in der Zeile darüber (Anschriftblock) oder ein Anschrift-Etikett am
+    Ende der Zeile darüber ("Anschrift:" ⏎ "…"). Positionen, Beträge, Mengen und Kürzel ("20231: Zahnbehandlung",
+    "15000 jährlich", "ZB100 Zahnersatz") haben das nicht."""
+    zeilenanfang = text.rfind("\n", 0, pos) + 1
+    davor = text[zeilenanfang:pos]
+    if davor.strip() and (_strasse_am_ende(davor) or _anschrift_etikett_in(davor)):
+        return True
+    if zeilenanfang == 0 or (davor.strip() and not davor.rstrip(" ").endswith(SPALTENTRENNER)):
+        return False                                  # mitten in der Zeile: die Zeile darüber zählt nicht
+    vorige = text[text.rfind("\n", 0, zeilenanfang - 1) + 1:zeilenanfang - 1]
+    return _strasse_in(vorige) or _anschrift_etikett_in(vorige, am_ende=True)
 
 
 def _gruppe_links(t: str, i: int) -> int:
@@ -161,16 +254,20 @@ def reparieren(t: str) -> str:
         for k in range(m.start(), m.end()):
             if zw[k] in ".,":
                 z[k] = " "
-    for regel in (_PLZ_DOPPELPUNKT_RE, _KFZ_DOPPELPUNKT_RE):
-        for m in regel.finditer(zw):
-            z[m.start(1)] = " "
+    for m in _KFZ_DOPPELPUNKT_RE.finditer(zw):
+        z[m.start(1)] = " "
     for m in _RAUSCHEN_RE.finditer(zw):
         for k in range(m.start(1), m.end(1)):
             if zw[k] != " ":
                 z[k] = " "
+    # PLZ-Reparaturen nur, wo eine Anschrift steht ("20231: Zahnbehandlung", "15000 jährlich" bleiben)
+    zw = "".join(z)
+    for m in _PLZ_DOPPELPUNKT_RE.finditer(zw):
+        if anschrift_kontext(zw, m.start()):
+            z[m.start(1)] = " "
     for m in _PLZ_KLEIN_RE.finditer(zw):
         gross = zw[m.start(1)].upper()
-        if len(gross) == 1:
+        if len(gross) == 1 and anschrift_kontext(zw, m.start()):
             z[m.start(1)] = gross
     return "".join(z)
 
@@ -283,5 +380,52 @@ def ocr_lesart(dok, kontext):
         for t in sorted(nachher):
             if (t.start, t.ende, t.kategorie) in bekannt:
                 continue
+            if t.kategorie == "plzort" and not anschrift_kontext(neu, t.start):
+                continue                              # "ZB100 Zahnersatz", "Z1000 Sport": keine Anschrift
             treffer.append(t._replace(quelle=f"{t.quelle}.ocr", sicherheit=min(t.sicherheit, 0.7)))
     return treffer
+
+
+# ----------------------------------------------------------------------
+# Verlesene Etiketten sind keine Namen (nur OCR-Text)
+# ----------------------------------------------------------------------
+def _in_ocr(bereiche: list, s: int, e: int) -> bool:
+    i = bisect.bisect_right(bereiche, (s, float("inf"))) - 1
+    return i >= 0 and bereiche[i][0] <= s and e <= bereiche[i][1]
+
+
+def _ner_ohne_verlesene_etiketten(alt):
+    def namen_ohne_verlesene_etiketten(dok, kontext):
+        treffer = list(alt(dok, kontext) or [])
+        bereiche = ocr_bereiche(dok) if treffer else []
+        if not bereiche:
+            return treffer                            # Textebene: keine Toleranz, jeder Name bleibt
+        try:
+            from ..namen import verlesenes_etikett_statt_name
+        except Exception:  # pragma: no cover - Modul fehlt
+            return treffer
+        aus = []
+        for t in treffer:
+            tt = t if isinstance(t, Treffer) else Treffer(*t)
+            if (tt.kategorie == "namen" and _in_ocr(bereiche, tt.start, tt.ende)
+                    and verlesenes_etikett_statt_name(dok.text, tt.start, tt.ende)):
+                continue                              # "Name, Vomame:" – ein verlesener Feldbezeichner
+            aus.append(t)
+        return aus
+    namen_ohne_verlesene_etiketten.__doc__ = (
+        f"{(alt.__doc__ or '').strip()}\n\nAuf OCR-Text ohne verlesene Feldbezeichner (\"Name, Vomame:\", "
+        f"namen.verlesenes_etikett_statt_name); auf der Textebene unverändert.")
+    return namen_ohne_verlesene_etiketten
+
+
+def _ner_umhuellen():
+    """Den Namens-Detektor ("ner", klassisch.py oder sein Ersatz) um den OCR-Filter ergänzen: die KI hält
+    verlesene Feldbezeichner gern für Namen. Der Filter braucht die Quelle der Zeichen, die nur das Seitenmodell
+    kennt – namen.py sieht nur Text und bleibt deshalb ohne Toleranz für Lesefehler."""
+    alt = next((e for e in REGISTER if e.name == "ner"), None)
+    if alt is None or getattr(alt.funktion, "__name__", "") == "namen_ohne_verlesene_etiketten":
+        return                                        # kein Namens-Detektor oder schon umhüllt (erneuter Import)
+    registrieren("ner", alt.kategorien, alt.profile, _ner_ohne_verlesene_etiketten(alt.funktion), ersetzt=True)
+
+
+_ner_umhuellen()

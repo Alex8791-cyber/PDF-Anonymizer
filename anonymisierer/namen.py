@@ -3,7 +3,11 @@ Plausibilitätsfilter gegen Fehlalarme und Stopplisten.
 
 Öffentliche Namen: lade_ner, finde_personen_ner (Menge von Namenstexten, wie bisher),
 finde_personen (Kandidaten mit Position und Zusammengehörigkeit), personen_teilen (mehrere Personen ohne
-Komma an Vornamen trennen – "Jörg Ziegler Ursula Frank"), NAMEN_STOPPLISTE, ner_fehler.
+Komma an Vornamen trennen – "Jörg Ziegler Ursula Frank"), verlesenes_etikett_statt_name (von der OCR
+verlesener Feldbezeichner statt Name – nur für OCR-Text), NAMEN_STOPPLISTE, ner_fehler.
+
+Die Filter dieses Moduls kennen die Herkunft der Zeichen nicht und gelten deshalb für jeden Text gleich; eine
+Toleranz für OCR-Lesefehler gehört nicht hierher (detektoren/ocr_lesart.py prüft die Quelle).
 """
 
 import functools
@@ -285,12 +289,16 @@ def _ist_sachwort(wort: str) -> bool:
             return True
         if _wissen_art(teil)[1]:
             return True
-    return _verlesenes_etikett(wort)
+    # Kein Abgleich mit verlesenen Etiketten: _ist_sachwort gilt für jeden Text, auch für die Textebene eines PDFs,
+    # und ein unbekannter Nachname ("Ehmann", "Wohnert") liegt oft nur einen Buchstaben neben einem Feldbezeichner
+    # ("Ehemann", "Wohnort"). Verlesene Etiketten prüft verlesenes_etikett_statt_name – nur für OCR-Text.
+    return False
 
 
 def _verlesenes_etikett(wort: str) -> bool:
-    """Von der OCR verlesener Feldbezeichner ("Vomame", "Verscherungsnchmer"): kein Name. Nur lange Wörter, die
-    selbst kein bekannter Name sind (detektoren/etiketten_unscharf.py)."""
+    """Von der OCR verlesener Feldbezeichner ("Vomame", "Verscherungsnchmer") nach detektoren/etiketten_unscharf.py:
+    langes, großgeschriebenes Wort, das weder bekannter Name noch bekanntes Wort ist. Allein KEIN Grund, einen
+    Namen zu verwerfen – siehe verlesenes_etikett_statt_name."""
     w = wort.strip(".,;:()[]\"'")
     if len(w) < 6 or not w.isalpha():
         return False
@@ -298,7 +306,42 @@ def _verlesenes_etikett(wort: str) -> bool:
         from .detektoren.etiketten_unscharf import etikettwort_fuer
     except Exception:  # pragma: no cover - Paket nicht ladbar
         return False
-    return etikettwort_fuer(w) is not None
+    # lange Komposita ("Versicherungsnuarmmer") auch mit untypischem Lesefehler – Nachnamen sind so lang nicht
+    return etikettwort_fuer(w, nachsichtig=len(w) >= _LANGES_ETIKETTWORT) is not None
+
+
+# Etikett-Stellung hinter einer Namensstelle: Doppelpunkt (auch hinter einer kurzen Klammer: "Vomame (Rufname):")
+_DOPPELPUNKT_DANACH_RE = re.compile(r"[ \t]*(?:\([^()\n]{0,25}\)[ \t]*)?:")
+# bei langen Wörtern auch Zeilen-/Zellenende oder eine Kennung dahinter ("Kundenntimmer 76183905")
+_ETIKETT_ENDE_RE = re.compile(r"[ \t]*(?:\)[ \t]*)?(?:\n|\t\t|$)"
+                              r"|[ \t]*(?:Nr\.?[ \t]*)?:?[ \t]*[A-Z]{0,4}[ \t./-]?\d{2}")
+_LANGES_ETIKETTWORT = 12          # so lange Wörter sind Komposita ("Verscherungsnchmer"), kaum Nachnamen
+
+
+def verlesenes_etikett_statt_name(text: str, start: int, ende: int) -> bool:
+    """Ist die Namensstelle text[start:ende] der KI in Wahrheit ein von der OCR verlesener Feldbezeichner
+    ("Name, Vomame:", "(Unterschrift Verscherungsnchmer")?
+
+    NUR für OCR-Text: der Aufrufer prüft, dass die Zeichen aus der OCR stammen (detektoren/ocr_lesart.py). Auf der
+    Textebene eines PDFs ist ein unbekanntes Wort nie ein Lesefehler, sondern womöglich ein Name ("Ehmann",
+    "Wohnert", "Portner" liegen einen Buchstaben neben "Ehemann", "Wohnort", "Partner").
+
+    Bedingungen: alle Wörter sind Sachwörter oder verlesene Etikettwörter, mindestens eins ist verlesen, und die
+    Stelle steht in Etikett-Stellung – ein Doppelpunkt direkt dahinter; bei einem langen verlesenen Wort (ab 12
+    Buchstaben, ein Kompositum wie "Verscherungsnchmer") auch das Zeilen- oder Zellenende oder eine Nummer dahinter
+    ("Kundenntimmer 76183905"). Ein Nachname üblicher Länge allein auf einer Zeile (Grußblock, Unterschrift), in
+    einer Liste oder im Fließtext bleibt damit ein Name; verworfen wird er nur mit Doppelpunkt dahinter, wenn er
+    zugleich nur einen typischen Lesefehler von einem Etikettwort entfernt und dem Sprachmodell unbekannt ist."""
+    if not (0 <= start < ende <= len(text)):
+        return False
+    teile = _namensteile(text[start:ende])
+    verlesen = [t for t in teile if _verlesenes_etikett(t)]
+    if not verlesen or not all(t in verlesen or _ist_sachwort(t) for t in teile):
+        return False
+    if _DOPPELPUNKT_DANACH_RE.match(text, ende):
+        return True
+    return (any(len(t) >= _LANGES_ETIKETTWORT for t in verlesen)
+            and _ETIKETT_ENDE_RE.match(text, ende) is not None)
 
 
 # ----------------------------------------------------------------------
