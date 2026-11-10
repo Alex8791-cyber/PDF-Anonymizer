@@ -919,6 +919,267 @@ def test_formularfeld_des_originals(tmp_path):
 
 
 # ----------------------------------------------------------------------
+# Kalibrierung (Runde 2b): Organisationsbereiche, Anschriften, Unterschriftszüge, Merkmale, OCR-Lesarten
+# ----------------------------------------------------------------------
+def pdf_mit_bloecken(pfad, bloecke):
+    """PDF-Seite (A4) mit Text an festen Stellen: [(x, y, Text, Schriftgröße)] – Briefkopf, Anschriftfeld, Fußzeile."""
+    doc = fitz.open()
+    seite = doc.new_page()
+    for x, y, text, groesse in bloecke:
+        seite.insert_text((x, y), text, fontsize=groesse, fontname="helv")
+    doc.save(pfad)
+    doc.close()
+    return Path(pfad)
+
+
+FUSSZEILE = [(60, 790, "Alpenland Krankenversicherung a.G.", 7), (60, 799, "Prinzregentenplatz 21 · 81675 München", 7),
+             (60, 808, "Sitz: München · Amtsgericht München HRB 17205", 7),
+             (250, 790, "Vorstand: Dr. Anton Schulze (Vorsitzender), Petra Strauß", 7),
+             (420, 790, "USt-IdNr. DE 129 274 139", 7), (420, 799, "Bankverbindung: Kreissparkasse Talheim", 7),
+             (420, 808, "IBAN DE89 3704 0044 0532 0130 00 · BIC COBADEFFXXX", 7)]
+
+
+def test_briefkopf_und_fusszeile_eines_versicherers_sind_kein_verdacht(tmp_path):
+    """Briefkopf (Name groß, darunter Anschrift, Telefon, Internet) und Fußzeile mit Pflichtangaben (Sitz,
+    Registergericht, Vorstand, USt-IdNr., Bankverbindung) gehören dem Versicherer: kein Verdacht – außer den Namen
+    des Vorstands. Die neue Anschrift des Kunden im Brieftext bleibt Verdacht."""
+    pdf = pdf_mit_bloecken(tmp_path / "b.pdf", [
+        (60, 50, "Alpenland Krankenversicherung a.G.", 18), (60, 68, "Prinzregentenplatz 21 · 81675 München", 9),
+        (60, 79, "Telefon 089 2160-0 · Telefax 089 2160-1999 · www.alpenland-versicherung.de", 9),
+        (60, 300, "Sehr geehrte Damen und Herren,", 11),
+        (60, 316, "wir haben Ihre neue Anschrift Hauptstr. 5, 12345 Berlin gespeichert.", 11),
+        (60, 332, "Mit freundlichen Grüßen", 11)] + FUSSZEILE)
+    texte_pdf = [v.text for v in restrisiko_pruefen(pdf)]
+    assert any("Hauptstr. 5" in t for t in texte_pdf) and any("12345 Berlin" in t for t in texte_pdf), texte_pdf
+    assert any("Schulze" in t for t in texte_pdf) and any("Strauß" in t for t in texte_pdf), texte_pdf
+    assert all(any(w in t for w in ("Hauptstr", "12345", "Schulze", "Strauß")) for t in texte_pdf), texte_pdf
+
+
+def test_kundennummer_in_einer_laufenden_fusszeile_bleibt_verdacht(tmp_path):
+    """Im Fußbereich sind Nummern Angaben des Unternehmens – nicht hinter einem Kennungs-Etikett."""
+    laufend = "Versicherungsschein-Nr. 47.897.336.2 · Kunden-Nr. 6259674059"
+    pdf = pdf_mit_bloecken(tmp_path / "f.pdf", [(60, 300, "Sehr geehrte Damen und Herren,", 11),
+                                                (60, 781, laufend, 7)] + FUSSZEILE)
+    texte_pdf = [v.text for v in restrisiko_pruefen(pdf)]
+    assert any("6259674059" in t for t in texte_pdf) and any("47.897.336.2" in t for t in texte_pdf), texte_pdf
+
+
+def test_iban_des_kunden_im_brieftext_bleibt_verdacht_neben_einer_fusszeile(tmp_path):
+    pdf = pdf_mit_bloecken(tmp_path / "i.pdf", [(60, 300, "Bitte überweisen Sie den Betrag auf mein Konto", 11),
+                                                (60, 316, f"IBAN {IBAN}", 11)] + FUSSZEILE)
+    assert any(IBAN in v.text for v in restrisiko_pruefen(pdf))
+
+
+def test_anschrift_einer_versicherung_im_anschriftfeld_ist_kein_verdacht():
+    assert texte("Donau Leben AG\nKundenservice\nDonaustaufer Str. 100\n93055 Regensburg") == []
+    assert texte("Hanseatische Assekuranz VVaG\nKundenservice\nAm Weserufer 3\n28199 Bremen") == []
+
+
+@pytest.mark.parametrize("anschriftfeld", [
+    "Alpenland Krankenversicherung a.G. · Postfach 1234 · 80001 München\nHerrn\nKristóf Vargha\nHauptstr. 5\n"
+    "12345 Berlin",
+    "Alpenland Krankenversicherung a.G.\nKristóf Vargha\nHauptstr. 5\n12345 Berlin",
+    "Die Donau Leben AG hat Ihren Antrag geprüft.\nIhre Anschrift Hauptstr. 5 in 12345 Berlin ist gespeichert.",
+])
+def test_anschrift_einer_person_unter_einem_organisationsnamen_bleibt_verdacht(anschriftfeld):
+    """Der Organisationsblock endet vor einer Anrede und vor einem möglichen Personennamen und wächst nicht aus einem
+    Satz – die Anschrift der Person darunter bleibt Verdacht."""
+    assert gemeldet(anschriftfeld, "Hauptstr. 5") and gemeldet(anschriftfeld, "12345 Berlin"), texte(anschriftfeld)
+
+
+def test_vertragsnummer_neben_versicherer_in_einer_tabelle_bleibt_verdacht():
+    tabelle = ("Versicherer\t\tSparte\t\tVertragsnummer\nAllianz Versicherungs-AG\t\tHausrat\t\t47114711\n"
+               "DEVK\t\tKfz\t\t52098811\nGothaer Allgemeine Versicherung AG 61203344")
+    for nummer in ("47114711", "52098811", "61203344"):
+        assert gemeldet(tabelle, nummer), (nummer, texte(tabelle))
+
+
+def test_hausnummer_und_plz_sind_eine_anschrift_keine_kennung():
+    zeile = "Ich wohne jetzt Prinzregentenplatz 21 - 81675 München."
+    v = pruefe_text(zeile)
+    assert gemeldet(zeile, "Prinzregentenplatz 21") and gemeldet(zeile, "81675 München"), v
+    assert not any("Ziffernfolge" in x.grund for x in v), v
+    assert texte("Alpenland Krankenversicherung a.G. · Prinzregentenplatz 21 - 81675 München") == []
+    assert gemeldet("Kundennummer 21 - 816753", "21 - 816753")
+
+
+def test_ust_idnr_auch_verlesen_und_glaeubiger_id_sind_keine_kennung():
+    assert texte("Sitz: Bremen · Amtsgericht Bremen HRB 16105 · USt-ldhr. DE489337863") == []
+    assert texte("Gläubiger-ID: DE86ZZZ02366554563") == []
+    assert texte("Gläubiger-ID: DE8622202366554563") == []                  # "ZZZ" als "222" gelesen
+    assert gemeldet(f"IBAN: {IBAN}", IBAN)
+    assert gemeldet("Steuer-ID 41 056 847 324", "41 056 847 324")       # 11 Ziffern: persönliche Steuer-ID
+
+
+@pytest.mark.parametrize("wert, verdacht", [("polnisch", False), ("ledig", False), ("max müller", True),
+                                            ("Wozniak", True)])
+def test_merkmal_im_formularfeld_ist_kein_verdacht_ein_name_schon(tmp_path, wert, verdacht):
+    pdf = pdf_mit_zeilen(tmp_path / "m.pdf", ["Angaben zur Person:", "", wert])
+    with fitz.open(pdf) as doc:
+        r = doc[0].search_for(wert)[0]
+    feld = {"seite": 0, "rect": fitz.Rect(r.x0 - 2, r.y0 - 2, r.x1 + 40, r.y1 + 2), "name": "feld",
+            "etikett": "Staatsangehörigkeit"}
+    v = [x for x in restrisiko_pruefen(pdf, felder=[feld]) if "Formularfeld" in x.grund]
+    assert bool(v) == verdacht, (wert, v)
+
+
+def test_betrag_an_einer_schwaerzung_ist_kein_abgeschnittener_wert(tmp_path):
+    pdf = pdf_mit_zeilen(tmp_path / "s.pdf", ["Vertrag 1.714,85 Beitrag", "Kennzeichen -WXV09-07 Halter"])
+    with fitz.open(pdf) as doc:
+        s = doc[0]
+        for wort, nachbar in (("Vertrag", "1.714,85"), ("Kennzeichen", "-WXV09-07")):
+            a, b = s.search_for(wort)[0], s.search_for(nachbar)[0]
+            s.draw_rect(fitz.Rect(a.x1 + 1, a.y0, b.x0, a.y1), color=None, fill=restrisiko.FUELLFARBE)
+        doc.save(tmp_path / "s2.pdf")
+    texte_pdf = [v.text for v in restrisiko_pruefen(tmp_path / "s2.pdf")]
+    assert any("WXV09" in t for t in texte_pdf) and not any("1.714" in t for t in texte_pdf), texte_pdf
+
+
+def test_modellname_hinter_einer_marke_und_heiliger_im_klinikname():
+    assert texte("Hersteller/Typ: Seat Leon ST") == []
+    assert texte("Behandlung im Krankenhaus St. Ansgar") == []
+    assert gemeldet("Leon Schmidt hat angerufen.", "Leon")
+
+
+def test_diagnoseschluessel_auch_verlesen_ist_keine_kennung():
+    assert not any("Ziffernfolge" in v.grund for v in pruefe_text("Koronare Herzkrankheit (125.11)"))
+    assert gemeldet("Kundennummer 12511", "12511")
+
+
+def test_strasse_hinter_anschrift_etikett_auch_mit_gewoehnlichem_wort():
+    zeile = "Ab dem 02.11.2025 lautet meine neue Anschrift: Straße des\n17. Juni 72. Bitte bestätigen Sie den Eingang."
+    assert gemeldet(zeile, "Straße des") and gemeldet(zeile, "17. Juni 72"), texte(zeile)
+    assert texte("Anschrift: Bitte geben Sie Ihre neue Anschrift an.") == []
+
+
+def test_kopfzeile_einer_tabelle_ist_kein_wert_hinter_etikett():
+    assert texte("Nr. Kunde (Name, Vorname)\t\tgeb.\t\tPLZ / Ort\t\tSparte\t\tVersicherer\t\tVertragsnummer") == []
+
+
+def test_namen_im_unterschriftsblock_und_in_firmenbezeichnungen():
+    assert gemeldet("Mit freundlichen Grüßen\nDeLuca", "DeLuca")
+    for block in ("Mit freundlichen Grüßen\nIhr Kundenservice\nAlpenland Krankenversicherung a.G.",
+                  "Mit freundlichen Grüßen\nLeistungsabteilung Kranken",
+                  "Mit freundlichen Grüßen\nVertragsservice Leben"):
+        assert texte(block) == [], block
+    assert gemeldet("anbei die Rechnung der Werkstatt Weiß und die Fotos", "Weiß")
+    assert texte("Die Werkstatt hat bis 18 Uhr geöffnet.") == []
+
+
+def test_silbentrennung_am_zeilenende_ist_kein_name(tmp_path):
+    pdf = pdf_mit_zeilen(tmp_path / "t.pdf", ["Herr Versiche-", "rer hat geschrieben."])
+    assert restrisiko_pruefen(pdf) == []
+
+
+def _ocr_seite(pfad, zeilen):
+    """Scan-Seite aus Textzeilen; die OCR-Wörter (5-Tupel) können von den gedruckten abweichen: zeilen =
+    [(gedruckt, gelesen)] – so lassen sich Lesefehler der OCR nachstellen."""
+    vorlage = fitz.open()
+    s = vorlage.new_page()
+    woerter = []
+    y = 100
+    for gedruckt, gelesen in zeilen:
+        s.insert_text((60, y), gedruckt, fontsize=12, fontname="helv")
+        x = 60.0
+        for wort in gelesen.split():
+            breite = fitz.get_text_length(wort, fontname="helv", fontsize=12)
+            woerter.append((x, y - 10, x + breite, y + 3, wort))
+            x += breite + fitz.get_text_length(" ", fontname="helv", fontsize=12)
+        y += 20
+    pix = s.get_pixmap(dpi=150, colorspace=fitz.csGRAY)
+    doc = fitz.open()
+    p = doc.new_page(width=s.rect.width, height=s.rect.height)
+    p.insert_image(p.rect, stream=pix.tobytes("png"))
+    vorlage.close()
+    doc.save(pfad)
+    doc.close()
+    return Path(pfad), woerter
+
+
+@pytest.mark.parametrize("gedruckt, gelesen, wert", [
+    ("Sehr geehrter Herr Dipl.-Kfm. Schüßler,", "Sehr geehrter Herr Dipl.-Kfm. schüßler,", "schüßler"),
+    ("Behandelt von Dr. Lukas Krause", "Behandelt von Dr. LukasKrause", "LukasKrause"),
+    ("Zeuge Ilir Shala, Tel. siehe Akte", "Zeuge llir Shala, Tel. siehe Akte", "llir"),
+    ("anbei die Rechnung der Werkstatt Weiß und die Fotos", "anbei die Rechnung der Werkstatt weiß und die Fotos",
+     "weiß"),
+])
+def test_ocr_lesarten_von_namen(tmp_path, gedruckt, gelesen, wert):
+    """Lesefehler der OCR bei Namen: kleiner Anfangsbuchstabe hinter Anrede/Titel (S/s gleich geformt), zwei Wörter
+    ohne Leerzeichen, großes I als l, Name in einer Firmenbezeichnung klein gelesen."""
+    pdf, woerter = _ocr_seite(tmp_path / "o.pdf", [(gedruckt, gelesen)])
+    verdacht = restrisiko_pruefen(pdf, ocr=OcrAttrappe({0: woerter}), ocr_modus={0: "seite"})
+    assert any(wert in v.text for v in verdacht), verdacht
+
+
+@pytest.mark.parametrize("gelesen", ["Tabelle 120.01.2025 Zahnreinigung", "Ablauf am 01.07.20836 laut Vertrag",
+                                     "Vom 01.04:2022 an gilt", "Zeitraum 08.1987 31.12.1989"])
+def test_verlesene_daten_sind_keine_kennung(tmp_path, gelesen):
+    pdf, woerter = _ocr_seite(tmp_path / "d.pdf", [(gelesen, gelesen)])
+    assert restrisiko_pruefen(pdf, ocr=OcrAttrappe({0: woerter}), ocr_modus={0: "seite"}) == []
+
+
+def test_verlesenes_geburtsdatum_bleibt_verdacht(tmp_path):
+    pdf, woerter = _ocr_seite(tmp_path / "g.pdf", [("Liste 117.04.1962 Mitglied", "Liste 117.04.1962 Mitglied")])
+    verdacht = restrisiko_pruefen(pdf, ocr=OcrAttrappe({0: woerter}), ocr_modus={0: "seite"})
+    assert any("1962" in v.text for v in verdacht), verdacht
+
+
+def _scan_unterschrift(pfad, geschwaerzt=("Martina", "Kowalczyk"), zug=True):
+    """Scan eines Briefschlusses: Grußformel, Firma, "i. A. Martina Kowalczyk" mit Unterschriftszug darüber und
+    durch den Namen, darunter die Abteilung. geschwaerzt: diese Wörter sind wie von der Schwärzung ersetzt (graues
+    Rechteck + "[PERSON A]"); die OCR liest den Namen nicht."""
+    vorlage = fitz.open()
+    s = vorlage.new_page()
+    y = 100
+    for z in ["Sehr geehrte Damen und Herren,", "vielen Dank für Ihre Nachricht vom Montag.",
+              "Mit freundlichen Grüßen", "Donau Leben AG"]:
+        s.insert_text((60, y), z, fontsize=12, fontname="helv")
+        y += 20
+    name_y = y + 34
+    s.insert_text((60, name_y), "i. A. Martina Kowalczyk", fontsize=12, fontname="helv")
+    s.insert_text((60, name_y + 18), "Leistungsabteilung", fontsize=12, fontname="helv")
+    if zug:
+        form = s.new_shape()
+        for k in range(5):
+            form.draw_bezier((92 + 22 * k, name_y - 4), (100 + 22 * k, name_y - 28), (108 + 22 * k, name_y + 6),
+                             (114 + 22 * k, name_y - 10))
+        form.finish(color=(0.05, 0.1, 0.45), width=1.4)
+        form.commit()
+    woerter = [tuple(w[:5]) for w in s.get_text("words")]
+    pix = s.get_pixmap(dpi=150, colorspace=fitz.csGRAY)
+    doc = fitz.open()
+    p = doc.new_page(width=s.rect.width, height=s.rect.height)
+    p.insert_image(p.rect, stream=pix.tobytes("png"))
+    if geschwaerzt:
+        r = None
+        for w in woerter:
+            if w[4] in geschwaerzt:
+                r = fitz.Rect(w[:4]) if r is None else r | fitz.Rect(w[:4])
+        r = r + (-1, -1, 1, 1)
+        p.draw_rect(r, color=None, fill=restrisiko.FUELLFARBE)
+        p.insert_text((r.x0 + 2, r.y1 - 3), "[PERSON A]", fontsize=8, fontname="helv")
+    vorlage.close()
+    doc.save(pfad)
+    doc.close()
+    return Path(pfad), [w for w in woerter if w[4] not in ("Martina", "Kowalczyk")]
+
+
+@pytest.mark.parametrize("fall, verdacht", [
+    (dict(), False),                                            # Zug über dem ganz geschwärzten Namen: keine Angabe
+    (dict(geschwaerzt=()), True),                               # Name nicht geschwärzt, vom Zug gekreuzt
+    (dict(geschwaerzt=("Martina",)), True),                     # Rest "Kowalczyk" neben dem Platzhalter, gekreuzt
+    (dict(geschwaerzt=("Martina",), zug=False), True),          # Rest ohne Zug
+], ids=["zug_geschwaerzt", "nicht_geschwaerzt", "rest_mit_zug", "rest_ohne_zug"])
+def test_unterschriftszug_ueber_einem_geschwaerzten_namen(tmp_path, fall, verdacht):
+    """Ein Unterschriftszug ist keine lesbare Angabe: steht er über einem GESCHWÄRZTEN gedruckten Namen (oder kreuzt
+    ihn), ist er kein Verdacht. Bleibt neben dem Platzhalter ein ungelesener Teil des Namens stehen (auch vom Zug
+    gekreuzt) oder ist der Name gar nicht geschwärzt, bleibt die Stelle Verdacht."""
+    pdf, ocr = _scan_unterschrift(tmp_path / "u.pdf", **fall)
+    v = restrisiko_pruefen(pdf, ocr=OcrAttrappe({0: ocr}), ocr_modus={0: "seite"}, platzhalter=["[PERSON A]"])
+    assert bool([x for x in v if x.start == -1]) == verdacht, v
+
+
+# ----------------------------------------------------------------------
 # Ende zu Ende: verpasster Wert -> _PRUEFEN mit Verdacht an der richtigen Stelle
 # ----------------------------------------------------------------------
 def test_schwaerzung_mit_verpasstem_wert_wird_pruefen(tmp_path):

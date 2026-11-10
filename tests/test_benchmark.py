@@ -44,10 +44,16 @@ MAX_UEBERSCHWAERZUNG = 0.065
 # Vorher (4408edc, alte Bewertung): 2 Kern-Lecks, keines abgedeckt – ">= 0,90" war eine Quote über 2 Einträge.
 # Nach den Review-Korrekturen (2026-11-10: Lesegeometrie, Schräglage, Rollenzeilen, Fach-/Firmenzeilen, gerade
 # Linienreste, Seitenmaske; Grundzahl der Dokumentkanäle) alle Werte unverändert.
+# Kalibrierung der Restrisiko-Prüfung (2026-11-10, auf e165afb: Organisationsbereiche, Hausnummer + PLZ,
+# Unterschriftszug über geschwärztem Namen, Merkmale in Formularfeldern, OCR-Lesarten), Linux: 0 Dokumente mit stillem
+# Leck; 1 Kern-Leck, abgedeckt; 0,071 Fehlverdacht je Seite (1 von 3 Verdachtsstellen: eine echte Unterschrift im
+# Unterschriftsfeld ohne geschwärzten Namen daneben – bleibt bewusst Verdacht); 2 von 12 Ausgaben _PRUEFEN (1 ohne
+# Kern-Leck); Laufzeit 0,095 s je Seite. Die Grenzen unten lassen Spielraum für Plattform-Abweichungen (OCR-Build).
 MAX_DOKUMENTE_STILLES_LECK = 1
 MIN_VERDACHTSABDECKUNG = 0.90
 MIN_LECKS_FUER_QUOTE = 10      # darunter ist eine Quote bedeutungslos: JEDES Leck braucht einen Verdacht
-MAX_FEHLVERDACHT_JE_SEITE = 1.0
+MAX_FEHLVERDACHT_JE_SEITE = 0.35
+MAX_PRUEFEN_OHNE_LECK = 3      # Ausgaben _PRUEFEN ohne Kern-Leck (von 12): die Maklerin soll nicht in Warnungen ertrinken
 
 
 # ----------------------------------------------------------------------
@@ -208,6 +214,8 @@ def test_benchmark_laeuft_und_haelt_qualitaetsgrenzen(ci_korpus, tmp_path):
         assert rr["verdachtsabdeckung_ohne_pixelrest"] >= MIN_VERDACHTSABDECKUNG, (
             f"Verdachtsabdeckung ohne Pixelreste {rr['verdachtsabdeckung_ohne_pixelrest']}: {ohne_verdacht}")
     assert rr["fehlverdacht_je_seite"] <= MAX_FEHLVERDACHT_JE_SEITE, rr["fehlverdacht_liste"][:15]
+    assert rr["pruefen_ohne_leck"] <= MAX_PRUEFEN_OHNE_LECK, (rr["pruefen_ohne_leck_dokumente"],
+                                                             rr["fehlverdacht_liste"][:15])
     assert "## Restrisiko" in (tmp_path / "ergebnis" / "bericht.md").read_text(encoding="utf-8")
 
 

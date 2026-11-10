@@ -14,8 +14,15 @@ Formregeln mit eigenen Prüfziffer-Rechnungen.
 Was gemeldet wird (jede Regel liefert Stelle + Grund):
   * Kennungen: Ziffernfolgen ab 5 Ziffern – auch in Gruppen ("6 259 674 059", "0170 318 40 11") und mit
     Buchstaben ("KF007952512", "LV-2014-697971") –, außer Beträgen, Datumsangaben, Uhrzeiten, Paragrafen,
-    Prozent- und Maßangaben, Verhältnissen ("300/150"), Handelsregister-, USt- und Gläubiger-Nummern,
-    Service-Rufnummern (0800 …) und PLZ/Telefon/Straße in Firmenanschriften (Briefkopf, Fußzeile).
+    Prozent- und Maßangaben, Verhältnissen ("300/150"), Diagnoseschlüsseln ("I25.11", auch verlesen),
+    Handelsregister-, USt- und Gläubiger-Nummern, Service-Rufnummern (0800 …), Hausnummer + PLZ ("Platz 21 - 81675
+    München": eine Anschrift) und den Angaben einer Organisation in ihren Organisationsbereichen.
+  * Organisationsbereiche (_Seitenpruefung._org_bereiche): Fußbereich eines Unternehmens (Zeilen am unteren Rand mit
+    Pflichtangaben wie Registergericht, HRB, USt-IdNr., Vorstand, Bankverbindung), Briefkopf und Anschrift einer
+    Organisation (Zellen unter ihrem Namen in derselben Spalte) – Anschriften, Telefon-, Register-, Steuer- und
+    Kontonummern, USt-IdNr., IBAN/BIC (Fußbereich) und Internetadressen dort sind keine Personenangaben. Nie
+    ausgenommen: Namen und Werte hinter Kennungs-, Personen- und Geburtsdatum-Etiketten ("Kunden-Nr. 4711" in einer
+    laufenden Fußzeile).
   * Formen mit Prüfziffer: IBAN, Steuer-ID, SV-Nummer, Krankenversichertennummer, FIN, Kreditkarte, Ausweis.
     Gemeldet wird die FORM; eine gültige Prüfziffer verstärkt nur den Grund (OCR-Verleser lassen Prüfziffern
     scheitern). Dazu Kfz-Kennzeichen- und BIC-Form und Werte hinter Kennungs-Etiketten ("Az. 123 C 45/24").
@@ -23,15 +30,19 @@ Was gemeldet wird (jede Regel liefert Stelle + Grund):
     Internetadressen.
   * Datum mit plausiblem Geburtsjahr (Alter 14-110), außer hinter Vertragsdaten-Etiketten (Beginn, Ablauf,
     Datum …, auch als Tabellenspalte) und in Zeiträumen; hinter Geburtsdatum-Etiketten jedes vergangene Datum.
-  * Namen: Vor- und Nachnamen der Wissensbasis (eindeutige immer, mehrdeutige mit Personenkontext), unbekannte
-    Eigennamen in Personenkontext (Herr/Frau/Titel, Etiketten wie "Name:", "Vorstand:", direkt hinter einem
-    Vornamen oder neben einem Personen-Platzhalter), Monats-/Wochentagsnamen direkt hinter einem Vornamen.
+  * Namen: Vor- und Nachnamen der Wissensbasis (eindeutige immer, mehrdeutige mit Personenkontext; nicht als
+    Modellname hinter einer Marke: "Seat Leon"), unbekannte Eigennamen in Personenkontext (Herr/Frau/Titel,
+    Etiketten wie "Name:", "Vorstand:", direkt hinter einem Vornamen, neben einem Personen-Platzhalter, im
+    Unterschriftsblock unter einer Grußformel), Monats-/Wochentagsnamen direkt hinter einem Vornamen, Namen der
+    Wissensbasis hinter einer Geschäftsbezeichnung ("Werkstatt Weiß" – auf Scans auch klein gelesen). OCR-Wörter, die
+    mit l + Konsonant beginnen, werden mit großem I gelesen ("llir" -> "Ilir").
   * Anschriften: Straße + Hausnummer, Postfach, PLZ + Ort, Werte hinter Anschrift-Etiketten ("Ort: Jena").
   * Reste neben Anschrift-Platzhaltern ("Untere [ADRESSE]", "[PLZ ORT] i.d.OPf.") – auch auf Scans, wo
     Platzhalter (Textebene) und OCR-Wörter nur über die Lage auf der Seite benachbart sind – und Bruchstücke mit
     Ziffern, die ein graues Schwärzungsrechteck berühren ("-WXV09-07": Wert mitten im Wort abgeschnitten).
   * Ort-Datum-Zeilen ("Tübingen, 14. Januar 2025": meist der Wohnort der Unterzeichnenden).
-  * Formularfelder des Originals (von der Schwärzung übergeben), deren Wert in der Ausgabe noch lesbar ist.
+  * Formularfelder des Originals (von der Schwärzung übergeben), deren Wert in der Ausgabe noch lesbar ist – außer
+    bloßen Merkmalen aus kleingeschriebenen Wörtern ("polnisch", "ledig"), die auf niemanden hinweisen.
   * Scan-Seiten: dichte Tinte in Unterschriftsblöcken (unter der Grußformel – auch so, wie die OCR sie liest,
     auch schräg –, über/neben "Unterschrift", über Rollenzeilen wie "Mandant" | "Makler") und neben Personenangaben
     (hinter "Name:", neben einem Personen-Platzhalter), die die OCR nicht VERLÄSSLICH gelesen hat: gar nicht, mit
@@ -42,7 +53,10 @@ Was gemeldet wird (jede Regel liefert Stelle + Grund):
     und Kürzel wie "Facharzt für Innere Medizin", "Hauptagentur Nord", "& Partner", "LL.M." sind keine Namen).
     Bereiche in Leserichtung (OCR-Ausrichtung 0/90/180/270°, Schräglage aus der OCR); Tinte relativ zum Papier (auch
     blasse Kugelschreiber-Striche), Linien und GERADE Reste von Unter-/Durchstreichungen zählen nicht; Rechteck je
-    Tintengruppe, "bitte ansehen".
+    Tintengruppe, "bitte ansehen". Der Unterschriftszug zu einem GESCHWÄRZTEN gedruckten Namen (über dem
+    Personen-Platzhalter oder ihn kreuzend) ist kein Verdacht: ein Zug ist keine lesbare Angabe, und der Name, zu dem
+    er gehört, ist schon ersetzt; ohne geschwärzten Namen daneben bleibt Tinte im Unterschriftsfeld Verdacht (dort kann
+    ein ungelesener Name stehen).
 Seitenverdacht (ohne Rechteck, „Seite selbst durchsehen“): eine Scan-Seite mit Tinte, aber ohne gelesene Wörter,
 eine kaum lesbare Scan-Seite (mehr als 20 % OCR-Bruchstücke wie "|", "\\", ".", Einzelzeichen – Fax, starke
 Kompression) und eine Scan-Seite, deren Lesung nach dem Maß der OCR unplausibel ist (Buchstabensalat einer
@@ -88,6 +102,16 @@ SCAN_MIN_WOERTER = 3           # liefert die OCR einer Scan-Seite weniger Wörte
 SCAN_RAUSCHEN_MAX = 0.20       # mehr OCR-Bruchstücke ("|", "\\", "u", "0.") als dieser Anteil: Scan kaum lesbar
 SCAN_RAUSCHEN_MIN_WOERTER = 40  # … erst ab so vielen OCR-Wörtern bewertet
 FUELLFARBE = (0.92, 0.92, 0.92)  # Füllfarbe der Schwärzungsrechtecke (schwaerzung.FUELLFARBE)
+# Organisationsbereiche (Briefkopf, Anschrift und Fußzeile eines Unternehmens, _Seitenpruefung._org_bereiche)
+FUSS_ANTEIL = 0.72             # Fußbereich: Zeilen unterhalb dieses Anteils der Seitenhöhe (in Leserichtung) …
+FUSS_LUECKE = 1.2              # … höchstens so viele Zeilenhöhen voneinander entfernt …
+FUSS_SCHRIFT = 1.35            # … und Schrift höchstens so viel größer als die größte darunter (Fließtext ist größer;
+FUSS_SCHRIFT_MIN = 8.0         #     verglichen mit mindestens dieser Höhe – OCR-Kästen schwanken)
+ORG_BLOCK_ZEILEN = 4           # Organisationsblock: so viele Zellen unter dem Namen der Organisation …
+ORG_BLOCK_LUECKE = 1.2         # … mit höchstens so viel Abstand (Zeilenhöhen) …
+ORG_BLOCK_SCHRIFT = 1.3        # … und Schrift höchstens so viel größer als die Zelle darüber
+SCHRIFT_OCR = 1.9              # auf OCR-Zeilen statt FUSS_SCHRIFT/ORG_BLOCK_SCHRIFT: Wortkästen schwanken mit Ober-/
+                               # Unterlängen und zusammengelesenen Spalten (gemessen: 6-13 pt für eine 7-pt-Fußzeile)
 
 GRUND_SEITE_UNGELESEN = ("Scan-Seite konnte nicht gelesen werden (keine Texterkennung) – Seite selbst "
                          "durchsehen")
@@ -146,7 +170,8 @@ _MARKEN = frozenset({"renault", "ford", "opel", "peugeot", "porsche", "ferrari",
                      "chevrolet", "cadillac", "lincoln", "dodge", "chrysler", "honda", "mazda", "suzuki", "toyota",
                      "nissan", "hyundai", "skoda", "dacia", "fiat", "volvo", "saab", "tesla", "mercedes", "benz",
                      "daimler", "audi", "bosch", "siemens", "miele", "philips", "maybach", "borgward", "lancia",
-                     "citroen", "citroën", "cupra", "mitsubishi", "subaru", "lexus", "landrover"})
+                     "citroen", "citroën", "cupra", "mitsubishi", "subaru", "lexus", "landrover", "seat", "kia",
+                     "mini", "smart", "jeep", "alfa", "volkswagen", "infiniti", "iveco", "rover", "chery", "polestar"})
 _ANREDEN = frozenset({"herr", "herrn", "frau", "divers", "firma", "familie", "eheleute", "mr", "mrs", "ms", "miss",
                       "monsieur", "madame", "signor", "signora", "señor", "señora", "keine", "keine angabe"})
 # Wörter, die hinter Herr/Frau stehen, aber kein Name sind
@@ -170,17 +195,29 @@ _FUNKTIONSPOSTFAECHER = frozenset({
 # Rechtsformen und Wörter, die eine Organisation kennzeichnen (Briefkopf/Fußzeile eines Unternehmens)
 _RECHTSFORM_RE = re.compile(
     r"(?<![\w])(?:AG|GmbH|mbH|SE|KG|KGaA|OHG|GbR|e\.\s?V\.|eG|e\.\s?G\.|VVaG|V\.V\.a\.G\.|a\.\s?G\.|AöR|KdöR|"
-    r"Ltd\.?|S\.A\.|N\.V\.|B\.V\.|Inc\.|PartG(?:mbB)?|UG)(?![\w])")
+    r"Ltd\.?|S\.A\.|N\.V\.|B\.V\.|Inc\.|PartG(?:mbB)?|UG|(?i:v{1,3}a[gq]|gmbh|kgaa))(?![\w])")
 _ORG_WORT_RE = re.compile(
     r"(?i)(?:versicherung|versicherungen|versicherer|assekuranz|bank|banken|sparkasse|volksbank|raiffeisenbank|"
     r"kasse|krankenkasse|bausparkasse|pensionskasse|rentenversicherung|berufsgenossenschaft|finanzamt|amtsgericht|"
     r"landgericht|gericht|behörde|bundesagentur|agentur für arbeit|polizei|polizeiinspektion|polizeipräsidium|"
     r"klinikum|universität|hochschule|verband|kammer|stadtwerke|holding|konzern|stiftung|versicherungsgruppe)"
     r"(?![a-zäöüß])")
+# Pflichtangaben eines Unternehmens (Fußzeile, Briefkopf) – auch so, wie die OCR sie liest ("USt-ldhr.")
+_PFLICHTANGABE_RE = re.compile(
+    r"(?i)(?<![\w])(?:Registergericht|Handelsregister|Amtsgericht|Sitz\s+der\s+Gesellschaft|Sitz\s?:|"
+    r"HR\s?[AB][\s.:]{0,2}\d|U\s?St[\s.-]{0,2}[I1l|][dD]|Umsatzsteuer|Vorstand|Vorstände|Vorsitz|Aufsichtsrat|"
+    r"Gesch[äa]ftsf[üu]hr|Bankverbindung|Gläubiger[\s-]{0,2}I[dD]|BaFin|Vermittlerregister|Komplementär)")
+_ORG_ETIKETT_RE = re.compile(r"(?i)IBAN|BIC|SWIFT|BLZ|Bankleitzahl|Konto|Kto|U\s?St|Id\.?\s?Nr|Umsatzsteuer|Steuer-?Nr|"
+                             r"Steuernummer|Gläubiger|Register|HR\s?[AB]|VU-?Nr|BaFin|Vermittler")
+_UST_ID_RE = re.compile(r"DE ?\d{3} ?\d{3} ?\d{3}")       # Form der USt-IdNr. (persönliche Steuer-ID: 11 Ziffern)
+# kleingeschriebene Wörter, die im Namen einer Organisation stehen dürfen ("Bank für Kirche und Diakonie")
+_ORG_VERBINDER = frozenset({"für", "und", "der", "des", "die", "im", "am", "an", "auf", "zu", "zur", "zum", "von",
+                            "vom", "in", "bei", "mbh", "eg", "ev", "ag", "se", "kg", "a.g", "a. g", "v. d", "v.d"})
 # Etiketten, hinter denen eine Nummer zu einer Organisation gehört (kein Personenbezug)
 _ORG_NUMMER_RE = re.compile(
     r"(?i)(?:HR\s?[AB]|Handelsregister|Registergericht|Register-?Nr\.?|Registernummer|Amtsgericht\s+[\w\-.]+|"
-    r"USt\.?[\s-]?Id(?:\.?[\s-]?Nr)?\.?|USt-?IdNr\.?|Umsatzsteuer[\s-]?(?:Identifikations)?(?:nummer|ID)|VAT|"
+    r"USt\.?[\s-]?Id(?:\.?[\s-]?Nr)?\.?|USt-?IdNr\.?|U\s?St[\s.-]{0,2}[I1l|][dD](?:[\s.-]{0,2}[NnHh]r)?\.?|"
+    r"Umsatzsteuer[\s-]?(?:Identifikations)?(?:nummer|ID)|VAT|"
     r"BLZ|Bankleitzahl|Gläubiger[\s-]?(?:ID|Identifikations(?:nummer)?|Ident(?:nummer)?)(?:[\s-]?Nr\.?)?|"
     r"Gläubiger-ID-Nr\.?|BaFin[\s-]?(?:ID|Reg\.?[\s-]?Nr\.?)?|VU[\s-]?Nr\.?|BSNR|"
     r"Betriebsstätten[\s-]?(?:nr\.?|nummer)|"
@@ -209,6 +246,11 @@ _STRASSE_PRAEP_RE = re.compile(
     r"(?:[A-ZÄÖÜ][\wäöüßÄÖÜ\-]+[ ]){0,2}[A-ZÄÖÜ][\wäöüßÄÖÜ\-]+)[ \t]{1,2}"
     r"(\d{1,4}(?:[ ]?[a-zA-Z](?![\w]))?)"
     r"(?![\w,.]\d|[\d])", re.IGNORECASE)
+# Wörter, mit denen ein Straßenname beginnen kann, die aber auch gewöhnliche Wörter sind ("Straße des 17. Juni")
+_STRASSEN_ANFANG = frozenset({"straße", "strasse", "str", "platz", "weg", "allee", "gasse", "ring", "damm", "ufer",
+                              "chaussee", "am", "an", "auf", "im", "in", "zum", "zur", "unter", "hinter", "vor",
+                              "alt", "alte", "alter", "neue", "neuer", "obere", "untere", "kleine", "große", "lange",
+                              "hohe", "hoher"})
 _POSTFACH_RE = re.compile(r"(?i)(?<![\w])Postfach[ \t:]+(\d[\d ]{2,10}\d)")
 _PLZ_ORT_RE = re.compile(r"(?<![\w\-/.,])(?:D[-\s])?(\d{5})[ \t]{1,2}([A-ZÄÖÜ][\wäöüßÄÖÜ.\-]+"
                          r"(?:[ \t](?:am|an|im|in|bei|ob|v\.|vor|der|d\.|a\.|i\.|"
@@ -223,6 +265,12 @@ _DATUM_RES = (
                 r"Juni?|Juli?|Aug(?:ust)?|Sept?(?:ember)?|Okt(?:ober)?|Nov(?:ember)?|Dez(?:ember)?)\.?[ ]?"
                 r"(\d{4})(?![\d])", re.IGNORECASE), "tMj"),
 )
+# OCR: Datum mit einer angehängten Ziffer (Tabellenlinie oder Fleck als Ziffer gelesen: "01.07.20836") – und mitten in
+# einer Ziffernfolge oder mit verlesenem Trenner ("120.01.2025" mit "|" als "1" davor, "01.04:2022")
+_DATUM_OCR_RES = ((re.compile(r"(?<![\d.,/])(\d{1,2})\.(\d{1,2})\.(\d{4})\d(?![\d])"), "tmj"),
+                  (re.compile(r"(\d{1,2})[.:,](\d{1,2})[.:,](\d{4})(?![\d])"), "tmj"))
+# Form eines Datums (auch ungültig verlesen: "0.04.2025", "06.36.1896") – keine Telefon- oder Kennnummer
+_DATUMSFORM_RE = re.compile(r"\d{1,2}[.:,]\d{1,2}[.:,](?:\d{2}|\d{4,5})|(?:0?[1-9]|1[0-2])[.:/](?:19|20)\d{2}")
 _BEREICH_DANACH_RE = re.compile(r"^\s?(?:-|–|—|bis(?:\s+zum)?|to)\s?\d")
 _BEREICH_DAVOR_RE = re.compile(r"(?:-|–|—|\bbis(?:\s+zum)?|\bvon|\bvom|\bab|\bseit|\bzwischen|\bperiod)\s?$",
                                re.IGNORECASE)
@@ -234,6 +282,8 @@ _PARAGRAF_RE = re.compile(r"(?:§§?|Art\.|Artikel|Abs\.|Absatz)\s?\d+[a-z]?(?:\
                           r"lit\.)\s?\d+[a-z]?)*")
 _JAHRESBEREICH_RE = re.compile(r"(?<![\d])(?:19|20)\d{2}\s?[/\-–]\s?(?:19|20)?\d{2}(?![\d])")
 _PROZENT_RE = re.compile(r"\d+(?:,\d+)?\s?%")
+# Diagnoseschlüssel nach ICD-10 ("I25.11", "S93.40") – die OCR liest den Buchstaben oft als Ziffer oder Klammer
+_ICD_RE = re.compile(r"\(?[A-Z0-9(]\d{2}\.\d{1,2}[A-Z!*+]?\)?")
 # Kennungsartige Zeichenfolgen (Buchstaben/Ziffern mit inneren Trennern)
 _TOKEN_RE = re.compile(r"[0-9A-Za-zÀ-ÖØ-öø-ɏ]+(?:(?:[./\-]|(?<=\d):(?=\d))[0-9A-Za-zÀ-ÖØ-öø-ɏ]+)*")
 _LUECKE_KETTE = frozenset(" /-()")
@@ -241,6 +291,8 @@ _IBAN_RE = re.compile(r"(?<![A-Za-z0-9])([A-Z]{2}[ ]?\d{2}(?:[ ]?[A-Z0-9]{4}){2,
                       r"(?![A-Za-z0-9])")
 _IBAN_DE_LOSE_RE = re.compile(r"(?<![A-Za-z0-9])(DE[ ]?\d{2}(?:[ ]?\d){18})(?![0-9])")
 _GLAEUBIGER_ID_RE = re.compile(r"[A-Z]{2}\d{2}\s?ZZZ")
+_GLAEUBIGER_ETIKETT_RE = re.compile(r"(?i)Gläubiger[\s-]?(?:ID|Identifikations(?:nummer)?|Ident(?:nummer)?)"
+                                    r"(?:[\s-]?Nr\.?)?[\s.:#]*$")
 _SVNR_RE = re.compile(r"(?<![\dA-Za-z])(\d{2}[ ]?\d{6}[ ]?[A-Za-z][ ]?\d{2}[ ]?\d)(?![\dA-Za-z])")
 _KVNR_RE = re.compile(r"(?<![A-Za-z0-9])([A-Z][ ]?\d{3}[ ]?\d{3}[ ]?\d{3})(?![A-Za-z0-9])")
 _FIN_RE = re.compile(r"(?<![A-Za-z0-9])((?=[A-HJ-NPR-Z0-9]{17}(?![A-Za-z0-9]))(?=[A-HJ-NPR-Z0-9]*\d)"
@@ -305,8 +357,27 @@ _GRUSS_WOERTER = frozenset({"mit", "freundlichen", "freundlichem", "freundliche"
 _EINHEITEN = frozenset({"agentur", "hauptagentur", "generalagentur", "bezirksagentur", "direktion", "filialdirektion",
                         "bezirksdirektion", "regionaldirektion", "landesdirektion", "niederlassung", "kanzlei",
                         "sozietät", "partnerschaft", "gemeinschaftspraxis", "kollegen", "kolleginnen", "nord", "süd",
-                        "ost", "west", "mitte", "nordost", "nordwest", "südost", "südwest"})
+                        "ost", "west", "mitte", "nordost", "nordwest", "südost", "südwest",
+                        # Sparten in Abteilungszeilen ("Leistungsabteilung Kranken", "Schadenservice Kfz")
+                        "kranken", "leben", "sach", "kfz", "kraftfahrt", "unfall", "haftpflicht", "rechtsschutz",
+                        "hausrat", "wohngebäude", "pflege", "komposit", "vorsorge"})
 _AUFTRAG_RE = re.compile(r"(?i)(?<![\w.])(?:i\.\s?[av]\.|ppa\.|gez\.|pp\.)")
+# OCR: großes I am Wortanfang als kleines l gelesen ("llir", "lrina") – kein deutsches Wort beginnt mit l + Konsonant
+_OCR_KLEIN_L_RE = re.compile(r"l[bcdfghjklmnpqrstvwxzß]")
+# OCR: Buchstaben, deren Groß- und Kleinform gleich aussehen – direkt hinter Anrede/Titel liest die OCR "schüßler"
+_FORMGLEICH_KLEIN = frozenset("ckopsuvwxz")
+# OCR: zwei Wörter ohne Leerzeichen zusammengelesen ("LukasKrause")
+_ZUSAMMEN_RE = re.compile(r"([A-ZÄÖÜ][a-zäöüß]{2,})([A-ZÄÖÜ][a-zäöüß]{2,})")
+GRUSS_ZEILEN = 4               # so viele Zeilen unter einer Grußformel gehören zum Unterschriftsblock (Namensregel)
+# Geschäftsbezeichnungen, hinter denen oft der Familienname des Inhabers steht ("Werkstatt Weiß", "Bäckerei Hofmeister")
+_GESCHAEFTE = frozenset({
+    "werkstatt", "autowerkstatt", "kfz-werkstatt", "autohaus", "firma", "fa.", "bäckerei", "metzgerei", "fleischerei",
+    "konditorei", "malerbetrieb", "malermeister", "schreinerei", "tischlerei", "zimmerei", "dachdeckerei", "glaserei",
+    "gärtnerei", "lackiererei", "karosseriebau", "spedition", "bauunternehmen", "baufirma", "elektro", "sanitär",
+    "heizungsbau", "hausverwaltung", "immobilien", "gaststätte", "restaurant", "café", "pension", "hotel",
+    "reisebüro", "fahrschule", "pflegedienst", "apotheke", "kanzlei", "praxis", "zahnarztpraxis", "physiotherapie",
+    "ingenieurbüro", "architekturbüro", "steuerbüro", "gutachterbüro", "sachverständigenbüro", "maklerbüro",
+    "versicherungsbüro", "abschleppdienst", "schlüsseldienst", "autovermietung", "optik", "friseur", "salon"})
 _UMLAUT_GRUND = {"ä": "a", "ö": "o", "ü": "u", "Ä": "A", "Ö": "O", "Ü": "U"}
 
 
@@ -548,7 +619,7 @@ class _Seitenpruefung:
     """Alle Regeln für EINE Seite des Seitenmodells der Ausgabe."""
 
     def __init__(self, m, wissen: _Wissen, platzhalter=(), nie=(), abgewaehlt=(), profil: str = "hoch",
-                 schwaerzungen=()):
+                 schwaerzungen=(), ausrichtung=None):
         self.m = m
         self.schwaerzungen = [fitz.Rect(r) for r in schwaerzungen or ()]
         self.text = m.text
@@ -563,6 +634,11 @@ class _Seitenpruefung:
         self.platzhalter = [(s, e) for s, e, art in self.gesperrt if art == "platzhalter"]
         self._ph_boxen = None
         self._freie_schwaerzungen: list = []
+        self._ausrichtung = ausrichtung        # (Winkel, Schräglage) der OCR-Wörter, falls bekannt
+        self._ocr_lage = None
+        self._quelle_block = {b.id: b.quelle for b in getattr(m, "bloecke", None) or ()}
+        self._org_zellen = None                # {Zeilen-ID: [(start, ende, Art)]} – Zellen in Organisationsbereichen
+        self._fusszeilen = None                # Zeilen-IDs des Fußbereichs eines Unternehmens
 
     # -- Gesperrte Bereiche: Platzhalter, NIE-Liste, abgewählte Stellen ----------------------------------
     def _sperren(self, platzhalter, nie, abgewaehlt) -> list:
@@ -784,18 +860,47 @@ class _Seitenpruefung:
         return [y for _, y in sorted(aus, key=lambda t: t[0])]
 
     def org_kontext(self, pos: int) -> bool:
-        """Steht die Stelle in einer Firmenanschrift (Briefkopf, Fußzeile: Rechtsform, Versicherung, Bank …
-        oder ein Eintrag der Allowlist in derselben Zeile oder bis zu drei Zeilen davor/danach im selben Block)?"""
+        """Steht die Stelle in einem Organisationsbereich (_org_bereiche: Fußbereich eines Unternehmens, Briefkopf
+        oder Anschrift einer Organisation, Zelle mit Organisationsmerkmal) – außerhalb des Fußbereichs nicht hinter
+        einem Anschrift-/Personen-/Kontakt-Etikett ("Anschrift: 27568 Bremerhaven" ist ein Formularwert)?"""
         z = self.zeile(pos)
         if z is None:
             return False
-        ergebnis = self._org.get(z.id)
-        if ergebnis is None:
-            ergebnis = self._org_zeile(z) or any(self._org_zeile(y) for y in self._block_nachbarn(z, 2))
-            self._org[z.id] = ergebnis
-        if ergebnis and self._etikett_vor(z, pos):
-            return False                              # "Anschrift: 27568 Bremerhaven" (Formularwert)
-        return ergebnis
+        self._org_bereiche()
+        if z.id in self._fusszeilen:
+            return True
+        if not any(s <= pos < e for s, e, _ in self._org_zellen.get(z.id, ())):
+            return False
+        return not self._etikett_vor(z, pos)
+
+    def im_fussbereich(self, pos: int) -> bool:
+        """Steht die Stelle im Fußbereich eines Unternehmens (Pflichtangaben, Bankverbindung)?"""
+        z = self.zeile(pos)
+        if z is None:
+            return False
+        self._org_bereiche()
+        return z.id in self._fusszeilen
+
+    def org_wert(self, pos: int, ende: int) -> bool:
+        """Ist die Ziffern-/Zeichenfolge an pos eine Angabe der Organisation selbst – Telefon-, Register-, Steuer-
+        und Kontonummern im Fußbereich oder in den Zeilen unter dem Namen einer Organisation (Briefkopf), nicht in
+        einer Zelle, die eine Organisation nur nennt (Bestandsliste: "Allianz 12345678" ist eine Vertragsnummer) –
+        und kein Wert hinter einem Kennungs-, Personen- oder Geburtsdatum-Etikett ("Kunden-Nr. 4711" in einer
+        laufenden Fußzeile bleibt verdächtig)?"""
+        z = self.zeile(pos)
+        if z is None:
+            return False
+        self._org_bereiche()
+        if z.id not in self._fusszeilen:
+            if not any(s <= pos < e and art == "block" for s, e, art in self._org_zellen.get(z.id, ())):
+                return False
+            if self._etikett_vor(z, pos):
+                return False
+        if _UST_ID_RE.fullmatch(self.text[pos:ende]):
+            return True                          # USt-IdNr. der Organisation (auch hinter verlesenem "USt-IdNr.")
+        etikett = self.etikett_davor(pos, ende, ("kennung", "person", "datum_geburt"), fenster=30)
+        # hinter Bank-, Steuer- und Registeretiketten (IBAN, BIC, USt-IdNr.) stehen hier Angaben der Organisation
+        return etikett is None or bool(_ORG_ETIKETT_RE.search(etikett[1]))
 
     def _etikett_vor(self, z, pos: int) -> bool:
         """Steht vor pos in derselben Zeile ein Anschrift-/Personen-/Kontakt-Etikett mit Doppelpunkt?"""
@@ -805,29 +910,238 @@ class _Seitenpruefung:
                 return True
         return False
 
-    def _block_nachbarn(self, z, anzahl: int) -> list:
-        zeilen = [y for y in self.m.zeilen if y.block == z.block]
-        try:
-            i = next(k for k, y in enumerate(zeilen) if y.id == z.id)
-        except StopIteration:
-            return []
-        return zeilen[max(0, i - anzahl):i]
-
     def _org_zeile(self, z) -> bool:
         schluessel = ("zeile", z.id)
-        if schluessel in self._org:
-            return self._org[schluessel]
-        t = _URL_RE.sub(" ", _EMAIL_RE.sub(" ", self.zeilen_text(z)))
-        ergebnis = bool(_RECHTSFORM_RE.search(t) or _ORG_WORT_RE.search(t))
-        if not ergebnis:
-            index = self.w.index("allowlist")
+        if schluessel not in self._org:
+            self._org[schluessel] = self._org_text(self.zeilen_text(z))
+        return self._org[schluessel]
+
+    def _org_text(self, text: str) -> bool:
+        """Trägt der Text ein Organisationsmerkmal: Rechtsform, Organisationswort ("Versicherung", "Bank" …),
+        Eintrag der Allowlist oder eine Pflichtangabe (Registergericht, HRB, USt-IdNr., Vorstand …)?"""
+        t = _URL_RE.sub(" ", _EMAIL_RE.sub(" ", text))
+        if _RECHTSFORM_RE.search(t) or _ORG_WORT_RE.search(t) or _PFLICHTANGABE_RE.search(t):
+            return True
+        return self._allowlist_in(t)
+
+    def _allowlist_in(self, t: str) -> bool:
+        index = self.w.index("allowlist")
+        try:
+            return index is not None and any(len(v.text) >= 4 and v.text[:1].isupper() for v in index.finde(t))
+        except Exception:
+            return False
+
+    def _org_name(self, text: str) -> bool:
+        """Ist die Zelle NUR der Name einer Organisation (Kopf eines Briefkopfs, einer Anschrift, einer Spalte der
+        Fußzeile): ohne Ziffern, bis zu sechs großgeschriebene Wörter (dazu Verbindungswörter und Teile der
+        Rechtsform) mit Rechtsform oder – bis zu vier Wörter – mit Organisationswort ("Kreissparkasse Talheim")? Kein
+        Satz, der eine Versicherung nur erwähnt ("Die Donau Leben AG hat Ihren Antrag geprüft"), keine Zeile, die
+        schon die Anschrift trägt (Rücksendeangabe: darunter folgt die Anschrift des Empfängers). Die Allowlist
+        zählt hier nicht: sie führt auch Produkte und Fachwörter wie "Regelaltersrente"."""
+        t = _URL_RE.sub(" ", _EMAIL_RE.sub(" ", text)).strip()
+        if not t or any(c.isdigit() for c in t) or _PERSONEN_PLATZHALTER_RE.search(t) \
+                or _ANSCHRIFT_PLATZHALTER_RE.search(t):
+            return False
+        woerter = re.findall(r"[^\W\d_][\w\-'.]*", t)
+        if not woerter or not all((w[:1].isupper() and w.lower() not in _STOPPWOERTER) or _RECHTSFORM_RE.fullmatch(w)
+                                  or w.lower().rstrip(".") in _ORG_VERBINDER for w in woerter):
+            return False
+        if _RECHTSFORM_RE.search(t):
+            return len(woerter) <= 6
+        return bool(_ORG_WORT_RE.search(t)) and len(woerter) <= 4
+
+    # -- Organisationsbereiche: Fußzeile und Briefkopf eines Unternehmens --------------------------------
+    def _herkunft(self, z) -> str:
+        """Herkunft einer Zeile: "text" (Textebene) oder "ocr" (OCR der Seite oder eines Bildbereichs)."""
+        return "text" if self._quelle_block.get(z.block, "text") == "text" else "ocr"
+
+    def ocr_lage(self) -> tuple:
+        """(Winkel, Schräglage) der OCR-Wörter der Seite – übergeben oder wie im Seitenmodell geschätzt."""
+        if self._ocr_lage is None:
+            if self._ausrichtung is not None:
+                self._ocr_lage = (int(self._ausrichtung[0] or 0) % 360, float(self._ausrichtung[1] or 0.0))
+            else:
+                stellen = _wortstellen(self.m)
+                self._ocr_lage = (_ocr.ausrichtung_der_woerter([(b.x0, b.y0, b.x1, b.y1, self.text[s:e])
+                                                                 for s, e, b in stellen]) if stellen else (0, 0.0))
+        return self._ocr_lage
+
+    def lese_rect(self, r, herkunft: str):
+        """Rechteck in Lesekoordinaten seiner Herkunft (Textebene: Seite; OCR: gerade gerückt nach Ausrichtung)."""
+        if herkunft == "text":
+            return fitz.Rect(r)
+        winkel, schraeg = self.ocr_lage()
+        return _lesekasten(fitz.Rect(r), winkel, schraeg)
+
+    def _org_bereiche(self) -> None:
+        """Organisationsbereiche der Seite, einmal je Seite und je Herkunft (Textebene, OCR) in deren
+        Lesekoordinaten (auch auf gedrehten Scans liegt die Fußzeile so unten); gearbeitet wird mit Zellen (Spalten
+        einer Zeile), nicht ganzen Zeilen – eine OCR-Zeile reicht oft über mehrere Spalten:
+          * Fußbereich: die Zeilen am unteren Seitenrand (unterhalb FUSS_ANTEIL der Seitenhöhe, dicht untereinander,
+            Schrift nicht größer als darunter), wenn eine davon eine Pflichtangabe trägt (Registergericht, HRB,
+            USt-IdNr., Sitz, Vorstand, Aufsichtsrat, Geschäftsführer, Bankverbindung; eine Rechtsform allein steht
+            auch im Unterschriftsblock) – Anschriften, Telefon-, Register-, Steuer- und Kontonummern, IBAN und BIC
+            dort sind Angaben des Unternehmens;
+          * Organisationsblock (Art "block"): unter einer Zelle mit dem Namen einer Organisation (_org_name) bis zu
+            ORG_BLOCK_ZEILEN Zellen direkt darunter in derselben Spalte, Schrift nicht größer (Briefkopf, Anschrift
+            der Versicherung im Anschriftfeld, Spalte einer Fußzeile) – bis zu einem Personen-/Anschrift-Platzhalter,
+            einer Anrede oder einem Personen-, Kennungs- oder Geburtsdatum-Etikett –, dazu reine Anschrift-Zellen
+            rechts neben dem Namen (_anschrift_daneben);
+          * Zelle mit eigenem Organisationsmerkmal (Art "eigen", _org_name oder _org_merkmal: "Alpenland
+            Krankenversicherung a.G. · Prinzregentenplatz 21 · 81675 München") – dort gelten nur Anschrift, Telefon,
+            BIC und Internetadresse als Angaben der Organisation (org_kontext), keine weiteren Nummern (org_wert):
+            "Allianz 12345678" in einer Bestandsliste ist eine Vertragsnummer.
+        Namen bleiben überall verdächtig (die Namensregeln fragen den Bereich nicht)."""
+        if self._org_zellen is not None:
+            return
+        self._org_zellen, self._fusszeilen = {}, set()
+        je_herkunft: dict = {}
+        for z in self.m.zeilen:
+            if z.rect is None:
+                continue
+            inhalt = self.zeilen_text(z)
+            if not inhalt.strip():
+                continue
+            herkunft = self._herkunft(z)
+            for a, b in _zellen(inhalt):
+                s, e = z.start + a, z.start + b
+                box = self.box(s, e)
+                if box is None or box.is_empty:
+                    continue
+                je_herkunft.setdefault(herkunft, []).append((self.lese_rect(box, herkunft), z, s, e, inhalt[a:b]))
+        for herkunft, zellen in je_herkunft.items():
+            self._fussbereich(herkunft, zellen)
+            nach_y = sorted(zellen, key=lambda c: c[0].y0)
+            for zelle in zellen:
+                name = self._org_name(zelle[4])
+                if name or self._org_merkmal(zelle[4]):
+                    self._org_zellen.setdefault(zelle[1].id, []).append((zelle[2], zelle[3], "eigen"))
+                if name:
+                    for c in self._org_block(zelle, nach_y)[1:] + self._anschrift_daneben(zelle, zellen):
+                        self._org_zellen.setdefault(c[1].id, []).append((c[2], c[3], "block"))
+
+    @staticmethod
+    def _anschrift_daneben(name, zellen: list) -> list:
+        """Zellen rechts neben einem Organisationsnamen in derselben Zeile, die nur eine Anschrift sind (Straße,
+        Hausnummer, PLZ + Ort): die Rücksendeangabe "Taunus Krankenversicherung AG · Kaiser-Friedrich-Promenade 4 ·
+        61352 Bad Homburg", von der OCR in Zellen zerlegt. Nur die unmittelbar folgenden Zellen und nur ohne weitere
+        Ziffernfolgen – in einer Tabelle folgt auf den Versicherer eine Vertragsnummer, keine Anschrift."""
+        aus = []
+        folgende = sorted((c for c in zellen if c[1].id == name[1].id and c[2] >= name[3]), key=lambda c: c[2])
+        for c in folgende[:2]:
+            t = c[4]
+            if _PERSONEN_PLATZHALTER_RE.search(t) or _ANSCHRIFT_PLATZHALTER_RE.search(t):
+                break
+            plz = _PLZ_ORT_RE.search(t)
+            strasse = _STRASSE_RE.search(t) or _STRASSE_PRAEP_RE.search(t)
+            if not (plz or strasse):
+                break
+            if any(len(g) > 4 and not (plz and g == plz.group(1)) for g in re.findall(r"\d+", t)):
+                break
+            aus.append(c)
+        return aus
+
+    def _org_merkmal(self, text: str) -> bool:
+        """Organisationsmerkmal irgendwo in der Zelle: Rechtsform, Pflichtangabe oder Eintrag der Allowlist
+        ("Alpenland Krankenversicherung a.G. · Prinzregentenplatz 21 · 81675 München", "DEVK") – ein Satz, der nur
+        eine Versicherung erwähnt ("Kündigung meiner Hausratversicherung"), ist keins."""
+        t = _URL_RE.sub(" ", _EMAIL_RE.sub(" ", text))
+        if _ist_fliesstext(t):
+            return False                    # ein Satz: "Die Donau Leben AG hat Ihre Anschrift Hauptstr. 5 gespeichert"
+        return bool(_RECHTSFORM_RE.search(t) or _PFLICHTANGABE_RE.search(t)) or self._allowlist_in(t)
+
+    def _fussbereich(self, herkunft: str, zellen: list) -> None:
+        seite = self.lese_rect(self.m.rect, herkunft)
+        grenze = seite.y0 + FUSS_ANTEIL * seite.height
+        faktor = FUSS_SCHRIFT if herkunft == "text" else SCHRIFT_OCR
+        zeilen: dict = {}
+        for r, z, *_ in zellen:
+            zeilen[z.id] = (r | zeilen[z.id][0], z) if z.id in zeilen else (r, z)
+        unten = sorted((t for t in zeilen.values() if t[0].y0 >= grenze), key=lambda t: -t[0].y1)
+        fuss, oben, groesste = [], None, 0.0
+        for r, z in unten:
+            h = max(r.height, 1.0)
+            if fuss and (r.y1 < oben - max(FUSS_LUECKE * min(h, groesste), 3.0)
+                         or h > faktor * max(groesste, FUSS_SCHRIFT_MIN) + 1.0):
+                break                      # Abstand zum Text darüber oder größere Schrift: der Fußbereich ist zu Ende
+            fuss.append(z.id)
+            oben = r.y0 if oben is None else min(oben, r.y0)
+            groesste = max(groesste, h)
+        if not fuss:
+            return
+        # nur mit Pflichtangabe: eine Rechtsform allein steht auch im Unterschriftsblock ("Donau Leben AG")
+        if any(z.id in fuss and _PFLICHTANGABE_RE.search(t) for _, z, s, e, t in zellen):
+            self._fusszeilen.update(fuss)
+
+    def _org_block(self, start, nach_y: list) -> list:
+        """Zellen direkt unter einem Organisationsnamen in derselben Spalte (siehe _org_bereiche) – nicht aus einer
+        Tabellenzeile heraus (der Name ist eine von mehreren Zellen seiner Zeile: Spalte "Versicherer" einer
+        Bestandsliste, darunter die nächste Zeile mit einer Vertragsnummer)."""
+        gruppe, akt = [start], start
+        zellen_der_zeile = [c for c in nach_y if c[1].id == start[1].id
+                            and sum(ch.isalnum() for ch in c[4]) >= 3]       # OCR-Krümel ("Bu", "a") zählen nicht
+        if len(zellen_der_zeile) >= 3:
+            return gruppe
+        for _ in range(ORG_BLOCK_ZEILEN):
+            r = akt[0]
+            h = max(r.height, 1.0)
+            naechste = None
+            for c in nach_y:
+                cr = c[0]
+                if cr.y0 < r.y1 - 0.5 * h or c in gruppe:
+                    continue
+                if cr.y0 > r.y1 + ORG_BLOCK_LUECKE * max(h, cr.height):
+                    break
+                ueberlapp = min(cr.x1, r.x1) - max(cr.x0, r.x0)
+                if ueberlapp >= 0.3 * min(cr.width, r.width) or abs(cr.x0 - r.x0) <= 1.5 * h:
+                    naechste = c
+                    break
+            if naechste is None:
+                break
+            faktor = ORG_BLOCK_SCHRIFT if self._herkunft(naechste[1]) == "text" else SCHRIFT_OCR
+            if naechste[0].height > faktor * h + 1.0 or self._block_ende(naechste[4]):
+                break
+            gruppe.append(naechste)
+            akt = naechste
+        return gruppe
+
+    def _block_ende(self, text: str) -> bool:
+        """Endet ein Organisationsblock vor dieser Zelle: Personen-/Anschrift-Platzhalter (auch als OCR-Bruchstück),
+        Anrede ("Herrn", "Frau"), Personen-, Kennungs- oder Geburtsdatum-Etikett ("Ansprechpartner",
+        "Kundennummer"), Fließtext oder etwas, das ein Personenname sein kann (zwei, drei großgeschriebene Wörter, von
+        denen eines kein gewöhnliches Wort ist: "Kristóf Vargha" – die Anschrift darunter gehört dann einer Person)?"""
+        ohne_adressen = _URL_RE.sub(" ", _EMAIL_RE.sub(" ", text))
+        if _PERSONEN_PLATZHALTER_RE.search(text) or _ANSCHRIFT_PLATZHALTER_RE.search(text) \
+                or _ist_fliesstext(ohne_adressen) or self._org_merkmal(text):
+            return True                     # eine weitere Organisation (Tabellenzeile) beginnt ihren eigenen Block
+        for g in re.finditer(r"\d+", text):
+            if len(g.group(0)) < 5:
+                continue
+            if len(g.group(0)) == 5 and re.match(r"[ \t]{1,2}[A-ZÄÖÜ]", text[g.end():g.end() + 3]):
+                continue                    # PLZ + Ort
+            if re.search(r"(?:\+\d{1,3}|\(?0\d{1,5}\)?)[\s/()-]{0,3}(?:\d+[\s/-]{1,2}){0,3}$", text[:g.start()]) \
+                    or g.group(0).startswith("0"):
+                continue                    # Teil einer Telefonnummer ("089 216012345", "+49 89 21600")
+            return True                     # lange Nummer, die weder PLZ noch Telefon ist (Vertragsnummer)
+        namenswoerter = re.findall(r"[^\W\d_][\w\-'.]*", text)
+        if (2 <= len(namenswoerter) <= 3 and not any(c.isdigit() for c in text) and not self._org_text(text)
+                and all(w[:1].isupper() for w in namenswoerter)
+                and any(not self._wort_harmlos(w.rstrip(".")) for w in namenswoerter)):
+            return True
+        woerter = text.split()
+        if not woerter:
+            return True
+        if any(w.strip(".,:").lower() in _ANREDEN for w in woerter) or any(
+                _platzhalter_bruchstueck(w) for w in woerter if "[" in w or "]" in w or w.strip("()|!.,:;").isupper()):
+            return True
+        for art in ("person", "kennung", "datum_geburt"):
+            index = self.w.index(art)
             try:
-                ergebnis = index is not None and any(len(v.text) >= 4 and v.text[:1].isupper()
-                                                     for v in index.finde(t))
+                if index is not None and index.finde(text):
+                    return True
             except Exception:
-                ergebnis = False
-        self._org[schluessel] = ergebnis
-        return ergebnis
+                continue
+        return False
 
     # -- Etiketten ----------------------------------------------------------------------------------
     def _etikett_in(self, text: str, arten):
@@ -960,7 +1274,7 @@ class _Seitenpruefung:
             zeile = self.zeilen_text(z)
             if not zeile.strip():
                 continue
-            maske = self._maske(zeile)
+            maske = self._maske(zeile, z)
             self._kennungen(z, zeile, maske)
             self._formen(z, zeile, maske)
             self._daten(z, zeile)
@@ -994,17 +1308,29 @@ class _Seitenpruefung:
                 self.neu(s, e, "Ort in Ort-Datum-Zeile (Wohnort?)", "anschrift")
 
     # Masken: Beträge, Uhrzeiten, Paragrafen, Prozent, Jahresbereiche, Verhältnisse, Datumsangaben
-    def _maske(self, zeile: str) -> list:
+    def _datumsformen(self, z) -> tuple:
+        """Datumsformen einer Zeile – auf OCR-Zeilen auch mit einer angehängten Ziffer ("01.07.20836")."""
+        if z is not None and self._herkunft(z) == "ocr":
+            return _DATUM_RES + _DATUM_OCR_RES
+        return _DATUM_RES
+
+    def _maske(self, zeile: str, z=None) -> list:
         maske = [False] * len(zeile)
         for regex in (_BETRAG_RE, _UHRZEIT_RE, _PARAGRAF_RE, _PROZENT_RE, _JAHRESBEREICH_RE):
             for m in regex.finditer(zeile):
                 for i in range(m.start(), m.end()):
                     maske[i] = True
-        for regex, art in _DATUM_RES:
+        heute = _heute()
+        for regex, art in self._datumsformen(z):
+            verlesen = regex in (r for r, _ in _DATUM_OCR_RES)
             for m in regex.finditer(zeile):
-                if self._datum(m, art) is not None:
-                    for i in range(m.start(), m.end()):
-                        maske[i] = True
+                datum = self._datum(m, art)
+                if datum is None:
+                    continue
+                if verlesen and datum <= heute and ALTER_MIN <= heute.year - datum.year <= ALTER_MAX:
+                    continue                # verlesenes Datum mit möglichem Geburtsjahr: die Ziffern bleiben Verdacht
+                for i in range(m.start(), m.end()):
+                    maske[i] = True
         return maske
 
     def _kennungen(self, z, zeile: str, maske: list):
@@ -1021,7 +1347,8 @@ class _Seitenpruefung:
                     luecke = zeile[tokens[j][1]:ns]
                     if (zeile[ns:ne].replace("-", "").replace("/", "").isdigit() and len(luecke) <= 4
                             and set(luecke) <= _LUECKE_KETTE and luecke.count(" ") <= 2
-                            and not any(maske[tokens[j][1]:ns])):
+                            and not any(maske[tokens[j][1]:ns])
+                            and not (j == i and self._hausnummer_plz(zeile, s, e, ns, ne))):
                         j += 1
                     else:
                         break
@@ -1030,6 +1357,16 @@ class _Seitenpruefung:
                 anfang -= 1                          # "+49" / "(0" davor gehört dazu
             self._kennung_bewerten(z, zeile, anfang, tokens[j][1])
             i = j + 1
+
+    @staticmethod
+    def _hausnummer_plz(zeile: str, s: int, e: int, ns: int, ne: int) -> bool:
+        """Sind die Ziffern s:e eine Hausnummer und ns:ne die Postleitzahl dahinter ("Prinzregentenplatz 21 - 81675
+        München", "Str. 33 01099 Dresden" – die OCR liest "·" als "-" oder gar nicht)? Dann ist es eine Anschrift
+        (die Anschrift-Regeln prüfen Straße und PLZ + Ort), keine Kennung."""
+        return (bool(re.fullmatch(r"\d{1,4}", zeile[s:e])) and bool(re.fullmatch(r"\d{5}", zeile[ns:ne]))
+                and bool(re.match(r"[ \t]{1,2}[A-ZÄÖÜ][a-zäöüß]", zeile[ne:ne + 4]))
+                and bool(re.search(r"(?i)(?:" + _STRASSEN_ENDUNG + r"|[a-zäöüß]{3})\.{0,2}[ \t]{0,2}$",
+                                   zeile[max(0, s - 30):s])))
 
     def _kennung_bewerten(self, z, zeile: str, s: int, e: int):
         stueck = zeile[s:e]
@@ -1044,6 +1381,21 @@ class _Seitenpruefung:
             return
         if re.fullmatch(r"\d{1,3}/\d{1,3}", stueck):
             return                                   # Verhältnis/Tarifstufe "300/150"
+        if _ICD_RE.fullmatch(stueck):
+            return                                   # Diagnoseschlüssel, auch verlesen ("(125.11" für "(I25.11")
+        if _DATUMSFORM_RE.fullmatch(stueck):
+            # Datum, auch verlesen ("0.04.2025"), oder Monat/Jahr ("08.1987"): keine Kennung – ein verlesenes Datum
+            # mit möglichem Geburtsjahr bleibt aber Verdacht (die Datumsregel erkennt es nicht mehr als Datum)
+            jahr = re.search(r"((?:19|20)\d{2})\d?$", stueck)
+            alter = _heute().year - int(jahr.group(1)) if jahr else -1
+            zeitraum = (_BEREICH_DANACH_RE.match(zeile[e:e + 8]) or _BEREICH_DAVOR_RE.search(zeile[max(0, s - 10):s])
+                        or re.match(r"[ \t]+\d{1,2}[.:,]\d{1,2}[.:,]\d{2,4}", zeile[e:e + 16]))
+            if ALTER_MIN <= alter <= ALTER_MAX and not zeitraum \
+                    and not self.etikett_davor(g_s, g_e, ("vertragsdaten",)):
+                self.neu(g_s, g_e, "verlesenes Datum mit möglichem Geburtsjahr", "datum")
+            return
+        if self.org_wert(g_s, g_e):
+            return                                   # Telefon, PLZ, Register-, Konto-, Steuernummer der Organisation
         kompakt = re.sub(r"[\s()/\-.]", "", stueck)
         if (stueck.startswith(("+", "0", "(0")) and kompakt.isdigit() and ziffern >= 6) or stueck.startswith("+"):
             if _SERVICE_NUMMER_RE.search(stueck.replace("(0)", "")) or stueck.endswith("-0"):
@@ -1072,18 +1424,23 @@ class _Seitenpruefung:
         """Formen mit Prüfziffer, Kfz-Kennzeichen, BIC, Ausweis-/ID-artige Werte, Werte hinter Kennungs-Etiketten."""
         o = z.start
         for m in _IBAN_RE.finditer(zeile):
-            if _GLAEUBIGER_ID_RE.match(m.group(1)):
-                continue                             # Gläubiger-Identifikationsnummer eines Unternehmens
+            if _GLAEUBIGER_ID_RE.match(m.group(1)) or self.im_fussbereich(o + m.start(1)) \
+                    or _GLAEUBIGER_ETIKETT_RE.search(zeile[max(0, m.start() - 40):m.start()]):
+                continue                             # Gläubiger-ID (auch "ZZZ" als "222" gelesen), Bankverbindung in
+                                                     # der Fußzeile eines Unternehmens
             if m.group(1)[:2] == "DE" or iban_gueltig(m.group(1)) or _ziffern(m.group(1)) >= 10:
                 grund = "IBAN (Prüfziffer gültig)" if iban_gueltig(m.group(1)) else "IBAN-Form"
                 self.neu(o + m.start(1), o + m.end(1), grund, "form")
         for m in _IBAN_DE_LOSE_RE.finditer(zeile):
-            self.neu(o + m.start(1), o + m.end(1), "IBAN-Form", "form")
+            if not self.im_fussbereich(o + m.start(1)):
+                self.neu(o + m.start(1), o + m.end(1), "IBAN-Form", "form")
         for m in _SVNR_RE.finditer(zeile):
             grund = ("Sozialversicherungsnummer (Prüfziffer gültig)" if sv_nummer_gueltig(m.group(1))
                      else "Sozialversicherungsnummer-Form")
             self.neu(o + m.start(1), o + m.end(1), grund, "form")
         for m in _KVNR_RE.finditer(zeile):
+            if self.im_fussbereich(o + m.start(1)) and self.org_wert(o + m.start(1), o + m.end(1)):
+                continue                             # im Fußbereich: Rest einer USt-IdNr. ("DE904950392")
             grund = ("Krankenversichertennummer (Prüfziffer gültig)" if kvnr_gueltig(m.group(1))
                      else "Krankenversichertennummer-Form")
             self.neu(o + m.start(1), o + m.end(1), grund, "form")
@@ -1098,7 +1455,8 @@ class _Seitenpruefung:
                 continue
             if trenner != "-" and len(ziffern) == 4 and ziffern[:2] in ("19", "20"):
                 continue                             # "SGB VI 2023"
-            if _ORG_NUMMER_RE.search(zeile[max(0, m.start() - 30):m.start()]):
+            if _ORG_NUMMER_RE.search(zeile[max(0, m.start() - 30):m.start()]) or self.org_wert(o + m.start(),
+                                                                                                 o + m.end()):
                 continue
             self.neu(o + m.start(), o + m.end(), "Kfz-Kennzeichen-Form", "form")
         for m in _BIC_RE.finditer(zeile):
@@ -1118,6 +1476,8 @@ class _Seitenpruefung:
                 continue
             mit_etikett = bool(_AUSWEIS_ETIKETT_RE.search(davor))
             id_artig = 8 <= len(wert) <= 12 and buchstaben >= 2 and not re.fullmatch(r"[A-Z]{2,4}\d{1,3}", wert)
+            if id_artig and not mit_etikett and self.org_wert(o + m.start(1), o + m.end(1)):
+                continue                             # USt-IdNr., BIC, Register-Nr. der Organisation (auch verlesen)
             if mit_etikett or id_artig:
                 if icao_gueltig(wert):
                     grund = "Ausweisnummer (Prüfziffer gültig)"
@@ -1150,6 +1510,8 @@ class _Seitenpruefung:
                     or re.fullmatch(r"[\d\s.,]+[€%]?", w) or any(maske[s:s + len(w)]) or _GLAEUBIGER_ID_RE.match(w)
                     or self.ist_platzhalter_bei(o + s, o + s + len(w))):
                 continue
+            if _UST_ID_RE.fullmatch(w) and self.org_kontext(o + s):
+                continue                                # USt-IdNr. in der Fußzeile (Etikett als "uat-ıdNr." gelesen)
             self.neu(o + s, o + s + len(w), f"Wert hinter Etikett »{v.text}«", "etikett")
 
     # Datumsangaben
@@ -1169,7 +1531,7 @@ class _Seitenpruefung:
     def _daten(self, z, zeile: str):
         heute = _heute()
         alle = []
-        for regex, art in _DATUM_RES:
+        for regex, art in self._datumsformen(z):
             for m in regex.finditer(zeile):
                 datum = self._datum(m, art)
                 if datum is not None:
@@ -1199,7 +1561,29 @@ class _Seitenpruefung:
             nachbarn = [x for x in (alle[k - 1] if k else None, alle[k + 1] if k + 1 < len(alle) else None) if x]
             if any(not zeile[min(me, x[1]):max(ms, x[0])].strip(" \t-–—/|[]\\") for x in nachbarn):
                 continue
+            if not zeile[:ms].strip() and not zeile[me:].strip() and self._datum_daneben(z, datum):
+                continue                    # Datum allein in seiner Zelle, rechts daneben das Ende des Zeitraums
             self.neu(s, e, "Datum mit möglichem Geburtsjahr", "datum")
+
+    def _datum_daneben(self, z, datum) -> bool:
+        """Steht rechts neben der Zeile z in derselben Reihe (eigene Zeile des Seitenmodells: Tabellenspalte) allein ein
+        späteres Datum – das Ende eines Zeitraums ("01.06.2005" | "31.05.2010" im Versicherungsverlauf)?"""
+        if z.rect is None:
+            return False
+        for y in self.m.zeilen:
+            r = y.rect
+            if y.id == z.id or r is None or r.x0 < z.rect.x1 - 1 or r.x0 > z.rect.x1 + 250:
+                continue
+            if min(r.y1, z.rect.y1) - max(r.y0, z.rect.y0) < 0.5 * min(r.height, z.rect.height):
+                continue
+            inhalt = self.zeilen_text(y).strip()
+            for regex, art in _DATUM_RES:
+                m = regex.match(inhalt)
+                if m and m.end() >= len(inhalt.split()[0]):
+                    anderes = self._datum(m, art)
+                    if anderes is not None and anderes > datum:
+                        return True
+        return False
 
     # Kontakt: @, +Ländervorwahl, Namen in Internetadressen
     def _kontakt(self, z, zeile: str):
@@ -1222,8 +1606,8 @@ class _Seitenpruefung:
             self.neu(o + m.start(), o + m.start() + len(stueck), "internationale Telefonnummer (+Ländervorwahl)",
                      "kontakt")
         for m in _URL_RE.finditer(zeile):
-            if "@" in zeile[max(0, m.start() - 1):m.start()]:
-                continue
+            if "@" in zeile[max(0, m.start() - 1):m.start()] or self.org_kontext(o + m.start(1)):
+                continue                             # Internetauftritt der Organisation (Briefkopf, Fußzeile)
             for teil in re.split(r"[./\-_~:?#=&+]+", m.group(1)):
                 if len(teil) < 4 or teil.lower() in ("http", "https", "www"):
                     continue
@@ -1273,11 +1657,51 @@ class _Seitenpruefung:
             erstes = text.split()[0]
             if text.isupper() and not any(c.isdigit() for c in text) and self._quelle(o + s) != "text":
                 continue                                # OCR-Salat ("EIS EFESEHE")
+            if self.org_kontext(o + s) or ("\t" in zeile[v.ende:s] and self._kopfzeile(z)):
+                continue                                # Kopfzeile einer Tabelle: "PLZ / Ort ⇥ Sparte ⇥ Versicherer"
+            if erstes.lower().rstrip(".") in _STRASSEN_ANFANG:
+                self._strassenwert(z, zeile, s, v.text)  # "Anschrift: Straße des 17. Juni 72", "Am Markt 3"
+                continue
             vn, nn, vnm, nnm, aw, tit, allow, _ = self.w.art(erstes)
-            if aw or tit or allow or erstes.lower() in _STOPPWOERTER or self.w.ist_etikett(erstes) \
-                    or self.org_kontext(o + s):
+            if aw or tit or allow or erstes.lower() in _STOPPWOERTER or self.w.ist_etikett(erstes):
                 continue
             self.neu(o + s, o + s + len(text), f"Angabe hinter Etikett »{v.text}«", "anschrift")
+
+    def _platzhalter_darunter(self, z) -> bool:
+        """Beginnt die Zeile unter z (auf der Seite, nicht in der Textfolge – Platzhalter stehen im Modell als eigene
+        Zeilen) mit einem Platzhalter?"""
+        if z.rect is None:
+            return False
+        h = max(z.rect.height, 4.0)
+        for _, _, (x0, y0, x1, y1) in self.platzhalter_boxen():
+            mitte = (y0 + y1) / 2
+            if z.rect.y1 - 0.2 * h <= mitte <= z.rect.y1 + 1.6 * h and x0 <= z.rect.x0 + 3 * h:
+                return True
+        return False
+
+    def _strassenwert(self, z, zeile: str, s: int, etikett: str):
+        """Straßenname hinter einem Anschrift-Etikett, der mit einem gewöhnlichen Wort beginnt ("Straße des 17. Juni
+        72", "Am Markt 3", "Platz der Republik 1"): der Wert bis zum Ende der Zelle; endet die Zeile mitten im
+        Straßennamen (Artikel am Ende, noch keine Hausnummer), gehört der Anfang der nächsten Zeile dazu."""
+        o = z.start
+        wert = re.match(r"[^\t,;]*", zeile[s:])
+        ende = s + len(wert.group(0).rstrip(" .:"))
+        if ende <= s or self.ist_platzhalter_bei(o + s, o + ende):
+            return
+        fortsetzung = None
+        if not any(c.isdigit() for c in zeile[s:ende]) and not zeile[ende:].strip():
+            if self._platzhalter_darunter(z):
+                return                                  # der Rest der Anschrift ist geschwärzt ("Am Alten" / [ADRESSE])
+            a = z.ende + 1
+            while a < len(self.text) and self.text[a] in " \n":
+                a += 1
+            treffer = re.match(r"(?:\d{1,2}\.\s?[A-ZÄÖÜ][a-zäöü]+\.?\s)?\d{1,4}\s?[a-zA-Z]?(?![\w])",
+                               self.text[a:a + 40])
+            if treffer and not self.ist_platzhalter_bei(a, a + treffer.end()):
+                fortsetzung = (a, a + treffer.end())
+        self.neu(o + s, o + ende, f"Angabe hinter Etikett »{etikett}«", "anschrift")
+        if fortsetzung is not None:
+            self.neu(fortsetzung[0], fortsetzung[1], f"Angabe hinter Etikett »{etikett}«", "anschrift")
 
     # Namen
     def _namen(self):
@@ -1305,7 +1729,15 @@ class _Seitenpruefung:
         for m in _NAMENSWORT_RE.finditer(text):
             while k < len(stuecke) and stuecke[k][1] <= m.start():
                 k += 1
-            woerter.append((m.start(), m.end(), m.group(0), k))
+            wort = m.group(0)
+            if self._quelle(m.start()) != "text":
+                if _OCR_KLEIN_L_RE.match(wort):
+                    wort = "I" + wort[1:]               # die OCR liest ein großes I am Wortanfang als l ("llir")
+                elif (wort[:1] in _FORMGLEICH_KLEIN and len(wort) >= 3 and 0 < k <= len(stueck_art)
+                      and stueck_art[k - 1] == "titel"
+                      and re.fullmatch(r"[ ]{1,2}", text[stuecke[k - 1][1]:m.start()])):
+                    wort = wort[:1].upper() + wort[1:]  # "Herr Dipl.-Kfm. schüßler": S/s sehen gleich aus
+            woerter.append((m.start(), m.end(), wort, k))
         n = len(woerter)
         arten = [self.w.art(w) for _, _, w, _ in woerter]
 
@@ -1429,11 +1861,36 @@ class _Seitenpruefung:
                                  r"Partnerschaft|& Co)(?![\w])", rest)) \
                 or "&" in text[max(0, woerter[i][0] - 3):woerter[i][0]]
 
+        gruss_zeilen = self._unterschriftszeilen()
+
+        def firmenname(i) -> bool:
+            """Steht das Wort direkt hinter einer Geschäftsbezeichnung ("Werkstatt Weiß", "Bäckerei Hofmeister") und
+            ist es ein Name der Wissensbasis – auf OCR-Seiten auch klein gelesen ("Werkstatt weiß")?"""
+            if not (i > 0 and direkt(i, i - 1) and woerter[i - 1][2].lower() in _GESCHAEFTE):
+                return False
+            w = woerter[i][2]
+            if w[:1].islower():
+                if self._quelle(woerter[i][0]) == "text":
+                    return False
+                w = w[:1].upper() + w[1:]
+            vn, nn, vnm, nnm, aw, tit, allow, part = self.w.art(w)
+            return (vn or nn) and not (aw or tit or allow or part) and len(w) >= 3 and w.lower() not in _STOPPWOERTER
+
         for i, (s, e, w, k) in enumerate(woerter):
+            if firmenname(i) and namenswort(i) and not (self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e)):
+                self.neu(s, e, "Name in einer Firmenbezeichnung", "name")
+                continue
+            zusammen = _ZUSAMMEN_RE.fullmatch(w) if self._quelle(s) != "text" else None
+            if zusammen and not self.ist_gesperrt(s, e) and all(
+                    (a[0] or a[1]) and not (a[4] or a[5] or a[6]) for a in map(self.w.art, zusammen.groups())):
+                self.neu(s, e, "Namen ohne Leerzeichen gelesen", "name")    # OCR: "LukasKrause"
+                continue
             if not gross(i) or not namenswort(i) or w.lower() in _STOPPWOERTER:
                 continue
             if self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e) or _platzhalter_bruchstueck(w):
                 continue
+            if re.match(r"-\n[a-zäöüß]", text[e:e + 3]):
+                continue                                # Silbentrennung am Zeilenende ("Versiche-" / "rer")
             vn, nn, vnm, nnm, aw, tit, allow, part = arten[i]
             if tit or part:
                 continue
@@ -1442,15 +1899,22 @@ class _Seitenpruefung:
             platzhalter = self.neben_platzhalter(s, e, _PERSONEN_PLATZHALTER_RE) is not None
             titel = titel_davor(i)
             etikett = etikett_kontext(i)
-            links_vorname = direkt(i, i - 1) and vorname_stark(i - 1)
+            links_vorname = (direkt(i, i - 1) and vorname_stark(i - 1)
+                             and not (i >= 2 and direkt(i - 1, i - 2) and woerter[i - 2][2].lower() in _MARKEN))
             rechts_nachname = direkt(i, i + 1) and nachname_stark(i + 1) and vn
             komma_paar = ((direkt(i, i + 1, komma=True) and "," in luecke(i, i + 1) and vorname_stark(i + 1) and nn)
                           or (direkt(i, i - 1, komma=True) and "," in luecke(i, i - 1)
                               and nachname_stark(i - 1) and vn))
-            kontext = titel or platzhalter or etikett or links_vorname or rechts_nachname or komma_paar
+            z_wort = self.zeile(s)
+            gruss = (z_wort is not None and z_wort.id in gruss_zeilen and not w.isupper()
+                     and not self._org_zeile(z_wort) and not self._wort_harmlos(w))
+            kontext = titel or platzhalter or etikett or links_vorname or rechts_nachname or komma_paar or gruss
             if vorname_stark(i) or nachname_stark(i) or doppelname(i):
                 stark_kontext = titel or platzhalter or links_vorname
-                if (allow or firma_danach(i) or w.lower() in _MARKEN) and not stark_kontext:
+                marke_davor = i > 0 and direkt(i, i - 1) and woerter[i - 1][2].lower() in _MARKEN
+                marke_davor = marke_davor or (k > 0 and stuecke[k - 1][2] in ("St.", "Sankt", "Hl.")
+                                              and not titel_davor(i))  # "Krankenhaus St. Ansgar"
+                if (allow or firma_danach(i) or w.lower() in _MARKEN or marke_davor) and not stark_kontext:
                     continue
                 if w.isupper() and len(w) <= 4 and not (kontext or spalte_person(i)):
                     continue                            # kurze Versalwörter ("BEER") nur mit Kontext
@@ -1485,6 +1949,34 @@ class _Seitenpruefung:
                 continue                                # OCR-Bruchstücke ("Fran", "Versicherurigsnehmer")
             if titel or (platzhalter and len(w) <= 14) or (etikett and not ocr_wort):
                 self.neu(s, e, "unbekannter Eigenname im Personenkontext", "name")
+            elif gruss and len(w) <= 14:
+                self.neu(s, e, "möglicher Name im Unterschriftsblock", "name")
+
+    def _unterschriftszeilen(self) -> set:
+        """IDs der Zeilen eines Unterschriftsblocks: bis zu GRUSS_ZEILEN Zeilen unter einer Grußformel (Leserichtung,
+        höchstens UNTERSCHRIFT_ZEILEN Zeilenhöhen tiefer, waagerecht im Bereich der Formel, kein Fließtext) – dort
+        steht der Name der Unterzeichnenden."""
+        if "gruss" in self._org:
+            return self._org["gruss"]
+        aus: set = set()
+        zeilen = []
+        for z in self.m.zeilen:
+            inhalt = self.zeilen_text(z)
+            if z.rect is not None and inhalt.strip():
+                zeilen.append((self.lese_rect(z.rect, self._herkunft(z)), z, inhalt, self._herkunft(z)))
+        for r, z, inhalt, herkunft in zeilen:
+            if not ist_grussformel(inhalt) or len(inhalt.split()) > 6:
+                continue
+            h = max(r.height, 8.0)
+            darunter = sorted((t for t in zeilen if t[3] == herkunft and t[1].id != z.id and t[0].y0 >= r.y1 - 0.3 * h
+                               and t[0].y0 <= r.y1 + UNTERSCHRIFT_ZEILEN * h and t[0].x0 >= r.x0 - 15
+                               and t[0].x0 <= r.x0 + UNTERSCHRIFT_BREITE), key=lambda t: t[0].y0)
+            for t in darunter[:GRUSS_ZEILEN]:
+                if _ist_fliesstext(t[2]):
+                    break
+                aus.add(t[1].id)
+        self._org["gruss"] = aus
+        return aus
 
     def _strassenwort(self, i, woerter) -> bool:
         """Wort ist Teil eines Straßennamens ("Theodor-Heuss-Ring", "Goethe Straße")."""
@@ -1523,7 +2015,8 @@ class _Seitenpruefung:
             e = s + len(kern)
             if sum(c.isalnum() for c in kern) >= 3 and _ziffern(kern) \
                     and self._quelle(s) == "text" and self.an_schwaerzung(s, e):
-                self.neu(s, e, "Rest direkt an einer Schwärzung (Wert abgeschnitten?)", "rest")
+                if not self._betrag_oder_datum(kern):    # "1.714,85" in der Nachbarspalte ist kein abgeschnittener Wert
+                    self.neu(s, e, "Rest direkt an einer Schwärzung (Wert abgeschnitten?)", "rest")
                 continue
             nachbar = self.neben_platzhalter(s, e, _ANSCHRIFT_PLATZHALTER_RE)
             if nachbar is None:
@@ -1554,9 +2047,21 @@ class _Seitenpruefung:
                 continue
             if re.fullmatch(r"(?i)" + _STRASSEN_ENDUNG + r"\.?", wort) or self.org_kontext(s):
                 continue
+            if not (vn or nn) and self._wort_harmlos(wort):
+                continue                                # "Fachärztin für Allgemeinmedizin · [ADRESSE]"
             if ocr_wort and not (vn or nn) and (len(wort) < 4 or wort.isupper() or self._kompositum(wort)):
                 continue                                # OCR-Bruchstück ("Dau", "MIRD", "Unfallherg")
             self.neu(s, e, "Rest neben Platzhalter", "rest")
+
+    def _betrag_oder_datum(self, kern: str) -> bool:
+        """Ist das Stück vollständig ein Betrag, ein Prozentsatz oder ein gültiges Datum?"""
+        if _BETRAG_RE.fullmatch(kern) or _PROZENT_RE.fullmatch(kern) or _DATUMSFORM_RE.fullmatch(kern):
+            return True
+        for regex, art in _DATUM_RES:
+            m = regex.fullmatch(kern)
+            if m and self._datum(m, art) is not None:
+                return True
+        return False
 
     def lesung_harmlos(self, s: int, e: int, lese_hoehe: float, uebliche_hoehe: float, fliesstext=False,
                        lese_breite=None, hohe_kaesten=True) -> bool:
@@ -1747,6 +2252,23 @@ def _rechtecke(m, start: int, ende: int) -> list:
     return aus
 
 
+def _merkmalswert(pruefung: _Seitenpruefung, wert: str) -> bool:
+    """Ist der Feldwert ein bloßes Merkmal – ein bis drei kleingeschriebene Wörter ohne Ziffern, keines ein
+    eindeutiger Vor- oder Nachname der Wissensbasis ("polnisch", "ledig", "verheiratet", "männlich")? Solche Werte
+    weisen auf niemanden hin (Namen, Anschriften, Kennungen, Daten sind groß geschrieben oder haben Ziffern); ein
+    klein getippter Name ("max müller") bleibt Verdacht."""
+    if any(c.isdigit() for c in wert):
+        return False
+    woerter = re.findall(r"[^\W\d_]+", wert)
+    if not (1 <= len(woerter) <= 3) or any(not w.islower() for w in woerter):
+        return False
+    for w in woerter:
+        vn, nn, vnm, nnm, *_ = pruefung.w.art(w.capitalize())
+        if (vn and not vnm) or (nn and not nnm):
+            return False
+    return True
+
+
 def _felder_pruefen(pruefung: _Seitenpruefung, felder) -> None:
     """Formularfelder des Originals: steht in der Ausgabe im Feldrechteck noch lesbarer Text (kein Platzhalter),
     wurde der Feldwert nicht geschwärzt."""
@@ -1779,6 +2301,8 @@ def _felder_pruefen(pruefung: _Seitenpruefung, felder) -> None:
             continue
         if all(t.lower().rstrip(".") in _ANREDEN for t in wert.split()):
             continue                                  # "Herr", "Frau" – Anrede
+        if _merkmalswert(pruefung, wert):
+            continue                                  # "polnisch", "ledig", "männlich": Merkmal, kein Personenbezug
         anzeige = re.sub(r"\s+", " ", str(name)).strip(" :")[:40] or "ohne Namen"
         pruefung.neu(s, e, f"Formularfeld »{anzeige}« nicht geschwärzt", "feld")
 
@@ -1788,7 +2312,7 @@ def _seite_pruefen(m, wissen: _Wissen, platzhalter=(), nie=(), abgewaehlt=(), pr
     """Alle Regeln einer Seite. scan_seite: die PDF-Seite einer Scan-Seite (OCR der ganzen Seite) – dann zusätzlich
     die Tinte in Unterschriftsblöcken und neben Personenangaben (_unterschrift_pruefen; deren Verdacht steht vorn);
     ausrichtung: (Winkel, Schräglage) der OCR-Wörter, falls bekannt (10-Tupel)."""
-    pruefung = _Seitenpruefung(m, wissen, platzhalter, nie, abgewaehlt, profil, schwaerzungen)
+    pruefung = _Seitenpruefung(m, wissen, platzhalter, nie, abgewaehlt, profil, schwaerzungen, ausrichtung=ausrichtung)
     pruefung.pruefen()
     _felder_pruefen(pruefung, felder)
     aus = [Verdacht(m.nr, s, e, m.text[s:e], grund, _rechtecke(m, s, e)) for s, e, grund in _zusammenfassen(pruefung)]
@@ -1908,6 +2432,7 @@ HOHE_KAESTEN_ANTEIL = 0.10     # halber senkrechter Auflösung: ab diesem Anteil
 LESUNG_BREITE_MAX = 1.25       # OCR-Wortkasten breiter als 1,25 x Schrifthöhe je gelesenes Zeichen (Schrifthöhe: eigene
                                # oder übliche, die größere): der Kasten passt nicht zum Text – ein Zug, als "Med" oder
                                # "az" gelesen (gemessen auf Scans: gedruckte Wörter bis 1,0, gelesene Züge ab 1,3)
+ZUG_ZEILEN = 5.0               # Unterschriftszug zu einem geschwärzten Namen: höchstens so viele Zeilenhöhen darüber
 ROLLE_ZEILEN = 4.5             # über einer Zeile aus Rollen ("Mandant", "Makler"): so viele Zeilenhöhen – Name, Linie
                                # und der Zug darüber (Generator: Oberkante des Zugs ~4,4 Rollenhöhen über der Rolle)
 # Text einer Rolle: Buchstaben, Teile nur mit Trenner (" ", "/", "/-", "-") oder "(in)" – jede Wiederholung beginnt mit
@@ -2396,8 +2921,50 @@ def _unterschrift_pruefen(seite, m, schwaerzungen, pruefung=None, gemeldet=(), a
         elif (r.height > WORT_HOEHE_MAX * ueblich and pruefung.lesung_harmlos(s, e, r.height, ueblich, **art)
               and bild.ein_textband(b, winkel, ueblich)):
             erklaert.append(b)          # bekanntes Wort im hohen Kasten, der Rest leer (Tabellenkopf mit grauem Grund)
+    # Geschwärzte gedruckte Namen: das graue Rechteck um einen Personen-Platzhalter (die Lage des Namens im Original) –
+    # die Tinte eines Unterschriftszugs darüber gehört zu diesem Namen (zug_zum_namen)
+    namen = []
+    for s, e, rand in pruefung.platzhalter_boxen():
+        if not _PERSONEN_PLATZHALTER_RE.match(text[s:e]):
+            continue
+        glyphen = [fitz.Rect(m.zeichen[g].rect) for g in m.glyphen(s, e)]
+        if not glyphen:
+            continue
+        ph = glyphen[0]
+        for r in glyphen[1:]:
+            ph |= r
+        mitte = fitz.Point((ph.x0 + ph.x1) / 2, (ph.y0 + ph.y1) / 2)
+        grau = [fitz.Rect(r) for r in schwaerzungen if fitz.Rect(r).contains(mitte)]
+        name_r = grau[0] if grau else ph
+        for r in grau[1:]:
+            name_r |= r
+        namen.append(_lesekasten(name_r, winkel, schraeg))
+
+    def zug_zum_namen(g, zug_namen) -> bool:
+        """Ist die Tintengruppe g (Seitenkoordinaten) der Unterschriftszug zu einem geschwärzten gedruckten Namen
+        (zug_namen: Rechtecke der Namen in Lesekoordinaten): über dem Namen oder ihn kreuzend – sie ragt über den Namen
+        hinaus, aber nicht unter ihn –, höchstens ZUG_ZEILEN Zeilenhöhen darüber und waagerecht im Bereich des Namens?
+        Ein Unterschriftszug ist keine lesbare Angabe, und der Name, zu dem er gehört, ist ersetzt."""
+        k = _lesekasten(g, winkel, schraeg)
+        for n in zug_namen:
+            h = hoehe(n)
+            if k.x1 < n.x0 - 2 * h or k.x0 > n.x1 + 4 * h:
+                continue
+            if k.y0 < n.y0 - 0.25 * h and n.y0 - ZUG_ZEILEN * h <= k.y1 <= n.y1 + 0.5 * h:
+                return True
+        return False
+
     verdacht, bekannt, gesehen = [], [], set()
     bild.erklaeren(erklaert)
+    # Nur Namen ohne ungelesenen Rest daneben: steht links oder rechts des grauen Rechtecks auf Namenshöhe noch Tinte
+    # (ein Teil des Namens, den die Erkennung nicht erfasst hat – auch vom Zug gekreuzt), erklärt der Name nichts
+    zug_namen = []
+    for n in namen:
+        h = hoehe(n)
+        seiten = (fitz.Rect(n.x0 - 3 * h, n.y0 + 0.15 * n.height, n.x0 - 1, n.y1 - 0.15 * n.height),
+                  fitz.Rect(n.x1 + 1, n.y0 + 0.15 * n.height, n.x1 + 3 * h, n.y1 - 0.15 * n.height))
+        if not any(_tintengruppen(bild, _aus_lesekasten(r, winkel, schraeg)) for r in seiten):
+            zug_namen.append(n)
     for bereich, grund in bereiche:
         schluessel = tuple(round(x) for x in bereich)
         if schluessel in gesehen:
@@ -2405,6 +2972,10 @@ def _unterschrift_pruefen(seite, m, schwaerzungen, pruefung=None, gemeldet=(), a
         gesehen.add(schluessel)
         gruppen = _tintengruppen(bild, _aus_lesekasten(bereich, winkel, schraeg))
         neu = [g for g in gruppen if not any(abs(g & b) > 0.5 * abs(g) for b in bekannt)]
+        zuege = [g for g in neu if zug_namen and zug_zum_namen(g, zug_namen)]
+        if zuege:
+            bekannt += zuege
+            neu = [g for g in neu if g not in zuege]
         if neu:
             bekannt += neu
             text_v = "Unterschriftsbereich" if grund != GRUND_PERSONENTINTE else "Personenangabe"
