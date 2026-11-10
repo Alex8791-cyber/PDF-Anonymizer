@@ -22,7 +22,10 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-import fitz  # PyMuPDF
+try:
+    import pymupdf as fitz
+except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
+    import fitz
 
 from . import dateien
 from . import gui_attrappen as attrappen
@@ -49,6 +52,10 @@ HINWEIS_VORHER = ("Klick auf ein Wort: schwärzen an/aus · Rahmen ziehen: Berei
                   "schwärzen / nicht schwärzen · Bild auf/ab: Seite blättern")
 HINWEIS_NACHHER = ("Ausgabe nach dem Schwärzen. Orange = Verdacht der Restrisiko-Prüfung. Markierte Verdachtsstellen "
                    "nachschwärzen – oder, wenn nichts Persönliches mehr zu sehen ist, „Freigeben“.")
+# Fotos und Ausweiskopien (Befund Runde 2): Gesicht/Lichtbild, Unterschrift und Handschrift erkennt das Programm nicht
+HINWEIS_FOTO = ("Foto: Gesichter/Lichtbilder, Unterschriften und Handschrift werden NICHT automatisch geschwärzt – "
+                "unter „Geplante Schwärzung“ einen Rahmen darüber ziehen.")
+GANZE_SEITE_RAND = 3.0        # pt: Rahmen eines Seitenverdachts liegt knapp innerhalb des Seitenrands
 
 
 def _engine_hat(name: str) -> bool:
@@ -266,7 +273,7 @@ class VorschauFenster:
         liste_rahmen = tk.Frame(self.nachher_rahmen, bg=FARBE_KARTE)
         liste_rahmen.pack(side="left", fill="both", expand=True)
         self.verdacht_titel = tk.Label(liste_rahmen, text="Verdachtsstellen", font=app.f_fett, bg=FARBE_KARTE,
-                                       anchor="w")
+                                       anchor="w", justify="left", wraplength=app._px(620))
         self.verdacht_titel.pack(fill="x")
         self.verdacht_liste = tk.Listbox(liste_rahmen, height=4, selectmode="extended", font=app.f_normal,
                                          activestyle="none", exportselection=False)
@@ -362,7 +369,17 @@ class VorschauFenster:
         if gesperrt:
             self.status("Gerade läuft eine Analyse oder Schwärzung – Änderungen sind danach wieder möglich.")
         else:
-            self.status(HINWEIS_VORHER if self.modus == "vorher" else HINWEIS_NACHHER)
+            self.status(self._hinweis())
+
+    def _ist_foto(self) -> bool:
+        """Ist die gezeigte Datei ein in eine PDF umgewandeltes Foto bzw. ein Bild-Scan?"""
+        eintrag = getattr(self.app, "arbeitskopien", {}).get(self.pdf) or {}
+        return eintrag.get("art") == "bild"
+
+    def _hinweis(self) -> str:
+        """Bedienhinweis der Statuszeile; bei Fotos zuerst die Warnung zu Gesicht, Unterschrift und Handschrift."""
+        hinweis = HINWEIS_VORHER if self.modus == "vorher" else HINWEIS_NACHHER
+        return f"{HINWEIS_FOTO} {hinweis}" if self._ist_foto() else hinweis
 
     def _ausgabe(self) -> Path | None:
         eintrag = self.app.ausgaben.get(self.pdf)
@@ -420,7 +437,7 @@ class VorschauFenster:
         self.titel_setzen()
         self.seiten = self._seitenzahl()
         ziel = self.seite if seite is None else seite
-        self.status(HINWEIS_VORHER if modus == "vorher" else HINWEIS_NACHHER)
+        self.status(self._hinweis())
         self._knoepfe_aktualisieren()
         self.zeige_seite(max(0, min(int(ziel or 0), self.seiten - 1)), erzwingen=True)
 
@@ -428,7 +445,9 @@ class VorschauFenster:
     # Seiten, Zoom, Zeichnen
     # ------------------------------------------------------------------
     def _datei(self) -> Path:
-        return self._ausgabe() if self.modus == "nachher" else self.pdf
+        """Gezeigte Datei: nachher die Ausgabe, vorher das Original – bei Fotos und entsperrten PDFs dessen
+        Arbeitskopie (die Datei, die die Engine gelesen hat)."""
+        return self._ausgabe() if self.modus == "nachher" else self.app._arbeitsdatei(self.pdf)
 
     def _seitenmasse(self, pfad: Path) -> list:
         schluessel = str(pfad)
@@ -507,6 +526,12 @@ class VorschauFenster:
         immer aus dem Speicher (Attrappe) – ein offener Datei-Handle würde unter Windows „Freigeben“ (Umbenennen)
         und „Verwerfen“ (Löschen) verhindern."""
         if self.modus == "vorher" and vorher_quelle_engine(self.app, self.pdf):
+            # R-01: das Vorschau-Modul der Engine öffnet die Datei nach ihrem Inhalt – eine inzwischen ersetzte Datei,
+            # die MuPDF als Nicht-PDF öffnet, brächte beim Seitenzugriff das ganze Programm zum Absturz
+            art = dateien.datei_art(datei)
+            if not dateien.fuer_engine_erlaubt(art):
+                raise ValueError(f"Die Datei ist keine PDF mehr, sondern {dateien.art_beschreibung(art)} (inzwischen "
+                                 f"ersetzt?) – bitte aus der Liste entfernen und neu hinzufügen.")
             try:
                 return _engine_vorschau.seite_bild(datei, nr, zoom)
             except Exception:
@@ -658,9 +683,26 @@ class VorschauFenster:
             for i, v in enumerate(self._verdacht()):
                 if attrappen.verdacht_feld(v, "seite") != self.seite:
                     continue
-                for r in attrappen.verdacht_feld(v, "rechtecke") or []:
+                rechtecke = attrappen.verdacht_feld(v, "rechtecke") or []
+                for r in rechtecke:
                     self._rechteck(_vergroessert(r), FARBE_VERDACHT, False, 4 if i in auswahl else 2,
                                    tags=("verdacht", f"v_{i}"))
+                if not rechtecke:
+                    # Seitenverdacht ohne Lage (z. B. „Seite nicht lesbar“): Rahmen um die ganze Seite
+                    self._rechteck(self._seiten_rahmen(), FARBE_VERDACHT, False, 5 if i in auswahl else 3,
+                                   tags=("verdacht", "ganze_seite", f"v_{i}"))
+
+    def _seiten_rahmen(self) -> fitz.Rect:
+        """Rechteck knapp innerhalb der gezeigten Seite (für einen Verdacht, der die ganze Seite betrifft)."""
+        try:
+            seite = fitz.Rect(self._seitenmasse(self._datei())[self.seite])
+            seite = fitz.Rect(0, 0, seite.width, seite.height)
+        except Exception:
+            breite = (self._bild.width() if self._bild is not None else 600) / max(self.faktor, 1e-6)
+            hoehe = (self._bild.height() if self._bild is not None else 800) / max(self.faktor, 1e-6)
+            seite = fitz.Rect(0, 0, breite, hoehe)
+        rand = GANZE_SEITE_RAND
+        return fitz.Rect(seite.x0 + rand, seite.y0 + rand, seite.x1 - rand, seite.y1 - rand)
 
     def _warnzeile_setzen(self, fehlend: list):
         if fehlend:
@@ -797,7 +839,7 @@ class VorschauFenster:
             self.status("Rahmen schwärzen kann diese Programmversion noch nicht – bitte Wörter anklicken oder den "
                         "Text in die IMMER-Liste eintragen.")
             return
-        masse = self._seitenmasse(self.pdf)[self.seite]
+        masse = self._seitenmasse(self.app._arbeitsdatei(self.pdf))[self.seite]
         rect = rect & masse
         if rect.is_empty:
             return
@@ -856,21 +898,37 @@ class VorschauFenster:
     # ------------------------------------------------------------------
     # Nach dem Schwärzen: Verdachtsliste, Freigeben, Nachschwärzen, Verwerfen
     # ------------------------------------------------------------------
+    @staticmethod
+    def _hat_lage(verdacht) -> bool:
+        """Hat der Verdacht Rechtecke (nur dann kann „Nachschwärzen“ ihn erfassen)?"""
+        return attrappen.verdacht_feld(verdacht, "seite") is not None and bool(
+            attrappen.verdacht_feld(verdacht, "rechtecke") or [])
+
     def _verdachtsliste_fuellen(self):
         liste = self.verdacht_liste
         liste.delete(0, "end")
         verdacht = self._verdacht()
         ausgabe = self._ausgabe()
         status = (self.app.ausgaben.get(self.pdf) or {}).get("status")
+        ganze_seiten = 0
         for v in verdacht:
             seite = attrappen.verdacht_feld(v, "seite")
             text = str(attrappen.verdacht_feld(v, "text", "") or "").replace("\n", " ")
             grund = attrappen.verdacht_feld(v, "grund", "") or ""
-            liste.insert("end", f"S. {int(seite) + 1 if seite is not None else '?'}: „{text[:50]}“ – {grund}")
+            if seite is not None and not self._hat_lage(v):
+                ganze_seiten += 1                      # Seitenverdacht: Rahmen um die ganze Seite, selbst ansehen
+                liste.insert("end", f"S. {int(seite) + 1} (ganze Seite): {grund}")
+            else:
+                liste.insert("end", f"S. {int(seite) + 1 if seite is not None else '?'}: „{text[:50]}“ – {grund}")
         if verdacht:
-            liste.selection_set(0, "end")
+            # vorausgewählt nur, was „Nachschwärzen“ wirklich erfassen kann (Stellen mit Lage)
+            for i, v in enumerate(verdacht):
+                if self._hat_lage(v):
+                    liste.selection_set(i)
+            zusatz = (f"; {ganze_seiten} {'betrifft' if ganze_seiten == 1 else 'betreffen'} eine ganze Seite – bitte "
+                      f"selbst ansehen und ggf. in „Geplante Schwärzung“ einen Rahmen ziehen" if ganze_seiten else "")
             self.verdacht_titel.config(text=f"{len(verdacht)} Verdachtsstelle(n) in {ausgabe.name if ausgabe else '?'}"
-                                            f" – markierte werden nachgeschwärzt:")
+                                            f" – markierte werden nachgeschwärzt{zusatz}:")
         else:
             liste.insert("end", "Keine Verdachtsstellen gemeldet – bitte die Seiten trotzdem durchsehen.")
             liste.itemconfigure(0, foreground=FARBE_TEXT_GRAU)
@@ -907,10 +965,15 @@ class VorschauFenster:
         if ausgabe is None:
             return
         offen = len(self._verdacht())
+        ganze = sum(1 for v in self._verdacht() if attrappen.verdacht_feld(v, "seite") is not None
+                    and not self._hat_lage(v))
         text = f"„{ausgabe.name}“ zur Weitergabe freigeben? Danach heißt die Datei ohne „_PRUEFEN“."
         if offen:
             text += (f"\n\nEs gibt noch {offen} Verdachtsstelle(n). Nur freigeben, wenn dort nichts Persönliches "
                      f"mehr zu sehen ist – sonst erst „Markierte nachschwärzen“.")
+        if ganze:
+            text += (f" Davon betreffen {ganze} eine ganze Seite (z. B. nicht lesbar) – diese Seite(n) bitte selbst "
+                     f"ganz durchsehen.")
         if not self.app._frage("Ausgabe freigeben", text, warnung=bool(offen), eltern=self.fenster):
             return
         neu = self.app.ausgabe_freigeben(self.pdf)
@@ -964,7 +1027,13 @@ class VorschauFenster:
         if not auswahl:
             self.status("Bitte zuerst eine oder mehrere Verdachtsstellen in der Liste markieren.")
             return
-        if self.app.nachschwaerzen(self.pdf, [verdacht[i] for i in auswahl]):
-            self.status(f"{len(auswahl)} Verdachtsstelle(n) werden nachgeschwärzt …")
+        # Stellen ohne Lage (ganze Seite, Rest ohne Fundort) kann Nachschwärzen nicht erfassen: sind auch Stellen MIT
+        # Lage markiert, werden nur diese nachgeschwärzt; sonst erklärt das Hauptfenster, was zu tun ist
+        mit_lage = [i for i in auswahl if self._hat_lage(verdacht[i])]
+        ohne_lage = len(auswahl) - len(mit_lage)
+        if self.app.nachschwaerzen(self.pdf, [verdacht[i] for i in (mit_lage or auswahl)]):
+            self.status(f"{len(mit_lage or auswahl)} Verdachtsstelle(n) werden nachgeschwärzt …"
+                        + (f" {ohne_lage} ohne Lage (ganze Seite) bitte selbst prüfen." if mit_lage and ohne_lage
+                           else ""))
         else:
             self.status("Nachschwärzen war nicht möglich – siehe Hinweis im Hauptfenster.")

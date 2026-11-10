@@ -1,11 +1,16 @@
-"""Dateiverwaltung: PDFs einsammeln, Einstellungen laden/speichern, Fehlerprotokoll, Ordner öffnen,
-Einzelinstanz-Sperre, verwaiste Zwischendateien, CSV-Vorschau (Kundenliste)."""
+"""Dateiverwaltung: PDFs einsammeln (Inhalt statt Endung, lange Windows-Pfade), Bilder und geschützte PDFs als
+Arbeitskopie im Programmordner für Zwischendateien, Einstellungen laden/speichern, Fehlerprotokoll, Ordner öffnen,
+Einzelinstanz-Sperre, verwaiste Zwischendateien, CSV-Vorschau (Kundenliste).
+
+Das Modul braucht beim Import keine Fremdpakete (das Startskript lädt es vor der Paketprüfung); PyMuPDF wird nur
+in den Funktionen geladen, die es brauchen (Inhalt einer Datei prüfen, Bild umwandeln, Kennwort prüfen/entfernen)."""
 
 import csv
 import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,14 +27,262 @@ FEHLERLOG_DATEI = "fehler.log"
 FEHLERLOG_MAX_BYTES = 200_000          # danach wird nach fehler.log.1 rotiert
 AUSGABE_ORDNER = "anonymisiert"        # Unterordner, in den die Schwärzung schreibt
 ZWISCHENDATEI_MAX_ALTER = 3600.0       # Sekunden; ältere Zwischendateien gelten immer als verwaist
+TEMP_ORDNER = "temp"                   # Arbeitskopien (Bild als PDF, entschlüsselte PDF) je Programmsitzung
+SITZUNG_MAX_ALTER = 7 * 86400.0        # Sekunden; ältere Sitzungsordner werden beim Start immer gelöscht
+PROTOKOLL_PRAEFIX = "PDF-Anonymisierer_Protokoll_"   # Laufprotokolle („Protokoll speichern …“)
 
 # Dateinamen, die die Schwärzung selbst erzeugt (neu: anonym_01.pdf, alt: <name>_anonym.pdf)
 _AUSGABE_NAME = re.compile(r"^anonym_\d+(_PRUEFEN)?$|_anonym$", re.IGNORECASE)
 # Zwischendateien der Schwärzung („.anonym_tmp_<PID>_<Kennung>.pdf“): nie eine Eingabe; bleiben nur nach
 # einem Absturz liegen (GR-11)
 _ZWISCHEN_NAME = re.compile(r"^\.anonym_tmp_(\d+)_", re.IGNORECASE)
+_SITZUNG_NAME = re.compile(r"^sitzung_(\d+)_")
 _CLOUD_MERKMALE = ("onedrive", "dropbox", "icloud", "google drive", "googledrive",
                    "nextcloud", "sharepoint", "box sync", "mega")
+
+# ----------------------------------------------------------------------
+# Inhalt statt Endung (R-01, R-10)
+# ----------------------------------------------------------------------
+KOPF_BYTES = 2048
+# werden auf Wunsch in eine PDF umgewandelt; „bild“ = ein Bildformat, das erst MuPDF selbst erkannt hat
+BILD_ARTEN = ("jpeg", "png", "tiff", "bmp", "pnm", "psd", "bild")
+BILD_ENDUNGEN = frozenset({".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".tif", ".tiff", ".bmp", ".dib"})
+# Nur bei diesen Endungen wird der Inhalt gelesen (bei allen anderen sagt schon die Endung „keine PDF“, und das
+# Lesen würde Cloud-Dateien unnötig herunterladen); „“ = Datei ohne Endung (z. B. Download aus einem Portal)
+_INHALT_ENDUNGEN = frozenset({".pdf", ""}) | BILD_ENDUNGEN
+# Dateien, die Windows, macOS oder Office selbst anlegen – kein Hinweis „keine PDF“ (sonst nur Rauschen)
+_SYSTEM_DATEIEN = frozenset({"desktop.ini", "thumbs.db", "ehthumbs.db", "ehthumbs_vista.db", ".ds_store",
+                             "_zuordnung.txt", "icon\r"})
+ART_BESCHREIBUNG = {
+    "pdf": "eine PDF-Datei", "jpeg": "ein Foto (JPEG)", "png": "ein Bild (PNG)", "tiff": "ein Bild (TIFF, z. B. Fax)",
+    "bmp": "ein Bild (BMP)", "gif": "ein Bild (GIF)", "webp": "ein Bild (WEBP)", "heic": "ein iPhone-Foto (HEIC)",
+    "pnm": "ein Bild (PNM/PAM, z. B. von einem Scanner)", "psd": "ein Bild (Photoshop)", "bild": "ein Bild",
+    "html": "eine Webseite (HTML)", "svg": "eine Grafik (SVG)", "xml": "eine XML-Datei",
+    "office": "eine Office- oder ZIP-Datei (z. B. Word, Excel)", "archiv": "ein Archiv (z. B. TAR)",
+    "ebook": "ein E-Book (z. B. EPUB)", "xps": "ein XPS-Dokument",
+    "ole": "eine ältere Office-Datei oder eine Outlook-Nachricht", "rtf": "ein RTF-Text", "text": "eine Textdatei",
+    "leer": "leer (0 Byte)", "unbekannt": "keine PDF-Datei", "endung": "keine PDF-Datei",
+    "nicht_lesbar": "nicht lesbar"}
+# Inhalte, die mit der Endung .pdf an die Engine gehen dürfen: echte PDFs und Unbestimmtes (Text, leere Datei,
+# unbekannte Bytes), das auch MuPDF NICHT öffnen kann (datei_art fragt MuPDF selbst) – dafür meldet die Engine
+# „keine lesbare PDF-Datei“ oder repariert eine beschädigte PDF. Alles, was MuPDF als Nicht-PDF öffnet (Bilder,
+# Webseiten auch in UTF-16, SVG, XML, FictionBook, ZIP/TAR, PNM, Photoshop …), geht nie an die Engine: der erste
+# Seitenzugriff brachte das ganze Programm zum Absturz (R-01).
+ENGINE_ARTEN = frozenset({"pdf", "text", "leer", "unbekannt"})
+# Arten aus den ersten Bytes, bei denen MuPDF selbst gefragt wird, wie es die Datei öffnet (sie gingen sonst an die
+# Engine): nicht raten, sondern MuPDF fragen – ohne Seitenzugriff, das stürzt nie ab
+_MUPDF_PRUEFEN = frozenset({"pdf", "text", "unbekannt"})
+# MuPDF-Formatangabe (metadata["format"], klein geschrieben) -> Art; was hier fehlt, heißt „format:<Angabe>“
+_MUPDF_FORMATE = (("pnm", "pnm"), ("image", "bild"), ("svg", "svg"), ("html", "html"), ("fictionbook", "xml"),
+                  ("epub", "ebook"), ("mobi", "ebook"), ("tar", "archiv"), ("zip", "archiv"), ("cbz", "archiv"),
+                  ("xps", "xps"))
+_BMP_KOPFGROESSEN = (12, 16, 40, 52, 56, 64, 108, 124)
+_HTML_ANFAENGE = (b"<!doctype html", b"<html", b"<head", b"<body", b"<meta", b"<title", b"<script", b"<!-- ")
+_HEIF_MARKEN = (b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1", b"avif")
+# Netpbm (PNM/PBM/PGM/PPM, z. B. von SANE-Scannern): „P1“ … „P6“, Breite, Höhe (und Maximalwert), Kommentare erlaubt
+_PNM_KOPF = re.compile(rb"P[1-6](?:\s+(?:#[^\n]*\n\s*)*\d+){2,3}\s")
+
+
+def _ist_text(kopf: bytes) -> bool:
+    """Sieht der Anfang einer Datei wie Text aus (kaum Steuerzeichen)?"""
+    if b"\x00" in kopf:
+        return False
+    steuer = sum(1 for b in kopf if b < 32 and b not in (9, 10, 12, 13))
+    return steuer <= len(kopf) // 100
+
+
+def _auszeichnung_art(anfang: bytes) -> str | None:
+    """Webseite, SVG oder XML (auch FictionBook) an einem Textanfang (klein geschrieben, ohne BOM und Leerraum)."""
+    if anfang.startswith(_HTML_ANFAENGE) or (anfang.startswith((b"<?xml", b"<!--")) and b"<html" in anfang):
+        return "html"
+    if b"<svg" in anfang[:600]:
+        return "svg"
+    if anfang.startswith(b"<?xml") or b"<fictionbook" in anfang[:600]:
+        return "xml"
+    return None
+
+
+def art_aus_kopf(kopf: bytes) -> str:
+    """Art einer Datei nach ihren ersten Bytes (nicht nach der Endung): "pdf", "jpeg", "png", "tiff", "bmp", "gif",
+    "webp", "heic", "pnm", "psd", "html", "svg", "xml", "office", "archiv", "ole", "rtf", "text", "leer" oder
+    "unbekannt". Nur eine erste Einordnung – datei_art fragt bei "pdf", "text" und "unbekannt" zusätzlich MuPDF."""
+    if not kopf:
+        return "leer"
+    if b"%PDF" in kopf[:1024]:                      # wie Acrobat: Kennung irgendwo in den ersten 1024 Bytes
+        return "pdf"
+    if kopf.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if kopf.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if kopf[:4] in (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+"):
+        return "tiff"
+    if kopf[:2] == b"BM" and len(kopf) >= 18 and int.from_bytes(kopf[14:18], "little") in _BMP_KOPFGROESSEN:
+        return "bmp"
+    if kopf[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if kopf[:4] == b"RIFF" and kopf[8:12] == b"WEBP":
+        return "webp"
+    if kopf[4:8] == b"ftyp" and kopf[8:12] in _HEIF_MARKEN:
+        return "heic"
+    if kopf[:4] == b"8BPS":
+        return "psd"
+    if _PNM_KOPF.match(kopf) or (kopf.startswith(b"P7\n") and b"ENDHDR" in kopf[:512]):
+        return "pnm"
+    if kopf[:4] == b"PK\x03\x04":
+        return "office"
+    if kopf[257:262] == b"ustar":
+        return "archiv"
+    if kopf[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return "ole"
+    if kopf[:5] == b"{\\rtf":
+        return "rtf"
+    if kopf[:2] in (b"\xff\xfe", b"\xfe\xff"):     # UTF-16 mit BOM (z. B. eine als .pdf gespeicherte Webseite)
+        text = kopf.decode("utf-16", errors="ignore").lstrip("\ufeff").lstrip().lower()
+        return _auszeichnung_art(text.encode("utf-8", errors="ignore")) or "text"
+    auszeichnung = _auszeichnung_art(kopf.lstrip(b"\xef\xbb\xbf").lstrip().lower())
+    if auszeichnung:
+        return auszeichnung
+    if _ist_text(kopf):
+        return "text"
+    return "unbekannt"
+
+
+def _art_laut_mupdf(pfad, art: str) -> str:
+    """Fragt MuPDF selbst, wie es die Datei öffnet – nur öffnen, kein Seitenzugriff (das stürzt nie ab). Öffnet
+    MuPDF sie als PDF: "pdf". Öffnet es sie als etwas anderes (Webseite, Bild, E-Book, Archiv …), darf sie nie an die
+    Engine – die Art kommt dann aus MuPDFs Formatangabe. Kann MuPDF sie gar nicht öffnen, bleibt die Art aus den
+    ersten Bytes: dann meldet auch die Engine nur „keine lesbare PDF-Datei“ (R-01)."""
+    try:
+        fitz = _fitz()
+    except ImportError:                    # ohne PyMuPDF läuft die Engine ohnehin nicht
+        return art
+    try:
+        with fitz.open(langpfad(pfad)) as doc:
+            if doc.is_pdf:
+                return "pdf"
+            angabe = str((doc.metadata or {}).get("format") or "").strip()
+    except Exception:
+        return art
+    klein = angabe.lower()
+    for merkmal, neue_art in _MUPDF_FORMATE:
+        if merkmal in klein:
+            return neue_art
+    return "format:" + (angabe or "?")
+
+
+def datei_art(pfad) -> str:
+    """Art einer Datei nach ihrem INHALT, nicht nach der Endung: erst die ersten Bytes (art_aus_kopf); wäre die Datei
+    damit ein Fall für die Engine ("pdf", "text", "unbekannt"), entscheidet MuPDF selbst (_art_laut_mupdf).
+    "nicht_lesbar", wenn sie nicht geöffnet werden kann."""
+    try:
+        with open(langpfad(pfad), "rb") as datei:
+            kopf = datei.read(KOPF_BYTES)
+    except OSError:
+        return "nicht_lesbar"
+    art = art_aus_kopf(kopf)
+    if art in _MUPDF_PRUEFEN:
+        art = _art_laut_mupdf(pfad, art)
+    return art
+
+
+def ist_bild_art(art: str) -> bool:
+    return art in BILD_ARTEN
+
+
+def fuer_engine_erlaubt(art: str) -> bool:
+    """Darf eine Datei dieser Art (aus datei_art, Endung .pdf) an Analyse, Schwärzung und Vorschau? Nur echte PDFs
+    und was auch MuPDF nicht öffnen kann (dafür meldet die Engine „keine lesbare PDF-Datei“); nicht_lesbar: ja – die
+    Engine meldet den Fehler selbst."""
+    return art in ENGINE_ARTEN or art == "nicht_lesbar"
+
+
+def art_beschreibung(art: str) -> str:
+    if art.startswith("format:"):
+        return f"eine Datei im Format „{art[len('format:'):]}“"
+    return ART_BESCHREIBUNG.get(art, ART_BESCHREIBUNG["unbekannt"])
+
+
+# Dateien, deren Inhalt nicht gelesen wird (die Endung sagt schon „keine PDF“): was sie vermutlich sind
+_ENDUNG_BESCHREIBUNG = {
+    ".msg": "eine Outlook-Nachricht", ".eml": "eine E-Mail", ".doc": "ein Word-Dokument",
+    ".docx": "ein Word-Dokument", ".odt": "ein Textdokument", ".rtf": "ein RTF-Text", ".txt": "eine Textdatei",
+    ".xls": "eine Excel-Tabelle", ".xlsx": "eine Excel-Tabelle", ".ods": "eine Tabelle", ".csv": "eine Tabelle (CSV)",
+    ".ppt": "eine Präsentation", ".pptx": "eine Präsentation", ".heic": "ein iPhone-Foto (HEIC)",
+    ".heif": "ein iPhone-Foto (HEIF)", ".webp": "ein Bild (WEBP)", ".gif": "ein Bild (GIF)",
+    ".zip": "ein Archiv (ZIP)", ".7z": "ein Archiv (7z)", ".rar": "ein Archiv (RAR)",
+    ".htm": "eine Webseite (HTML)", ".html": "eine Webseite (HTML)", ".xml": "eine XML-Datei",
+    ".svg": "eine Grafik (SVG)", ".xps": "ein XPS-Dokument", ".oxps": "ein XPS-Dokument",
+    ".mp4": "ein Video", ".mov": "ein Video", ".mp3": "eine Tonaufnahme", ".m4a": "eine Tonaufnahme"}
+
+
+def endung_beschreibung(name) -> str | None:
+    """Was eine Datei nach ihrer Endung vermutlich ist („eine Outlook-Nachricht“); None, wenn unbekannt."""
+    return _ENDUNG_BESCHREIBUNG.get(_endung(os.fspath(name)))
+
+
+def ist_systemdatei(name: str) -> bool:
+    """Von Windows/macOS/Office angelegte Dateien, versteckte Dateien und Dateien dieses Programms
+    (_zuordnung.txt, Laufprotokolle) – im Ordner-Scan ohne Meldung übergangen."""
+    klein = name.lower()
+    return (klein in _SYSTEM_DATEIEN or name.startswith(("~$", ".")) or klein.startswith(PROTOKOLL_PRAEFIX.lower()))
+
+
+# ----------------------------------------------------------------------
+# Lange Pfade unter Windows (R-09)
+# ----------------------------------------------------------------------
+LANGPFAD_AB = 200        # ab dieser Länge arbeitet das Programm unter Windows mit „\\?\“ (Ausgabeordner und
+#                          Ausgabename machen den Pfad noch um gut 35 Zeichen länger; Grenze sonst 260)
+
+
+def langpfad(pfad, plattform: str | None = None) -> str:
+    """Unter Windows: Pfad mit dem Präfix „\\\\?\\“ (bzw. „\\\\?\\UNC\\“ für Netzwerkpfade) – so öffnet und
+    durchsucht Windows auch Pfade über 260 Zeichen, ohne dass „lange Pfade“ in der Registrierung eingeschaltet sein
+    müssen. Andere Systeme und bereits so geschriebene Pfade bleiben unverändert."""
+    text = os.fspath(pfad)
+    if isinstance(text, bytes):
+        text = os.fsdecode(text)
+    if (plattform or sys.platform) != "win32" or text.startswith("\\\\?\\"):
+        return text
+    if sys.platform == "win32":
+        text = os.path.abspath(text)
+    text = text.replace("/", "\\")
+    if text.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + text[2:]
+    return "\\\\?\\" + text
+
+
+def ohne_langpfad(pfad) -> str:
+    """Pfad ohne das Präfix „\\\\?\\“ – für Anzeige, Vergleich und gemeinsamen Stammordner."""
+    text = os.fspath(pfad)
+    if isinstance(text, bytes):
+        text = os.fsdecode(text)
+    if text.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + text[8:]
+    if text.startswith("\\\\?\\"):
+        return text[4:]
+    return text
+
+
+def pfad_fuer_programm(pfad, plattform: str | None = None) -> Path:
+    """Pfad, mit dem Programm und Engine die Datei öffnen: unter Windows ab LANGPFAD_AB Zeichen mit „\\\\?\\“, sonst
+    der gewohnte Pfad (kurze Pfade bleiben, wie sie sind)."""
+    text = ohne_langpfad(pfad)
+    if (plattform or sys.platform) == "win32" and len(text) >= LANGPFAD_AB:
+        return Path(langpfad(text, plattform))
+    return Path(text)
+
+
+def _lesefehler_text(fehler: OSError, pfad) -> str:
+    """Kurzer Grund, warum eine Datei oder ein Ordner nicht gelesen werden konnte."""
+    nummer = getattr(fehler, "errno", None)
+    winfehler = getattr(fehler, "winerror", None)
+    lang = len(ohne_langpfad(pfad)) >= 250
+    if nummer == 36 or (winfehler in (206, 3) and lang) or (lang and isinstance(fehler, FileNotFoundError)):
+        return "Pfad zu lang – bitte den Ordner näher an C:\\ kopieren"
+    if isinstance(fehler, PermissionError) or winfehler == 5:
+        return "Zugriff verweigert"
+    text = str(getattr(fehler, "strerror", None) or fehler)
+    return text[:80]
 
 
 # ----------------------------------------------------------------------
@@ -51,62 +304,152 @@ def ist_ausgabedatei(pfad: Path) -> bool:
     return bool(_AUSGABE_NAME.search(pfad.stem))
 
 
-def sammle_pdfs_bericht(pfade) -> dict:
-    """
-    Nimmt Dateien UND Ordner entgegen und liefert einen Bericht:
-      {"pdfs": [Path], "uebersprungen": [Path] (keine PDF), "ausgaben": [Path]
-       (bereits anonymisierte Dateien aus Ordner-Scans), "zwischendateien": [Path] (Reste einer
-       abgebrochenen Schwärzung, nie Eingabe), "leere_ordner": [Path], "fehlend": [Path]}
-    Ordner werden rekursiv durchsucht (Endung .pdf in jeder Schreibweise); Ausgaben des
-    Programms werden dabei ausgelassen. Einzeln übergebene Dateien werden angenommen
-    (auch bereits anonymisierte, z. B. zum Nachschwärzen) – außer Zwischendateien.
-    """
-    bericht = {"pdfs": [], "uebersprungen": [], "ausgaben": [], "zwischendateien": [],
-               "leere_ordner": [], "fehlend": []}
-    for eintrag in pfade:
-        pfad = Path(eintrag)
-        if pfad.is_dir():
-            treffer = []
-            try:
-                for datei in pfad.rglob("*"):
-                    try:
-                        if datei.suffix.lower() == ".pdf" and datei.is_file():
-                            treffer.append(datei)
-                    except OSError:
-                        continue
-            except OSError:
-                pass
-            if not treffer:
-                bericht["leere_ordner"].append(pfad)
-                continue
-            for datei in sorted(treffer):
-                if ist_zwischendatei(datei):
-                    bericht["zwischendateien"].append(datei)
-                elif ist_ausgabedatei(datei):
-                    bericht["ausgaben"].append(datei)
-                else:
-                    bericht["pdfs"].append(datei)
-        elif pfad.is_file():
-            if ist_zwischendatei(pfad):
-                bericht["zwischendateien"].append(pfad)
-            elif pfad.suffix.lower() == ".pdf":
-                bericht["pdfs"].append(pfad)
-            else:
-                bericht["uebersprungen"].append(pfad)
-        else:
-            bericht["fehlend"].append(pfad)
+def _leerer_bericht() -> dict:
+    return {"pdfs": [], "bilder": [], "pdf_ohne_endung": [], "uebersprungen": [], "keine_pdf": [],
+            "nicht_lesbar": [], "ausgaben": [], "ausgaben_einzeln": [], "zwischendateien": [], "leere_ordner": [],
+            "fehlend": [], "arten": {}, "gruende": {}}
 
-    # Dubletten entfernen (gleicher Pfad in verschiedener Schreibweise), Reihenfolge behalten
-    eindeutig, gesehen = [], set()
-    for pdf in bericht["pdfs"]:
+
+def _endung(name: str) -> str:
+    return os.path.splitext(name)[1].lower()
+
+
+def _einordnen(bericht: dict, pfad: Path, im_ordner: bool) -> bool:
+    """Ordnet eine Datei nach ihrem Inhalt ein. Liefert True, wenn sie für den Ordner zählt (PDF, Bild, Ausgabe …)."""
+    if ist_zwischendatei(pfad):
+        if not im_ordner or _endung(pfad.name) == ".pdf":
+            bericht["zwischendateien"].append(pfad)
+            return True
+        return False
+    if im_ordner:
+        if ist_systemdatei(pfad.name):
+            return False
+        if any(teil.lower() == AUSGABE_ORDNER for teil in pfad.parts[:-1]):
+            if _endung(pfad.name) == ".pdf":           # alles im Ausgabeordner gehört dem Programm
+                bericht["ausgaben"].append(pfad)
+                return True
+            return False
+    endung = _endung(pfad.name)
+    if endung not in _INHALT_ENDUNGEN:
+        bericht["keine_pdf" if im_ordner else "uebersprungen"].append(pfad)
+        bericht["arten"][pfad] = "endung"
+        return False
+    art = datei_art(pfad)
+    if art == "pdf" or (endung == ".pdf" and art in ENGINE_ARTEN):
+        if endung != ".pdf":
+            bericht["pdf_ohne_endung"].append(pfad)   # PDF ohne passende Endung: Arbeitskopie mit „.pdf“
+        elif ist_ausgabedatei(pfad):
+            if im_ordner:
+                bericht["ausgaben"].append(pfad)
+            else:                                      # einzeln gewählt: wird angenommen, die Oberfläche fragt nach
+                bericht["pdfs"].append(pfad)
+                bericht["ausgaben_einzeln"].append(pfad)
+        else:
+            bericht["pdfs"].append(pfad)
+        return True
+    if ist_bild_art(art):
+        bericht["bilder"].append(pfad)
+        bericht["arten"][pfad] = art
+        return True
+    if art == "nicht_lesbar":
+        bericht["nicht_lesbar"].append(pfad)
+        bericht["gruende"][pfad] = "nicht lesbar (gesperrt oder Pfad zu lang?)"
+        return True
+    bericht["keine_pdf" if im_ordner else "uebersprungen"].append(pfad)
+    bericht["arten"][pfad] = art
+    return False
+
+
+def _ordner_durchsuchen(ordner: Path, bericht: dict) -> bool:
+    """Durchsucht einen Ordner samt Unterordnern (ohne Verknüpfungen zu folgen). Nichts wird still übergangen:
+    Was nicht gelesen werden kann (Zugriff verweigert, Pfad zu lang …), steht unter „nicht_lesbar“ (R-09).
+    Liefert True, wenn etwas Verwertbares (oder Unlesbares) gefunden wurde."""
+    wurzel = langpfad(ordner) if sys.platform == "win32" else os.fspath(ordner)
+    gefunden = []
+    etwas = False
+    stapel = [wurzel]
+    while stapel:
+        aktuell = stapel.pop()
         try:
-            kennung = str(pdf.resolve()).lower() if sys.platform == "win32" else str(pdf.resolve())
+            with os.scandir(aktuell) as eintraege:
+                liste = list(eintraege)
+        except OSError as fehler:
+            pfad = pfad_fuer_programm(aktuell)
+            bericht["nicht_lesbar"].append(pfad)
+            bericht["gruende"][pfad] = _lesefehler_text(fehler, aktuell)
+            etwas = True
+            continue
+        for eintrag in liste:
+            try:
+                if eintrag.is_dir(follow_symlinks=False):
+                    if not (hasattr(eintrag, "is_junction") and eintrag.is_junction()):
+                        stapel.append(eintrag.path)
+                elif eintrag.is_file():
+                    gefunden.append(eintrag.path)
+            except OSError as fehler:
+                pfad = pfad_fuer_programm(eintrag.path)
+                bericht["nicht_lesbar"].append(pfad)
+                bericht["gruende"][pfad] = _lesefehler_text(fehler, eintrag.path)
+                etwas = True
+    for text in sorted(gefunden, key=lambda t: Path(ohne_langpfad(t))):
+        if _einordnen(bericht, pfad_fuer_programm(text), im_ordner=True):
+            etwas = True
+    return etwas
+
+
+def _eindeutig(pfade: list) -> list:
+    """Dubletten entfernen (gleicher Pfad in verschiedener Schreibweise), Reihenfolge behalten."""
+    eindeutig, gesehen = [], set()
+    for pfad in pfade:
+        try:
+            kennung = str(Path(ohne_langpfad(pfad)).resolve())
         except OSError:
-            kennung = str(pdf)
+            kennung = ohne_langpfad(pfad)
+        if sys.platform == "win32":
+            kennung = kennung.lower()
         if kennung not in gesehen:
             gesehen.add(kennung)
-            eindeutig.append(pdf)
-    bericht["pdfs"] = eindeutig
+            eindeutig.append(pfad)
+    return eindeutig
+
+
+def sammle_pdfs_bericht(pfade) -> dict:
+    """
+    Nimmt Dateien UND Ordner entgegen und prüft jede Datei am INHALT (nicht nur an der Endung, R-01). Bericht:
+      "pdfs": [Path]            echte PDFs (einzeln gewählte Ausgaben des Programms eingeschlossen)
+      "bilder": [Path]          Bilder (JPEG, PNG, TIFF, BMP, PNM, Photoshop – auch mit falscher Endung wie
+                                „Foto.pdf“), die die Oberfläche auf Wunsch in eine PDF umwandelt
+      "pdf_ohne_endung": [Path] PDFs ohne die Endung .pdf (z. B. Download aus einem Portal)
+      "uebersprungen": [Path]   einzeln gewählte Dateien, die keine PDF und kein Bild sind
+      "keine_pdf": [Path]       solche Dateien aus Ordner-Scans (R-10; ohne System- und Programmdateien)
+      "nicht_lesbar": [Path]    Dateien/Ordner, die nicht gelesen werden konnten (Grund in "gruende", R-09)
+      "ausgaben": [Path]        Ausgaben des Programms aus Ordner-Scans (ausgelassen)
+      "ausgaben_einzeln": [Path] einzeln gewählte Ausgaben (stehen auch in "pdfs"; die Oberfläche fragt nach, M-63)
+      "zwischendateien": [Path] Reste einer abgebrochenen Schwärzung (nie Eingabe)
+      "leere_ordner": [Path], "fehlend": [Path], "arten": {Path: Art}, "gruende": {Path: Text}
+    Ordner werden rekursiv durchsucht; unter Windows auch über 260 Zeichen hinaus (Präfix „\\\\?\\“).
+    """
+    bericht = _leerer_bericht()
+    for eintrag in pfade:
+        pfad = pfad_fuer_programm(eintrag) if sys.platform == "win32" else Path(eintrag)
+        try:
+            ist_ordner = Path(langpfad(pfad)).is_dir()
+            ist_datei = not ist_ordner and Path(langpfad(pfad)).is_file()
+        except OSError as fehler:
+            bericht["nicht_lesbar"].append(pfad)
+            bericht["gruende"][pfad] = _lesefehler_text(fehler, pfad)
+            continue
+        if ist_ordner:
+            if not _ordner_durchsuchen(pfad, bericht):
+                bericht["leere_ordner"].append(pfad)
+        elif ist_datei:
+            _einordnen(bericht, pfad, im_ordner=False)
+        else:
+            bericht["fehlend"].append(pfad)
+            if len(ohne_langpfad(pfad)) >= 250:
+                bericht["gruende"][pfad] = "Pfad sehr lang"
+    for schluessel in ("pdfs", "bilder", "pdf_ohne_endung"):
+        bericht[schluessel] = _eindeutig(bericht[schluessel])
     return bericht
 
 
@@ -116,14 +459,224 @@ def sammle_pdfs(pfade) -> list[Path]:
 
 
 def gemeinsamer_stamm(pfade) -> Path | None:
-    """Gemeinsamer Elternordner aller Pfade (für die relative Anzeige im Baum); None ohne Pfade."""
-    eltern = [str(Path(p).parent) for p in pfade]
+    """Gemeinsamer Elternordner aller Pfade (für die relative Anzeige im Baum); None ohne Pfade. Das Präfix
+    „\\\\?\\“ langer Windows-Pfade zählt nicht mit."""
+    eltern = [str(Path(ohne_langpfad(p)).parent) for p in pfade]
     if not eltern:
         return None
     try:
         return Path(os.path.commonpath(eltern))
     except ValueError:        # verschiedene Laufwerke unter Windows
         return None
+
+
+# ----------------------------------------------------------------------
+# Arbeitskopien: Bild als PDF, entschlüsselte PDF (R-01, R-12)
+# ----------------------------------------------------------------------
+A4_LANG, A4_KURZ = 842.0, 595.0
+# Art -> Dateityp für MuPDF (None: ein Bildformat, das nur MuPDF selbst erkannt hat – über den Pfad öffnen)
+_BILD_DATEITYP = {"jpeg": "jpg", "png": "png", "tiff": "tiff", "bmp": "bmp", "pnm": "pnm", "psd": "psd",
+                  "bild": None}
+_SITZUNG: Path | None = None
+# Nach dem endgültigen Aufräumen beim Beenden wird keine neue Sitzung (und keine Arbeitskopie) mehr angelegt –
+# sonst entstand still ein neuer Ordner mit einer entschlüsselten Kopie, den erst der nächste Start löschte
+_SITZUNG_BEENDET = False
+
+
+class SitzungBeendet(RuntimeError):
+    """Das Programm wird beendet: es wird keine Arbeitskopie mehr angelegt."""
+
+
+def _fitz():
+    """PyMuPDF erst bei Bedarf laden (das Modul selbst braucht keine Fremdpakete)."""
+    try:
+        import pymupdf as fitz
+    except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
+        import fitz
+    return fitz
+
+
+def temp_basis() -> Path:
+    """Ordner für Arbeitskopien: %LOCALAPPDATA%\\PDF-Anonymisierer\\temp bzw. ~/.local/state/PDF-Anonymisierer/temp –
+    nie im Kundenordner und nie im servergespeicherten (Roaming-)Profil, denn eine entschlüsselte Kopie enthält
+    das ganze Original."""
+    return _zustands_basis() / TEMP_ORDNER
+
+
+def sitzung_beginnen():
+    """Neue Programmsitzung (beim Öffnen des Hauptfensters): Arbeitskopien dürfen (wieder) angelegt werden; ein
+    Ordner einer früheren Sitzung dieses Prozesses wird nicht weiterverwendet."""
+    global _SITZUNG, _SITZUNG_BEENDET
+    _SITZUNG_BEENDET = False
+    _SITZUNG = None
+
+
+def aktuelle_sitzung() -> Path | None:
+    """Ordner der laufenden Sitzung, ohne ihn anzulegen (None: es gibt noch keine Arbeitskopie)."""
+    return _SITZUNG
+
+
+def sitzungsordner() -> Path:
+    """Ordner dieser Programmsitzung („sitzung_<PID>_…“); wird beim ersten Bedarf angelegt. SitzungBeendet, wenn das
+    Programm schon beendet wird (nie still einen neuen Ordner anlegen)."""
+    global _SITZUNG
+    if _SITZUNG_BEENDET:
+        raise SitzungBeendet("Das Programm wird beendet – es wird keine Arbeitskopie mehr angelegt.")
+    if _SITZUNG is None or not _SITZUNG.is_dir():
+        basis = temp_basis()
+        basis.mkdir(parents=True, exist_ok=True)
+        _SITZUNG = Path(tempfile.mkdtemp(prefix=f"sitzung_{os.getpid()}_", dir=basis))
+    return _SITZUNG
+
+
+def _innerhalb_temp(pfad) -> bool:
+    return _liegt_in(Path(pfad), temp_basis())
+
+
+def arbeitskopie_ziel(name: str) -> Path:
+    """Pfad für eine neue Arbeitskopie: eigener Unterordner der Sitzung (gleiche Namen aus verschiedenen
+    Kundenordnern stören sich nicht), der Dateiname bleibt erkennbar – er steht in _zuordnung.txt."""
+    ordner = Path(tempfile.mkdtemp(prefix="kopie_", dir=sitzungsordner()))
+    sicher = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .") or "dokument"
+    if not sicher.lower().endswith(".pdf"):
+        sicher += ".pdf"
+    return ordner / sicher[-120:]
+
+
+def arbeitskopie_entfernen(pfad) -> bool:
+    """Löscht eine Arbeitskopie samt ihrem Unterordner – nur innerhalb des Ordners für Arbeitskopien."""
+    pfad = Path(pfad)
+    if not _innerhalb_temp(pfad):
+        return False
+    ziel = pfad.parent if pfad.parent.name.startswith("kopie_") else pfad
+    try:
+        if ziel.is_dir():
+            shutil.rmtree(ziel)
+        elif ziel.exists():
+            ziel.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def sitzung_aufraeumen(endgueltig: bool = False) -> bool:
+    """Löscht alle Arbeitskopien dieser Sitzung. True, wenn danach nichts mehr übrig ist. endgueltig=True (beim
+    Beenden): danach wird keine neue Sitzung mehr angelegt (SitzungBeendet). Bleibt etwas übrig (unter Windows hält
+    ein noch laufender Lesevorgang die Datei offen), bleibt der Ordner vermerkt – ein weiterer Aufruf versucht es
+    erneut; ordner_loeschen räumt ihn auch später noch gezielt weg."""
+    global _SITZUNG, _SITZUNG_BEENDET
+    if endgueltig:
+        _SITZUNG_BEENDET = True
+    ordner = _SITZUNG
+    if ordner is None:
+        return True
+    if ordner_loeschen(ordner):
+        if _SITZUNG == ordner:
+            _SITZUNG = None
+        return True
+    return False
+
+
+def ordner_loeschen(ordner) -> bool:
+    """Löscht einen Sitzungsordner samt Inhalt – nur innerhalb des Ordners für Arbeitskopien. True, wenn er danach
+    nicht mehr existiert."""
+    ordner = Path(ordner)
+    if not _innerhalb_temp(ordner):
+        return not ordner.exists()
+    if ordner.exists():
+        shutil.rmtree(ordner, ignore_errors=True)
+    return not ordner.exists()
+
+
+def alte_sitzungen_aufraeumen(max_alter: float = SITZUNG_MAX_ALTER) -> list[Path]:
+    """Löscht Arbeitskopien früherer Sitzungen (z. B. nach einem Absturz): Prozess beendet oder Ordner älter als
+    max_alter Sekunden. Die eigene Sitzung bleibt. Liefert die gelöschten Ordner."""
+    entfernt: list[Path] = []
+    try:
+        kandidaten = [p for p in temp_basis().iterdir() if p.is_dir() and _SITZUNG_NAME.match(p.name)]
+    except OSError:
+        return entfernt
+    jetzt = time.time()
+    for ordner in kandidaten:
+        if _SITZUNG is not None and ordner == _SITZUNG:
+            continue
+        pid = int(_SITZUNG_NAME.match(ordner.name).group(1))
+        try:
+            alter = jetzt - ordner.stat().st_mtime
+        except OSError:
+            continue
+        if pid == os.getpid() or (alter < max_alter and prozess_lebt(pid)):
+            continue
+        shutil.rmtree(ordner, ignore_errors=True)
+        if not ordner.exists():
+            entfernt.append(ordner)
+    return entfernt
+
+
+def bild_als_pdf(bild, ziel, art: str | None = None) -> int:
+    """Wandelt ein Bild (JPEG, PNG, TIFF – auch mehrseitige Faxe –, BMP, PNM/PAM vom Scanner, Photoshop oder ein
+    anderes Bildformat, das MuPDF erkennt) mit PyMuPDF in eine PDF um: je Bildseite eine PDF-Seite, aufgerichtet nach
+    der Lage-Angabe des Fotos (EXIF) und höchstens A4 groß (ein Handyfoto mit 72 dpi wäre sonst über einen Meter
+    breit; die Texterkennung liest die Seite dann wie einen Scan).
+    Liefert die Seitenzahl; ValueError, wenn das Bild nicht lesbar ist."""
+    fitz = _fitz()
+    art = art or datei_art(bild)
+    if art not in _BILD_DATEITYP:
+        raise ValueError(f"Die Datei ist kein unterstütztes Bild ({art_beschreibung(art)}).")
+    try:
+        dateityp = _BILD_DATEITYP[art]
+        if dateityp is None:                          # nur MuPDF kennt das Format: so öffnen, wie es geprüft wurde
+            quelle = fitz.open(langpfad(bild))
+        else:
+            quelle = fitz.open(stream=Path(langpfad(bild)).read_bytes(), filetype=dateityp)
+        with quelle:
+            pdf_daten = quelle.convert_to_pdf()
+    except OSError:
+        raise
+    except Exception as fehler:
+        raise ValueError(f"Das Bild ist beschädigt oder nicht lesbar ({type(fehler).__name__}).") from fehler
+    with fitz.open("pdf", pdf_daten) as zwischen, fitz.open() as neu:
+        for nr, seite in enumerate(zwischen):
+            rect = seite.rect
+            if rect.width < 1 or rect.height < 1:
+                continue
+            faktor = min(1.0, A4_LANG / max(rect.width, rect.height), A4_KURZ / min(rect.width, rect.height))
+            if faktor > 0.999:
+                neu.insert_pdf(zwischen, from_page=nr, to_page=nr)
+            else:
+                seite_neu = neu.new_page(width=rect.width * faktor, height=rect.height * faktor)
+                seite_neu.show_pdf_page(seite_neu.rect, zwischen, nr)
+        if not len(neu):
+            raise ValueError("Das Bild enthält keine lesbare Seite.")
+        neu.save(os.fspath(ziel), garbage=3, deflate=True)
+        return len(neu)
+
+
+def pdf_kennwort_noetig(pfad) -> bool:
+    """Braucht die PDF ein Kennwort zum Öffnen? (Nur-Besitzer-Kennwort mit Rechten: nein – die Engine liest sie.)"""
+    fitz = _fitz()
+    try:
+        with fitz.open(langpfad(pfad), filetype="pdf") as doc:
+            return bool(doc.needs_pass)
+    except Exception:
+        return False                      # beschädigt o. Ä.: die Analyse meldet das mit eigenem Text
+
+
+def pdf_entschluesseln(pfad, kennwort: str, ziel) -> bool:
+    """Öffnet eine geschützte PDF mit dem Kennwort und speichert eine Kopie OHNE Kennwort nach „ziel“ (Ordner für
+    Arbeitskopien). False bei falschem Kennwort. Das Kennwort wird weder gespeichert noch protokolliert."""
+    fitz = _fitz()
+    with fitz.open(langpfad(pfad), filetype="pdf") as doc:
+        if not doc.authenticate(kennwort):
+            return False
+        # Nach authenticate() needs_pass nicht mehr abfragen: PyMuPDF 2.1 setzt dabei den Schlüssel zurück
+        doc.save(os.fspath(ziel), encryption=fitz.PDF_ENCRYPT_NONE, garbage=1)
+    return True
+
+
+def pdf_kopieren(pfad, ziel) -> None:
+    """PDF ohne die Endung .pdf als Arbeitskopie mit Endung ablegen (die Engine erkennt die Art an der Endung)."""
+    shutil.copyfile(langpfad(pfad), os.fspath(ziel))
 
 
 def ist_cloud_ordner(pfad) -> bool:
@@ -468,7 +1021,7 @@ def oeffne_ordner(pfad) -> bool:
         return False
     try:
         if sys.platform == "win32":
-            os.startfile(str(pfad))  # type: ignore[attr-defined]
+            os.startfile(ohne_langpfad(pfad))  # type: ignore[attr-defined]  # Explorer kennt „\\?\“ nicht
         elif sys.platform == "darwin":
             subprocess.Popen(["open", str(pfad)])
         else:
