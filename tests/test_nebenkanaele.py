@@ -558,3 +558,91 @@ def test_zaehlen_vor_bake(tmp_path):
                       "ebenen", "xfa"}
     assert z["miniaturbilder"] == 1 and z["anhaenge"] == 1 and z["ebenen"] == 1 and z["xfa"] is False
     doc.close()
+
+
+# ----------------------------------------------------------------------
+# Lesen für die Erkennung (Gutachten R-04): nebenkanaele_lesen
+# ----------------------------------------------------------------------
+def _kanaele(eintraege):
+    aus = {}
+    for e in eintraege:
+        aus.setdefault(e.kanal, []).append(e)
+    return aus
+
+
+def test_lesen_metadaten_lesezeichen_anhaenge_kommentare():
+    """Info-Felder (auch eigene wie /Kunde), XMP, Lesezeichen, eingebettete Datei und Datei-Anmerkung samt Inhalt,
+    Notizen an der Seite – jeweils als eigene Einheit; technische Felder (Producer, Kennungen) fehlen."""
+    doc = fitz.open()
+    seite = doc.new_page()
+    seite.insert_text((72, 100), "Allgemeine Bedingungen", fontsize=11)
+    doc.set_metadata({"title": "Antrag Max Mustermann", "author": "Erika Musterfrau", "producer": "Werkzeug 1.0"})
+    info = int(doc.xref_get_key(-1, "Info")[1].split()[0])
+    doc.xref_set_key(info, "Kunde", "(Kunde 4711 Mustermann)")
+    doc.set_xml_metadata('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="r"><rdf:Description '
+                         'xmlns:dc="d" xmlns:xmpMM="m" xmpMM:DocumentID="uuid:1234"><dc:creator><rdf:Seq>'
+                         '<rdf:li>Max Mustermann</rdf:li></rdf:Seq></dc:creator></rdf:Description></rdf:RDF>'
+                         '</x:xmpmeta>')
+    doc.set_toc([[1, "Antrag Max Mustermann", 1], [1, "Anlagen", 1]])
+    doc.embfile_add("Bank.txt", "IBAN DE89 3704 0044 0532 0130 00".encode(), filename="Bank.txt", desc="Bankdaten")
+    seite.add_file_annot((300, 300), b"Telefon 0171 2345678", "Notiz.txt", desc="Rueckruf")
+    seite.add_text_annot((100, 300), "Kunde Mustermann ruft zurück")
+    kanaele = _kanaele(nk.nebenkanaele_lesen(doc))
+    meta = " | ".join(e.text for e in kanaele["metadaten"])
+    assert "Antrag Max Mustermann" in meta and "Erika Musterfrau" in meta and "Kunde 4711 Mustermann" in meta
+    assert "Max Mustermann" in kanaele["metadaten"][-1].text and "uuid" not in meta and "Werkzeug" not in meta
+    assert [e.text for e in kanaele["lesezeichen"]] == ["Antrag Max Mustermann", "Anlagen"]
+    anhaenge = kanaele["anhaenge"]
+    assert {e.einheit for e in anhaenge} == {0, 1} and all(e.pruefbar for e in anhaenge)
+    assert any("IBAN DE89" in e.text for e in anhaenge) and any("0171 2345678" in e.text for e in anhaenge)
+    assert any("Bank.txt" in e.text and "Bankdaten" in e.text for e in anhaenge)
+    assert any("Kunde Mustermann ruft zurück" in e.text for e in kanaele["kommentare"])
+
+
+def test_lesen_anhaenge_rekursiv_und_nicht_pruefbar():
+    """Ein angehängtes PDF wird mit Seitentext UND eigenen Nebenkanälen gelesen; ein Foto, eine verschlüsselte PDF
+    und eine unbekannte Binärdatei sind nicht prüfbar (pruefbar=False)."""
+    innen = fitz.open()
+    innen.new_page().insert_text((72, 100), "Antrag von Max Mustermann", fontsize=11)
+    innen.set_metadata({"author": "Erika Musterfrau"})
+    innen_bytes = innen.tobytes()
+    geheim = fitz.open()
+    geheim.new_page().insert_text((72, 100), "Max Mustermann", fontsize=11)
+    geheim_bytes = geheim.tobytes(encryption=fitz.PDF_ENCRYPT_AES_256, user_pw="x", owner_pw="y")
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 20, 20), False)
+    pix.clear_with(90)
+    doc = fitz.open()
+    doc.new_page()
+    doc.embfile_add("Antrag.pdf", innen_bytes)
+    doc.embfile_add("Geheim.pdf", geheim_bytes)
+    doc.embfile_add("Foto.jpg", pix.tobytes("jpeg"))
+    doc.embfile_add("Daten.bin", bytes(range(256)) * 4)
+    inhalt = {e.einheit: e for e in nk.nebenkanaele_lesen(doc)
+              if e.kanal == "anhaenge" and e.art.startswith("Inhalt")}
+    assert inhalt[0].pruefbar and "Antrag von Max Mustermann" in inhalt[0].text
+    assert "Erika Musterfrau" in inhalt[0].text
+    assert not inhalt[1].pruefbar and "verschlüsselt" in inhalt[1].art
+    assert not inhalt[2].pruefbar and "Bild (JPEG)" in inhalt[2].art
+    assert not inhalt[3].pruefbar and "unbekanntes Format" in inhalt[3].art
+
+
+def test_lesen_xml_und_webseite():
+    """XML wird als „Etikett: Wert“ gelesen (der Elementname ist das Etikett); Schablonen, Kennungs-Attribute und
+    Zeitstempel fallen weg. Eine Webseite als Text ohne Skripte."""
+    xml = ('<?xml version="1.0"?><rsm:Invoice xmlns:rsm="urn:x"><ram:BuyerTradeParty><ram:Name>Max Mustermann'
+           '</ram:Name><ram:ID schemeID="0088">4000001123452</ram:ID></ram:BuyerTradeParty>'
+           '<template><field name="IBAN"/></template><ram:IssueDateTime>2024-01-01</ram:IssueDateTime></rsm:Invoice>')
+    text = nk._xml_zu_text(xml)
+    assert "Name: Max Mustermann" in text and "IssueDateTime" not in text and "template" not in text
+    assert "schemeID" not in text
+    texte, pruefbar, art = nk._anhang_inhalt(b"<html><head><script>var x='Geheim';</script></head><body><p>"
+                                             b"Herr Max Mustermann</p></body></html>", 0)
+    assert pruefbar and art == "Webseite" and "Herr Max Mustermann" in texte[0] and "Geheim" not in texte[0]
+
+
+def test_lesen_ohne_nebenkanaele():
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), "Nur Seitentext", fontsize=11)
+    assert nk.nebenkanaele_lesen(doc) == []
+    assert nk.bildart(b"\xff\xd8\xff\xe0") == "JPEG" and nk.bildart(b"%PDF-1.7") is None
+    assert nk.ist_html(b"\xef\xbb\xbf <!DOCTYPE html><html>") and not nk.ist_html(b"%PDF-1.7")

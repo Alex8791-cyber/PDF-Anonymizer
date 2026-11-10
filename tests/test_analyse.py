@@ -1448,3 +1448,25 @@ def test_gesundheitsbegriff_ist_kein_name(monkeypatch):
         assert dia["text"] == "Distale Radiusfraktur links (S52.5)"
         assert [st["an"] for st in dia["stellen"]] == [stufe == "maximal"]
         assert gedeckt(funde, text, "Frau Krebs", "Krebs")
+
+
+# ----------------------------------------------------------------------
+# Runde 2 (analyse-status): Schnittstelle „nebenkanaele“ und leckrelevante Meldungen am Modell
+# ----------------------------------------------------------------------
+def test_ergebnis_hat_immer_nebenkanaele_und_leckrelevante_meldungen(tmp_path):
+    """„nebenkanaele“ steht in jedem Ergebnis (auch bei Öffnungsfehlern) mit genau den vereinbarten Schlüsseln;
+    das Modell trägt die Meldungen, die die Ausgabe _PRUEFEN machen (hier XFA)."""
+    kaputt = tmp_path / "kaputt.pdf"
+    kaputt.write_bytes(b"kein pdf")
+    e = analysiere_pdf(kaputt, STANDARD, [], [])
+    assert e["nebenkanaele"] == {"metadaten": 0, "lesezeichen": 0, "anhaenge": 0, "xfa": False,
+                                 "personenbezug": False}
+    pfad = tmp_path / "xfa.pdf"
+    doc = fitz.open()
+    doc.new_page().insert_text((50, 72), "Formular")
+    doc.xref_set_key(doc.pdf_catalog(), "AcroForm", "<</XFA (dummy)>>")
+    doc.save(pfad)
+    doc.close()
+    e = analysiere_pdf(pfad, OHNE_NAMEN, [], [])
+    assert set(e["nebenkanaele"]) == {"metadaten", "lesezeichen", "anhaenge", "xfa", "personenbezug"}
+    assert [m["code"] for m in e["modell"].leckrelevant] == ["XFA"]

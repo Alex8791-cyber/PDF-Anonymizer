@@ -4,7 +4,8 @@ Alle Koordinaten stammen aus demselben Seitenmodell wie Analyse und Schwärzung 
 beziehen sich auf die vorbereitete Seite (nach bake und remove_rotation) – Seitenbild, Wörter und
 Fundstellen passen deshalb genau übereinander.
 
-    seite_bild(pdf_pfad_oder_doc, seite_nr0, zoom) -> (PNG-Bytes, Faktor pt -> px)
+    seite_bild(pdf_pfad_oder_doc, seite_nr0, zoom) -> (PNG-Bytes, Faktor pt -> px); eine Datei, die keine PDF ist
+                     (Bild, Webseite … mit der Endung .pdf), ergibt ValueError mit Erklärung statt eines Absturzes
     vorschau_daten(ergebnis, seite_nr0) -> {"woerter", "stellen", "bilder", "seitenrect"}
     ausgabe_vorschau(ausgabe_pfad, verdacht, seite_nr0, zoom) -> {"bild", "faktor", "verdacht", "seitenrect"}
 """
@@ -20,6 +21,7 @@ except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
     import fitz
 
 from . import seitenmodell as sm
+from .analyse import keine_pdf_meldung as _keine_pdf_meldung
 
 _SPERRE = threading.Lock()
 _VORBEREITET: dict = {}           # (Pfad, Größe, Zeitstempel) -> vorbereitetes Dokument (höchstens 2)
@@ -39,6 +41,10 @@ def _vorbereitetes_dokument(pfad: Path):
         if doc is not None:
             return doc
         doc = fitz.open(pfad)
+        keine_pdf = _keine_pdf_meldung(doc, pfad)       # vor jedem Seitenzugriff (Gutachten R-01: sonst Absturz)
+        if keine_pdf:
+            doc.close()
+            raise ValueError(keine_pdf)
         if doc.needs_pass:
             doc.close()
             raise ValueError("Passwortgeschützt – keine Vorschau möglich.")
