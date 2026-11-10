@@ -18,8 +18,11 @@ Optionen:
     --ohne-pixel       Pixelvergleich an Scan-Wortrechtecken abschalten
     --selbstpruefung   statt des Programms die Bewertung selbst prüfen: Null-Anonymisierer (Ausgabe = Original:
                        jeder zu schwärzende Eintrag muss ein Leck an seiner Stelle sein, alles zu Behaltende
-                       erhalten) und Orakel aus der Wahrheit, ohne und mit Platzhaltertext im grauen Rechteck
-                       (Recall 100 %, Über-Schwärzung 0); Ergebnis in <ordner>/selbstpruefung.json
+                       erhalten), Orakel aus der Wahrheit, ohne und mit Platzhaltertext im grauen Rechteck
+                       (Recall 100 %, Über-Schwärzung 0), und Teilreste: Orakel, dann EIN Exemplar eines
+                       Nebenkanals aus dem Original zurück (XMP, Info-Dict, Anhangname, Anhanginhalt) – jeder
+                       Eintrag, dessen Wert darin steht, muss ein Leck in seinem Kanal sein; Ergebnis in
+                       <ordner>/selbstpruefung.json
 """
 
 import argparse
@@ -43,7 +46,8 @@ def main(argv=None) -> int:
     parser.add_argument("--ohne-cli-ocr", action="store_true", help="keine Tesseract-Kommandozeile verwenden")
     parser.add_argument("--ohne-pixel", action="store_true", help="keinen Pixelvergleich durchführen")
     parser.add_argument("--selbstpruefung", action="store_true",
-                        help="Bewertung selbst prüfen (Null-Anonymisierer, Orakel) statt das Programm zu messen")
+                        help="Bewertung selbst prüfen (Null-Anonymisierer, Orakel, Teilreste) statt das Programm zu "
+                             "messen")
     args = parser.parse_args(argv)
 
     warnings.filterwarnings("ignore", category=FutureWarning)   # "fitz" ist in PyMuPDF 2.x veraltet

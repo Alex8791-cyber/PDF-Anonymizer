@@ -53,7 +53,11 @@ Gezählt werden die Verdachtsstellen der Restrisiko-Prüfung und – wie in der 
 Selbstkontrolle gemeldeten Reste mit ihrer Lage (gui_attrappen.reste_als_verdacht).
 Normalisierung siehe normalisierung.py (Schema-Normalisierung + Diakritika-Faltung + Wortgrenzen).
 Mehrdeutigkeit: Kommt ein Wert/Token im ORIGINAL auch außerhalb der Einträge vor (z. B. ein Ortsname im
-Briefkopf des Versicherers), zählt erst ein Vorkommen ÜBER dieser Grundzahl als Rest.
+Briefkopf des Versicherers), zählt erst ein Vorkommen ÜBER dieser Grundzahl als Rest. Seitenkanäle: je Eintrag
+eine Stelle; Dokumentkanäle (Metadaten, Lesezeichen, Anhänge, Dateiname): ein Eintrag steht für ALLE Exemplare
+seines Werts (Info-Dict-Titel und XMP dc:title) – ein einzelnes übrig gebliebenes Exemplar ist ein Leck.
+Selbstprüfung (selbstpruefung()): Null-Anonymisierer, Orakel, Orakel mit Platzhaltertext und Teilreste (Orakel, dann
+EIN Exemplar eines Nebenkanals aus dem Original zurück: XMP, Info-Dict, Anhangname, Anhanginhalt).
 """
 
 import difflib
@@ -697,13 +701,32 @@ def _eintragskanaele(kanal: str) -> set:
     return {kanal}
 
 
+WERTKANAELE = ("metadaten", "lesezeichen", "anhang", "dateiname")   # ein Eintrag = ALLE Exemplare seines Werts
+
+
 def _grundzahl(original: Kanaele, kanal: str, seite, nadel: Gefaltet, eintraege: list) -> int:
     """Vorkommen von `nadel` im Original-Kanal, die NICHT zu einem zu schwärzenden Eintrag DIESES Kanals gehören
     (ein Datum "2025-05-21" der Textebene macht das "2025" eines Eingangsstempels in einer Anmerkung nicht zum
-    Rest des Datums)."""
-    im_original = original.gefaltet(kanal, seite).zaehle(nadel)
-    if not im_original:
+    Rest des Datums).
+    Textebene, Rohdaten, OCR, Formular, Anmerkungen: ein Eintrag steht für EINE Stelle – abgezogen wird je Eintrag,
+    wie oft die Nadel in seinem Text steht. Dokumentkanäle (WERTKANAELE): ein Eintrag steht für ALLE Exemplare seines
+    Werts im Kanal (Info-Dict-Titel und XMP dc:title sind EIN Eintrag, ebenso Name, Dateiname und Inhalt eines
+    Anhangs) – nicht zur Grundzahl zählt jedes Vorkommen der Nadel, das eine Fundstelle eines Eintragswerts dieses
+    Kanals berührt; ein vollkommener Anonymisierer hätte es mit entfernt. Sonst läge ein einzelnes übrig gebliebenes
+    Exemplar (Info-Dict bereinigt, XMP vergessen) nicht über der Grundzahl."""
+    g = original.gefaltet(kanal, seite)
+    treffer = g.finde(nadel)
+    if not treffer:
         return 0
+    if kanal in WERTKANAELE:
+        belegt = []
+        for e in eintraege:
+            if e["erwartung"] != "schwaerzen" or e.get("kanal") != kanal:
+                continue
+            wert = Gefaltet(e["text"])
+            belegt += [(i, i + len(wert.kette)) for i in g.finde(wert)]
+        laenge = len(nadel.kette)
+        return sum(1 for i in treffer if not any(a < i + laenge and i < b for a, b in belegt))
     in_eintraegen = 0
     kanaele = _eintragskanaele(kanal)
     for e in eintraege:
@@ -712,7 +735,7 @@ def _grundzahl(original: Kanaele, kanal: str, seite, nadel: Gefaltet, eintraege:
         if seite is not None and e["seite"] != seite:
             continue
         in_eintraegen += Gefaltet(e["text"]).zaehle(nadel)
-    return max(0, im_original - in_eintraegen)
+    return max(0, len(treffer) - in_eintraegen)
 
 
 def _grund_kanal(original: Kanaele, kanal: str, seite, nadel: Gefaltet, eintraege: list) -> int:
@@ -1575,6 +1598,87 @@ class Orakel(_Pruefling):
         return {"ausgabe": ziel, "treffer": n, "status": "fertig", "verdacht": [], "reste": [], "warnungen": []}
 
 
+TEILRESTE = {
+    # Art: (Kanal, Beschreibung) – das Orakel schwärzt perfekt, dann kommt EIN Exemplar aus dem Original zurück
+    "xmp": ("metadaten", "XMP-Metadaten des Originals zurückgeschrieben (Info-Dict bereinigt)"),
+    "info": ("metadaten", "Info-Dict des Originals zurückgeschrieben (XMP bereinigt)"),
+    "anhang_name": ("anhang", "Anhänge mit Namen und Beschreibung des Originals, Inhalt neutral"),
+    "anhang_inhalt": ("anhang", "Anhänge mit dem Inhalt des Originals, Name neutral"),
+}
+
+
+class OrakelMitTeilrest(Orakel):
+    """Orakel, das EIN Exemplar eines Nebenkanals aus dem Original zurückschreibt (TEILRESTE: XMP oder Info-Dict,
+    Anhangname oder Anhanginhalt) – ein klassischer Teilfehler einer Bereinigung. Jeder Eintrag des Kanals, dessen
+    Wert in diesem Exemplar steht, muss als Leck in seinem Kanal zählen (sonst ist die Grundzahl zu hoch); alles
+    andere bleibt entfernt. `kopien` hält je Dokument den Text des zurückgeschriebenen Exemplars."""
+
+    def __init__(self, korpus, art: str):
+        super().__init__(korpus)
+        self.commit = f"orakel-teilrest-{art}"
+        self.art = art
+        self.kopien: dict = {}
+
+    def schwaerze_pdf(self, pdf, funde=None, ziel_ordner=None, **kwargs) -> dict:
+        aus = super().schwaerze_pdf(pdf, funde, ziel_ordner, **kwargs)
+        ziel = Path(aus["ausgabe"])
+        teile = []
+        with fitz.open(pdf) as original, fitz.open(ziel) as doc:
+            if self.art == "xmp":
+                xmp = original.get_xml_metadata() or ""
+                if xmp:
+                    doc.set_xml_metadata(xmp)
+                    teile.append(xmp)
+            elif self.art == "info":
+                meta = {k: v for k, v in (original.metadata or {}).items()
+                        if isinstance(v, str) and k not in ("format", "encryption")}
+                doc.set_metadata(meta)
+                teile += [v for v in meta.values() if v]
+            else:
+                for i in range(original.embfile_count()):
+                    info = original.embfile_info(i)
+                    if self.art == "anhang_name":
+                        namen = [str(info.get(k) or "") for k in ("name", "filename", "ufilename", "desc")]
+                        doc.embfile_add(namen[0] or f"anlage_{i}.txt", b"Notiz", filename=namen[1] or None,
+                                        ufilename=namen[2] or None, desc=namen[3] or None)
+                        teile += namen
+                    else:
+                        inhalt = original.embfile_get(i)
+                        doc.embfile_add(f"anlage_{i + 1}.txt", inhalt, filename=f"anlage_{i + 1}.txt",
+                                        ufilename=f"anlage_{i + 1}.txt", desc="Anlage")
+                        teile.append(_bytes_als_text(inhalt))
+            zwischen = ziel.with_name(ziel.stem + "_teilrest.pdf")
+            doc.save(zwischen, garbage=4, deflate=True)
+        zwischen.replace(ziel)
+        self.kopien[Path(pdf).name] = "\n".join(teile)
+        return aus
+
+
+def _selbstpruefung_teilrest(ergebnis: dict, kanal: str, kopien: dict) -> dict:
+    """Teilrest-Probe auswerten: jeder Eintrag des Kanals, dessen Wert im zurückgeschriebenen Exemplar steht, ist ein
+    Leck IN DIESEM KANAL; Einträge, von denen dort weder der Wert noch ein signifikantes Token steht, bleiben
+    entfernt."""
+    erwartet, nicht_leck, unerwartet = 0, [], []
+    for d in ergebnis["dokumente"]:
+        kopie = kopien.get(d["dokument"])
+        if kopie is None:
+            continue
+        g = Gefaltet(kopie)
+        for e in d["eintraege"]:
+            if e["erwartung"] != "schwaerzen":
+                continue
+            drin = g.enthaelt(Gefaltet(e["text"]))
+            if drin and e["kanal"] == kanal:
+                erwartet += 1
+                if e["status"] != "leck" or kanal not in (e.get("kanaele") or []):
+                    nicht_leck.append((d["dokument"], e["id"], e["text"], e["status"], e.get("kanaele")))
+            elif not drin and e["status"] != "entfernt" \
+                    and not any(g.enthaelt(Gefaltet(t)) for t in signifikante_token(e["text"])):
+                unerwartet.append((d["dokument"], e["id"], e["text"], e["status"], e.get("kanaele") or e.get("reste")))
+    return {"kanal": kanal, "erwartet": erwartet, "leck": erwartet - len(nicht_leck), "nicht_leck": nicht_leck,
+            "unerwartet": unerwartet, "ok": not nicht_leck and not unerwartet}
+
+
 def _selbstpruefung_null(ergebnis: dict) -> dict:
     schw = [(d["dokument"], e) for d in ergebnis["dokumente"] for e in d["eintraege"] if e["erwartung"] == "schwaerzen"]
     beh = [(d["dokument"], e) for d in ergebnis["dokumente"] for e in d["eintraege"] if e["erwartung"] == "behalten"]
@@ -1605,16 +1709,27 @@ def _selbstpruefung_orakel(ergebnis: dict) -> dict:
 def selbstpruefung(korpus: Path, ausgabe: Path, cli_ocr: bool = False, pixel: bool = True, melde=print,
                    nur: list | None = None) -> dict:
     """Selbstprüfung der Bewertung auf einem Korpus: Null-Anonymisierer (jeder zu schwärzende Eintrag ein Leck an
-    seiner Stelle, alles zu Behaltende erhalten), Orakel (Recall 100 %, Über-Schwärzung 0) und Orakel mit
-    Platzhaltertext im grauen Rechteck wie das Programm (dessen Tinte darf nicht als Original zählen). Schreibt
+    seiner Stelle, alles zu Behaltende erhalten), Orakel (Recall 100 %, Über-Schwärzung 0), Orakel mit
+    Platzhaltertext im grauen Rechteck wie das Programm (dessen Tinte darf nicht als Original zählen) und Teilreste
+    (TEILRESTE: Orakel, dann EIN Exemplar eines Nebenkanals aus dem Original zurück – jeder Eintrag, dessen Wert darin
+    steht, ist ein Leck in seinem Kanal; nur auf Dokumenten mit Einträgen in diesem Kanal). Schreibt
     selbstpruefung.json nach `ausgabe` und liefert die Zusammenfassung."""
     ausgabe = Path(ausgabe)
     ergebnis = {}
-    for name, pruefling, auswertung in (
-            ("null_anonymisierer", NullAnonymisierer(), _selbstpruefung_null),
-            ("orakel", Orakel(korpus), _selbstpruefung_orakel),
-            ("orakel_platzhalter", Orakel(korpus, platzhalter=True), _selbstpruefung_orakel)):
-        lauf = bewerte_korpus(korpus, ausgabe / name, cli_ocr=cli_ocr, pixel=pixel, melde=None, nur=nur,
+    laeufe = [("null_anonymisierer", NullAnonymisierer(), _selbstpruefung_null, nur),
+              ("orakel", Orakel(korpus), _selbstpruefung_orakel, nur),
+              ("orakel_platzhalter", Orakel(korpus, platzhalter=True), _selbstpruefung_orakel, nur)]
+    wahrheiten = lade_wahrheiten(korpus)
+    for art, (kanal, _) in TEILRESTE.items():
+        dokumente = [w["dokument"] for w in wahrheiten if (not nur or w["dokument"] in nur)
+                     and any(e["kanal"] == kanal and e["erwartung"] == "schwaerzen" for e in w["eintraege"])]
+        if not dokumente:
+            continue
+        pruefling = OrakelMitTeilrest(korpus, art)
+        laeufe.append((f"teilrest_{art}", pruefling,
+                       lambda lauf, k=kanal, p=pruefling: _selbstpruefung_teilrest(lauf, k, p.kopien), dokumente))
+    for name, pruefling, auswertung, auswahl in laeufe:
+        lauf = bewerte_korpus(korpus, ausgabe / name, cli_ocr=cli_ocr, pixel=pixel, melde=None, nur=auswahl,
                               pipeline=pruefling)
         ergebnis[name] = auswertung(lauf)
         if melde:

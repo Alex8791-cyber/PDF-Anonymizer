@@ -7,8 +7,9 @@
   der Erkennung oder Schwärzung lässt den Test scheitern. Wer die Erkennung verbessert, zieht die Grenzen
   hier nach (Messwerte stehen im Kommentar).
 * Selbstprüfung der Bewertung: Null-Anonymisierer (Ausgabe = Original: jeder zu schwärzende Eintrag ein Leck
-  an seiner Stelle) und Orakel (perfekte Schwärzung, auch mit Platzhaltertext wie das Programm: Recall 100 %,
-  Über-Schwärzung 0); Pixelvergleich, Über-Schwärzung und Fehlalarme an kleinen Beispielen.
+  an seiner Stelle), Orakel (perfekte Schwärzung, auch mit Platzhaltertext wie das Programm: Recall 100 %,
+  Über-Schwärzung 0) und Teilreste (Orakel + ein zurückgeschriebenes XMP-/Info-/Anhang-Exemplar: Leck im Kanal);
+  Pixelvergleich, Grundzahl der Dokumentkanäle, Über-Schwärzung und Fehlalarme an kleinen Beispielen.
 
 Alle erzeugten Dateien landen im tmp_path.
 """
@@ -41,6 +42,8 @@ MAX_UEBERSCHWAERZUNG = 0.065
 # 007_kuendigung_DeLuca, vom Unterschriftszug durchkreuzt); 0,429 Fehlverdacht je Seite (6 von 12 Verdachtsstellen,
 # darunter eine echte Unterschrift ohne gedruckten Namen); 6 von 12 Ausgaben _PRUEFEN (5 ohne Kern-Leck).
 # Vorher (4408edc, alte Bewertung): 2 Kern-Lecks, keines abgedeckt – ">= 0,90" war eine Quote über 2 Einträge.
+# Nach den Review-Korrekturen (2026-11-10: Lesegeometrie, Schräglage, Rollenzeilen, Fach-/Firmenzeilen, gerade
+# Linienreste, Seitenmaske; Grundzahl der Dokumentkanäle) alle Werte unverändert.
 MAX_DOKUMENTE_STILLES_LECK = 1
 MIN_VERDACHTSABDECKUNG = 0.90
 MIN_LECKS_FUER_QUOTE = 10      # darunter ist eine Quote bedeutungslos: JEDES Leck braucht einen Verdacht
@@ -360,6 +363,68 @@ def test_behaltenes_wort_in_geschwaerzter_kennung_ist_keine_ueberschwaerzung(tmp
     assert bewertung._behalten_pruefen(e, nadel, original, weg, [])["status"] == "fehlt"
 
 
+class _FesteAusgabe(bewertung._Pruefling):
+    """Prüfling, dessen „Ausgabe" eine vorbereitete Datei ist (Teilfehler gezielt nachstellen)."""
+
+    def __init__(self, datei):
+        super().__init__("feste-ausgabe")
+        self.datei = Path(datei)
+
+    def schwaerze_pdf(self, pdf, funde=None, ziel_ordner=None, **kwargs):
+        import shutil
+        ziel = Path(ziel_ordner) / "ausgabe_01.pdf"
+        shutil.copyfile(self.datei, ziel)
+        return {"ausgabe": ziel, "treffer": 0, "status": "fertig", "verdacht": [], "reste": [], "warnungen": []}
+
+
+def test_grundzahl_dokumentkanal_ein_eintrag_steht_fuer_alle_exemplare(tmp_path):
+    """Metadaten: EIN Eintrag der Wahrheit steht für Info-Dict-Titel UND XMP dc:title (Generator: "Info-Dict Titel und
+    XMP dc:title"). Bleibt ein Exemplar stehen (Info bereinigt, XMP vergessen – oder umgekehrt), ist das ein Leck im
+    Kanal metadaten. Früher zog die Grundzahl je Eintrag nur EIN Vorkommen ab: 2 Exemplare - 1 Eintrag = 1, und der
+    Rest lag nicht darüber; der Name stand zudem zweimal in der Textebene (Felder Vorname/Nachname untereinander und
+    Kontoinhaber), sodass auch die Rohdaten ihn nicht sahen – ein vollständig unsichtbares Leck (Seed 1, 037-029)."""
+    import pymupdf as fitz
+    titel = "Antrag auf Riester-Rente Omar El-Masri"
+    xmp = ('<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF '
+           'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" '
+           'xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title><rdf:Alt><rdf:li xml:lang="x-default">' + titel
+           + '</rdf:li></rdf:Alt></dc:title></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>')
+
+    def pdf(pfad, zeilen, info, mit_xmp):
+        doc = fitz.open()
+        s = doc.new_page()
+        for i, z in enumerate(zeilen):
+            s.insert_text((50, 80 + 16 * i), z, fontsize=11, fontname="helv")
+        doc.set_metadata({"title": titel} if info else {})
+        if mit_xmp:
+            doc.set_xml_metadata(xmp)
+        doc.save(pfad)
+        doc.close()
+        return pfad
+
+    original = pdf(tmp_path / "o.pdf", ["Omar", "El-Masri", "Kontoinhaber: Omar El-Masri"], True, True)
+    eintraege = [{"id": f"e{i}", "text": t, "kategorie": "namen", "seite": 1, "erwartung": "schwaerzen",
+                  "umfang": "kern", "kanal": k}
+                 for i, (t, k) in enumerate([("Omar", "text"), ("El-Masri", "text"), ("Omar El-Masri", "text"),
+                                             ("Omar El-Masri", "metadaten")])]
+    kanaele = bewertung.Kanaele(original)
+    nadel = Gefaltet("Omar El-Masri")
+    assert kanaele.gefaltet("metadaten").zaehle(nadel) == 2
+    assert bewertung._grund_kanal(kanaele, "metadaten", None, nadel, eintraege) == 0
+    wahrheit = {"dokument": "o.pdf", "typ": "test", "merkmale": [], "seiten": 1, "eintraege": eintraege}
+    schwarz = ["[PERSON A]", "[PERSON A]", "Kontoinhaber: [PERSON A]"]
+    for art, info, mit_xmp in (("nur_xmp", False, True), ("nur_info", True, False), ("keins", False, False)):
+        aus = pdf(tmp_path / f"{art}.pdf", schwarz, info, mit_xmp)
+        (tmp_path / art).mkdir()
+        d = bewertung.bewerte_dokument(original, wahrheit, _FesteAusgabe(aus), None, tmp_path / art, tmp_path,
+                                       cli_ocr=False, pixel=False)
+        meta = next(e for e in d["eintraege"] if e["id"] == "e3")
+        if art == "keins":
+            assert meta["status"] == "entfernt", meta
+        else:
+            assert meta["status"] == "leck" and "metadaten" in meta["kanaele"], (art, meta)
+
+
 def test_fund_aktiv():
     assert bewertung.fund_aktiv({"text": "x"})                                    # ältere Funde ohne Stellen
     assert bewertung.fund_aktiv({"stellen": [{"an": False}, {"an": True}]})
@@ -404,6 +469,12 @@ def test_selbstpruefung_der_bewertung(ci_korpus, tmp_path):
     for name in ("orakel", "orakel_platzhalter"):
         assert e[name]["recall_kern"] == 1.0 and e[name]["recall_erweitert"] == 1.0, e[name]["nicht_entfernt"][:10]
         assert e[name]["ueberschwaerzung"] == 0.0, e[name]["ueberschwaerzt"]
+    # Teilreste: Orakel, dann EIN Exemplar eines Nebenkanals aus dem Original zurück (XMP oder Info-Dict; Anhangname
+    # oder -inhalt) – jeder Eintrag, dessen Wert darin steht, ist ein Leck in seinem Kanal, sonst bleibt alles entfernt
+    for name in ("teilrest_xmp", "teilrest_info"):
+        assert e[name]["erwartet"] > 0 and e[name]["ok"], e[name]
+    for name in ("teilrest_anhang_name", "teilrest_anhang_inhalt"):
+        assert name not in e or e[name]["ok"], e[name]
     assert (tmp_path / "selbst" / "selbstpruefung.json").exists()
 
 
