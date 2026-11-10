@@ -3,10 +3,12 @@
 Öffentliche Schnittstelle (CONTRACT_V2.md 12.4):
     nebenkanaele_lesen(doc) -> list[NebenkanalText]
                                                Texte der Nebenkanäle für die Erkennung (Gutachten R-04): Info-/
-                                               XMP-Metadaten, Lesezeichen, Anhänge (Name, Beschreibung, Inhalt –
-                                               Text/XML/Office/PDF, rekursiv; auch Portfolios und Datei-Anmerkungen),
-                                               XFA-Formulardaten. Nicht lesbare Anhänge (Bild, verschlüsselt …)
-                                               kommen mit pruefbar=False zurück
+                                               XMP-Metadaten (auch an Seiten und Bildern; Creator/Producer/CreatorTool
+                                               als eigener Kanal „programm“), Lesezeichen, Anhänge (Name, Beschreibung,
+                                               Inhalt – Text/CSV/XML/Office/PDF, rekursiv; auch Portfolios und Datei-
+                                               Anmerkungen), XFA-Formulardaten, JavaScript (Zeichenketten), Link-
+                                               Ziele, Seitenbeschriftungen. Nicht lesbare Anhänge (Bild, Scan,
+                                               verschlüsselt …) kommen mit pruefbar=False zurück
     nebenkanaele_zaehlen(doc) -> dict          VOR doc.bake() aufrufen (Formularfelder, Anmerkungen, XFA …)
     markierungen_entfernen(doc) -> int         /ActualText, /Alt, /E aus Inhaltsströmen (Seiten, alle Form-
                                                XObjects, Muster) und Properties-Ressourcen; gehört in die
@@ -780,7 +782,10 @@ def nebenkanaele_entfernen(doc, zaehler=None) -> dict:
 # ----------------------------------------------------------------------
 class NebenkanalText(NamedTuple):
     """Ein Stück Text aus einem Nebenkanal.
-    kanal: "metadaten" | "lesezeichen" | "anhaenge" | "xfa" | "kommentare" (Notizen/Kommentare an der Seite);
+    kanal: "metadaten" | "programm" (Creator/Producer/CreatorTool: Programm- und Gerätenamen – zählen nur mit einem
+    ausdrücklichen Vor- und Nachnamen, E-Mail-Adresse oder IBAN) | "lesezeichen" | "anhaenge" | "xfa" | "kommentare"
+    (Notizen/Kommentare an der Seite) | "skripte" (JavaScript) | "links" (Link-Ziele: mailto, Parameter einer Adresse,
+    Dateien) | "seitenbeschriftungen";
     einheit: Nummer innerhalb des Kanals – ein Metadatenfeld, ein Lesezeichen, ein Anhang samt Name, Beschreibung
     und Inhalt (auch dessen eigene Nebenkanäle) zählen je einmal; art: was es ist (für Meldungen, ohne den Inhalt);
     text: Text für die Erkennung; pruefbar=False: Inhalt nicht lesbar (Bild, Scan, verschlüsselt, unbekanntes
@@ -796,8 +801,13 @@ LESEN_MAX_ZEICHEN = 400_000      # so viel Text wird höchstens gelesen (danach:
 LESEN_MAX_BYTES = 60 * 2**20     # größere Anhänge werden nicht ausgepackt
 LESEN_MAX_TIEFE = 3              # Anhänge in Anhängen …
 LESEN_MAX_SEITEN = 500           # Seiten eines angehängten PDFs
-_INFO_TECHNISCH = frozenset({"CreationDate", "ModDate", "Trapped", "Producer", "PTEX.Fullbanner", "GTS_PDFXVersion",
+BILDFLAECHE_NICHT_PRUEFBAR = 0.3   # Seite eines angehängten PDFs, die zu so viel Fläche Bild ist: nicht prüfbar (Scan)
+_INFO_TECHNISCH = frozenset({"CreationDate", "ModDate", "Trapped", "PTEX.Fullbanner", "GTS_PDFXVersion",
                              "GTS_PDFXConformance", "GTS_PDFVTVersion", "SourceModified"})
+# Programm- und Gerätenamen (Gutachten-Befund NEBENKANAL_FUND auf „RICOH MP C3004“, „Crystal Reports“): eigener Kanal
+# „programm“, geprüft nur auf ausdrückliche Personennamen, E-Mail-Adressen und IBAN
+_INFO_PROGRAMM = frozenset({"Creator", "Producer"})
+_XML_PROGRAMM = re.compile(r"(?i)^(?:creatortool|producer)$")
 _XML_TECHNISCH = re.compile(
     r"(?i)^(?:about|documentid|instanceid|originaldocumentid|versionid|renditionclass|createdate|modifydate|"
     r"metadatadate|pdfversion|format|trapped|producer|when|action|changed|parameters|softwareagent|xmptk|part|"
@@ -839,28 +849,39 @@ def ist_html(anfang: bytes) -> bool:
     return bool(_HTML_RE.match(anfang.lstrip(b"\xef\xbb\xbf")))
 
 
-def _xml_zu_text(xml: str) -> str:
+def _xml_zu_text(xml: str, programm: list | None = None) -> str:
     """XML lesbar machen: Blattelemente als „Name: Wert“-Zeilen (der Elementname ist oft das Etikett: <IBAN>,
     <Geburtsdatum>), dazu inhaltliche Attributwerte; technische Felder (Kennungen, Zeitstempel, Namensräume) und
-    XFA-Schablonen (nur Beschriftungen) entfallen. Ohne Blattelemente: Text ohne Tags."""
+    XFA-Schablonen (nur Beschriftungen) entfallen. Ohne Blattelemente: Text ohne Tags.
+    programm (Liste, nur für XMP-Metadaten): Werte von CreatorTool und Producer (Programm-/Gerätenamen) kommen
+    hierhin statt in den Text – sie werden nur auf ausdrückliche Personennamen geprüft."""
     xml = _XML_WEGLASSEN.sub(" ", xml)
     zeilen = []
+    programm_vorher = len(programm) if programm is not None else 0
     for m in _XML_BLATT.finditer(xml):
         name = m.group(1).split(":")[-1]
         wert = " ".join(html.unescape(m.group(3)).split())
         if len(wert) > 200 and " " not in wert:
             continue                                  # eingebettete Daten (Base64-Vorschaubild …), kein Text
+        if programm is not None and wert and _XML_PROGRAMM.match(name):
+            programm.append(wert)
+            continue
         if wert and not _XML_TECHNISCH.match(name) and not _XML_WERT_TECHNISCH.match(wert):
             ohne_etikett = name.lower() in ("li", "value", "text", "t", "p", "span", "div")
             zeilen.append(wert if ohne_etikett else f"{name}: {wert}")
     for name, wert in _XML_ATTRIBUT.findall(xml):
         lokal = name.split(":")[-1]
         wert = " ".join(html.unescape(wert).split())
+        if programm is not None and wert and _XML_PROGRAMM.match(lokal):
+            programm.append(wert)
+            continue
         if name.startswith("xmlns") or _XML_TECHNISCH.match(lokal) or not wert or _XML_WERT_TECHNISCH.match(wert):
             continue
         zeilen.append(f"{lokal}: {wert}")
     if zeilen:
         return "\n".join(zeilen)
+    if programm is not None and len(programm) > programm_vorher:
+        return ""                                     # nur Programmangaben: die stehen schon in `programm`
     return " ".join(html.unescape(re.sub(r"<[^>]*>", " ", xml)).split())
 
 
@@ -916,9 +937,53 @@ def _als_text(daten: bytes):
     return None if steuer > 0.02 * max(1, len(stichprobe)) else text
 
 
+_CSV_TRENNER = (";", "\t", ",", "|")
+
+
+def _csv_zu_text(text: str):
+    """Eine Tabelle als CSV (Excel speichert in Deutschland mit Semikolon) wie ein Formular lesen: mit Kopfzeile
+    „Spalte: Wert“ je Zelle, ohne Kopfzeile die Zellen einer Zeile durch Leerzeichen getrennt (dann sieht die
+    Namenserkennung „Mustermann Max Berlin“ statt „Mustermann;Max;Berlin“). None, wenn es keine Tabelle ist."""
+    zeilen = [z for z in text.splitlines() if z.strip()]
+    if len(zeilen) < 2:
+        return None
+    for trenner in _CSV_TRENNER:
+        spalten = [z.count(trenner) for z in zeilen[:50]]
+        if min(spalten) < 1 or max(spalten) - min(spalten) > 1:
+            continue
+        zellen = [[c.strip().strip('"').strip() for c in z.split(trenner)] for z in zeilen]
+        kopf = zellen[0]
+        mit_kopf = (all(k and not any(ch.isdigit() for ch in k) for k in kopf)
+                    and len({k.casefold() for k in kopf}) == len(kopf))
+        aus = []
+        for reihe in (zellen[1:] if mit_kopf else zellen):
+            if mit_kopf:
+                aus.extend(f"{k}: {w}" for k, w in zip(kopf, reihe) if w)
+            else:
+                aus.append(" ".join(w for w in reihe if w))
+            aus.append("")
+        return "\n".join(aus).strip()
+    return None
+
+
+def _bildanteil(seite) -> float:
+    """Anteil der Seitenfläche, den Bilder bedecken (grob, Überlappungen zählen mehrfach, höchstens 1)."""
+    try:
+        flaeche = abs(seite.rect) or 1.0
+        summe = 0.0
+        for info in seite.get_image_info():
+            r = fitz.Rect(info.get("bbox")) & seite.rect
+            if not r.is_empty:
+                summe += abs(r)
+        return min(1.0, summe / flaeche)
+    except Exception:
+        return 1.0 if seite.get_images() else 0.0
+
+
 def _pdf_inhalt(daten: bytes, tiefe: int) -> tuple:
-    """(Texte, prüfbar, Art) eines angehängten PDFs: Seitentext und – rekursiv – seine Nebenkanäle. Seiten mit
-    Bildern, aber ohne Text (Scans) sind nicht prüfbar."""
+    """(Texte, prüfbar, Art) eines angehängten PDFs: Seitentext und – rekursiv – seine Nebenkanäle. Seiten, die zu
+    einem großen Teil Bild sind (Scan, auch mit einer Textzeile wie „Anlage 1“ oder einem Eingangsstempel), sind ohne
+    OCR nicht prüfbar."""
     try:
         sub = fitz.open(stream=daten, filetype="pdf")
     except Exception:
@@ -932,7 +997,7 @@ def _pdf_inhalt(daten: bytes, tiefe: int) -> tuple:
         for nr in range(min(len(sub), LESEN_MAX_SEITEN)):
             seite = sub[nr]
             t = seite.get_text()
-            if not t.strip() and seite.get_images():
+            if seite.get_images() and (not t.strip() or _bildanteil(seite) >= BILDFLAECHE_NICHT_PRUEFBAR):
                 pruefbar = False                             # Scan im Anhang: ohne OCR nicht prüfbar
             zeichen += len(t)
             texte.append(t)
@@ -979,12 +1044,16 @@ def _anhang_inhalt(daten: bytes, tiefe: int) -> tuple:
         return [_html_zu_text(text)], True, "Webseite"
     if probe.startswith("<"):
         return [_xml_zu_text(text)], True, "XML"
+    tabelle = _csv_zu_text(text)
+    if tabelle is not None:
+        return [text, tabelle], True, "Tabelle"
     return [text], True, "Text"
 
 
-def _info_felder(doc) -> list:
-    """(Schlüssel, Wert) der Dokumenteigenschaften (Info-Wörterbuch, auch eigene Felder wie /Company)."""
-    felder = []
+def _info_felder(doc, programm: list | None = None) -> list:
+    """(Schlüssel, Wert) der Dokumenteigenschaften (Info-Wörterbuch, auch eigene Felder wie /Company). Creator und
+    Producer (Programm-/Gerätenamen) kommen in die Liste `programm` (Schlüssel, Wert), sofern übergeben."""
+    felder, programme = [], []
     try:
         art, wert = doc.xref_get_key(-1, "Info")
         if art == "xref":
@@ -994,20 +1063,146 @@ def _info_felder(doc) -> list:
                     continue
                 a, v = doc.xref_get_key(info, k)
                 if a == "string" and v.strip():
-                    felder.append((k, v.strip()))
+                    (programme if k in _INFO_PROGRAMM else felder).append((k, v.strip()))
     except Exception:
-        felder = []
-    if not felder:
+        felder, programme = [], []
+    if not felder and not programme:
         try:
             md = doc.metadata or {}
         except Exception:
             md = {}
         for k, name in (("title", "Title"), ("author", "Author"), ("subject", "Subject"), ("keywords", "Keywords"),
-                        ("creator", "Creator")):
+                        ("creator", "Creator"), ("producer", "Producer")):
             v = str(md.get(k) or "").strip()
             if v:
-                felder.append((name, v))
+                (programme if name in _INFO_PROGRAMM else felder).append((name, v))
+    if programm is not None:
+        programm.extend(programme)
     return felder
+
+
+def _js_zeichenketten(quelle: str) -> list:
+    """Zeichenketten-Literale eines JavaScript-Texts ('…', "…", `…`) – dort stehen Namen, IBAN, Texte von Meldungen;
+    Programmcode selbst (Variablen, Funktionen) trägt keine Personendaten."""
+    aus = []
+    for m in re.finditer(r"'((?:\\.|[^'\\\n])*)'|\"((?:\\.|[^\"\\\n])*)\"|`((?:\\.|[^`\\])*)`", quelle or ""):
+        wert = next((g for g in m.groups() if g is not None), "")
+        wert = re.sub(r"\\(.)", r"\1", wert).strip()
+        if any(c.isalnum() for c in wert):
+            aus.append(wert)
+    return aus
+
+
+def _pdf_zeichenkette(roh: str) -> str:
+    """Inhalt einer PDF-Literal-Zeichenkette ohne Klammern: Escapes (\\( \\) \\\\ \\n \\ddd) auflösen."""
+    def ersetzen(m):
+        z = m.group(1)
+        if z.isdigit():
+            return chr(int(z, 8))
+        return {"n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f"}.get(z, z)
+    return re.sub(r"\\([0-7]{1,3}|.)", ersetzen, roh)
+
+
+def _skripte(doc) -> list:
+    """Texte aller JavaScript-Aktionen (Dokument-Skripte, Öffnen-Aktion, Seiten-, Formularfeld- und Link-Aktionen):
+    nur ihre Zeichenketten. Liest die Quelle der Objekte (auch direkt eingebettete Aktionen /A, /AA)."""
+    texte = []
+    for xref in range(1, doc.xref_length()):
+        try:
+            quelle = doc.xref_object(xref, compressed=True)
+        except Exception:
+            continue
+        if "/JS" not in quelle:
+            continue
+        for m in re.finditer(r"/JS\s*(\d+)\s+\d+\s+R", quelle):
+            try:
+                texte.append(doc.xref_stream(int(m.group(1))).decode("latin-1", "replace"))
+            except Exception:
+                continue
+        for m in re.finditer(r"/JS\s*\(((?:\\.|[^\\)])*)\)", quelle, re.S):
+            texte.append(_pdf_zeichenkette(m.group(1)))
+        for m in re.finditer(r"/JS\s*<([0-9A-Fa-f\s]*)>", quelle):
+            try:
+                texte.append(bytes.fromhex("".join(m.group(1).split())).decode("latin-1", "replace"))
+            except ValueError:
+                continue
+    aus = []
+    for t in texte:
+        if t.startswith("﻿") or t.startswith("þÿ"):
+            try:
+                t = t.encode("latin-1", "replace").decode("utf-16", "replace")
+            except Exception:
+                pass
+        teile = _js_zeichenketten(t)
+        if teile:
+            aus.append("\n".join(teile))
+    return aus
+
+
+def _link_text(ziel: str) -> str:
+    """Prüfbarer Text eines Link-Ziels: E-Mail-Adresse aus mailto:, Parameter einer Webadresse als „Name: Wert“-Zeilen
+    (dekodiert), Dateinamen; eine bloße Webadresse ohne Parameter (www.versicherer.de/kontakt) trägt nichts bei."""
+    from urllib.parse import parse_qsl, unquote, urlsplit
+    ziel = (ziel or "").strip()
+    if not ziel:
+        return ""
+    if ziel.lower().startswith("mailto:"):
+        adresse, _, rest = ziel[7:].partition("?")
+        zeilen = [unquote(adresse)]
+        zeilen += [f"{k}: {v}" for k, v in parse_qsl(rest, keep_blank_values=False)]
+        return "\n".join(z for z in zeilen if z.strip())
+    if re.match(r"(?i)^(?:https?|ftp)://", ziel):
+        teile = urlsplit(ziel)
+        zeilen = [f"{k}: {v}" for k, v in parse_qsl(teile.query, keep_blank_values=False)]
+        if teile.fragment:
+            zeilen.append(unquote(teile.fragment))
+        return "\n".join(z for z in zeilen if z.strip())
+    return unquote(ziel)                                     # Datei, Programm, eigenes Schema
+
+
+def _links(doc) -> list:
+    texte = []
+    for nr in range(len(doc)):
+        try:
+            for link in doc[nr].get_links():
+                t = _link_text(str(link.get("uri") or link.get("file") or ""))
+                if t:
+                    texte.append(t)
+        except Exception:
+            continue
+    return texte
+
+
+def _seitenbeschriftungen(doc) -> list:
+    try:
+        regeln = doc.get_page_labels() or []
+    except Exception:
+        return []
+    return list(dict.fromkeys(str(r.get("prefix") or "").strip() for r in regeln if str(r.get("prefix") or "").strip()))
+
+
+def _objekt_xmp(doc) -> list:
+    """XMP-Metadaten an Seiten, Bildern, Schriften und Formular-XObjects (nicht die des Dokuments): (Text, Programme)."""
+    katalog = doc.pdf_catalog()
+    aus = []
+    for xref in range(1, doc.xref_length()):
+        if xref == katalog:
+            continue
+        try:
+            art, wert = doc.xref_get_key(xref, "Metadata")
+        except Exception:
+            continue
+        if art != "xref":
+            continue
+        try:
+            daten = doc.xref_stream(int(wert.split()[0])) or b""
+        except Exception:
+            continue
+        programme: list = []
+        text = _xml_zu_text(daten.decode("utf-8", "replace"), programme)
+        if text.strip() or programme:
+            aus.append((text, programme))
+    return aus
 
 
 def _xfa_pakete(doc) -> list:
@@ -1045,18 +1240,33 @@ def nebenkanaele_lesen(doc, tiefe: int = 0) -> list:
     NebenkanalText-Einträge; nicht lesbare Inhalte mit pruefbar=False. Wirft nie: Fehler beim Lesen eines Kanals
     werden als „nicht prüfbar“ gemeldet."""
     aus: list = []
-    # 1) Dokumenteigenschaften und XMP
+    programme: list = []                                      # (Art, Text) der Programm-/Gerätefelder
+    # 1) Dokumenteigenschaften und XMP (des Dokuments, dann der Seiten, Bilder, Schriften)
     try:
-        felder = _info_felder(doc)
+        info_programme: list = []
+        felder = _info_felder(doc, info_programme)
         for i, (name, wert) in enumerate(felder):
             aus.append(NebenkanalText("metadaten", i, f"Dokumenteigenschaft {name}", wert))
+        programme += [(f"Dokumenteigenschaft {k}", v) for k, v in info_programme]
+        einheit = len(felder)
         xmp = doc.get_xml_metadata() or ""
         if xmp.strip():
-            text = _xml_zu_text(xmp)
+            xmp_programme: list = []
+            text = _xml_zu_text(xmp, xmp_programme)
             if text.strip():
-                aus.append(NebenkanalText("metadaten", len(felder), "XMP-Metadaten", text[:LESEN_MAX_ZEICHEN]))
+                aus.append(NebenkanalText("metadaten", einheit, "XMP-Metadaten", text[:LESEN_MAX_ZEICHEN]))
+                einheit += 1
+            programme += [("XMP-Metadaten (Programm)", v) for v in xmp_programme]
+        for text, objekt_programme in _objekt_xmp(doc):
+            if text.strip():
+                aus.append(NebenkanalText("metadaten", einheit, "XMP-Metadaten einer Seite oder eines Bilds",
+                                          text[:LESEN_MAX_ZEICHEN]))
+                einheit += 1
+            programme += [("XMP-Metadaten einer Seite oder eines Bilds (Programm)", v) for v in objekt_programme]
     except Exception:
         aus.append(NebenkanalText("metadaten", 0, "Dokumenteigenschaften", "", False))
+    for i, (art, wert) in enumerate(dict.fromkeys(programme)):
+        aus.append(NebenkanalText("programm", i, art, wert))
     # 2) Lesezeichen
     try:
         for i, eintrag in enumerate(doc.get_toc(simple=True)):
@@ -1113,6 +1323,16 @@ def nebenkanaele_lesen(doc, tiefe: int = 0) -> list:
             aus.append(NebenkanalText("xfa", 0, "XFA-Formulardaten", text))
     except Exception:
         aus.append(NebenkanalText("xfa", 0, "XFA-Formulardaten", "", False))
+    # 5) Was die Ausgabe ebenfalls entfernt, man beim Durchblättern aber nicht sieht: JavaScript, Link-Ziele
+    #    (mailto:, Parameter einer Adresse, Dateien), Seitenbeschriftungen
+    for kanal, art, lesen in (("skripte", "JavaScript", _skripte), ("links", "Link-Ziel", _links),
+                              ("seitenbeschriftungen", "Seitenbeschriftung", _seitenbeschriftungen)):
+        try:
+            for i, text in enumerate(lesen(doc)):
+                if text.strip():
+                    aus.append(NebenkanalText(kanal, i, art, text[:LESEN_MAX_ZEICHEN]))
+        except Exception:
+            aus.append(NebenkanalText(kanal, 0, art, "", False))
     return aus
 
 
