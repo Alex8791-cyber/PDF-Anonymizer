@@ -43,6 +43,11 @@ Restrisiko (zweite Verteidigungslinie, Vertrag Abschnitt 7) – je Dokument werd
                           Verdachts schneidet ein Wortrechteck des Eintrags (gleiche Seite), Verdachtstext und
                           Eintrag überlappen (gefaltet, an Wortgrenzen) oder teilen ein signifikantes Token auf
                           derselben Seite; ein Seitenverdacht ohne Rechteck deckt seine ganze Seite ab
+    verortete Abdeckung   dasselbe nur für Verdachte, die AUF den Eintrag zeigen: Textüberlappung (gleiche Seite) oder
+                          ein Rechteck, das ein Wortrechteck des Eintrags schneidet und höchstens VERORTET_FLAECHE-mal
+                          so groß ist wie dessen Wortrechtecke zusammen – ein spaltenhohes Rechteck über vielen
+                          Einträgen, ein Seitenverdacht oder ein gemeinsames Token deckt ab, verortet aber nicht
+                          (ohne reine Pixelreste berichtet, neben der Abdeckung)
     Fehlverdacht je Seite Verdachtsstellen, die keinen zu schwärzenden Eintrag (Kern oder erweitert) überdecken,
                           im Mittel je Seite
     _PRUEFEN ohne Leck    Dokumente mit Ausgabe _PRUEFEN, in denen kein Kern-Eintrag geleckt ist
@@ -1031,9 +1036,38 @@ def _verdacht_trifft(v: dict, e: dict, kasten: list, nadel: Gefaltet, tokens: se
     return bool(gleiche_seite and tokens and tokens & set(signifikante_token(v.get("text", ""))))
 
 
+VERORTET_FLAECHE = 4.0          # "verortet": Verdachtsrechteck höchstens so viel mal so groß wie die Wortkästen
+
+
+def _verdacht_verortet(v: dict, e: dict, kasten: list, nadel: Gefaltet) -> bool:
+    """Zeigt der Verdacht v AUF den Eintrag e (siehe "verortete Abdeckung" im Modulkopf): gleiche Seite und
+    Textüberlappung oder ein Rechteck, das ein Wortrechteck des Eintrags schneidet und höchstens VERORTET_FLAECHE-mal so
+    groß ist wie die Hülle seiner Wortrechtecke? Seitenverdacht, gemeinsames Token und Rechtecke über einer ganzen
+    Spalte decken ab (_verdacht_trifft), zeigen der Nutzerin aber nicht, welcher Wert stehen geblieben ist."""
+    seite = v.get("seite")
+    if seite is None or int(seite) + 1 != e["seite"]:
+        return False
+    if _ueberlappt(Gefaltet(v.get("text", "")), nadel):
+        return True
+    if not kasten:
+        return False
+    huelle = fitz.Rect(kasten[0])
+    for k in kasten[1:]:
+        huelle |= k
+    grenze = VERORTET_FLAECHE * max(abs(huelle), 1.0)
+    for r in v.get("rechtecke") or []:
+        rv = fitz.Rect(r)
+        if abs(rv) > grenze:
+            continue
+        if any(rv.intersects(k) and abs(rv & k) > 0.15 * min(abs(k) or 1.0, abs(rv) or 1.0) for k in kasten):
+            return True
+    return False
+
+
 def verdacht_bewerten(ergebnis: dict, bewertete: list, wahrheit_eintraege: list) -> None:
-    """Je zu schwärzendem Eintrag "verdacht_abgedeckt", je Verdacht "trifft" (überdeckt er einen zu schwärzenden
-    Eintrag, Kern oder erweitert?) – Grundlage für Verdachtsabdeckung und Fehlverdacht."""
+    """Je zu schwärzendem Eintrag "verdacht_abgedeckt" und "verdacht_verortet", je Verdacht "trifft" (überdeckt er einen
+    zu schwärzenden Eintrag, Kern oder erweitert?) – Grundlage für Verdachtsabdeckung, verortete Abdeckung und
+    Fehlverdacht."""
     verdacht = list(ergebnis.get("verdacht") or []) + list(ergebnis.get("reste_verdacht") or [])
     wahrheit = {w["id"]: w for w in wahrheit_eintraege}
     vorbereitet = []
@@ -1047,6 +1081,8 @@ def verdacht_bewerten(ergebnis: dict, bewertete: list, wahrheit_eintraege: list)
         v["trifft"] = any(_verdacht_trifft(v, r, kasten, nadel, tokens) for r, kasten, nadel, tokens in vorbereitet)
     for r, kasten, nadel, tokens in vorbereitet:
         r["verdacht_abgedeckt"] = any(_verdacht_trifft(v, r, kasten, nadel, tokens) for v in verdacht)
+        r["verdacht_verortet"] = r["verdacht_abgedeckt"] and any(_verdacht_verortet(v, r, kasten, nadel)
+                                                                 for v in verdacht)
 
 
 def _ueberlappt(a: Gefaltet, b: Gefaltet) -> bool:
@@ -1316,7 +1352,7 @@ def restrisiko_kennzahlen(dokumente: list) -> dict:
     seiten = sum(d.get("seiten") or 0 for d in dokumente) or 1
     stille, docs_still, pruefen, pruefen_ohne_leck, pruefen_ohne_jedes = 0, [], 0, [], []
     gezaehlt, abgedeckt, verdacht_n, fehl, nicht_abgedeckt = 0, 0, 0, [], []
-    ohne_pixel_n, ohne_pixel_abgedeckt = 0, 0
+    ohne_pixel_n, ohne_pixel_abgedeckt, ohne_pixel_verortet, nicht_verortet = 0, 0, 0, []
     je_kat: dict = defaultdict(lambda: {"n": 0, "abgedeckt": 0})
     for d in dokumente:
         status = d.get("status_ausgabe")
@@ -1339,6 +1375,11 @@ def restrisiko_kennzahlen(dokumente: list) -> dict:
             if not pixelrest:
                 ohne_pixel_n += 1
                 ohne_pixel_abgedeckt += bool(e.get("verdacht_abgedeckt"))
+                ohne_pixel_verortet += bool(e.get("verdacht_verortet"))
+                if e.get("verdacht_abgedeckt") and not e.get("verdacht_verortet"):
+                    nicht_verortet.append({"dokument": d["dokument"], "seite": e.get("seite"),
+                                           "kategorie": e["kategorie"], "text": e["text"],
+                                           "ausgabe_pruefen": status == "pruefen"})
             if e.get("verdacht_abgedeckt"):
                 abgedeckt += 1
                 je_kat[e["kategorie"]]["abgedeckt"] += 1
@@ -1363,6 +1404,8 @@ def restrisiko_kennzahlen(dokumente: list) -> dict:
         "kern_lecks": gezaehlt, "kern_lecks_abgedeckt": abgedeckt,
         "verdachtsabdeckung_ohne_pixelrest": round(ohne_pixel_abgedeckt / ohne_pixel_n, 4) if ohne_pixel_n else None,
         "kern_lecks_ohne_pixelrest": ohne_pixel_n, "kern_lecks_ohne_pixelrest_abgedeckt": ohne_pixel_abgedeckt,
+        "verdachtsabdeckung_verortet": round(ohne_pixel_verortet / ohne_pixel_n, 4) if ohne_pixel_n else None,
+        "kern_lecks_ohne_pixelrest_verortet": ohne_pixel_verortet, "abgedeckt_nicht_verortet": nicht_verortet,
         "verdacht": verdacht_n, "fehlverdacht": len(fehl), "fehlverdacht_je_seite": round(len(fehl) / seiten, 3),
         "ausgaben_pruefen": pruefen, "ausgaben_pruefen_quote": round(pruefen / n, 4) if n else None,
         "pruefen_ohne_leck": len(pruefen_ohne_leck), "pruefen_ohne_leck_dokumente": pruefen_ohne_leck,
@@ -1788,6 +1831,9 @@ def _restrisiko_bericht(e: dict) -> list:
          f"{_p(rr['verdachtsabdeckung'])} ({rr['kern_lecks_abgedeckt']}/{rr['kern_lecks']})"],
         ["Verdachtsabdeckung ohne reine Pixelreste",
          f"{_p(rr.get('verdachtsabdeckung_ohne_pixelrest'))} ({rr.get('kern_lecks_ohne_pixelrest_abgedeckt')}/"
+         f"{rr.get('kern_lecks_ohne_pixelrest')})"],
+        ["… davon verortet (Verdacht zeigt auf den Wert, kein Seiten- oder Spaltenrechteck)",
+         f"{_p(rr.get('verdachtsabdeckung_verortet'))} ({rr.get('kern_lecks_ohne_pixelrest_verortet')}/"
          f"{rr.get('kern_lecks_ohne_pixelrest')})"],
         ["Fehlverdacht je Seite (Verdacht ohne zu schwärzenden Eintrag)",
          f"{rr['fehlverdacht_je_seite']} ({rr['fehlverdacht']} von {rr['verdacht']} Verdachtsstellen)"],
