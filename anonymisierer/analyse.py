@@ -1714,9 +1714,14 @@ TINTE_SOCKEL = 0.004            # Linien, Logo, Stempel, Unterschrift einer sons
 
 def tintenanteil(seite) -> float:
     """Anteil dunkler Pixel (grob gerendert): eine unlesbare Seite hat viele. Nur ein Maß für „viel Tinte“ – für „die
-    Seite ist leer“ übersieht es hell gedruckten Text (dafür seite_nachweislich_leer)."""
+    Seite ist leer“ übersieht es hell gedruckten Text (dafür seite_nachweislich_leer). Gerendert wird ohne
+    Strukturbaum (nur für diesen Aufruf ausgeblendet): an einem Zyklus darin hängt MuPDF 1.28 beim Rendern über zehn
+    Minuten – hier im Dokument der Analyse bzw. der Schwärzung."""
+    from contextlib import nullcontext
+    ausgeblendet = getattr(_ocr, "strukturbaum_ausgeblendet", None)
     try:
-        daten = seite.get_pixmap(dpi=50, colorspace=fitz.csGRAY, alpha=False).samples
+        with ausgeblendet(seite.parent) if ausgeblendet is not None else nullcontext():
+            daten = seite.get_pixmap(dpi=50, colorspace=fitz.csGRAY, alpha=False).samples
     except Exception:
         return 1.0
     return (len(daten) - len(bytes(daten).translate(None, bytes(range(180))))) / max(1, len(daten))
@@ -1761,7 +1766,10 @@ def seite_nachweislich_leer(seite) -> bool:
         dpi = LEER_DPI
         if flaeche * (dpi / 72) ** 2 > LEER_MAX_PIXEL:
             dpi = max(10, int(72 * (LEER_MAX_PIXEL / flaeche) ** 0.5))
-        pix = seite.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY, alpha=False)
+        from contextlib import nullcontext
+        ausgeblendet = getattr(_ocr, "strukturbaum_ausgeblendet", None)     # Strukturbaum-Zyklus: wie tintenanteil
+        with ausgeblendet(seite.parent) if ausgeblendet is not None else nullcontext():
+            pix = seite.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY, alpha=False)
         breite, daten = int(pix.width), bytes(pix.samples)
     except Exception:
         return False

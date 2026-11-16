@@ -4,7 +4,8 @@ Die Oberfläche erkennt die echten Funktionen per hasattr/try-Import und nimmt d
 die Engine sie noch nicht hat (und in Tests). Jede Attrappe hält die Vertragsschnittstelle ein, tut aber nur
 das Nötigste:
   - PROFILE: Schutzstufen aus den vorhandenen Kategorien abgeleitet (muster.PROFILE ersetzt sie)
-  - seite_bild / vorschau_daten: Seitenbild per PyMuPDF (aus dem Speicher, ohne offenen Datei-Handle);
+  - seite_bild / vorschau_daten: Seitenbild per PyMuPDF (aus dem Speicher, ohne offenen Datei-Handle, vorbereitet
+    wie in der Analyse und ohne Strukturbaum – vorschau.dokument_fuer_vorschau);
     Wörter und Fundstellen aus dem Seitenmodell der Analyse (ergebnis["modell"], Vertrag Abschnitt 1), wenn es
     eins gibt – sonst eigene PyMuPDF-Wörter (vorschau.py ersetzt sie)
   - freigeben / verwerfen: _PRUEFEN entfernen bzw. Ausgabe löschen, die Zuordnungsdatei nachführen (neben dem
@@ -141,9 +142,68 @@ def cache_leeren(pfad=None):
             pass
 
 
+def _wie_analyse_vorbereiten(doc, schliessen: bool = True):
+    """Dieselbe Seitenvorbereitung wie Analyse und Schwärzung: seitenmodell.dokument_vorbereiten (Formularfelder
+    einbrennen, Drehung so entfernen, dass der sichtbare Ausschnitt einer Seite mit CropBox exakt bleibt – Befund
+    R-05 –, ausgeblendete Ebenen sichtbar). Liefert das vorbereitete Dokument: bei Ebenen eine neu geöffnete
+    Fassung (die alte wird geschlossen, außer schliessen=False – ein Dokument des Aufrufers). Nur ohne Seitenmodell:
+    bake und ocr.drehung_entfernen je Seite. Mehrfachaufruf ist unschädlich."""
+    try:
+        from . import seitenmodell as _sm
+    except ImportError:
+        _sm = None
+    if _sm is not None and hasattr(_sm, "dokument_vorbereiten"):
+        neu = _sm.dokument_vorbereiten(doc).get("dokument") or doc
+        if neu is not doc and schliessen:
+            doc.close()
+        return neu
+    try:
+        doc.bake()
+    except Exception:
+        pass
+    from . import ocr as _ocr
+    for seite in doc:
+        try:
+            _ocr.drehung_entfernen(seite)
+        except Exception:
+            pass
+    return doc
+
+
+def _strukturbaum_ausgeblendet(doc):
+    """Kontext fürs Rendern eines fremden Dokuments: Strukturbaum nur währenddessen ausgeblendet – an einem Zyklus
+    darin hängt MuPDF 1.28 beim Rendern über zehn Minuten (ocr.strukturbaum_entfernen)."""
+    from . import ocr as _ocr
+    return _ocr.strukturbaum_ausgeblendet(doc)
+
+
+def _dokument_oeffnen(pfad: Path):
+    """Kopie im Speicher (keine offene Datei – unter Windows bleibt sie umbenenn- und löschbar), vorbereitet wie in
+    Analyse und Schwärzung und ohne Strukturbaum: vorschau.dokument_fuer_vorschau (Nicht-PDF, Kennwort, Reparatur,
+    seitenmodell.dokument_vorbereiten). Nur ohne Vorschau-Modul der Engine ein eigener Rückfall."""
+    try:
+        from .vorschau import dokument_fuer_vorschau
+    except ImportError:
+        dokument_fuer_vorschau = None
+    if dokument_fuer_vorschau is not None:
+        return dokument_fuer_vorschau(pfad)
+    doc = fitz.open(stream=Path(pfad).read_bytes(), filetype="pdf")
+    try:
+        if not doc.is_pdf:                              # vor jedem Seitenzugriff (Gutachten R-01)
+            raise ValueError(f"»{Path(pfad).name}« ist keine PDF – keine Vorschau möglich.")
+        if doc.needs_pass:
+            raise ValueError("Die PDF-Datei ist passwortgeschützt.")
+        doc = _wie_analyse_vorbereiten(doc)
+    except BaseException:
+        doc.close()
+        raise
+    from . import ocr as _ocr
+    _ocr.strukturbaum_entfernen(doc)                    # eigene Kopie, wird nie gespeichert
+    return doc
+
+
 def _vorbereitet(pfad) -> dict:
-    """PDF aus dem Speicher öffnen (keine offene Datei – unter Windows bleibt sie umbenennbar), Formular-
-    felder einbrennen und Drehung entfernen wie Analyse und Schwärzung; je Pfad und Dateistand gemerkt."""
+    """Vorbereitete Kopie im Speicher (_dokument_oeffnen), je Pfad und Dateistand gemerkt."""
     pfad = Path(pfad)
     stand = pfad.stat()
     kennung = (stand.st_mtime_ns, stand.st_size)
@@ -151,19 +211,7 @@ def _vorbereitet(pfad) -> dict:
     if eintrag is not None and eintrag["kennung"] == kennung:
         return eintrag
     cache_leeren(pfad)
-    doc = fitz.open(stream=pfad.read_bytes(), filetype="pdf")
-    if doc.needs_pass:
-        doc.close()
-        raise ValueError("Die PDF-Datei ist passwortgeschützt.")
-    try:
-        doc.bake()
-    except Exception:
-        pass
-    for seite in doc:
-        try:
-            seite.remove_rotation()
-        except Exception:
-            pass
+    doc = _dokument_oeffnen(pfad)
     eintrag = {"kennung": kennung, "doc": doc, "seiten": {}}
     while len(_CACHE) >= _CACHE_MAX:
         cache_leeren(next(iter(_CACHE)))
@@ -254,13 +302,17 @@ def rechtecke_fuer(woerter, start: int, ende: int) -> list:
 
 
 def seite_bild(pdf_pfad_oder_doc, seite_nr0: int, zoom: float) -> tuple[bytes, float]:
-    """PNG der Seite (nach remove_rotation) und Faktor pt -> Pixel (Vertrag Abschnitt 8)."""
+    """PNG der Seite (vorbereitet wie in der Analyse) und Faktor pt -> Pixel (Vertrag Abschnitt 8). Ein übergebenes
+    Dokument wird zuerst wie in der Analyse vorbereitet; sein Strukturbaum bleibt nur fürs Rendern ausgeblendet."""
     zoom = max(0.1, min(float(zoom), 6.0))
+    matrix = fitz.Matrix(zoom, zoom)
     if isinstance(pdf_pfad_oder_doc, fitz.Document):
-        doc = pdf_pfad_oder_doc
+        doc = _wie_analyse_vorbereiten(pdf_pfad_oder_doc, schliessen=False)
+        with _strukturbaum_ausgeblendet(doc):
+            pix = doc[seite_nr0].get_pixmap(matrix=matrix, alpha=False)
     else:
         doc = _vorbereitet(pdf_pfad_oder_doc)["doc"]
-    pix = doc[seite_nr0].get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        pix = doc[seite_nr0].get_pixmap(matrix=matrix, alpha=False)
     return pix.tobytes("png"), zoom
 
 
@@ -269,8 +321,8 @@ def _vergleichstext(text: str) -> str:
 
 
 def _mit_ocr_woertern(modell: dict, ocr_woerter) -> dict:
-    """Seitenmodell um OCR-Wörter (ocr_cache der Analyse: (x0, y0, x1, y1, text) in Seitenkoordinaten nach
-    remove_rotation) ergänzen – sonst zeigt die Vorschau auf Scans keine einzige Fundstelle."""
+    """Seitenmodell um OCR-Wörter (ocr_cache der Analyse: (x0, y0, x1, y1, text) in Seitenkoordinaten nach dem
+    Entfernen der Drehung) ergänzen – sonst zeigt die Vorschau auf Scans keine einzige Fundstelle."""
     if not ocr_woerter:
         return modell
     woerter = list(modell["woerter"])
@@ -444,15 +496,9 @@ def reste_als_verdacht(ausgabe_pfad, reste, vorhandene=()) -> list[dict]:
         seite = verdacht_feld(v, "seite")
         if seite is not None:
             belegt.setdefault(int(seite), []).extend(fitz.Rect(r) for r in verdacht_feld(v, "rechtecke") or [])
-    doc = fitz.open(stream=Path(ausgabe_pfad).read_bytes(), filetype="pdf")
+    doc = _dokument_oeffnen(Path(ausgabe_pfad))   # dieselben Seitenkoordinaten wie das Bild der Vorschau
     try:
-        seiten = []
-        for seite in doc:
-            try:
-                seite.remove_rotation()
-            except Exception:
-                pass
-            seiten.append(_text_und_woerter(seite)[1])
+        seiten = [_text_und_woerter(seite)[1] for seite in doc]
     finally:
         doc.close()
     verdacht = []

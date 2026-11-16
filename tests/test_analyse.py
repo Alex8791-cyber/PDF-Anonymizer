@@ -817,9 +817,16 @@ def test_lauf_wissen_sammelt_personen(tmp_path):
 
 def test_analyse_laufzeit_skaliert_linear(monkeypatch):
     """Gutachten PERF-01: keine O(Funde x Text)- oder O(Funde²)-Nachbearbeitung (Weitergabe, Zusammenführen,
-    Kontext, Seitenzuordnung). Gemessen mit linearen Ersatz-Mustern, damit nur der Kern zählt: vierfache
-    Menge darf höchstens etwa vierfache Zeit kosten (großzügig: Faktor 7)."""
-    import time
+    Kontext, Seitenzuordnung). Gemessen mit linearen Ersatz-Mustern, damit nur der Kern zählt.
+    Lastunabhängig (Runde 3): CPU-Zeit des eigenen Prozesses statt Wanduhr (parallele Benchmarks dehnten die
+    Wanduhr der großen Messung, das Verhältnis riss); beide Größen werden abwechselnd je dreimal gemessen, es
+    zählt jeweils das Minimum – so sehen beide dieselbe Last.
+    Große Spreizung (Befund Runde 3a): 500 gegen 4000 Zeilen (Faktor 8). Linear wächst die CPU-Zeit etwa mit dem
+    Faktor (wachstum gemessen 1,0 bis 1,13, auch unter Last), eine Überlappungsprüfung aller Stellenpaare
+    (Funde²) hebt es auf 1,6 bis 1,9 (nur Paare i < j) bzw. 3,4 (alle Paare) – Schranke 1,4. Beim früheren
+    Vergleich 500 gegen 2000 Zeilen blieb dieselbe Regression laut Prüfung mit Verhältnis 4,6 bis 6,0 unter der
+    Schranke 7."""
+    import zeitmessung
     from anonymisierer import muster
 
     linear = [("iban", "IBANs", "[IBAN]", lambda t: re.findall(r"DE\d\d(?: \d{4}){4} \d\d", t), True),
@@ -832,14 +839,17 @@ def test_analyse_laufzeit_skaliert_linear(monkeypatch):
                          f"IBAN DE89 3704 0044 {i:04d} 0130 00 Betrag {i},00 EUR" for i in range(n))
     aktive = {"iban", "telefon", "vertrag"}
     analysiere_text(text(50), aktive, [], [])                         # Aufwärmen
-    t0 = time.perf_counter()
-    klein = analysiere_text(text(500), aktive, [], [])
-    t1 = time.perf_counter()
-    gross = analysiere_text(text(2000), aktive, [], [])
-    t2 = time.perf_counter()
-    assert len(gross) == 4 * len(klein) == 6000
-    assert (t2 - t1) < 7 * max(t1 - t0, 0.05), (t1 - t0, t2 - t1)
-    assert t2 - t1 < 30
+    text_klein, text_gross = text(500), text(4000)
+    gemessen = zeitmessung.cpu_sekunden_abwechselnd({"klein": lambda: analysiere_text(text_klein, aktive, [], []),
+                                                     "gross": lambda: analysiere_text(text_gross, aktive, [], [])},
+                                                    wiederholungen=3)
+    (klein, zeit_klein), (gross, zeit_gross) = gemessen["klein"], gemessen["gross"]
+    wachstum = zeitmessung.wachstum(zeit_klein, zeit_gross, 8)
+    print(f"analysiere_text CPU: 500 Zeilen {zeit_klein:.3f} s, 4000 Zeilen {zeit_gross:.3f} s, "
+          f"Verhältnis {zeit_gross / zeit_klein:.1f} bei Faktor 8, wachstum {wachstum:.2f}")
+    assert len(gross) == 8 * len(klein) == 12000
+    assert wachstum < 1.4, (zeit_klein, zeit_gross)
+    assert zeit_gross < 30
 
 
 # ----------------------------------------------------------------------

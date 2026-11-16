@@ -11,6 +11,7 @@
     pruefung_merken()                       Kontext: Seitenprüfung je Seite nur einmal (Seitenmodell)
     drehung_entfernen(seite)                /Rotate entfernen, sichtbarer Ausschnitt bleibt exakt (Befund R-05)
     strukturbaum_entfernen(doc)             vor dem Rendern: Strukturbaum-Zyklen lassen MuPDF 1.28 hängen
+    strukturbaum_ausgeblendet(doc)          dasselbe nur für einen with-Block (Dokument bleibt danach unverändert)
     render_dpi(seite, clip, dpi), render_aufloesung(...)
                                             Renderauflösung der OCR (mit Grund), riesige Seiten begrenzt (Befund R-06)
     ocr_noetig(seite, meldungen=None)       "nein" | "seite" | "bilder"   (= seiten_pruefung(...).modus)
@@ -57,6 +58,7 @@ Code-Tabellen bleiben bei 0°). Bleibt die beste Lesung unplausibel: Meldung OCR
 
 import concurrent.futures
 import concurrent.futures.process  # registriert sein Beenden-Hook vor unserem (siehe _beim_beenden)
+import contextlib
 import hashlib
 import math
 import multiprocessing
@@ -375,18 +377,28 @@ def _tessdata_finden():
     return None
 
 
+def _sprachdatei_hilfe() -> str:
+    """Wo die deutsche Sprachdatei liegen muss und was hilft – passend zur Betriebsart: in der EXE (PyInstaller,
+    sys.frozen) unter _internal\\tessdata, in der Skript-Version unter tessdata im Programmordner. In beiden Fällen
+    liefert die ZIP-Datei sie mit; Installieren.bat bringt sie nicht zurück (es installiert nur Python-Pakete und
+    bricht ohne sie mit „Dateien fehlen“ ab). Gleiche Abhilfe wie in der Übersetzung der Oberfläche (M-70)."""
+    ordner = "_internal\\tessdata" if getattr(sys, "frozen", False) else "tessdata"
+    return (f"Die Datei deu.traineddata muss im Programmordner unter {ordner} liegen (bitte den Programmordner "
+            f"vollständig neu entpacken bzw. eine neue ZIP-Datei anfordern; ggf. die Quarantäne des Virenscanners "
+            f"prüfen).")
+
+
 def _ocr_sprache(tessdata):
     """Liefert (Sprachkürzel oder None, Warnung oder None) für den Sprachdaten-Ordner."""
     if tessdata is None:
         return None, ("Tesseract-Sprachdaten nicht gefunden – Scans können nicht gelesen werden. "
-                      "Der Ordner »tessdata« mit deu.traineddata muss neben dem Programm liegen "
-                      "(Installieren.bat erneut ausführen).")
+                      + _sprachdatei_hilfe())
     if (Path(tessdata) / "deu.traineddata").exists():
         return "deu", None
     if (Path(tessdata) / "eng.traineddata").exists():
-        return "eng", ("Deutsche OCR-Sprachdatei fehlt – nutze Englisch "
-                       "(Umlaute werden evtl. falsch erkannt).")
-    return None, "Keine OCR-Sprachdatei gefunden – Installieren.bat erneut ausführen."
+        return "eng", ("Deutsche OCR-Sprachdatei fehlt – nutze Englisch (Umlaute werden evtl. falsch erkannt). "
+                       + _sprachdatei_hilfe())
+    return None, "Keine OCR-Sprachdatei gefunden – Scans können nicht gelesen werden. " + _sprachdatei_hilfe()
 
 
 def traineddata_mit_einstellungen(daten: bytes, einstellungen: dict) -> bytes:
@@ -872,6 +884,30 @@ def strukturbaum_entfernen(doc) -> None:
             doc.xref_set_key(katalog, "StructTreeRoot", "null")
     except Exception as e:
         _protokollieren(e)
+
+
+@contextlib.contextmanager
+def strukturbaum_ausgeblendet(doc):
+    """Wie strukturbaum_entfernen, aber nur für die Dauer des with-Blocks – für Dokumente, die danach weiterbenutzt
+    oder gespeichert werden (Tintenanteil im Dokument der Analyse und der Schwärzung). MuPDF liest den Strukturbaum
+    erst beim Rendern; danach steht der Eintrag im Katalog wieder genau so da wie vorher."""
+    katalog, vorher = None, None
+    try:
+        katalog = doc.pdf_catalog()
+        art, wert = doc.xref_get_key(katalog, "StructTreeRoot")
+        if art != "null":
+            vorher = wert
+            doc.xref_set_key(katalog, "StructTreeRoot", "null")
+    except Exception as e:
+        _protokollieren(e)
+    try:
+        yield doc
+    finally:
+        if vorher is not None:
+            try:
+                doc.xref_set_key(katalog, "StructTreeRoot", vorher)
+            except Exception as e:
+                _protokollieren(e)
 
 
 def _probe_seite(seite):

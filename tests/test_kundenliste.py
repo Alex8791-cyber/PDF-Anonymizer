@@ -186,19 +186,43 @@ def test_analyse_mit_kundenliste_findet_unbekannten_namen(tmp_path):
 
 
 def test_geschwindigkeit_10000_kunden_50_seiten(tmp_path):
-    zeilen = ["Name;Vorname;Geburtsdatum;IBAN;Kundennummer;E-Mail;Telefon"]
-    for i in range(10_000):
-        zeilen.append(f"Nachname{i:05d};Vorname{i % 997};{1 + i % 28:02d}.{1 + i % 12:02d}.{1950 + i % 50};"
-                      f"DE{i:020d};KD-{i:06d};kunde{i}@example.de;0911 {100000 + i}")
-    pfad = _csv(tmp_path, "\n".join(zeilen) + "\n")
-    liste = Kundenliste.importieren(pfad)
-    assert liste.anzahl_kunden == 10_000
+    """Lastunabhängig (Runde 3): gemessen wird die CPU-Zeit des eigenen Prozesses statt der Wanduhr – parallele
+    Benchmarks oder ein langsamer CI-Runner verlängern nur die Wartezeit, nicht die Rechenzeit. Zwei Prüfungen:
+    (1) Skalierung: 4-mal so viele Kunden UND gut 4-mal so viel Text kosten bei linearem Abgleich etwa 4-mal so
+    viel (gemessen 3,4 bis 4,7, auch unter Last), ein Abgleich Kunden x Text (eingebaut: Index je 25 Zeilen neu
+    gebaut) 10,2 bis 21,7-mal – Schranke 8. Hier wachsen Kunden und Text zugleich, ein solcher Anteil also mit
+    dem Faktor 16 statt 4 und überwiegt schon bei dieser Spreizung (anders als bei Schwärzung und
+    analysiere_text, Befund Runde 3a); (2) die bisherige Schranke 2 s für 10 000 Kunden und 50 Seiten, jetzt als
+    CPU-Zeit (gemessen 0,7 bis 0,85 s). Jede Messung mit frischer Liste (der Index entsteht im ersten treffer());
+    gemessen wird abwechselnd klein/groß, je das Minimum von drei Läufen – so sehen beide Größen dieselbe Last."""
+    import zeitmessung
     seite = ("Sehr geehrte Frau Beispiel, Ihr Vertrag LV-2024-887766 vom 01.01.2020 wurde angepasst. Der Beitrag "
-             "beträgt 120,00 EUR monatlich. Bei Fragen erreichen Sie uns unter 0800 123456. Kunde KD-004711, "
-             "Nachname04711 Vorname4711, Hauptstraße 12, 90402 Nürnberg.\n") * 25
-    text = "\n\f\n".join([seite] * 50)
-    dok = dokument_aus_text(text)
-    start = time.perf_counter()
-    treffer = liste.treffer(dok)
-    dauer = time.perf_counter() - start
-    assert treffer and dauer < 2.0, dauer
+             "beträgt 120,00 EUR monatlich. Bei Fragen erreichen Sie uns unter 0800 123456. Kunde KD-001234, "
+             "Nachname01234 Vorname1234, Hauptstraße 12, 90402 Nürnberg.\n") * 25     # Kunde in beiden Listen
+
+    def frische_listen(anzahl_kunden, wie_oft):
+        zeilen = ["Name;Vorname;Geburtsdatum;IBAN;Kundennummer;E-Mail;Telefon"]
+        for i in range(anzahl_kunden):
+            zeilen.append(f"Nachname{i:05d};Vorname{i % 997};{1 + i % 28:02d}.{1 + i % 12:02d}.{1950 + i % 50};"
+                          f"DE{i:020d};KD-{i:06d};kunde{i}@example.de;0911 {100000 + i}")
+        pfad = _csv(tmp_path, "\n".join(zeilen) + "\n", name=f"kunden_{anzahl_kunden}.csv")
+        listen = [Kundenliste.importieren(pfad) for _ in range(wie_oft)]
+        assert all(liste.anzahl_kunden == anzahl_kunden for liste in listen)
+        return iter(listen)
+
+    dok_klein = dokument_aus_text("\n\f\n".join([seite] * 12))
+    dok_gross = dokument_aus_text("\n\f\n".join([seite] * 50))
+    listen_klein, listen_gross = frische_listen(2_500, 3), frische_listen(10_000, 3)
+    wanduhr = time.perf_counter()
+    gemessen = zeitmessung.cpu_sekunden_abwechselnd({"klein": lambda: next(listen_klein).treffer(dok_klein),
+                                                     "gross": lambda: next(listen_gross).treffer(dok_gross)},
+                                                    wiederholungen=3)
+    wanduhr = time.perf_counter() - wanduhr          # nur zur Anzeige: unter Last weit über der CPU-Zeit
+    (treffer_klein, klein), (treffer, gross) = gemessen["klein"], gemessen["gross"]
+    assert treffer_klein and treffer
+    assert {t.kategorie for t in treffer} >= {"namen"}, {t.kategorie for t in treffer}
+    verhaeltnis = gross / max(klein, 0.05)
+    print(f"Kundenliste CPU: 2 500 Kunden/12 Seiten {klein:.3f} s, 10 000 Kunden/50 Seiten {gross:.3f} s, "
+          f"Verhältnis {verhaeltnis:.1f} (Wanduhr aller sechs Messungen: {wanduhr:.1f} s)")
+    assert verhaeltnis < 8, f"Abgleich wächst nicht linear: {klein:.3f} s -> {gross:.3f} s (x{verhaeltnis:.1f})"
+    assert gross < 2.0, f"Abgleich 10 000 Kunden/50 Seiten braucht {gross:.2f} s CPU-Zeit"

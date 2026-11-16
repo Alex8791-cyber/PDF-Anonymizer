@@ -894,28 +894,61 @@ def test_selbstkontrolle_findet_echte_reste(tmp_path, monkeypatch):
 # M-35: Laufzeit
 # ----------------------------------------------------------------------
 def test_laufzeit_50_seiten_300_funde(tmp_path):
-    pdf = tmp_path / "gross.pdf"
-    doc = fitz.open()
-    funde = []
-    for p in range(50):
-        seite = doc.new_page()
-        y = 40
-        for i in range(45):
-            seite.insert_text((40, y), f"Kunde{p:02d}{i:02d} Nummer{p}{i} Vertrags-Nr. V{p:02d}{i:03d}X Tel 0171 {p:03d}{i:04d}",
-                              fontsize=8, fontname="helv")
-            y += 15
-            if len(funde) < 300 and i % 8 == 0:
-                funde.append(fund(f"Kunde{p:02d}{i:02d}", f"[PERSON {len(funde)}]"))
-    doc.save(pdf)
-    doc.close()
-    assert len(funde) == 300
-    start = time.perf_counter()
-    e = schwaerze_pdf(pdf, funde)
-    dauer = time.perf_counter() - start
+    """M-35 / Gutachten KQ-09, lastunabhängig (Runde 3): gemessen wird die CPU-Zeit des eigenen Prozesses statt
+    der Wanduhr – auch die großzügige 20-s-Schranke riss, sobald parallele Benchmarks die Kerne belegten. Zwei
+    Prüfungen:
+    (1) Skalierung mit großer Spreizung (Befund Runde 3a): 3 gegen 50 Seiten mit je 6 Funden (Faktor 16,7). Linear
+        wächst die CPU-Zeit etwa mit dem Faktor (wachstum gemessen 1,0 bis 1,1, auch unter Last); das alte
+        Verhalten Funde x Seiten (jede Seite sucht jeden Fund, Audit: 8 Minuten) hebt es auf etwa 3,0, mildere
+        Formen (jeder zweite bzw. vierte Fund auf jeder Seite) auf 2,0 bzw. 1,4 bis 1,5 – Schranke 1,3. Früher
+        wurde 12 gegen 50 Seiten verglichen: dort ging dieselbe Regression in der linearen Grundlast unter
+        (Verhältnis laut Prüfung 6,0 bis 9,4 statt der angenommenen 17, Schranke 8), rot wurde der Test nur durch
+        die rechnerabhängige 20-s-Schranke;
+    (2) die bisherige Schranke 20 s für 50 Seiten und 300 Funde, jetzt als CPU-Zeit (gemessen 6 bis 8 s).
+    Beide Größen werden abwechselnd je zweimal geschwärzt, es zählt jeweils das Minimum."""
+    import zeitmessung
+
+    def pdf_mit(seiten: int):
+        pdf = tmp_path / f"gross_{seiten}.pdf"
+        doc = fitz.open()
+        funde = []
+        for p in range(seiten):
+            seite = doc.new_page()
+            y = 40
+            for i in range(45):
+                seite.insert_text((40, y), f"Kunde{p:02d}{i:02d} Nummer{p}{i} Vertrags-Nr. V{p:02d}{i:03d}X Tel 0171 "
+                                           f"{p:03d}{i:04d}", fontsize=8, fontname="helv")
+                y += 15
+                if i % 8 == 0:
+                    funde.append(fund(f"Kunde{p:02d}{i:02d}", f"[PERSON {len(funde)}]"))
+        doc.save(pdf)
+        doc.close()
+        return pdf, funde
+
+    klein_pdf, klein_funde = pdf_mit(3)
+    pdf, funde = pdf_mit(50)
+    assert (len(klein_funde), len(funde)) == (18, 300)
+    faktor = len(funde) / len(klein_funde)
+    laeufe = iter(range(100))
+
+    def schwaerzen(pdf_pfad, liste):                 # jede Messung schreibt in einen eigenen Ordner
+        return schwaerze_pdf(pdf_pfad, liste, ziel_ordner=tmp_path / f"aus_{next(laeufe)}")
+
+    schwaerzen(klein_pdf, klein_funde[:2])           # Aufwärmen: der erste Aufruf lädt Schriften und Module
+    wanduhr = time.perf_counter()
+    gemessen = zeitmessung.cpu_sekunden_abwechselnd({"klein": lambda: schwaerzen(klein_pdf, klein_funde),
+                                                     "gross": lambda: schwaerzen(pdf, funde)}, wiederholungen=2)
+    wanduhr = time.perf_counter() - wanduhr          # nur zur Anzeige: unter Last weit über der CPU-Zeit
+    (ek, klein), (e, gross) = gemessen["klein"], gemessen["gross"]
+    assert ek["treffer"] == 18 and ek["reste"] == [], ek
     assert e["treffer"] == 300 and e["reste"] == [], e
-    # Gutachten KQ-09: keine knappe Wanduhr-Schranke (CI-Runner unter Last) – 20 s fangen jede
-    # Rückkehr zum alten quadratischen Verhalten (Audit: 8 Minuten) zuverlässig ab
-    assert dauer < 20.0, f"Schwärzung dauerte {dauer:.1f} s"
+    wachstum = zeitmessung.wachstum(klein, gross, faktor)
+    print(f"Schwärzung CPU: 3 Seiten/18 Funde {klein:.2f} s, 50 Seiten/300 Funde {gross:.2f} s, Verhältnis "
+          f"{gross / klein:.1f} bei Faktor {faktor:.1f}, wachstum {wachstum:.2f} (Wanduhr aller vier Messungen: "
+          f"{wanduhr:.1f} s)")
+    assert wachstum < 1.3, (f"Schwärzung wächst nicht linear: {klein:.2f} s -> {gross:.2f} s "
+                            f"(x{gross / klein:.1f} bei {faktor:.1f}-facher Größe)")
+    assert gross < 20.0, f"Schwärzung 50 Seiten/300 Funde brauchte {gross:.1f} s CPU-Zeit"
 
 
 # ----------------------------------------------------------------------

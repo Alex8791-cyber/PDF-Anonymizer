@@ -626,8 +626,17 @@ def test_cache_haengt_am_inhalt_nicht_am_pfad(tmp_path, dienst):
 
 
 @braucht_ocr
-def test_vorab_liest_parallel_und_fuellt_den_cache(tmp_path):
-    """PERF-05: vorab() reiht mehrere Seiten ein, alle Arbeiter rechnen gleichzeitig; ergebnis() wartet nur."""
+def test_vorab_liest_parallel_und_fuellt_den_cache(tmp_path, monkeypatch):
+    """PERF-05: vorab() reiht mehrere Seiten ein, alle Arbeiter rechnen gleichzeitig; ergebnis() wartet nur.
+
+    Lastunabhängig (Runde 3): früher verglich der Test die Wanduhr von zwei Arbeitern gegen einen – das scheiterte,
+    sobald parallele Benchmarks die Kerne belegten. Jetzt schreibt ein Ersatz des Arbeiters (zeitmessung) Prozess,
+    Beginn und Ende jedes Auftrags auf, und geprüft wird der Aufbau selbst: zwei verschiedene Arbeitsprozesse
+    rechneten gleichzeitig (ihre Aufträge überlappen zeitlich), jede Seite wurde genau einmal eingereicht und
+    genau einmal gelesen, ergebnis() bedient sich danach nur noch aus dem Zwischenspeicher. Unter Last dehnen sich
+    die Aufträge, sie bleiben aber gleichzeitig; ein Pool mit nur einem Arbeiter, ein vorab(), das jeden Auftrag
+    abwartet, oder ein ergebnis(), das neu liest, fällt dagegen immer auf."""
+    import zeitmessung
     pfad = tmp_path / "mehrseitig.pdf"
     doc = fitz.open()
     for i in range(4):
@@ -636,28 +645,36 @@ def test_vorab_liest_parallel_und_fuellt_den_cache(tmp_path):
         s.insert_image(s.rect, stream=bild)
     doc.save(pfad)
     doc.close()
+    protokoll = tmp_path / "arbeitszeiten"
+    protokoll.mkdir()
+    monkeypatch.setenv(zeitmessung.UMGEBUNG, str(protokoll))         # erben die Arbeitsprozesse beim Start
+    monkeypatch.setattr(ocr, "_ocr_worker", zeitmessung.gemessener_ocr_arbeiter)
     with OcrDienst(prozesse=2) as d:
         pool = d._pool_holen()                           # beide Arbeiter starten (Startzeit nicht mitmessen)
         for f in [pool.submit(time.sleep, 0.5) for _ in range(2)]:
             f.result()
-        start = time.perf_counter()
         assert d.vorab(pfad, [0, 1, 2, 3]) == 4
         assert d.vorab(pfad, [0, 1]) == 0, "laufende Aufträge werden nicht doppelt eingereiht"
         eingereicht = d.statistik["auftraege"]
+        assert eingereicht == 4, d.statistik
         ergebnisse = [d.ergebnis(pfad, nr) for nr in range(4)]
-        parallel = time.perf_counter() - start
-        assert d.statistik["auftraege"] == eingereicht, "ergebnis() reicht nichts neu ein"
         assert all(f"{nr + 1}" in texte(e["woerter"]) for nr, e in enumerate(ergebnisse))
+        laeufe = zeitmessung.auftraege(protokoll)
+        # zweiter Durchgang: alles aus dem Zwischenspeicher – kein neuer Auftrag, kein weiterer Lauf eines Arbeiters
+        assert [texte(d.ergebnis(pfad, nr)["woerter"]) for nr in range(4)] == [texte(e["woerter"])
+                                                                               for e in ergebnisse]
+        assert d.statistik["auftraege"] == eingereicht, "ergebnis() reicht nichts neu ein"
+        assert zeitmessung.auftraege(protokoll) == laeufe, "ergebnis() hat eine Seite erneut gelesen"
         # Kontroll-OCR als Stapel mit fester Ausrichtung je Seite
         assert d.vorab(pfad, [0, 1], winkel={0: 0, 1: 180}) == 2
         assert d.ergebnis(pfad, 1, winkel=180)["winkel"] == 180
-    with OcrDienst(prozesse=1) as d:
-        d.selbsttest()
-        start = time.perf_counter()
-        for nr in range(4):
-            d.ergebnis(pfad, nr)
-        einzeln = time.perf_counter() - start
-    assert parallel < einzeln * 0.85, (parallel, einzeln)
+    assert sorted(lauf.seite for lauf in laeufe) == [0, 1, 2, 3], laeufe   # jede Seite genau einmal gelesen
+    prozesse = {lauf.prozess for lauf in laeufe}
+    assert len(prozesse) == 2 and os.getpid() not in prozesse, ("nicht zwei Arbeitsprozesse", laeufe)
+    ueberlappung = zeitmessung.groesste_ueberlappung(laeufe)
+    print(f"Überlappung der Arbeiter: {ueberlappung:.2f}; Aufträge (Prozess, Seite, Dauer s): "
+          f"{[(lauf.prozess, lauf.seite, round(lauf.ende - lauf.beginn, 2)) for lauf in laeufe]}")
+    assert ueberlappung >= 0.5, ("die Arbeiter rechneten nacheinander statt gleichzeitig", ueberlappung, laeufe)
 
 
 @braucht_ocr
