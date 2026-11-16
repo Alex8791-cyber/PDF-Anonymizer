@@ -14,9 +14,15 @@
                                                XObjects, Muster) und Properties-Ressourcen; gehört in die
                                                gemeinsame Vorbereitung von Analyse UND Schwärzung (vor dem
                                                Seitenmodell), damit beide die echten Glyphen sehen (S-06)
-    nebenkanaele_entfernen(doc, zaehler=None) -> dict
+    nebenkanaele_entfernen(doc, zaehler=None, rueckfall=None) -> dict
                                                nach dem Anwenden aller Schwärzungen, vor dem Speichern
+    beschnitt_entfernen(doc, seite, qualitaet=85, rueckfall=None) -> bool | "bild"
+                                               Inhalte außerhalb des sichtbaren Bereichs einer Seite entfernen;
+                                               scheitert MuPDF an der Seite (zyklisches Form-XObject, Befund R-08),
+                                               wird sie als Bild ihres sichtbaren Bereichs neu erzeugt ("bild")
     nebenkanal_hinweis(zaehler) -> str         Nutzerhinweis "Entfernt bzw. eingebrannt: …"
+    dateiname_als_woerter(name) -> str | None  „PIB_Hausrat_Mustermann_Max.docx“ -> „PIB Hausrat Mustermann Max“
+    geraetename_abtrennen(wert) -> (str, str)  „RICOH MP C3004 – Scan“ -> („RICOH MP C3004“, „Scan“)
 
 Entfernt werden: Anmerkungen aller Art (außer noch nicht angewendeten Schwärzungen), Links, Lesezeichen,
 eingebettete Dateien (auch /AF, ZUGFeRD-XML), Info- und XMP-Metadaten (Dokument, Seiten, Bilder, Fonts),
@@ -451,26 +457,58 @@ def _beschnitt_streifen(seite) -> list:
     return [r for r in streifen if r.width > 0.5 and r.height > 0.5]
 
 
-def beschnitt_entfernen(doc, seite, qualitaet=_bilder.JPEG_QUALITAET) -> bool:
+SEITE_ALS_BILD = "bild"         # Rückgabe von beschnitt_entfernen: die Seite wurde als Bild neu erzeugt (R-08)
+
+
+def _offene_schwaerzungen(seite) -> bool:
+    try:
+        return any(a.type[0] == fitz.PDF_ANNOT_REDACT for a in seite.annots())
+    except Exception:
+        return False
+
+
+def beschnitt_entfernen(doc, seite, qualitaet=_bilder.JPEG_QUALITAET, rueckfall=None):
     """Entfernt Text, Vektorgrafik und Bildpixel außerhalb des sichtbaren Bereichs einer Seite (per
     Schwärzung ohne Füllung – der sichtbare Inhalt bleibt unverändert). Berührte Bilder werden danach
-    wieder kompakt kodiert. Rückgabe: True, wenn etwas entfernt wurde. Liegen auf der Seite noch nicht
+    wieder kompakt kodiert. Rückgabe: True, wenn etwas entfernt wurde, sonst False. Liegen auf der Seite noch nicht
     angewendete Schwärzungen, bricht sie mit RuntimeError ab: apply_redactions würde sie sonst mit fremden
-    Parametern anwenden (Reihenfolge beim Aufrufer: erst schwärzen, dann Nebenkanäle)."""
-    if seite.rotation:
-        seite.remove_rotation()
-    streifen = _beschnitt_streifen(seite)
-    if not streifen:
-        return False
-    if any(a.type[0] == fitz.PDF_ANNOT_REDACT for a in seite.annots()):
-        raise RuntimeError("Seite hat noch nicht angewendete Schwärzungen – nebenkanaele_entfernen erst "
-                           "nach apply_redactions aufrufen.")
-    vorher = _bilder.bildzustand(seite)
-    for r in streifen:
-        seite.add_redact_annot(r, fill=False, cross_out=False)
-    seite.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS,
-                           graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
-                           text=fitz.PDF_REDACT_TEXT_REMOVE)
+    Parametern anwenden (Reihenfolge beim Aufrufer: erst schwärzen, dann Nebenkanäle).
+
+    Scheitert MuPDF an der Seite (zyklisches oder zu tief verschachteltes Form-XObject: „exception stack overflow“,
+    Befund R-08 – beim Lesen des Inhalts oder beim Anwenden), bleibt der Inhalt außerhalb des Beschnitts nie still
+    stehen: Die Seite wird als Bild ihres sichtbaren Bereichs neu erzeugt (rueckfall(seite, fehler) des Aufrufers,
+    z. B. die Schwärzung mit ihrer Kontroll-OCR, sonst bilder.seite_als_bild_schwaerzen) – Rückgabe SEITE_ALS_BILD.
+    Lässt sich die Seite auch nicht rendern, geht die Ausnahme an den Aufrufer (dann entsteht keine Ausgabe)."""
+    if _offene_schwaerzungen(seite):
+        # Vertrag (vor jedem Lesen): offene Schwärzungen gehören dem Aufrufer, sie werden hier nie mit angewendet
+        try:
+            etwas = bool(_beschnitt_streifen(seite))
+        except Exception:
+            etwas = True
+        if etwas:
+            raise RuntimeError("Seite hat noch nicht angewendete Schwärzungen – nebenkanaele_entfernen erst "
+                               "nach apply_redactions aufrufen.")
+    try:
+        if seite.rotation:
+            seite.remove_rotation()
+        streifen = _beschnitt_streifen(seite)
+        if not streifen:
+            return False
+        vorher = _bilder.bildzustand(seite)
+        for r in streifen:
+            seite.add_redact_annot(r, fill=False, cross_out=False)
+        seite.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS,
+                               graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
+                               text=fitz.PDF_REDACT_TEXT_REMOVE)
+    except Exception as fehler:
+        for annot in list(seite.annots()):            # eigene, noch nicht angewendete Streifen
+            if annot.type[0] == fitz.PDF_ANNOT_REDACT:
+                seite.delete_annot(annot)
+        if rueckfall is not None:
+            rueckfall(seite, fehler)
+        else:
+            _bilder.seite_als_bild_schwaerzen(doc, seite, [], [])
+        return SEITE_ALS_BILD
     geaendert = _bilder.geaenderte_bilder(seite, vorher)
     if geaendert:
         _bilder.bilder_neu_kodieren(doc, geaendert, qualitaet)
@@ -685,13 +723,16 @@ def _objekte_bereinigen(doc, z: dict):
                 z.setdefault("fehler", []).append(f"Bild {xref}: {e}")
 
 
-def nebenkanaele_entfernen(doc, zaehler=None) -> dict:
+def nebenkanaele_entfernen(doc, zaehler=None, rueckfall=None) -> dict:
     """Entfernt alle Nebenkanäle (siehe Modulbeschreibung) und liefert die Zähler für den Nutzerhinweis.
 
     zaehler: Ergebnis von nebenkanaele_zaehlen() VOR doc.bake() (wird ergänzt und zurückgegeben).
     Aufrufen NACH dem Anwenden aller Schwärzungen (apply_redactions) und vor dem Speichern; noch nicht
     angewendete Schwärzungsanmerkungen bleiben stehen. Speichern danach mit garbage >= 1 (besser 4), damit
     gelöste Objekte (alte Metadaten, Original-Bilder, Anhänge) nicht in der Datei bleiben.
+    rueckfall(seite, fehler): wie bei beschnitt_entfernen – Seiten, an denen MuPDF scheitert, werden als Bild neu
+    erzeugt; ihre Nummern (0-basiert) stehen in z["seite_als_bild"]. Objekte, die sich nicht bereinigen ließen,
+    stehen in z["fehler"] (der Aufrufer darf die Ausgabe dann nicht als geprüft ausgeben).
     """
     z = dict(zaehler or {})
     for s, standard in (("formularfelder", 0), ("anmerkungen", 0), ("links", 0), ("lesezeichen", 0),
@@ -699,6 +740,7 @@ def nebenkanaele_entfernen(doc, zaehler=None) -> dict:
                         ("markierungen", 0), ("seitenbeschriftungen", 0), ("aktionen", 0), ("beschnitt", 0),
                         ("bild_metadaten", 0), ("strukturbaum", 0), ("formulardaten", 0), ("metadaten", 0)):
         z.setdefault(s, standard)
+    z["seite_als_bild"] = list(z.get("seite_als_bild") or [])
     gezaehlt = zaehler is not None
     katalog = doc.pdf_catalog()
 
@@ -718,10 +760,13 @@ def nebenkanaele_entfernen(doc, zaehler=None) -> dict:
     # 2) Ersatztexte in Inhaltsströmen (idempotent, falls schon in der Vorbereitung geschehen)
     z["markierungen"] += markierungen_entfernen(doc)
 
-    # 3) Inhalte außerhalb des sichtbaren Bereichs
-    for seite in doc:
-        if beschnitt_entfernen(doc, seite):
+    # 3) Inhalte außerhalb des sichtbaren Bereichs (Seiten, an denen MuPDF scheitert: als Bild, Befund R-08)
+    for nr in range(len(doc)):
+        ergebnis = beschnitt_entfernen(doc, doc[nr], rueckfall=rueckfall)
+        if ergebnis:
             z["beschnitt"] += 1
+        if ergebnis == SEITE_ALS_BILD and nr not in z["seite_als_bild"]:
+            z["seite_als_bild"].append(nr)
 
     # 4) Dokumentweite Kanäle
     try:
@@ -828,6 +873,120 @@ _OFFICE_TEILE = re.compile(r"^(?:word/(?:document|header\d*|footer\d*|footnotes|
                            r"xl/(?:sharedStrings|comments\d*)\.xml|xl/worksheets/sheet\d+\.xml|"
                            r"ppt/(?:slides/slide\d+|notesSlides/notesSlide\d+|comments/comment\d+)\.xml|"
                            r"docProps/(?:core|app|custom)\.xml|content\.xml|meta\.xml)$")
+
+
+# ----------------------------------------------------------------------
+# Dateinamen und Gerätenamen (Gutachten Runde 3, Paket ausgabe-status)
+# ----------------------------------------------------------------------
+# Dateinamen von Anhängen („Ausweis_Mustermann.txt“, „PIB_Hausrat_Mustermann_Max.docx“, „Antrag.Schmidt.Peter.pdf“,
+# „erika-musterfrau-ausweis.jpg“): Die Namenserkennung findet Namen nur zwischen Leerzeichen. Der Name geht deshalb
+# zusätzlich in Wörtern an die Erkennung – ohne Endung, Trenner (_ + sowie . und - zwischen Buchstaben) und
+# Binnenmajuskeln als Leerzeichen; die Schreibweise bleibt (ganz klein geschriebene Namen erkennt die Vorsicht-Regel
+# der Analyse, analyse._name_im_dateinamen – groß geschrieben las die Namenserkennung „Bedingungen Kfz Haftpflicht“
+# als Person).
+_DATEINAME_ENDUNG_RE = re.compile(r"(?i)\.(?:docx?|docm|dotx?|xlsx?|xlsm|pptx?|pdf|odt|ods|odp|rtf|txt|csv|jpe?g|"
+                                  r"png|tiff?|gif|bmp|heic|eml|msg|zip|xml|html?|json|vcf|ics|p7m|p7s)$")
+
+
+def dateiname_als_woerter(name) -> str | None:
+    """„PIB_Hausrat_Mustermann_Max.docx“ -> „PIB Hausrat Mustermann Max“, „Antrag.Schmidt.Peter.pdf“ -> „Antrag
+    Schmidt Peter“, „mustermann_max.txt“ -> „mustermann max“; None, wenn sich nichts ändert (schon Wörter, z. B.
+    „Antrag Hausrat.pdf“ -> „Antrag Hausrat“ zählt als Änderung, „Antrag Hausrat“ nicht)."""
+    t = " ".join(str(name or "").split())
+    if not t or len(t) > 300:
+        return None
+    neu = _DATEINAME_ENDUNG_RE.sub("", t)
+    neu = re.sub(r"[_+]+", " ", neu)
+    neu = re.sub(r"(?<=[^\W\d_])[.\-]+(?=[^\W\d_])", " ", neu)                 # Antrag.Schmidt, Scan-Mueller
+    neu = re.sub(r"(?<=[a-zäöüß])(?=[A-ZÄÖÜ][a-zäöüß])", " ", neu)               # AntragThomasSchaefer
+    neu = " ".join(neu.split())
+    return neu if neu and neu != t else None
+
+
+# Geräte- und Programmnamen in Dokumenteigenschaften wie Titel oder Autor („RICOH MP C3004“ las die Erkennung als
+# Kfz-Kennzeichen, „Kyocera ECOSYS M2540dn“ als Person; Befund Runde 3): Ein Hersteller am Anfang, gefolgt von
+# einer Modellbezeichnung mit mindestens einer Ziffer, ist ein Gerätename. Dieser Teil kommt in den Kanal
+# „programm“ (dort zählen nur ausdrückliche Personennamen, E-Mail-Adressen und IBAN); was danach steht („… – Scan
+# Mustermann“), wird weiter wie ein Titel geprüft – und vorsichtig: dort zählt jedes namensartige Wort
+# (ART_NACH_GERAET). Ohne Modellbezeichnung mit Ziffer bleibt alles beim Alten („Iris Weber“, „Sharp“ als Name).
+_HERSTELLER = frozenset("""
+ricoh canon konica minolta kyocera brother epson hp hewlett-packard hewlett packard xerox sharp lexmark samsung
+toshiba oki panasonic fujitsu fujifilm fuji develop olivetti utax triumph-adler muratec avision plustek visioneer
+scansnap nashuatec gestetner savin lanier infotec kodak pfu dell imagerunner taskalfa bizhub ecosys
+""".split())
+_BAUREIHEN = frozenset("""
+mp im c mfp mfc dcp hl ecosys taskalfa bizhub imagerunner advance adv ir ir-adv laserjet officejet deskjet envy
+pagewide smart tank workcentre versalink altalink phaser aficio imageclass i-sensys pixma maxify ecotank workforce
+expression color colour pro plus series serie mono duplex scan scanner fi ix sv sp mx bp ar dx e-studio estudio
+""".split())
+ART_NACH_GERAET = " (nach einem Gerätenamen)"
+_MODELL_RE = re.compile(r"^(?=[^\s]*\d)[\w\-/+.]{2,20}$")          # enthält eine Ziffer: C3004, M2540dn, MFC-L2710DW
+_TRENNER_RE = re.compile(r"^[\s\-–—:;,|/()]+|[\s\-–—:;,|/()]+$")
+
+
+def geraetename_abtrennen(wert) -> tuple:
+    """(Gerätename, Rest) – („RICOH MP C3004“, „Scan Mustermann“) für „RICOH MP C3004 – Scan Mustermann“;
+    (None, Wert), wenn der Wert nicht mit einem Hersteller und einer Modellbezeichnung (mit Ziffer) beginnt."""
+    t = " ".join(str(wert or "").split())
+    woerter = t.split(" ")
+    if not woerter or woerter[0].casefold().strip(",;:") not in _HERSTELLER:
+        return None, t
+    ende, ziffer = 1, False
+    while ende < len(woerter):
+        w = woerter[ende].strip(",;:()")
+        klein = w.casefold()
+        if _MODELL_RE.match(w):
+            ende += 1
+            ziffer = True
+            continue
+        # Baureihen und kurze Versalien („MP“, „MFP“, „ADV“) nur vor bzw. als Teil der Modellbezeichnung – nach der
+        # Ziffer beginnt mit einem Wort in Versalien schon der Rest („RICOH MP C3004 MAX MUSTERMANN“)
+        if klein in _HERSTELLER or klein in _BAUREIHEN or (not ziffer and w.isupper() and 2 <= len(w) <= 6):
+            ende += 1
+            continue
+        break
+    if not ziffer:
+        return None, t
+    return " ".join(woerter[:ende]), _TRENNER_RE.sub("", " ".join(woerter[ende:]))
+
+
+def _mit_woertern(beschriftung: str, namen) -> str:
+    """Beschriftung eines Anhangs plus – je Zeile – die Dateinamen in Wörtern (dateiname_als_woerter)."""
+    zeilen = [beschriftung]
+    for name in namen:
+        woerter = dateiname_als_woerter(name)
+        if woerter and woerter not in zeilen:
+            zeilen.append(woerter)
+    return "\n".join(z for z in zeilen if z)
+
+
+def _mit_schreibweisen(text: str) -> str:
+    """Ein Rest in Versalien aus mindestens zwei Wörtern („MAX MUSTERMANN“) zusätzlich in üblicher Schreibweise – die
+    Namenserkennung liest Namen in Versalien schlechter. Ein einzelnes Wort („PDF“, „SCAN“) bleibt, wie es ist (als
+    „Pdf“ hielt es die Vorsicht-Regel für einen Namen)."""
+    if any(c.islower() for c in text) or not any(c.isupper() for c in text):
+        return text
+    if sum(1 for w in text.split() if len(w) >= 2 and w.isalpha()) < 2:
+        return text
+    return f"{text}\n{' '.join(w[:1] + w[1:].lower() for w in text.split())}"
+
+
+def _ohne_geraetenamen(text: str, programme: list) -> str:
+    """XMP-Text Zeile für Zeile: Werte, die mit einem Gerätenamen beginnen („title: RICOH MP C3004“), geben den
+    Gerätenamen an `programme` ab; ein Rest bleibt in der Zeile."""
+    zeilen = []
+    for zeile in (text or "").splitlines():
+        etikett, trenner, wert = zeile.partition(": ")
+        if not trenner:
+            etikett, wert = "", zeile
+        geraet, rest = geraetename_abtrennen(wert)
+        if geraet is None:
+            zeilen.append(zeile)
+            continue
+        programme.append(geraet)
+        if rest:
+            zeilen.append(f"{etikett}: {_mit_schreibweisen(rest)}" if etikett else _mit_schreibweisen(rest))
+    return "\n".join(zeilen)
 
 
 def bildart(anfang: bytes):
@@ -1241,23 +1400,32 @@ def nebenkanaele_lesen(doc, tiefe: int = 0) -> list:
     werden als „nicht prüfbar“ gemeldet."""
     aus: list = []
     programme: list = []                                      # (Art, Text) der Programm-/Gerätefelder
-    # 1) Dokumenteigenschaften und XMP (des Dokuments, dann der Seiten, Bilder, Schriften)
+    # 1) Dokumenteigenschaften und XMP (des Dokuments, dann der Seiten, Bilder, Schriften); Gerätenamen („RICOH MP
+    #    C3004“) gehen in den Kanal „programm“, ein Rest dahinter bleibt eine Eigenschaft (ART_NACH_GERAET)
     try:
         info_programme: list = []
         felder = _info_felder(doc, info_programme)
         for i, (name, wert) in enumerate(felder):
-            aus.append(NebenkanalText("metadaten", i, f"Dokumenteigenschaft {name}", wert))
+            geraet, rest = geraetename_abtrennen(wert)
+            if geraet is None:
+                aus.append(NebenkanalText("metadaten", i, f"Dokumenteigenschaft {name}", wert))
+                continue
+            programme.append((f"Dokumenteigenschaft {name} (Gerätename)", geraet))
+            if rest:
+                aus.append(NebenkanalText("metadaten", i, f"Dokumenteigenschaft {name}{ART_NACH_GERAET}",
+                                          _mit_schreibweisen(rest)))
         programme += [(f"Dokumenteigenschaft {k}", v) for k, v in info_programme]
         einheit = len(felder)
         xmp = doc.get_xml_metadata() or ""
         if xmp.strip():
             xmp_programme: list = []
-            text = _xml_zu_text(xmp, xmp_programme)
+            text = _ohne_geraetenamen(_xml_zu_text(xmp, xmp_programme), xmp_programme)
             if text.strip():
                 aus.append(NebenkanalText("metadaten", einheit, "XMP-Metadaten", text[:LESEN_MAX_ZEICHEN]))
                 einheit += 1
             programme += [("XMP-Metadaten (Programm)", v) for v in xmp_programme]
         for text, objekt_programme in _objekt_xmp(doc):
+            text = _ohne_geraetenamen(text, objekt_programme)
             if text.strip():
                 aus.append(NebenkanalText("metadaten", einheit, "XMP-Metadaten einer Seite oder eines Bilds",
                                           text[:LESEN_MAX_ZEICHEN]))
@@ -1287,6 +1455,7 @@ def nebenkanaele_lesen(doc, tiefe: int = 0) -> list:
                                                                              info.get("ufilename"),
                                                                              info.get("description"))
                                                   if x and str(x).strip()))
+            beschriftung = _mit_woertern(beschriftung, (name, info.get("filename"), info.get("ufilename")))
             aus.append(NebenkanalText("anhaenge", nummer, "Name des Anhangs", beschriftung))
             texte, pruefbar, art = _anhang_inhalt(doc.embfile_get(name), tiefe)
             aus.append(NebenkanalText("anhaenge", nummer, f"Inhalt des Anhangs ({art})", "\n".join(texte), pruefbar))
@@ -1303,6 +1472,7 @@ def nebenkanaele_lesen(doc, tiefe: int = 0) -> list:
                     datei = getattr(annot, "file_info", None) or {}
                     beschriftung = " ".join(str(x).strip() for x in (datei.get("filename"), datei.get("description"),
                                                                      info.get("content")) if x and str(x).strip())
+                    beschriftung = _mit_woertern(beschriftung, (datei.get("filename"), datei.get("ufilename")))
                     aus.append(NebenkanalText("anhaenge", nummer, "Name des Anhangs", beschriftung))
                     texte, pruefbar, art = _anhang_inhalt(annot.get_file(), tiefe)
                     aus.append(NebenkanalText("anhaenge", nummer, f"Inhalt des Anhangs ({art})", "\n".join(texte),
@@ -1349,6 +1519,10 @@ def nebenkanal_hinweis(zaehler: dict) -> str:
             teile.append(f"{int(wert)} {wort}")
     teile.append("Metadaten/XMP")
     hinweis = "Entfernt bzw. eingebrannt: " + ", ".join(teile) + "."
+    bild = zaehler.get("seite_als_bild") or []
+    if bild:
+        hinweis += (f" Seite(n) {', '.join(str(n + 1) for n in bild)} waren fehlerhaft aufgebaut und wurden als Bild "
+                    f"neu erzeugt (nur der sichtbare Bereich).")
     if zaehler.get("fehler"):
         hinweis += (f" {len(zaehler['fehler'])} Objekt(e) ließen sich nicht bereinigen – Datei bitte "
                     f"prüfen.")

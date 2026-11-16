@@ -220,11 +220,18 @@ def endung_beschreibung(name) -> str | None:
     return _ENDUNG_BESCHREIBUNG.get(_endung(os.fspath(name)))
 
 
+# Zuordnungsdateien der Schwärzung: im Ausgabeordner (_zuordnung.txt, ältere Fassungen) und – seit Runde 3 – neben
+# ihm, also meist neben den Originalen (_zuordnung_anonymisiert.txt bzw. _zuordnung_<Zielordner>.txt)
+_ZUORDNUNG_NAME = re.compile(r"^_zuordnung(?:_.+)?\.txt$", re.IGNORECASE)
+
+
 def ist_systemdatei(name: str) -> bool:
     """Von Windows/macOS/Office angelegte Dateien, versteckte Dateien und Dateien dieses Programms
-    (_zuordnung.txt, Laufprotokolle) – im Ordner-Scan ohne Meldung übergangen."""
+    (Zuordnungsdateien _zuordnung.txt und _zuordnung_<Ausgabeordner>.txt, Laufprotokolle) – im Ordner-Scan ohne
+    Meldung übergangen."""
     klein = name.lower()
-    return (klein in _SYSTEM_DATEIEN or name.startswith(("~$", ".")) or klein.startswith(PROTOKOLL_PRAEFIX.lower()))
+    return (klein in _SYSTEM_DATEIEN or name.startswith(("~$", ".")) or klein.startswith(PROTOKOLL_PRAEFIX.lower())
+            or bool(_ZUORDNUNG_NAME.match(name)))
 
 
 # ----------------------------------------------------------------------
@@ -535,7 +542,7 @@ def _innerhalb_temp(pfad) -> bool:
 
 def arbeitskopie_ziel(name: str) -> Path:
     """Pfad für eine neue Arbeitskopie: eigener Unterordner der Sitzung (gleiche Namen aus verschiedenen
-    Kundenordnern stören sich nicht), der Dateiname bleibt erkennbar – er steht in _zuordnung.txt."""
+    Kundenordnern stören sich nicht), der Dateiname bleibt erkennbar – er steht in der Zuordnungsdatei."""
     ordner = Path(tempfile.mkdtemp(prefix="kopie_", dir=sitzungsordner()))
     sicher = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .") or "dokument"
     if not sicher.lower().endswith(".pdf"):

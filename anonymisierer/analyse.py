@@ -35,11 +35,16 @@ Ablauf:
   einmal geladen, damit MuPDF eine nötige Reparatur JETZT ausführt und nicht erst nach Änderungen -> DATEI_REPARIERT
   (R-11); beschädigte Bilder (abgebrochenes JPEG) -> BILD_BESCHAEDIGT (R-07); Nebenkanäle mit denselben Detektoren
   geprüft (auch Skripte, Link-Ziele, Seitenbeschriftungen, XMP an Seiten und Bildern; Werte in Dateinamen-
-  Schreibweise als Wörter; Programmfelder nur auf Personennamen) -> „nebenkanaele“, NEBENKANAL_FUND (R-04; ein
-  Hinweis, wenn auf den Seiten ohnehin geschwärzt wird). Nach dem Seitenmodell: „kaum lesbar“ (weniger als 25
-  OCR-Wörter) bleibt nur eine Warnung, wenn die Lesung schlecht ist oder die Tinte nicht zu den Wörtern passt
-  (scan_kaum_lesbar, dieselbe Regel wie der _PRUEFEN-Grund der Schwärzung); sonst Hinweis WENIG_TEXT. Meldungen, die
-  die Ausgabe _PRUEFEN machen, stehen am Modell (dok.leckrelevant, R-07).
+  Schreibweise als Wörter, in einem eigenen Durchgang; Programmfelder und Gerätenamen im Titel nur auf
+  Personennamen) -> „nebenkanaele“, NEBENKANAL_FUND (R-04; ein Hinweis, wenn auf den Seiten ohnehin geschwärzt
+  wird). Nach dem Seitenmodell: „kaum lesbar“ (weniger als 25 OCR-Wörter) bleibt nur eine Warnung, wenn die Lesung
+  schlecht ist oder die Tinte nicht zu den Wörtern passt (scan_kaum_lesbar, dieselbe Regel wie der _PRUEFEN-Grund
+  der Schwärzung); sonst Hinweis WENIG_TEXT.
+  Status (Runde 3, EINE Regel für Analyse und Schwärzung): WARNUNGS_CODES, FEHLER_CODES und HINWEIS_CODES führen
+  jeden Meldungscode mit einer Zeile Begründung; ist_leckrelevant(meldung) entscheidet – jede Meldung der Art
+  „fehler“ und jede leckrelevante oder unbekannte Warnung macht die Ausgabe _PRUEFEN (oder verhindert sie), ein
+  Hinweis nie. Die leckrelevanten Meldungen der Analyse stehen am Modell (dok.leckrelevant, R-07), alle Meldungen
+  der Analyse in dok.meldungen_analyse.
 
 Öffentlich: analysiere_pdf, analysiere_text, weitergabe_anwenden, LaufWissen, hinweis_kategorien,
 gesundheit_nur_vermutet, ANZEIGE_BEGRIFF, PLATZHALTER_BEGRIFF, HINWEIS_GESUNDHEIT, HINWEIS_GESUNDHEIT_VERMUTET,
@@ -1457,10 +1462,95 @@ def keine_pdf_meldung(doc, pfad=None) -> str | None:
 # ----------------------------------------------------------------------
 TEXT_REPARIERT = ("Die Datei war beschädigt und wurde repariert – Inhalte können fehlen, bitte das Original "
                   "prüfen")
+
+# ----------------------------------------------------------------------
+# Meldungs-Codes und ihre Wirkung auf die Ausgabe – EINE Regel für Analyse und Schwärzung (Gutachten R-07, Runde 3)
+# ----------------------------------------------------------------------
+# Jede Warnung ist entweder leckrelevant – ihre Ursache wirkt bis in die Ausgabe: Teile wurden nicht (sicher) geprüft,
+# oder eine personenbezogene Angabe bleibt bekannt stehen; die Ausgabe ist dann _PRUEFEN mit verständlichem Grund –
+# oder nicht (die Ursache ist in der Ausgabe behoben, oder andere Prüfungen decken sie ab). Jede Meldung der Art
+# „fehler“ macht die Ausgabe _PRUEFEN oder verhindert sie. Codes, die in keiner Tabelle stehen, gelten als
+# leckrelevant (im Zweifel prüfen). Zu jedem Code eine Zeile Begründung; tests/test_ausgabe_status.py prüft, dass
+# jeder Code, den das Programm meldet, hier steht.
+WARNUNGS_CODES = {
+    # leckrelevant
+    "BILD_BESCHAEDIGT": (True, "eine halb sichtbare Zeile an der Abbruchkante liest die OCR nicht, ein Mensch schon"),
+    "BILDER_UNGEPRUEFT": (True, "Bildanalyse fehlgeschlagen oder keine OCR: Text in Bildern blieb ungeprüft"),
+    "DATEI_REPARIERT": (True, "beschädigte Datei: Inhalte können fehlen oder anders gelesen worden sein"),
+    "DREHUNG": (True, "Drehung nicht verlustfrei entfernbar: Lage der Fundstellen auf dieser Seite unsicher"),
+    "ERKENNUNG_FEHLER": (True, "eine Erkennungsregel ist ausgefallen: ihre Kategorie wurde nicht gesucht"),
+    "KAUM_LESBAR": (True, "Scan kaum lesbar (nach scan_kaum_lesbar): dort kann nichts erkannt werden"),
+    "KEIN_TEXT": (True, "weder Textebene noch OCR lieferten Text: nichts wurde geprüft (leere Datei ohne Tinte: nein)"),
+    "MODELL_ABWEICHUNG": (True, "die Datei liest sich beim Schwärzen anders als bei der Analyse"),
+    "NAMEN_INAKTIV": (True, "Namenserkennung ohne Sprachmodell: Namen wurden nicht gesucht"),
+    "NEBENKANAL_ENTFERNT": (True, "als Warnung: versteckte Teile ließen sich nur teilweise entfernen (als Hinweis "
+                                  "zählt derselbe Code nur auf, was entfernt wurde)"),
+    "NICHT_LOKALISIERT": (True, "ein angehakter Fund wurde nicht (ganz) gefunden: er steht vermutlich noch da"),
+    "OCR_FEHLER": (True, "OCR fehlgeschlagen, mit zu geringer Auflösung oder ohne Text trotz Tinte"),
+    "OCR_UNPLAUSIBEL": (True, "OCR-Lesung ist Buchstabensalat bzw. Zeilenlage unsicher"),
+    "RESTE": (True, "die Selbstkontrolle findet Fundtext in der Ausgabe"),
+    "SCHLUESSELWORT_OHNE_FUND": (True, "Etikett (IBAN, Geburtsdatum …) ohne geschwärzten Wert: OCR-Verleser?"),
+    "TEXT_ABGESCHNITTEN_REST": (True, "abgeschnittener Text ist nach dem Schwärzen noch in der Ausgabe (Nachprüfung)"),
+    "TEXTEBENE_UNLESBAR": (True, "die unlesbare Textebene bleibt in der Ausgabe; keine Prüfung kann sie lesen, "
+                                 "geprüft wurde nur das Seitenbild per OCR"),
+    "VERDACHT": (True, "Restrisiko-Prüfung meldet Verdacht, ist ausgefallen oder fehlt"),
+    "XFA": (True, "XFA-Formular: Feldinhalte lassen sich nicht prüfen"),
+    # nicht leckrelevant
+    "AUSGABE_PRUEFEN": (False, "fasst nur die Gründe einer ohnehin _PRUEFEN abgelegten Ausgabe zusammen"),
+    "FORMULAR_EINGEBRANNT": (False, "nicht eingebrannte Feldwerte entfernt die Ausgabe mit den Formularfeldern "
+                                    "(Daten fehlen dann, sie gehen nicht hinaus)"),
+    "KEIN_TREFFER": (False, "nur ältere Programmversionen: dort entstand keine Ausgabe"),
+    "NEBENKANAL_FUND": (False, "die Ausgabe entfernt die Nebenkanäle (ohne Seitenfund: Grund NUR_NEBENKANAL)"),
+    "OCR_GELESEN": (False, "Scan per OCR gelesen: Lesbarkeit, Kontroll-OCR und Restrisiko-Prüfung greifen je Seite"),
+    "TEXT_ABGESCHNITTEN": (False, "wird beim Schwärzen entfernt und in der Ausgabe nachgeprüft (sonst Seite als "
+                                  "Bild, sonst keine Ausgabe; bleibt etwas: TEXT_ABGESCHNITTEN_REST)"),
+    "ZUORDNUNG": (False, "betrifft die Zuordnungsdatei, nicht die PDF; der Abschlussdialog nennt sie"),
+}
+# Meldungen der Art „fehler“: keine endet mit „fertig“ – entweder entsteht keine Ausgabe (False), oder sie ist _PRUEFEN
+# mit diesem Grund (True)
+FEHLER_CODES = {
+    "ABGEBROCHEN": (False, "Lauf abgebrochen: keine Ausgabe"),
+    "AUSGABE_FEHLER": (False, "Ausgabe oder Zwischenstand nicht schreibbar: keine Ausgabe"),
+    "DATEI_REPARIERT": (False, "erst beim Schwärzen repariert (Schwärzungen könnten verloren sein): keine Ausgabe"),
+    "FEHLER": (False, "Fehlertext einer älteren Engine (Oberfläche): dort entstand keine Ausgabe"),
+    "KEIN_PDF": (False, "keine PDF (Bild, Webseite …): keine Ausgabe"),
+    "KENNWORT": (False, "kennwortgeschützt ohne Kennwort: keine Ausgabe"),
+    "NICHT_LESBAR": (False, "Datei lässt sich nicht öffnen: keine Ausgabe"),
+    "NICHT_LOKALISIERT": (True, "Fundstellen der Analyse nicht wiedergefunden: Ausgabe _PRUEFEN, Texte genannt"),
+    "SEITE_NICHT_SCHWAERZBAR": (False, "Seite weder schwärz- noch als Bild erzeugbar: keine Ausgabe"),
+}
+# Codes, die das Programm nur als Hinweis meldet – sie ändern den Status nie
+HINWEIS_CODES = frozenset({
+    "ABGEBROCHEN", "AUSGABE_PRUEFEN", "BILDER_UNGEPRUEFT", "FORMULAR_EINGEBRANNT", "GESUNDHEITSDATEN",
+    "NACHBARWORT_BESCHAEDIGT", "NEBENKANAL_ENTFERNT", "NICHTS_GESCHWAERZT", "NIE_FREIGABE", "OCR_GELESEN",
+    "OCR_UNPLAUSIBEL", "PLATZHALTER_GEKUERZT", "SEITE_ALS_BILD", "VEKTORGRAFIK", "WENIG_TEXT", "ZUORDNUNG"})
 # Analyse-Meldungen, deren Ursache bis in die Ausgabe wirkt (Gutachten R-07): die Schwärzung legt die Ausgabe dann
 # als _PRUEFEN ab. Die Analyse vermerkt sie am Modell (dok.leckrelevant).
-LECKRELEVANTE_CODES = frozenset({"OCR_UNPLAUSIBEL", "KAUM_LESBAR", "OCR_FEHLER", "XFA", "DATEI_REPARIERT",
-                                 "BILDER_UNGEPRUEFT", "BILD_BESCHAEDIGT"})
+LECKRELEVANTE_CODES = frozenset(c for c, (leck, _) in WARNUNGS_CODES.items() if leck)
+
+
+def ist_leckrelevant(meldung) -> bool:
+    """Die zentrale Regel: Macht diese Meldung die Ausgabe _PRUEFEN? Jede Meldung der Art „fehler“, jede Warnung
+    mit leckrelevantem oder unbekanntem Code; Hinweise nie."""
+    if not isinstance(meldung, dict):
+        return False
+    art, code = meldung.get("art"), meldung.get("code")
+    if art == "fehler":
+        return True
+    if art != "warnung":
+        return False
+    eintrag = WARNUNGS_CODES.get(code)
+    return eintrag is None or eintrag[0]
+
+
+def _leckrelevant_merken(dok, meldungen) -> None:
+    """Am Modell für die Schwärzung: alle leckrelevanten Meldungen der Analyse (dok.leckrelevant) und alle Meldungen
+    (dok.meldungen_analyse, z. B. für die Nachprüfung abgeschnittenen Texts). Am Ende jeder Analyse aufrufen – auch
+    Meldungen der Erkennung (NAMEN_INAKTIV, ERKENNUNG_FEHLER, KEIN_TEXT) zählen."""
+    if dok is None:
+        return
+    dok.leckrelevant = [dict(m) for m in meldungen if ist_leckrelevant(m)]
+    dok.meldungen_analyse = [dict(m) for m in meldungen if isinstance(m, dict)]
 
 
 def datei_repariert(doc) -> bool:
@@ -1714,9 +1804,18 @@ def _aufzaehlung(teile: list) -> str:
 # ----------------------------------------------------------------------
 # Nebenkanäle: Dateinamen-Schreibweise, Programmfelder, Standardtitel (Gutachten R-04, Befund NEBENKANAL_FUND)
 # ----------------------------------------------------------------------
+# Standardtitel von Programmen und Scanner-Apps, auch mit Zähler, Datum oder Uhrzeit dahinter („Dokument1“,
+# „CamScanner 05-03-2024 10.11“, „Adobe Scan 03.05.2024“, „Scan_20240503_101112“, „WhatsApp Image 2024-05-03 at
+# 10.11.12“): kein Personenbezug. Als Zahlen hinter dem Titel zählen nur ein Zähler, ein Datum (mit Trennern oder
+# kompakt 20240503), eine Uhrzeit – eine Telefonnummer („Scan 0171 2345678“) passt nicht und wird weiter geprüft.
+_STANDARD_ZEIT = r"(?:\d{1,4}[.\-/]\d{1,2}[.\-/]\d{2,4}|\d{1,2}[.:]\d{2}(?:[.:]\d{2})?|(?:19|20)\d{6}(?:[_\-]?\d{4,6})?)"
 _STANDARDTITEL_RE = re.compile(
     r"(?i)^(?:microsoft\s+\w+\s*-\s*)?(?:unbenannt|untitled|ohne\s+titel|neues\s+dokument|dokument|document|"
-    r"gescanntes\s+dokument|scan|scanned\s+document|bild|image|img)[\s_\-]*\d*(?:\.[a-z0-9]{2,4})?$")
+    r"untitled\s+document|gescanntes\s+dokument|scan|scanned\s+document|bild|image|img|camscanner|adobe\s+scan|"
+    r"genius\s+scan|tiny\s+scanner|scanbot|office\s+lens|microsoft\s+lens|whatsapp[\s\-](?:image|bild)|"
+    r"screenshot|bildschirmfoto|foto|photo|dsc|dscn|pxl|dok|doc|kopie|fax|neuer\s+scan)"
+    r"(?:[\s_\-]*\d{1,6}(?![.\-/:\d]))?(?:[\s_\-]+(?:at|um|vom|von)?[\s_\-]*" + _STANDARD_ZEIT + r")*"
+    r"(?:\.[a-z0-9]{2,4})?$")
 _DATEI_PRAEFIX_RE = re.compile(r"(?i)^\s*(?:microsoft\s*(?:®\s*)?(?:office\s+)?(?:word|excel|powerpoint|outlook)|"
                                r"libreoffice\s+\w+|openoffice\.org\s+\w+|word|excel)\s*[-–:]\s*")
 _DATEI_ENDUNG_RE = re.compile(r"(?i)\.(?:docx?|docm|dotx?|xlsx?|xlsm|pptx?|pdf|odt|ods|odp|rtf|txt|csv|jpe?g|png|"
@@ -1753,6 +1852,19 @@ def _dateinamen_lesart(text: str) -> str | None:
     return neu if neu and neu != t else None
 
 
+def _lesarten(text: str) -> list:
+    """Lesarten in Dateinamen-Schreibweise je Zeile (und des ganzen Werts), die noch nicht im Text stehen – ein
+    Wert kann schon Zeilen in Wörtern mitbringen (nebenkanaele.dateiname_als_woerter)."""
+    text = str(text or "")
+    vorhanden = {" ".join(z.split()) for z in text.splitlines()}
+    aus = []
+    for kandidat in (text.splitlines() if "\n" in text else [text]):
+        lesart = _dateinamen_lesart(kandidat)
+        if lesart and lesart not in vorhanden and lesart not in aus:
+            aus.append(lesart)
+    return aus
+
+
 def _nie_enthaelt(nie_woerter: list, woerter) -> bool:
     """Gehören die Wörter (zusammen) zu einem Eintrag der NIE-Liste (eigene Daten der Nutzerin)?"""
     gesucht = {w.casefold() for w in woerter}
@@ -1775,24 +1887,42 @@ def _namensartig(wort: str) -> bool:
     return len(wort) >= 3 and wort[0].isupper() and not wort.isupper() and wort.isalpha()
 
 
-# Wörter typischer Seitenbeschriftungen, die die Wissensbasis nicht als Allerweltswörter führt
-_ETIKETT_WOERTER = frozenset("abschnitt band hauptteil cover appendix part page section chapter".split())
+# Wörter typischer Seitenbeschriftungen, Dokumenttitel und Geräteangaben, die die Wissensbasis nicht als
+# Allerweltswörter führt (Dateiformate, Scan-Einstellungen)
+_ETIKETT_WOERTER = frozenset("abschnitt band hauptteil cover appendix part page section chapter kfz image img mappe "
+                             "ordner dok doc ausweis pass lebenslauf seite seiten pdf tif tiff jpg jpeg png docx xlsx "
+                             "pptx fax scan scans kopie farbe color colour duplex simplex mono".split())
+_KLEINWOERTER_NAME = frozenset("von vom van de der den dem des die das und mit fuer für zum zur bei nach aus auf im am "
+                               "an in zu".split())
 
 
-def _name_im_dateinamen(text: str, wissen, nie_woerter: list, locker: bool = False) -> bool:
+def _gross_geschrieben(lesart: str) -> str:
+    """Ganz klein geschriebene Werte („mustermann max“) wie Namen schreiben („Mustermann Max“) – nur für die
+    Vorsicht-Regel, die namensartige Wörter an der Großschreibung erkennt (der Erkennung bleibt die Schreibweise)."""
+    if any(c.isupper() for c in lesart):
+        return lesart
+    return " ".join(w[:1].upper() + w[1:] if len(w) >= 3 and w.isalpha() and w not in _KLEINWOERTER_NAME else w
+                    for w in lesart.split())
+
+
+def _name_im_dateinamen(text: str, wissen, nie_woerter: list, locker: bool = False, frei: bool = False) -> bool:
     """Vorsicht-Regel für Nebenkanäle, die die Erkennung nicht sicher liest: Steht in einem Wert in Dateinamen-
-    Schreibweise ein bekannter Vorname neben einem namensartigen Wort („Mustermann_Max“) oder ein bekannter, nicht
-    mehrdeutiger Nachname („Vollmacht_Schaefer“ … „Schäfer“), gelten Personendaten als nicht auszuschließen.
-    locker=True (Seitenbeschriftungen – kurze Etiketten wie „Mustermann-1“, sonst „Anlage-“, „Teil I-“): jedes
-    namensartige Wort, das kein Allerweltswort ist, zählt – auch ohne Dateinamen-Schreibweise."""
+    Schreibweise ein bekannter Vorname neben einem namensartigen Wort („Mustermann_Max“, auch ganz klein geschrieben:
+    „mustermann_max“) oder ein bekannter, nicht mehrdeutiger Nachname („Vollmacht_Schaefer“ … „Schäfer“), gelten
+    Personendaten als nicht auszuschließen.
+    frei=True (Dokumenteigenschaften, Namen von Anhängen): dieselbe Regel auch ohne Dateinamen-Schreibweise („Scan Max
+    Mustermann“ – die Namenserkennung liest solche Titel nicht zuverlässig).
+    locker=True (Seitenbeschriftungen – kurze Etiketten wie „Mustermann-1“, sonst „Anlage-“, „Teil I-“ – und der Rest
+    einer Eigenschaft nach einem Gerätenamen): jedes namensartige Wort, das kein Allerweltswort ist, zählt – auch
+    ohne Dateinamen-Schreibweise."""
     if wissen is None:
         return False
     lesart = _dateinamen_lesart(text)
     if lesart is None:
-        if not locker:
+        if not (locker or frei):
             return False
         lesart = " ".join(str(text or "").replace("_", " ").replace("-", " ").split())
-    woerter = _BUCHSTABEN_WORT_RE.findall(lesart)
+    woerter = _BUCHSTABEN_WORT_RE.findall(_gross_geschrieben(lesart))
     for i, w in enumerate(woerter):
         if not _namensartig(w) or _wort_ist(wissen, "ist_allerweltswort", w):
             continue
@@ -1916,9 +2046,15 @@ def nebenkanaele_pruefen(doc, aktive, whitelist=(), immer_schwaerzen=(), profil:
     Einträge des Kanals (Eigenschaft, Lesezeichen, Anhang) mit personenbezogenen Daten; xfa = XFA-Formulardaten mit
     personenbezogenen Daten; personenbezug = irgendwo gefunden (auch in Skripten, Link-Zielen, Seitenbeschriftungen,
     Notizen) oder nicht auszuschließen (Anhang nicht lesbar, Name in Dateinamen-Schreibweise).
-    Werte in Dateinamen-Schreibweise („Antrag_Mustermann_Max.docx“) werden zusätzlich als Wörter gelesen; Programm-
-    und Gerätefelder (Creator, Producer, CreatorTool) zählen nur mit einem ausdrücklichen Personennamen, einer E-Mail-
-    Adresse oder IBAN; Standardtitel („Unbenannt“, „Dokument1“) zählen nie.
+    Werte in Dateinamen-Schreibweise („Antrag_Mustermann_Max.docx“) werden zusätzlich als Wörter gelesen – in einem
+    eigenen Durchgang der Erkennung (zusammen mit dem Originalwert las die Namenserkennung Bruchstücke als Person);
+    Namen von Anhängen bringt nebenkanaele.py schon in Wörtern mit („Antrag.Schmidt.Peter.pdf“). Programm- und
+    Gerätefelder (Creator, Producer, CreatorTool) und ein Gerätename am Anfang des Titels („RICOH MP C3004“) zählen
+    nur mit einem ausdrücklichen Personennamen, einer E-Mail-Adresse oder IBAN; was im Titel nach dem Gerätenamen
+    steht, wird vorsichtig geprüft (jedes namensartige Wort zählt). Standardtitel („Unbenannt“, „Dokument1“, „Scan
+    2024-05-03“) zählen nie. Vorsicht-Regel (_name_im_dateinamen): ein bekannter Vorname neben einem namensartigen
+    Wort oder ein bekannter, nicht mehrdeutiger Nachname zählt auch ohne Fund der Erkennung – in Dokumenteigenschaften
+    und Anhangnamen auch ohne Dateinamen-Schreibweise („Scan Max Mustermann“).
     Bei personenbezug: Meldung NEBENKANAL_FUND (Warnung; analysiere_pdf macht daraus einen Hinweis, wenn auf den
     Seiten ohnehin geschwärzt wird) – die Ausgabe entfernt diese Teile, deshalb schreibt schwaerze_pdf dann auch ohne
     Fund auf den Seiten eine bereinigte Ausgabe (als _PRUEFEN)."""
@@ -1933,14 +2069,19 @@ def nebenkanaele_pruefen(doc, aktive, whitelist=(), immer_schwaerzen=(), profil:
     betroffen: set = set()
     pruefbar = [e for e in eintraege if e.pruefbar and e.text.strip()]
     programm = [e for e in pruefbar if e.kanal == "programm"]
-    inhalt = []
+    inhalt, lesarten_alle = [], []
     for e in pruefbar:
         if e.kanal == "programm":
             continue
-        lesart = _dateinamen_lesart(e.text)
-        inhalt.append(e._replace(text=f"{e.text}\n{lesart}") if lesart else e)
+        inhalt.append(e)
+        # Werte in Dateinamen-Schreibweise („Microsoft Word - Antrag_Mustermann_Max.docx“): ihre Lesarten in Wörtern
+        # („Antrag Mustermann Max“) prüft die Erkennung in einem EIGENEN Durchgang – zusammen mit dem Originalwert las
+        # die Namenserkennung „Vorlage Kündigung“ + „…Kündigung.docx“ als Person (Befund Runde 3: Fehlalarm im Titel)
+        lesarten_alle.extend(e._replace(text=lesart) for lesart in _lesarten(e.text))
     try:
         betroffen = _nebenkanal_funde(inhalt, aktive, whitelist, immer_schwaerzen, profil, kundenliste)
+        if lesarten_alle:
+            betroffen |= _nebenkanal_funde(lesarten_alle, aktive, whitelist, immer_schwaerzen, profil, kundenliste)
         betroffen |= {(e.kanal, e.einheit) for e in programm if _programm_mit_person(e.text, wissen, nie_woerter)}
     except Exception:  # eine kaputte Regel darf die Analyse nicht abbrechen – dann gilt nichts als geprüft
         eintraege = [x._replace(pruefbar=False) if x in pruefbar else x for x in eintraege]
@@ -1952,7 +2093,14 @@ def nebenkanaele_pruefen(doc, aktive, whitelist=(), immer_schwaerzen=(), profil:
             continue
         if e.kanal == "anhaenge" and e.art != "Name des Anhangs":
             continue                        # Inhalte von Anhängen prüft die Erkennung (Text, Tabelle, Office …)
-        if _name_im_dateinamen(e.text, wissen, nie_woerter, locker=e.kanal == "seitenbeschriftungen"):
+        # locker: kurze Etiketten (Seitenbeschriftungen) und der Rest einer Eigenschaft nach einem Gerätenamen
+        # („RICOH MP C3004 – Scan Mustermann“) – dort zählt jedes namensartige Wort, das kein Allerweltswort ist
+        locker = e.kanal == "seitenbeschriftungen" or e.art.endswith(_nebenkanaele.ART_NACH_GERAET)
+        # frei: Dokumenteigenschaften und Namen von Anhängen auch ohne Dateinamen-Schreibweise („Scan Max Mustermann“)
+        frei = e.kanal in ("metadaten", "anhaenge")
+        zeilen = e.text.splitlines() if "\n" in e.text else []
+        if (_name_im_dateinamen(e.text, wissen, nie_woerter, locker=locker, frei=frei)
+                or any(_name_im_dateinamen(z, wissen, nie_woerter, locker=locker, frei=frei) for z in zeilen)):
             vermutet.add((e.kanal, e.einheit))
     betroffen |= vermutet
     ungeprueft = []                         # (Kanal, Art) nicht lesbarer Teile, die nicht schon Funde haben
@@ -2080,6 +2228,7 @@ def analysiere_pdf(pdf_pfad: Path, aktive: set[str], whitelist: list[str], immer
         doc = fitz.open(pdf_pfad)
     except Exception as e:
         ergebnis["fehler"] = f"Konnte nicht geöffnet werden: {e}"
+        _melde(meldungen, None, "fehler", "NICHT_LESBAR", ergebnis["fehler"])
         return ergebnis
     keine_pdf = keine_pdf_meldung(doc, pdf_pfad)       # vor jedem Seitenzugriff (R-01: sonst Absturz)
     if keine_pdf:
@@ -2092,6 +2241,7 @@ def analysiere_pdf(pdf_pfad: Path, aktive: set[str], whitelist: list[str], immer
     try:
         if doc.needs_pass:
             ergebnis["fehler"] = "Passwortgeschützt — übersprungen."
+            _melde(meldungen, None, "fehler", "KENNWORT", ergebnis["fehler"])
             return ergebnis
         # vor jeder Änderung (bake, Drehung, Ebenen): eine nötige Reparatur jetzt auslösen (R-11, späte Reparatur)
         repariert = reparatur_erzwingen(doc)
@@ -2147,14 +2297,15 @@ def analysiere_pdf(pdf_pfad: Path, aktive: set[str], whitelist: list[str], immer
 
     dok.nie = list(whitelist or [])            # für Schwärzung/Restrisiko (eigene Daten der Nutzerin)
     # Meldungen, deren Ursache bis in die Ausgabe wirkt: die Schwärzung übernimmt sie mit dem Modell und legt die
-    # Ausgabe dann als _PRUEFEN ab (R-07; ohne Modell stellt sie dieselben Gründe selbst fest)
-    dok.leckrelevant = [dict(m) for m in meldungen
-                        if m.get("code") in LECKRELEVANTE_CODES and m.get("art") in ("warnung", "fehler")]
+    # Ausgabe dann als _PRUEFEN ab (R-07; ohne Modell stellt sie die Gründe aus Lesbarkeit und Zustand der Datei
+    # selbst fest). Vor jeder Rückgabe neu vermerkt – auch Meldungen der Erkennung zählen (_leckrelevant_merken).
+    _leckrelevant_merken(dok, meldungen)
     ergebnis["modell"] = dok
     ergebnis["felder"] = list(dok.felder)
     ergebnis["ocr_seiten"] = sum(1 for s in dok.seiten if s.ocr_modus == "seite" and s.ocr_woerter)
     if not dok.text.strip():
         _melde(meldungen, warnungen, "warnung", "KEIN_TEXT", "Kein Text lesbar — weder direkt noch per OCR.")
+        _leckrelevant_merken(dok, meldungen)
         return ergebnis
     ergebnis["text_lesbar"] = True
     if ergebnis["ocr_seiten"]:
@@ -2177,6 +2328,7 @@ def analysiere_pdf(pdf_pfad: Path, aktive: set[str], whitelist: list[str], immer
     if "namen" in aktive and lade_ner() is None:
         _melde(meldungen, warnungen, "warnung", "NAMEN_INAKTIV",
                "Namenserkennung inaktiv: " + (ner_fehler() or "Modell fehlt."))
+    _leckrelevant_merken(dok, meldungen)
     return ergebnis
 
 

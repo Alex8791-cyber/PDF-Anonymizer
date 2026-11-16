@@ -739,7 +739,8 @@ def test_einfachklick_schaltet_doppelklick_auf_kopf_und_dreieck_nicht(app, umgeb
     assert [app._zustand(k) for k in kinder] == ["an", "an", "an"] and app._zustand(eltern) == "an"
     app._taste_leer()
     assert [app._zustand(k) for k in kinder] == ["aus", "aus", "aus"] and app._zustand(eltern) == "aus"
-    assert str(app.start_knopf.cget("state")) == "disabled"
+    # Runde 3 (Paket ausgabe-status): auch ohne Häkchen entsteht eine bereinigte Ausgabe – Schwärzen bleibt möglich
+    assert str(app.start_knopf.cget("state")) == "normal"
     # „alle an“ je Kategorie
     app.kategorie_setzen("Telefonnummern", "an")
     assert [app._zustand(k) for k in kinder] == ["aus", "an", "aus"] and app._zustand(eltern) == "teil"
@@ -1005,10 +1006,14 @@ def test_null_funde_erklaert_und_sperrt_schwaerzen(app, umgebung, monkeypatch, d
     monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse(
         {}, warnungen_je_datei={"scan.pdf": ["Kein Text lesbar — weder direkt noch per OCR."]}))
     analysiere(app, [pdf])
-    assert str(app.start_knopf.cget("state")) == "disabled"
+    # Runde 3 (Paket ausgabe-status, bewusst geändert): jede lesbare Datei bekommt eine bereinigte Ausgabe – der Knopf
+    # bleibt an, der Dialog sagt, dass die Ausgabe dieser unlesbaren Datei _PRUEFEN wird (früher: Knopf aus, „keine
+    # Ausgabedatei“)
+    assert str(app.start_knopf.cget("state")) == "normal"
     art, titel, text = app.letzter_dialog
     assert art == "warning" and titel == "Keine Funde"
-    assert "keine Ausgabedatei" in text and "kein Text lesbar" in text and "scan.pdf" in text
+    assert "bereinigte Ausgabe" in text and "_PRUEFEN" in text and "keine Ausgabedatei" not in text
+    assert "kein Text lesbar" in text and "scan.pdf" in text
     assert app.baum.set(str(pdf), "kategorie").startswith("0 Funde – kein Text lesbar")
     assert "nichts zu schwärzen" in app.protokoll_text()
 
@@ -1739,7 +1744,7 @@ def test_kompletter_ablauf_mit_echter_engine(app, umgebung, dialoge):
     # Freigabe über die Attrappe bzw. schwaerzung.freigeben
     neu = app.ausgabe_freigeben(pdf)
     assert neu == tmp / "echt" / "anonymisiert" / "anonym_01.pdf" and neu.exists()
-    zuordnung = (tmp / "echt" / "anonymisiert" / "_zuordnung.txt").read_text(encoding="utf-8")
+    zuordnung = schwaerzung.zuordnung_pfad(tmp / "echt" / "anonymisiert").read_text(encoding="utf-8")
     assert zuordnung.startswith("anonym_01.pdf  <-  Vertrag.pdf") and "PRUEFEN" not in zuordnung
     assert app.ausgaben[pdf]["status"] == "fertig"
 
@@ -1910,7 +1915,8 @@ def test_tarifuebersicht_ohne_personendaten_keine_falsche_warnung(app, umgebung,
     status = app.status_label.cget("text")
     assert status.startswith("Keine Personendaten zum Schwärzen – nur mögliche Gesundheitsangaben angeboten "
                              "(nicht angehakt)") and "dann schwärzen" not in status, status
-    assert str(app.start_knopf.cget("state")) == "disabled"
+    # Runde 3 (Paket ausgabe-status): auch ohne Häkchen entsteht eine bereinigte Ausgabe – der Knopf bleibt an
+    assert str(app.start_knopf.cget("state")) == "normal"
     art, titel, text = dialoge.liste[-1]
     assert (art, titel) == ("info", "Analyse abgeschlossen")
     assert text.startswith("Keine Personendaten zum Schwärzen erkannt") and "Möglicherweise Gesundheitsdaten" in text

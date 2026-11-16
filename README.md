@@ -188,21 +188,35 @@ werden unter `%APPDATA%\PDF-Anonymisierer\einstellungen.json` gespeichert.
 
 ## Ausgabedateien
 
-Die Originale bleiben unverändert. Neben jeder Eingabedatei entsteht ein Unterordner
-`anonymisiert` (oder ein selbst gewählter Zielordner) mit:
+Die Originale bleiben unverändert. Die einfache Regel lautet: **Hochladen nur aus dem
+Ausgabeordner.** Dafür bekommt **jede** lesbare PDF eine bereinigte Ausgabe – auch eine
+Datei, in der nichts zu schwärzen war (z. B. ein Bedingungswerk): versteckte Teile wie
+Dateieigenschaften, Lesezeichen, Anhänge, Formulardaten und abgeschnittener, unsichtbarer
+Text sind darin entfernt. Neben jeder Eingabedatei entsteht ein Unterordner `anonymisiert`
+(oder ein selbst gewählter Zielordner) mit:
 
 | Datei | Bedeutung |
 |---|---|
-| `anonym_01.pdf`, `anonym_02.pdf`, … | Die geschwärzten PDFs. Die Namen sind absichtlich neutral – der Original-Dateiname (oft ein Kundenname!) soll nicht mit zur KI wandern. Bestehende Dateien werden nie überschrieben, es wird immer die nächste freie Nummer genommen. |
-| `_zuordnung.txt` | Welche Ausgabe zu welchem Original gehört, z. B. `anonym_01.pdf  <-  Antrag_Mustermann.pdf  (2026-11-09 14:32)`. Diese Datei bleibt im Büro und wird **nicht** weitergegeben. |
-| `anonym_03_PRUEFEN.pdf` | Die eingebaute Selbstkontrolle hat nach dem Schwärzen noch Fundtext in der Ausgabe gefunden (z. B. in einem schlechten Scan). Diese Datei **unbedingt von Hand prüfen**, bevor sie das Haus verlässt. |
+| `anonym_01.pdf`, `anonym_02.pdf`, … | Die bereinigten bzw. geschwärzten PDFs („fertig“). Die Namen sind absichtlich neutral – der Original-Dateiname (oft ein Kundenname!) soll nicht mit zur KI wandern. Bestehende Dateien werden nie überschrieben, es wird immer die nächste freie Nummer genommen. |
+| `anonym_03_PRUEFEN.pdf` | Diese Ausgabe ist noch **nicht** zur Weitergabe freigegeben: Die Selbstkontrolle oder die Restrisiko-Prüfung hat etwas gefunden, ein angehakter Fund war im Dokument nicht auffindbar, ein Scan war kaum lesbar o. Ä. – der Grund steht im Programm neben der Datei. Erst in der Vorschau prüfen, ggf. nachschwärzen und dort „Freigeben“ drücken. |
+
+Die **Zuordnungsdatei** – welche Ausgabe zu welchem Original gehört, z. B.
+`anonym_01.pdf  <-  Antrag_Mustermann.pdf  (2026-11-09 14:32)` – liegt **neben** dem
+Ausgabeordner, nicht darin: im Standardfall als `_zuordnung_anonymisiert.txt` neben den
+Originalen, bei einem eigenen Zielordner `D:\Upload` als `D:\_zuordnung_Upload.txt`. So
+wird sie nicht versehentlich mit hochgeladen; sie enthält die Original-Dateinamen und bleibt
+im Büro. Eine `_zuordnung.txt` älterer Versionen im Ausgabeordner wird beim nächsten
+Schwärzen übernommen und dort gelöscht. Nur wenn neben dem Ausgabeordner nicht geschrieben
+werden kann (z. B. schreibgeschützter Ordner), landet sie im Ausgabeordner – dann warnt das
+Programm deutlich, sie beim Hochladen nicht mit auszuwählen.
 
 Weitere Eigenschaften der Ausgabe: Formularfelder und Anmerkungen werden vor der Analyse
 in den Seiteninhalt eingebrannt (damit auch Feldinhalte geprüft werden), Metadaten
 (Autor, Titel, XMP), Lesezeichen, Links, eingebettete Dateien und Vorschaubilder werden
-entfernt, bei Scans werden die Bildpixel unter der Fundstelle gelöscht. Konnte kein
-einziger angehakter Fund im Dokument lokalisiert werden, entsteht **keine** Ausgabedatei
-und das Protokoll warnt.
+entfernt, bei Scans werden die Bildpixel unter der Fundstelle gelöscht. Keine Ausgabe
+entsteht nur für Dateien, die sich nicht bearbeiten lassen (keine PDF, Kennwort fehlt,
+beschädigt, Abbruch) – das Programm nennt sie im Abschlussdialog unter „OHNE
+Ausgabedatei“; das Original dieser Dateien nicht weitergeben.
 
 ## Wichtiger Hinweis (bitte lesen)
 
@@ -213,7 +227,8 @@ und das Protokoll warnt.
 - Keine automatische Erkennung ist zu 100 % zuverlässig. Die Fundliste ansehen, das
   Ergebnis stichprobenartig öffnen, Warnungen im Protokoll ernst nehmen – insbesondere
   bei Scans und bei Dateien mit `_PRUEFEN` im Namen.
-- `_zuordnung.txt` enthält die Originalnamen und gehört nicht zur KI.
+- Die Zuordnungsdatei (`_zuordnung_anonymisiert.txt` neben den Originalen) enthält die Originalnamen und gehört
+  nicht zur KI. Hochgeladen wird nur, was im Ausgabeordner liegt – Dateien mit `_PRUEFEN` erst nach der Freigabe.
 - Bei Fehlern schreibt das Programm eine `fehler.log` (siehe
   [Problemlösung](#problemlösung)); sie kann Dateipfade und damit Kundennamen enthalten
   – vor dem Weiterleiten prüfen.

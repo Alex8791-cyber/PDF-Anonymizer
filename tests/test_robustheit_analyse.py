@@ -267,9 +267,15 @@ def test_ohne_personendaten_in_nebenkanaelen_bleibt_es_bei_keiner_ausgabe(tmp_pa
         doc.saveIncr()
     e = analysiere_pdf(pdf, STANDARD, [], [])
     assert e["nebenkanaele"] == analyse.NEBENKANAELE_LEER and "NEBENKANAL_FUND" not in codes(e)
-    s = schwaerze_pdf(pdf, e["funde"], ocr=Attrappe())
-    assert s["ausgabe"] is None and "KEIN_TREFFER" in codes(s)
-    assert not (tmp_path / "anonymisiert").exists()
+    # Name historisch – Runde 3: jede lesbare PDF bekommt eine bereinigte Ausgabe, hier „fertig“ ohne Grund (früher:
+    # keine Ausgabe, KEIN_TREFFER – dann ging das Original mit Titel und Lesezeichen weiter)
+    s = schwaerze_pdf(pdf, e["funde"], ocr=Attrappe(), modell=e["modell"], nebenkanaele=e["nebenkanaele"])
+    assert s["fehler"] is None and s["ausgabe"] is not None and s["ausgabe"].name == "anonym_01.pdf"
+    assert s["status"] == "fertig" and s["pruefen_gruende"] == [] and s["treffer"] == 0
+    assert "KEIN_TREFFER" not in codes(s) and "NICHTS_GESCHWAERZT" in codes(s)
+    with fitz.open(s["ausgabe"]) as aus:
+        assert not aus.get_toc() and not any((aus.metadata or {}).get(k) for k in ("title", "creator"))
+    assert NEUTRAL[0] in volltext(s["ausgabe"])
 
 
 def test_portfolio_mit_pdf_und_text_anhaengen(tmp_path):
@@ -641,11 +647,17 @@ def test_titel_treffer_eines_detektors_wird_keine_person():
 
 
 # ----------------------------------------------------------------------
-# M-25: Zuordnungsdatei nicht im Ordner, der hochgeladen wird (vorbereitet, noch ausgeschaltet)
+# M-25: Zuordnungsdatei nicht im Ordner, der hochgeladen wird (seit Runde 3 eingeschaltet)
 # ----------------------------------------------------------------------
 def test_zuordnung_standard_unveraendert_im_ausgabeordner(tmp_path):
-    assert schwaerzung.ZUORDNUNG_NEBEN_AUSGABEORDNER is False
-    assert schwaerzung.zuordnung_pfad(tmp_path / "anonymisiert") == tmp_path / "anonymisiert" / "_zuordnung.txt"
+    """Name historisch: bis Runde 2 war M-25 ausgeschaltet und die Zuordnung lag im Ausgabeordner. Seit Runde 3 liegt
+    sie standardmäßig NEBEN dem Ausgabeordner (auch neben einem eigenen Zielordner); nur ohne Ordner darüber (eine
+    Laufwerkswurzel) bleibt sie darin."""
+    assert schwaerzung.ZUORDNUNG_NEBEN_AUSGABEORDNER is True
+    assert schwaerzung.zuordnung_pfad(tmp_path / "anonymisiert") == tmp_path / "_zuordnung_anonymisiert.txt"
+    assert schwaerzung.zuordnung_pfad(tmp_path / "KI-Upload") == tmp_path / "_zuordnung_KI-Upload.txt"
+    wurzel = Path(tmp_path.anchor)
+    assert schwaerzung.zuordnung_pfad(wurzel) == wurzel / "_zuordnung.txt"
 
 
 def test_zuordnung_neben_dem_ausgabeordner(tmp_path, monkeypatch):

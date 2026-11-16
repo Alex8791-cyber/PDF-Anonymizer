@@ -8,8 +8,10 @@ Aufruf (aus der Projektwurzel):
                                             [--kategorien iban,email,...]
 
 Ablauf: Alle PDFs im Ordner (auch in Unterordnern, ohne bereits anonymisierte Ausgaben) werden wie in der
-Oberfläche analysiert und geschwärzt – in einen temporären Ordner, der danach gelöscht wird (außer mit
---behalten <ordner>: dann liegen die Ausgaben dort, wie bei normaler Benutzung, samt _zuordnung.txt).
+Oberfläche analysiert und geschwärzt – jede lesbare PDF bekommt eine Ausgabe, auch ohne Fund (dann bereinigt) –
+in einen temporären Ordner, der danach samt Zuordnungsdatei gelöscht wird (außer mit
+--behalten <ordner>: dann liegen die Ausgaben dort, wie bei normaler Benutzung; die Zuordnungsdatei liegt daneben,
+_zuordnung_<ordner>.txt).
 
 Ausgegeben werden NUR Zählwerte: Dokumente (als laufende Nummer, ohne Dateinamen), Seiten, OCR-Seiten, Funde je
 Kategorie, Verdachtsstellen je Dokument und je Regel, wie viele Ausgaben _PRUEFEN sind, Meldungs-Codes, Fehlerarten
@@ -95,9 +97,11 @@ def selbsttest(ordner: Path, profil: str = "hoch", behalten: Path | None = None,
         nie = [str(x) for x in gespeichert.get("nie") or [] if str(x).strip()]
         immer = [str(x) for x in gespeichert.get("immer") or [] if str(x).strip()]
     pdfs = dateien.sammle_pdfs([ordner])
-    ziel = Path(behalten) if behalten else Path(tempfile.mkdtemp(prefix="selbsttest_"))
-    if behalten:
-        ziel.mkdir(parents=True, exist_ok=True)
+    # Ausgaben in einen Unterordner des temporären Ordners: die Zuordnungsdatei (Original-Dateinamen!) liegt NEBEN dem
+    # Ausgabeordner – so liegt sie noch im temporären Ordner und wird mit ihm gelöscht
+    temp = None if behalten else Path(tempfile.mkdtemp(prefix="selbsttest_"))
+    ziel = Path(behalten) if behalten else temp / dateien.AUSGABE_ORDNER
+    ziel.mkdir(parents=True, exist_ok=True)
     werte = {"dokumente": len(pdfs), "seiten": 0, "ocr_seiten": 0, "funde": Counter(), "fund_stellen": 0,
              "verdacht_je_dokument": [], "verdacht_je_regel": Counter(), "pruefen": 0, "fertig": 0,
              "ohne_ausgabe": 0, "fehler": Counter(), "meldungen": Counter(), "analyse_s": 0.0,
@@ -125,10 +129,11 @@ def selbsttest(ordner: Path, profil: str = "hoch", behalten: Path | None = None,
                     a = {"fehler": f"Analyse: {type(e).__name__}", "funde": []}
                 t1 = time.perf_counter()
                 e = {}
-                if not a.get("fehler") and a.get("funde"):
+                if not a.get("fehler"):              # jede lesbare PDF bekommt eine Ausgabe (auch ohne Fund)
                     try:
                         e = _rufe(schwaerze_pdf, pdf, a["funde"], ocr=dienst, ocr_cache=a.get("ocr_cache"),
-                                  ziel_ordner=ziel, modell=a.get("modell"), profil=profil)
+                                  ziel_ordner=ziel, modell=a.get("modell"), profil=profil,
+                              nebenkanaele=a.get("nebenkanaele"))
                     except Exception as fehler:
                         e = {"fehler": f"Schwärzung: {type(fehler).__name__}"}
             t2 = time.perf_counter()
@@ -156,7 +161,7 @@ def selbsttest(ordner: Path, profil: str = "hoch", behalten: Path | None = None,
                 status = "Fehler"
             elif not e.get("ausgabe"):
                 werte["ohne_ausgabe"] += 1
-                status = "keine Ausgabe (kein Fund)"
+                status = "keine Ausgabe"
             elif e.get("status") == "pruefen" or "_PRUEFEN" in Path(str(e.get("ausgabe"))).name.upper():
                 werte["pruefen"] += 1
                 status = "_PRUEFEN"
@@ -172,8 +177,8 @@ def selbsttest(ordner: Path, profil: str = "hoch", behalten: Path | None = None,
                 dienst.schliessen()
             except Exception:
                 pass
-        if not behalten:
-            shutil.rmtree(ziel, ignore_errors=True)
+        if temp is not None:
+            shutil.rmtree(temp, ignore_errors=True)
     gesamt = time.perf_counter() - beginn
     werte["laufzeit_s"] = gesamt
     seiten = werte["seiten"] or 1
