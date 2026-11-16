@@ -284,6 +284,26 @@ def test_zugangsnummer_auf_der_kartenvorderseite():
     kopie = ("Name / Surname / Nom\nMUSTERMANN\n582913\nIDO<<T220001293<<<<<<<<<<<<<<<\n"
              "6408125<2010315D<<<<<<<<<<<<<4\nMUSTERMANN<<ERIKA<<<<<<<<<<<<<")
     assert "582913" in {t for _, t, q, _ in _treffer(kopie, "ausweis.mrz") if q.endswith("zugangsnummer")}
+    # Zeile 1 unleserlich: die Datenzeile mit dem Datumspaar am Anfang ist die TD1-Zeile 2 einer Ausweiskarte;
+    # neben der Nummer ein längeres OCR-Bruchstück der Unterschrift in eigener Zelle ("wen")
+    karte = ("Name / Surname / Nom\nZEIDLER\nwen\t\t425330\nIDD<<MR7H)JEt\t\tREDE\n"
+             "4806299<2708126D<<<<<<<<<<<<<0\nZEIDLER<<FRAUKE<<<<<<<<<<<<<<<")
+    assert "425330" in {t for _, t, q, _ in _treffer(karte, "ausweis.mrz") if q.endswith("zugangsnummer")}
+    # ... aber nie neben einem Feldnamen in einer anderen Zelle
+    feld = karte.replace("wen\t\t425330", "Kilometerstand\t\t425330")
+    assert "425330" not in {t for _, t, q, _ in _treffer(feld, "ausweis.mrz") if q.endswith("zugangsnummer")}
+
+
+def test_mrz_nachbarzeile_mit_verlesenen_fuellzeichen():
+    """Schwacher Scan: die OCR liest die Füllzeichen der Datenzeile fast alle als Kleinbuchstaben
+    ("7409255<2911168D<e<ca<e<cccach") – neben einer belegten Zonenzeile genügen zwei einzelne Füllzeichen. Allein
+    (ohne belegte Nachbarzeile) reicht das nie: eine Kontaktzeile bleibt keine Zone."""
+    text = "IDD<<PCYRMJ2380<<<<<<e<eccuuce\n7409255<2911168D<e<ca<e<cccach\n<c<cececn«"
+    treffer = {(k, t) for k, t, q, _ in _treffer(text, "ausweis.mrz") if q == "ausweis.mrz"}
+    assert ("geburt", "7409255") in treffer
+    assert any(k == "ausweis" and t.startswith("7409255<2911168D") for k, t in treffer)
+    allein = "Mit freundlichen Grüßen <info@makler.de>\n7409255<2911168D<e<ca<e<cccach"
+    assert not [q for _, _, q, _ in _treffer(allein, "ausweis.mrz") if q == "ausweis.mrz"]
 
 
 # ----------------------------------------------------------------------

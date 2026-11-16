@@ -108,11 +108,13 @@ def normalform(zeile: str) -> tuple:
     return text, abb
 
 
-def _mrz_artig(zeile: str, nf: str) -> bool:
+def _mrz_artig(zeile: str, nf: str, nachbar: bool = False) -> bool:
     """Grobe Form einer MRZ-Zeile: Datenzeilen ab 20, Namenszeilen (auch von der OCR abgetrennte Stücke) ab
     10 Zeichen; mindestens ein echter Füllzeichen-Lauf ("<<", "«<", K-Kette – Kleinbuchstaben zählen dafür nicht);
     höchstens ein fremdes Satzzeichen ohne die Randzeichen der Kartenkante ("." , ":", "/" … – eine Zeile "STADT
-    KÖLN  23.07.2024" ist keine MRZ); kaum Leerraum."""
+    KÖLN  23.07.2024" ist keine MRZ); kaum Leerraum. nachbar=True (Zeile direkt neben einer belegten Zonenzeile):
+    statt des Laufs genügen zwei einzelne Füllzeichen – ein schwacher Scan liest die übrigen als Kleinbuchstaben
+    ("7409255<2911168D<e<ca<e<cccach")."""
     if nf is None or len(nf) > 52:
         return False
     if len(nf) < (20 if any(c.isdigit() for c in nf) else 10):
@@ -125,7 +127,10 @@ def _mrz_artig(zeile: str, nf: str) -> bool:
                                             or "a" <= c <= "z"))
     if fremd > 1:
         return False
-    if not _ECHTE_FUELLUNG_RE.search("".join(sichtbar)):
+    if nachbar:
+        if sum(1 for c in sichtbar if c in "<«‹≤〈") < 2:
+            return False
+    elif not _ECHTE_FUELLUNG_RE.search("".join(sichtbar)):
         return False
     gross = sum(1 for c in sichtbar if ("A" <= c <= "Z") or c.isdigit() or c in _FUELL_LESARTEN)
     if gross / len(sichtbar) < 0.6:
@@ -264,6 +269,15 @@ def mrz_zonen(zeilen: list, angaben: list | None = None) -> list:
         kandidaten.append((idx, start, text, nf, abb))
     if not kandidaten:
         return []
+    # Nachbarzeilen einer belegten Zonenzeile mit schwächerer Füllzeichen-Prüfung (schwacher Scan)
+    belegt = {k[0] for k in kandidaten}
+    for idx, (start, text) in enumerate(zeilen):
+        if idx in belegt or not any(abs(idx - b) <= 2 for b in belegt):
+            continue
+        nf, abb = normalform(text)
+        if _mrz_artig(text, nf, nachbar=True):
+            kandidaten.append((idx, start, text, nf, abb))
+    kandidaten.sort(key=lambda k: k[0])
     # benachbarte Kandidaten zu Zonen bündeln (höchstens eine fremde Zeile dazwischen – die OCR zerlegt Zeilen)
     zonen, aktuell = [], []
     for k in kandidaten:
@@ -292,8 +306,8 @@ def mrz_zonen(zeilen: list, angaben: list | None = None) -> list:
         # Format der Zone: TD2/TD3-Namenszeilen beginnen mit dem Dokumentkopf, TD1 hat ihn in Datenzeile 1
         if kopf_namen or any(len(k[3]) >= 34 for k, _ in daten):
             format_ = "td23"
-        elif kopf_daten or len(zone) >= 3:
-            format_ = "td1"
+        elif kopf_daten or len(zone) >= 3 or any(_datumspaar(k[3], felder) in (0, 1) for k, felder in daten):
+            format_ = "td1"                           # TD1-Zeile 2 beginnt mit dem Datumspaar (Geburt, Ablauf)
         else:
             format_ = None
         sicherheit = 0.95 if geprueft else 0.85
@@ -444,8 +458,9 @@ _KARTEN_WORT_RE = re.compile(r"(?i)" + _KARTEN_WORT)
 # Zugangsnummer mit Feldnamen (Formulare, Abschriften): überall
 _CAN_ETIKETT_RE = re.compile(r"(?i:zugangsnummer|card[ \t]+access[ \t]+number|(?-i:\bCAN\b))[ \t]*[:.]?[ \t]*"
                              r"(\d{6})(?![\d])")
-# Bruchstücke, die die OCR neben der Zugangsnummer aus Unterschrift und Kartenkante liest ("Ve", "le", ")")
-_KARTEN_REST_RE = re.compile(r"[^\w]*\w{0,2}[^\w]*")
+# Bruchstücke, die die OCR neben der Zugangsnummer aus Unterschrift und Kartenkante liest ("Ve", "wen", ")") – ein
+# Wort ab vier Zeichen ist ein Feldname oder Wert ("Kilometerstand", "Tarifnummer"), die Zahl dann keine CAN
+_KARTEN_REST_RE = re.compile(r"[^\w]*\w{0,3}[^\w]*")
 
 
 def _kartenkopf(seite) -> bool:
@@ -479,6 +494,7 @@ def _zugangsnummern(seite, karte: bool) -> list:
                 if stelle not in aus:
                     aus.append(stelle)
     return aus
+
 
 
 def _datenzeile_unter_namenszeile(seite, lg, ns: tuple) -> list:
