@@ -490,6 +490,50 @@ def test_attrappe_liest_zuordnung_in_jeder_kodierung(tmp_path):
     assert neben.read_bytes().decode("utf-8") == f"{neu.name}  <-  Müller.pdf  (2026-01-01 10:00)\n"
 
 
+# CI Windows auf 81c1b00: die Zuordnung wird als Bytes gelesen (jede Kodierung). Ohne Textmodus blieb \r\n stehen, das
+# Zurückschreiben im Textmodus machte unter Windows \r\r\n daraus – nach jeder Zeile eine Leerzeile, eine Datei mit
+# Leerzeilen in der Mitte. Eine Datei mit \r\n (ältere Fassung unter Windows, Editor) wird jetzt einheitlich mit \n
+# geschrieben, auf jedem System gleich; unter Linux zeigt sich der Fehler als stehen gebliebenes \r.
+ZUORDNUNG_CRLF = ("anonym_01_PRUEFEN.pdf  <-  A.pdf  (2026-01-01 10:00)\r\n"
+                  "anonym_02.pdf  <-  B.pdf  (2026-01-01 10:01)\r\n")
+
+
+def test_freigeben_mit_windows_zeilenenden_ohne_leerzeilen(tmp_path):
+    ziel = tmp_path / "anonymisiert"
+    ziel.mkdir()
+    (ziel / "anonym_01_PRUEFEN.pdf").write_bytes(b"%PDF x")
+    datei = schwaerzung.zuordnung_pfad(ziel)
+    datei.write_bytes(ZUORDNUNG_CRLF.encode("utf-8"))
+    neu = schwaerzung.freigeben(ziel / "anonym_01_PRUEFEN.pdf")
+    assert neu.name == "anonym_01.pdf"
+    assert datei.read_bytes() == ("anonym_01.pdf  <-  A.pdf  (2026-01-01 10:00)\n"
+                                  "anonym_02.pdf  <-  B.pdf  (2026-01-01 10:01)\n").encode("utf-8")
+
+
+def test_alte_zuordnung_mit_windows_zeilenenden_wird_einheitlich_uebernommen(tmp_path):
+    ziel = tmp_path / "anonymisiert"
+    ziel.mkdir()
+    (ziel / "_zuordnung.txt").write_bytes(ZUORDNUNG_CRLF.replace("_PRUEFEN", "").encode("utf-8"))
+    pdf = textseiten(tmp_path / "Brief.pdf", NEUTRAL)
+    s = schwaerze_pdf(pdf, [], ocr=Attrappe(), freigabe_erforderlich=True)
+    daten = schwaerzung.zuordnung_pfad(ziel).read_bytes()
+    assert b"\r" not in daten and not (ziel / "_zuordnung.txt").exists()
+    zeilen = daten.decode("utf-8").split("\n")
+    assert [z.split()[0] for z in zeilen[:-1]] == ["anonym_01.pdf", "anonym_02.pdf", s["ausgabe"].name]
+    assert zeilen[-1] == ""
+
+
+def test_attrappe_freigeben_mit_windows_zeilenenden(tmp_path):
+    ordner = tmp_path / "anonymisiert"
+    ordner.mkdir()
+    (ordner / "anonym_01_PRUEFEN.pdf").write_bytes(b"%PDF x")
+    neben = tmp_path / "_zuordnung_anonymisiert.txt"
+    neben.write_bytes(ZUORDNUNG_CRLF.encode("utf-8"))
+    neu = attrappen.freigeben(ordner / "anonym_01_PRUEFEN.pdf")
+    assert neben.read_bytes() == (f"{neu.name}  <-  A.pdf  (2026-01-01 10:00)\n"
+                                  "anonym_02.pdf  <-  B.pdf  (2026-01-01 10:01)\n").encode("utf-8")
+
+
 def test_fehler_der_zuordnung_nach_dem_ablegen_bricht_nie_ab(tmp_path, monkeypatch):
     """Die Ausgabe liegt schon im Ordner: was immer beim Eintrag in die Zuordnung schiefgeht, wird eine Warnung
     ZUORDNUNG – nie eine Ausnahme (sonst hieß es „OHNE Ausgabedatei“, obwohl anonym_NN.pdf existiert)."""

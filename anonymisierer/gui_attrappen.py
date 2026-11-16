@@ -515,11 +515,13 @@ def _zuordnung_lesen(pfad: Path) -> str:
     oder „Unicode“ gespeichert, darf sie Freigeben und Verwerfen nicht scheitern lassen."""
     daten = pfad.read_bytes()
     if daten.startswith((b"\xff\xfe", b"\xfe\xff")):
-        return daten.decode("utf-16", errors="replace")
-    try:
-        return daten.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        return daten.decode("cp1252", errors="replace")
+        text = daten.decode("utf-16", errors="replace")
+    else:
+        try:
+            text = daten.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = daten.decode("cp1252", errors="replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n")     # wie schwaerzung: ohne Textmodus gelesen
 
 
 def _zuordnung_umschreiben(ordner: Path, alt_name: str, neu_name: str | None):
@@ -537,7 +539,7 @@ def _zuordnung_umschreiben(ordner: Path, alt_name: str, neu_name: str | None):
                     continue
                 zeile = neu_name + zeile[len(alt_name):]
             neu.append(zeile)
-        pfad.write_text("".join(neu), encoding="utf-8")
+        pfad.write_text("".join(neu), encoding="utf-8", newline="\n")
 
 
 def freigeben(ausgabe_pfad) -> Path:

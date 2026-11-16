@@ -496,10 +496,11 @@ def zuordnung_im_ausgabeordner(datei, ziel) -> bool:
 
 
 def _atomar_schreiben(datei: Path, text: str):
-    """Datei über eine Hilfsdatei im selben Ordner ersetzen (nie halb geschrieben)."""
+    """Datei über eine Hilfsdatei im selben Ordner ersetzen (nie halb geschrieben). Zeilenende immer \\n: im Textmodus
+    machte Windows aus einem gelesenen \\r\\n sonst \\r\\r\\n – jede Zeile bekam eine Leerzeile dahinter."""
     tmp = datei.parent / f".{datei.name}.{os.getpid()}.tmp"
     try:
-        tmp.write_text(text, encoding="utf-8")
+        tmp.write_text(text, encoding="utf-8", newline="\n")
         os.replace(tmp, datei)
     except OSError:
         _aufraeumen([tmp])
@@ -517,11 +518,18 @@ def zuordnung_lesen(datei) -> str:
     fehlt, gesperrt) geht an den Aufrufer."""
     daten = Path(datei).read_bytes()
     if daten.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
-        return daten.decode("utf-16", errors="replace")
-    try:
-        return daten.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        return daten.decode("cp1252", errors="replace")
+        text = daten.decode("utf-16", errors="replace")
+    else:
+        try:
+            text = daten.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = daten.decode("cp1252", errors="replace")
+    return _zeilenenden_vereinheitlichen(text)
+
+
+def _zeilenenden_vereinheitlichen(text: str) -> str:
+    """\\r\\n (Windows, ältere Programmfassungen, Editor) und \\r zu \\n – die Bytes werden ohne Textmodus gelesen."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _ist_utf8(datei: Path) -> bool:
@@ -539,7 +547,7 @@ def _zeile_anhaengen(datei: Path, zeile: str):
     if datei.exists() and not _ist_utf8(datei):
         _atomar_schreiben(datei, _mit_zeilenende(zuordnung_lesen(datei)) + zeile)
         return
-    with open(datei, "a", encoding="utf-8") as f:
+    with open(datei, "a", encoding="utf-8", newline="\n") as f:
         f.write(zeile)
 
 
