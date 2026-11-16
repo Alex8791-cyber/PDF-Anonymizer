@@ -398,6 +398,10 @@ def test_rohwert_ort_und_formtext_gegenproben(zeile):
     ("Ort: Frankfurt am Main", ("plzort", "Frankfurt am Main")),
     ("PLZ: 87600", ("plzort", "87600")),
     ("Name des Kindes: MAX KOWALSKI", ("namen", "MAX KOWALSKI")),
+    # gedruckter Feldname länger als das Etikett: der Wert steht hinter dem Doppelpunkt, auch eine PLZ allein
+    ("PLZ des Wohnorts:\t\t99423", ("plzort", "99423")),
+    ("Wohnort (PLZ):\t\t99423", ("plzort", "99423")),
+    ("PLZ 99423\t\tOrt Weimar", ("plzort", "99423")),
 ])
 def test_rohwert_ort_und_name_positivkontrollen(zeile, wert):
     assert wert in set(_treffer(_ocr_dok([zeile]), "struktur.etikett_wert"))

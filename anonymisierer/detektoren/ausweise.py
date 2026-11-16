@@ -18,10 +18,11 @@ werden nach der Lage geschwärzt). Kontakt- und Kontozeilen eines E-Mail-Ausdruc
 Zone. Geschwärzt werden alle persönlichen Felder: die Namen (namen, ohne den Kopf aus Art und Staat), das
 Zeichenstück mit dem Geburtsdatum (geburt) und die Datenzeilen ab ihrem ersten Zeichen (ausweis: Nummer – auch ein
 von der OCR verlesener Anfang –, Ablauf, Staatsangehörigkeit, optionale Daten, Prüfziffern) – nur Füllzeichen und der
-Dokumentkopf bleiben stehen. Eine Zonenzeile, deren OCR-Box nicht wie eine Zeile aussieht (mehrere Zeilen hoch, an
-anderer Stelle eingeordnet), wird nicht geschwärzt. Die Sichtzone (gedruckte Nummer, Geburtsdatum, Namen) wird nur mit
-bestätigten Angaben gesucht. Die Zugangsnummer (CAN) nur auf einer Kartenvorderseite (Kartenkopf als eigene Zeile,
-Zone einer Ausweiskarte) allein in ihrer Zeile oder hinter "Zugangsnummer"/"CAN".
+Dokumentkopf bleiben stehen. Jede Zonenzeile wird geschwärzt, auch wenn ihre OCR-Box höher als eine Zeile ist
+(schräger Scan, Box über zwei Zonenzeilen, entartete Box): eine verworfene Zeile bliebe sicher lesbar. Die Sichtzone
+(gedruckte Nummer, Geburtsdatum, Namen) wird nur mit bestätigten Angaben gesucht. Die Zugangsnummer (CAN) nur auf
+einer Kartenvorderseite (Kartenkopf als eigene Zeile, Zone einer Ausweiskarte) allein in ihrer Zeile oder hinter
+"Zugangsnummer"/"CAN".
 
 »ausweis.fuehrerschein« – EU-Kartenführerschein (Richtlinie 2006/126/EG, Anhang I): die Werte stehen hinter
 Feldnummern statt Feldnamen ("1. MUSTERMANN", "2. ERIKA", "3. 12.08.1983 MÜNCHEN", "4a./4b." Daten, "4c." Behörde,
@@ -50,6 +51,7 @@ _ZIFFER_LESART = str.maketrans({"O": "0", "Q": "0", "D": "0", "U": "0", "I": "1"
                                 "G": "6", "B": "8", "T": "7"})
 _FUELL_LESARTEN = set("<«‹≤〈([{|")
 _KOPF_RE = re.compile(r"[PIACV][A-Z<][A-Z<]{3}")
+_KARTEN_ART = frozenset({"ID", "I<", "IR", "IP", "AR", "AC", "C<"})
 _K_KETTE_RE = re.compile(r"K{3,}")
 
 
@@ -296,8 +298,11 @@ def mrz_zonen(zeilen: list, angaben: list | None = None) -> list:
             format_ = None
         sicherheit = 0.95 if geprueft else 0.85
         gruppe = None
+        # Ausweiskarte (TD1/TD2: Dokumentart I, A, C) – auch wenn die OCR den Staatscode verliest: dreizeilige Zone
+        # oder Art "ID"/"I<"/"IR"/"AR"/"C<" am Zeilenanfang einer belegten Zone (ein Pass "P<" hat keine Zugangsnummer)
         angabe = {"nachname": [], "vornamen": [], "nummer": None, "geburt": None, "kopf": kopf,
-                  "karte": any(k[3][0] in "IAC" for k in kopf_namen) or bool(kopf_daten)}
+                  "karte": any(k[3][0] in "IAC" for k in kopf_namen) or bool(kopf_daten) or format_ == "td1"
+                  or any(k[3][:2] in _KARTEN_ART for k in zone)}
         for k in namen:
             idx, start, text, nf, abb = k
             ab = _kopf_laenge(nf, True)
@@ -476,25 +481,6 @@ def _zugangsnummern(seite, karte: bool) -> list:
     return aus
 
 
-def _lage_plausibel(lg, text: str, s: int, e: int) -> bool:
-    """Liegt eine Zonenzeile so, wie eine MRZ-Zeile aussieht – höchstens etwa zwei Zeilen hoch (Höhe bis 3,6 Zeichen-
-    breiten der nichtproportionalen OCR-B)? Eine Wortbox, die die OCR einem ganz anderen Band zuordnet (schwacher
-    Scan: Kopf der Kartenvorderseite statt der MRZ), wird nicht geschwärzt – die Schwärzung träfe die falsche Stelle,
-    die Zone bliebe trotzdem lesbar (die Restrisiko-Prüfung liest die Ausgabe neu)."""
-    if lg is None:
-        return True
-    ws = lg.woerter_in(s, e)
-    if not ws:
-        return True
-    zeichen = sum(sum(1 for c in text[w.start:w.ende] if not c.isspace()) for w in ws)
-    if zeichen < 8:
-        return True
-    x0, y0 = min(w.x0 for w in ws), min(w.y0 for w in ws)
-    x1, y1 = max(w.x1 for w in ws), max(w.y1 for w in ws)
-    breite = (x1 - x0) / zeichen
-    return breite <= 0 or (y1 - y0) <= 3.6 * breite
-
-
 def _datenzeile_unter_namenszeile(seite, lg, ns: tuple) -> list:
     """Zeile(n) direkt unter einer TD2/TD3-Namenszeile, deren Datenzeile die OCR nicht als MRZ lieferte: ihre
     Bruchstücke ("J6910900", "10D<<8604…") sind die Datenzeile mit Nummer und Geburtsdatum – nach der LAGE schwärzen
@@ -543,9 +529,11 @@ def mrz(dok, kontext):
             vorher = len(angaben)
             zonen = mrz_zonen(zeilen, angaben)
             lg = lage(seite) if (zonen and lage is not None) else None
+            # Jede Zonenzeile wird geschwärzt, auch mit hoher OCR-Box: schräge Scans und Boxen über zwei Zonenzeilen
+            # sind die Regel, und auch eine entartete Box überdeckt meist die echte Zeile. Ob die OCR eine Zeile in
+            # ein falsches Band setzte, lässt sich hier nicht sicher erkennen (Ursache in ocr.py); eine verworfene
+            # Zeile bliebe dagegen sicher lesbar.
             for s, e, kat, si, gruppe in zonen:
-                if not _lage_plausibel(lg, text, s, e):
-                    continue
                 treffer.append(Treffer(dok.global_(nr, s), dok.global_(nr, e), kat, QUELLE_MRZ, si, gruppe))
             for angabe in angaben[vorher:]:
                 if angabe.get("namenszeile_ohne_daten"):
@@ -557,13 +545,17 @@ def mrz(dok, kontext):
             treffer.append(Treffer(dok.global_(nr, s), dok.global_(nr, e), "ausweis", QUELLE_MRZ + ".zugangsnummer",
                                    0.8))
     for angabe in angaben:
-        # Sichtzone nur mit bestätigten Angaben: Nummer UND Geburtsdatum mit stimmender Prüfziffer, oder das
-        # Geburtsdatum mit gelesenem Dokumentkopf; die Namen der Namenszeile nur mit Dokumentkopf oder Bestätigung
-        bestaetigt = bool(angabe["nummer"] and angabe["geburt"]) or bool(angabe["geburt"] and angabe.get("kopf"))
-        if not bestaetigt:
-            if not angabe.get("kopf"):
-                continue
-            angabe = dict(angabe, nummer=None, geburt=None)
+        # Sichtzone nur mit bestätigten Angaben (Prüfziffer): Nummer UND Geburtsdatum, oder eines von beiden mit
+        # gelesenem Dokumentkopf (verliest die OCR eine Ziffer des Geburtsdatums, sucht ein Pass mit Kopf "P<D<<"
+        # und geprüfter Nummer trotzdem die gedruckte Nummer); die Namen der Namenszeile nur mit Dokumentkopf oder
+        # Bestätigung. Ein Datum mit zufällig stimmender Prüfziffer allein (Kontaktzeile) sucht nichts.
+        kopf = bool(angabe.get("kopf"))
+        nummer_ok = bool(angabe["nummer"]) and (kopf or bool(angabe["geburt"]))
+        geburt_ok = bool(angabe["geburt"]) and (kopf or bool(angabe["nummer"]))
+        if not (nummer_ok or geburt_ok or kopf):
+            continue
+        angabe = dict(angabe, nummer=angabe["nummer"] if nummer_ok else None,
+                      geburt=angabe["geburt"] if geburt_ok else None)
         gruppe = " ".join(t.capitalize() for t in angabe["vornamen"] + angabe["nachname"]) or None
         for s, e, kat in sichtzone_stellen(dok.text, angabe):
             treffer.append(Treffer(s, e, kat, QUELLE_MRZ + ".sichtzone", 0.9, gruppe if kat == "namen" else None))
@@ -577,16 +569,18 @@ _FS_WORT = (r"f[uü]e?hrerschein|driving\s+licen[cs]e|permis\s+de\s+conduire|pra
             r"rijbewijs|f[uü]hrerausweis|permiso\s+de\s+conducci[oó]n|carta\s+de\s+condu[cç][aã]o|"
             r"[rř]idi[cč]sk[yý]\s+pr[uů]kaz|voza[cč]ka\s+dozvola|jogos[ií]tv[aá]ny|k[oö]rkort|ajokortti|k[oø]rekort")
 _FS_WORT_RE = re.compile(r"(?i)" + _FS_WORT)
-# Kartenkopf als eigene Zeile: "FÜHRERSCHEIN", OCR "/FÜHRERSCHEIN", "PERMIS DE CONDUIRE · FÜHRERSCHEIN", dahinter
-# höchstens das Länderkennzeichen ("FÜHRERSCHEIN   D") – nicht "Kopie Führerschein (Vorder- und Rückseite)", nicht
-# "2. Führerschein" (Checkliste), nicht das Wort im Fließtext eines Kfz-Schreibens
-_FS_KOPF_RE = re.compile(r"(?i)^[^\w]{0,3}(?:EU[\s\-]?)?(?:" + _FS_WORT + r")(?:[\s/·|,.\-–]+(?:" + _FS_WORT +
-                         r"))*(?:[\s/·|,.\-–]+[A-Z]{1,3})?[^\w]{0,3}$")
+# Kartenkopf als eigene Zeile: "FÜHRERSCHEIN", OCR "/FÜHRERSCHEIN" oder "(5FÜHRERSCHEIN" (Bruchstücke der Kartenkante
+# und des Kartenmusters davor), "PERMIS DE CONDUIRE · FÜHRERSCHEIN", dahinter höchstens das Länderkennzeichen
+# ("FÜHRERSCHEIN   D") – nicht "Kopie Führerschein (Vorder- und Rückseite)", nicht "2. Führerschein" (Listennummer
+# einer Checkliste), nicht das Wort im Fließtext eines Kfz-Schreibens
+_FS_KOPF_RE = re.compile(r"(?i)^(?![ \t]*\d{1,2}[.)][ \t])[\W\d_]{0,3}(?:EU[\s\-]?)?(?:" + _FS_WORT +
+                         r")(?:[\s/·|,.\-–]+(?:" + _FS_WORT + r"))*(?:[\s/·|,.\-–]+[A-Z]{1,3})?[^\w]{0,3}$")
 # Feldnummer am Zeilen- oder Zellenanfang bzw. hinter breiter Lücke: "1.", "4a.", OCR auch "4a," / "1 ."
 _FS_FELD_RE = re.compile(r"(?:^|(?<=\t)|(?<=  ))[ \t]*(1|2|3|4a|4b|4c|4d|5|8|9)[ ]?[.,](?=[ \t]|$)", re.MULTILINE)
 _DATUM_RE = re.compile(r"\d{1,2}[./]\d{1,2}[./](?:\d{4}|\d{2})")
-# Führerscheinklassen (Feld 9, Rückseite): "AM/B/L", "B/BE/C1/C1E/L" – OCR auch "CIE"
-_FS_KLASSE = r"(?:AM|A1|A2|A|B1|BE|B|C1E|CIE|C1|CI|CE|C|D1E|D1|DE|D|L|T|M)"
+# Führerscheinklassen (Feld 9, Rückseite): "AM/B/L", "B/BE/C1/C1E/L" – mit den Lesarten der OCR für die Ziffer 1
+# und 2 ("AL"/"AI" für A1, "CIE" für C1E, "AZ" für A2)
+_FS_KLASSE = r"(?:AM|A1|AI|Al|AL|A2|AZ|A|B1|BI|Bl|BE|B|C1E|CIE|ClE|C1|CI|Cl|CE|C|D1E|DIE|DlE|D1|DI|Dl|DE|D|L|T|M)"
 _FS_KLASSEN_RE = re.compile(r"(?<![\w/])" + _FS_KLASSE + r"(?:[ ]?/[ ]?" + _FS_KLASSE + r"){1,12}(?![\w/])")
 # Zeilen ohne Feldnummer zwischen zwei Feldzeilen desselben Blocks (OCR-Bruchstücke, Unterschrift, Feld 7)
 _FS_LUECKE_ZEILEN = 3
@@ -723,9 +717,10 @@ def fuehrerschein_felder(text: str, mit_wortlaut: bool | None = None) -> list:
     Feldnummern allein beweisen nichts – Schadenanzeigen, Angebotsvergleiche und Schadenabläufe sind ebenso
     nummeriert ("1. Versicherungsnehmer", "3. 01.04.2025 Beginn aller Angebote"), und das Wort "Führerschein" steht in
     jedem Kfz-Schreiben. Verlangt werden deshalb Kartenmerkmale in EINEM dichten Block von Feldnummern: Feld 4a oder
-    4b mit Datum, Feld 3 mit plausiblem Geburtsdatum und höchstens dem Geburtsort, Feld 1 oder 2 mit Namen (kein
-    Versicherer der Erlaubnisliste) – und dazu der Kartenkopf als eigene Zeile, die Klassenliste (Feld 9: "AM/B/L")
-    oder die vollständige Feldfolge 1 bis 5. Geschwärzt wird nur in diesem Block."""
+    4b mit Datum (verliest die OCR beide, genügt neben Kartenkopf oder Klassenliste die Nummer in Feld 5), Feld 3 mit
+    plausiblem Geburtsdatum und höchstens dem Geburtsort, Feld 1 oder 2 mit Namen (kein Versicherer der
+    Erlaubnisliste) – und dazu der Kartenkopf als eigene Zeile, die Klassenliste (Feld 9: "AM/B/L") oder die
+    vollständige Feldfolge 1 bis 5. Geschwärzt wird nur in diesem Block."""
     marken = [(mo.group(1), mo.start(1), mo.end()) for mo in _FS_FELD_RE.finditer(text)]
     if len({mk for mk, _, _ in marken} & {"1", "2", "3", "5"}) < 3:
         return []
@@ -747,7 +742,10 @@ def fuehrerschein_felder(text: str, mit_wortlaut: bool | None = None) -> list:
                 belegt.add("4")
             elif mk == "5" and sum(c.isdigit() for c in wert) >= 2 and sum(c.isalnum() for c in wert) >= 5:
                 belegt.add("5")
-        if "3" not in belegt or not belegt & {"1", "2"} or "4" not in belegt:
+        # Ausstellungs-/Ablaufdatum (4a/4b) – oder, wenn die OCR beide verliest ("42.01.02.22" statt "4a. 01.02.22"),
+        # die Führerscheinnummer (5) neben Kartenkopf oder Klassenliste
+        if "3" not in belegt or not belegt & {"1", "2"} or \
+                not ("4" in belegt or ("5" in belegt and (kopf or klassen))):
             continue
         if not (kopf or klassen or {"1", "2", "3", "4", "5"} <= belegt):
             continue
@@ -774,7 +772,12 @@ def fuehrerschein_felder(text: str, mit_wortlaut: bool | None = None) -> list:
                 if sum(c.isalnum() for c in wert) >= 5 and sum(c.isdigit() for c in wert) >= 2:
                     aus.append((s, w, "ausweis"))
             elif mk == "8":
-                if sum(c.isalnum() for c in wert) >= 4 and any(c.isdigit() for c in wert):
+                # Anschrift: mit Hausnummer oder PLZ – oder, wenn die OCR die Zeile teilt ("8. FELDKIRCHENER"), ein
+                # großgeschriebener Straßenname ohne Funktionswort (nicht "8. Werkstattbindung optional")
+                woerter8 = re.findall(r"[^\W\d_]+", wert)
+                if sum(c.isalnum() for c in wert) >= 4 and (any(c.isdigit() for c in wert) or (
+                        woerter8 and woerter8[0][0].isupper()
+                        and not any(x.casefold() in _FS_FUNKTIONSWORT for x in woerter8))):
                     aus.append((s, w, "strasse"))
     return aus
 

@@ -225,16 +225,32 @@ def test_td2_bruchstuecke_unter_der_namenszeile_nach_lage():
 
 
 # ----------------------------------------------------------------------
-# Review-Befund 13: eine Zonenzeile, deren OCR-Box an falscher Stelle liegt (Höhe mehrerer Zeilen), wird nicht
-# geschwärzt – die Schwärzung träfe den Kartenkopf
+# Review-Befund 13: eine Zonenzeile mit hoher OCR-Box. Ein erster Ansatz verwarf Zeilen, deren Box höher als 3,6
+# Zeichenbreiten war ("Schwärzung an falscher Stelle"). Gemessen (eigener Entwicklungskorpus, Generator 1.3) sind
+# solche Boxen aber meist echt: schräge Scans und Boxen über zwei Zonenzeilen (3,6 bis 5,3 Zeichenbreiten), und auch
+# eine entartete Box (10 Zeichenbreiten) überdeckte die echte Zeile – verworfen blieben Ausweisnummer und
+# Geburtsdatum lesbar. Ob die OCR eine Zeile in ein falsches Band setzte, lässt sich im Detektor nicht sicher
+# erkennen (Ursache in ocr.py); geschwärzt wird deshalb jede Zonenzeile.
 # ----------------------------------------------------------------------
-def test_mrz_zeile_mit_unplausibler_box_wird_nicht_geschwaerzt():
+def test_mrz_zeile_mit_hoher_box_wird_geschwaerzt():
     zeile = "8110022<2901271D<<<<<<<<<<<d"
     gut = _ocr_treffer(_ocr_dok([("BUNDESREPUBLIK DEUTSCHLAND", 150, 70, 300, 80), (zeile, 150, 505, 316, 516)]))
     assert ("ausweis", "8110022<2901271D", "ausweis.mrz") in gut
-    falsch = _ocr_treffer(_ocr_dok([("BUNDESREPUBLIK DEUTSCHLAND", 150, 120, 300, 130),
-                                    (zeile, 148, 65, 315, 110)]))   # 45 pt hoch bei 6 pt Zeichenbreite
-    assert not any(q == "ausweis.mrz" for _, _, q in falsch)
+    # Box über zwei Zonenzeilen bzw. schräger Scan: 21,6 pt hoch bei 5,7 pt Zeichenbreite (3,8)
+    zwei = _ocr_treffer(_ocr_dok([("IDD<<T220001293<<<<<<<<<<<<<<<", 144, 652, 315, 662),
+                                  ("4702151<3011065D<<<<<<<<<<<<<2", 144, 674, 315, 696),
+                                  ("HERRMANN<<HEIKE<<<<<<<<<<<<<<<", 144, 674, 315, 696)]))
+    assert ("ausweis", "4702151<3011065D<<<<<<<<<<<<<2", "ausweis.mrz") in zwei
+    assert ("geburt", "4702151", "ausweis.mrz") in zwei
+    # entartete Box (69 pt hoch), die die echte Zeile überdeckt: lieber eine Fläche zu viel als eine Nummer zu wenig
+    entartet = _ocr_treffer(_ocr_dok([("IDD<<SCHOLZ<<CLAUDIA<<<<<<<<<<<<<<<<", 118, 321, 435, 339),
+                                      ("H444888403D<6607065<2603036<<<<<<<<8", 112, 315, 465, 384)]))
+    assert any(k == "ausweis" and t.startswith("H444888403D") for k, t, _ in entartet)
+    # auch eine Box im Band des Kartenkopfs wird geschwärzt: ohne weitere Zonenzeilen ist die Fehllage nicht belegt
+    # (die Restrisiko-Prüfung liest die Ausgabe neu und meldet eine stehen gebliebene Zone)
+    kopf = _ocr_treffer(_ocr_dok([("BUNDESREPUBLIK DEUTSCHLAND", 150, 120, 300, 130),
+                                  (zeile, 148, 65, 315, 110)]))   # 45 pt hoch bei 6 pt Zeichenbreite
+    assert ("ausweis", "8110022<2901271D", "ausweis.mrz") in kopf
 
 
 # ----------------------------------------------------------------------
@@ -263,6 +279,11 @@ def test_zugangsnummer_auf_der_kartenvorderseite():
     assert "556841" in {t for _, t, q, _ in _treffer(ocr, "ausweis.mrz") if q.endswith("zugangsnummer")}
     # mit Feldnamen auch ohne Karte
     assert "582913" in {t for _, t, q, _ in _treffer("Zugangsnummer: 582913", "ausweis.mrz")}
+    # Kopie von Vorder- und Rückseite, Kartenkopf unleserlich und Staatscode der Zone verlesen ("IDO<<"): die
+    # dreizeilige Zone mit Dokumentart "ID" belegt die Ausweiskarte
+    kopie = ("Name / Surname / Nom\nMUSTERMANN\n582913\nIDO<<T220001293<<<<<<<<<<<<<<<\n"
+             "6408125<2010315D<<<<<<<<<<<<<4\nMUSTERMANN<<ERIKA<<<<<<<<<<<<<")
+    assert "582913" in {t for _, t, q, _ in _treffer(kopie, "ausweis.mrz") if q.endswith("zugangsnummer")}
 
 
 # ----------------------------------------------------------------------
@@ -313,6 +334,27 @@ def test_fuehrerschein_geburtsort_mit_ortszusatz(ort):
 def test_fuehrerschein_kartenkopf_als_eigene_zeile():
     assert aw._kartenmerkmale("/FÜHRERSCHEIN\nREPUBLIK ÖSTERREICH")[0]
     assert aw._kartenmerkmale("FÜHRERSCHEIN   D")[0]
+    assert aw._kartenmerkmale("(5FÜHRERSCHEIN\nRZECZPOSPOLITA POLSKA")[0]     # OCR-Bruchstück der Kartenkante davor
     assert not aw._kartenmerkmale("Kopie Führerschein (Vorder- und Rückseite)")[0]
     assert not aw._kartenmerkmale("2. Führerschein")[0]
+    assert not aw._kartenmerkmale("1. Personalausweis\n2) FÜHRERSCHEIN")[0]
     assert not aw._kartenmerkmale("Die Prüfung des Führerscheins erfolgt bei Abschluss.")[0]
+
+
+def test_fuehrerschein_ocr_mit_verlesenen_feldnummern():
+    """Gescannter Führerschein (eigener Entwicklungskorpus, Generator 1.3): die OCR klebt "4a." an das Datum
+    ("42.01.02.22"), liest "1." als "a1.", die Klasse A1 als "AL" und setzt ein Bruchstück vor den Kartenkopf. Kopf und
+    Klassen bleiben Kartenmerkmale, und neben ihnen genügt die Nummer in Feld 5 statt 4a/4b."""
+    text = ("(5FÜHRERSCHEIN\nRZECZPOSPOLITA POLSKA\na1. PETERS\n2. EVA-MARIA\n42.01.02.22\n4b. 31.01.37\n"
+            "5. 79178257\n5\n\\& AM/AL/B/BE/L\n8. MARKTPLATZ 8,\n3. 28.01.49 HANOI\n4c. Starosta Powiatowy")
+    assert aw._kartenmerkmale(text) == (True, True)
+    werte = {(k, text[s:e]) for s, e, k in aw.fuehrerschein_felder(text)}
+    assert {("namen", "EVA-MARIA"), ("geburt", "28.01.49"), ("ausweis", "79178257")} <= werte
+    # ohne 4a/4b genügt Feld 5 nur neben Kartenkopf oder Klassenliste – nie in einer nummerierten Kfz-Liste
+    ohne_4 = "1. MÜLLER\n2. HANS\n3. 12.08.1983 MÜNCHEN\n5. B072RRE2I55"
+    assert aw.fuehrerschein_felder(ohne_4, mit_wortlaut=False) == []
+    mit_kopf = "FÜHRERSCHEIN\n" + ohne_4
+    assert ("ausweis", "B072RRE2I55") in {(k, mit_kopf[s:e]) for s, e, k in aw.fuehrerschein_felder(mit_kopf)}
+    # Feld 8, von der OCR geteilt: der Straßenname ohne Hausnummer ist trotzdem die Anschrift
+    geteilt = mit_kopf + "\n4b. 31.01.2030\n8. FELDKIRCHENER\nWEG 41"
+    assert ("strasse", "FELDKIRCHENER") in {(k, geteilt[s:e]) for s, e, k in aw.fuehrerschein_felder(geteilt)}

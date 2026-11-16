@@ -1699,10 +1699,10 @@ def _rohwert_passt(wert: str, kat: str) -> bool:
     if kat == "strasse":
         return ziffern >= 1 or bool(re.search(r"(?i)stra(?:ß|ss)e|str\.|weg\b|platz\b|allee\b|gasse\b", w))
     woerter = re.findall(r"[^\W\d_][^\W\d_'’.\-]*", w)
+    if kat == "plzort":
+        return _roh_ort_passt(w, woerter, ziffern)     # auch eine PLZ allein ("PLZ des Wohnorts: 99423")
     if not woerter:
         return False
-    if kat == "plzort":
-        return _roh_ort_passt(w, woerter, ziffern)
     if kat == "namen":
         if ziffern > 1:
             return False
@@ -1751,8 +1751,9 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
     die Wertformen verlässlich. Ausgenommen sind Füllwerte ("wie oben", "entfällt", "nein"), Werte ohne die grobe
     Gestalt ihrer Kategorie (_rohwert_passt: ein Ort ist eine PLZ oder bis zu drei großgeschriebene Wörter ohne
     Funktionswort und ohne Feldnummer – nicht "Werkstatt Ihrer Wahl", "3. Verletzte", "bitte angeben"), Ereignisorte
-    in jeder Wortstellung ("Schadenort", "Ort des Schadens", "Ort der Besichtigung"), Anschrift-Felder, deren
-    gedruckter Feldname über das Etikett hinausgeht ("Ort| der Besichtigung:"), und Unterschriftsfelder."""
+    in jeder Wortstellung ("Schadenort", "Ort des Schadens", "Ort der Besichtigung") und Unterschriftsfelder. Reicht
+    der gedruckte Feldname eines Anschrift-Felds über das Etikett hinaus ("PLZ| des Wohnorts:"), ist der Rest kein
+    Wert – gelesen wird erst hinter dem Doppelpunkt."""
     zelle = lg.zelle_bei(et.start)
     if zelle is None or not lg.zeilen_ocr.get(zelle.zeile) or not _etikett_am_zellanfang(seite, lg, et):
         return []
@@ -1765,14 +1766,16 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
         return []
     starts = sorted(n.start for n in alle if n.arten)
     # Der gedruckte Feldname reicht bis zum Doppelpunkt: "Ort der Besichtigung:", "Stelle des Unfalls:" – ein
-    # Ereignisort ist keine Anschrift, und deckt das Etikett ("Ort") den Feldnamen nicht ganz ab, ist der Rest
-    # ("der Besichtigung") kein Wert (Anschrift-Kategorien; "Name des Kindes:" liest weiter den Namen)
+    # Ereignisort ist keine Anschrift, und deckt das Etikett ("PLZ") den Feldnamen nicht ganz ab ("PLZ des
+    # Wohnorts:"), ist der Rest kein Wert: der Wert steht erst hinter dem Doppelpunkt (Anschrift-Kategorien; "Name des
+    # Kindes:" liest weiter den Namen)
+    anfang = et.ende
     fm = _FELDNAME_REST_RE.match(text, et.ende, zelle.ende)
     if fm is not None:
         if _ROH_KEIN_FELD_RE.search(text[et.start:fm.end()]):
             return []
         if kat in ("plzort", "strasse") and not any(fm.start(1) <= s0 < fm.end(1) for s0 in starts):
-            return []
+            anfang = fm.end()
 
     def bereich(s: int, ende: int):
         h = _HINWEIS_KLAMMER_RE.match(text, s, ende)       # "(TTMMJJJJ)", "(bei Selbstständigen)"
@@ -1809,10 +1812,10 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
         if not _rohwert_passt(sauber, kat):
             return None
         return s, e
-    b = bereich(et.ende, zeile.ende)
+    b = bereich(anfang, zeile.ende)
     if b is not None:
         return [Wert(b[0], b[1], kat)]
-    if text[et.ende:zeile.ende].strip(" \t:.()…_") and not _HINWEIS_KLAMMER_RE.fullmatch(text[et.ende:zeile.ende]):
+    if text[anfang:zeile.ende].strip(" \t:.()…_") and not _HINWEIS_KLAMMER_RE.fullmatch(text[anfang:zeile.ende]):
         return []
     # Feldname allein in seiner Zeile: Eintrag darunter in derselben Spalte
     box = lg.box(et.start, et.ende)
