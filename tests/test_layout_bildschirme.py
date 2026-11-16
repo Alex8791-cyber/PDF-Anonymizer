@@ -422,10 +422,13 @@ def test_gefundener_text_laesst_sich_von_hand_verbreitern(umgebung, dialoge, mon
         trenner_ziehen(app, "text", app._px(300))
         nachher = spalten(app)
         assert nachher["text"] >= vorher["text"] + spielraum - 2, (vorher, nachher)
-        assert nachher["kontext"] == baum.column("kontext", "minwidth") and \
-            nachher["#0"] == baum.column("#0", "minwidth"), nachher
-        assert sum(nachher.values()) <= baum.winfo_width() - 2           # ttk hält die Summe in der Liste
         assert sichtbar(app, iban, nachher["text"]) == iban, nachher["text"]
+        if sum(nachher.values()) <= baum.winfo_width() - 2:
+            # Tk 8.6.14: beim Loslassen („drop“) holt ttk den Platz aus den dehnbaren Spalten, die Summe bleibt
+            assert nachher["kontext"] == baum.column("kontext", "minwidth") and \
+                nachher["#0"] == baum.column("#0", "minwidth"), nachher
+        else:                                       # Tk ohne „drop“: breiter als die Liste – dann mit Bildlaufleiste
+            assert app.baum_roll_x.winfo_ismapped(), "Spalten breiter als die Liste, aber keine Bildlaufleiste"
         for iid in app.zeilen:                                            # Namen an die schmalere Spalte angepasst
             zeile = baum.item(iid, "text")
             assert app.f_fett.measure(zeile) + app._px(gui.SPALTE0_EINZUG) <= nachher["#0"] + 1, zeile
@@ -444,6 +447,7 @@ def test_gefundener_text_laesst_sich_von_hand_verbreitern(umgebung, dialoge, mon
         assert neu != nachher and neu["#0"] > nachher["#0"]
         # die Liste ist gefüllt, ohne überzustehen (die App lässt 4 px Rand, ttk verteilt den Rest selbst)
         assert baum.winfo_width() - 6 <= sum(neu.values()) <= baum.winfo_width() - 2, (neu, baum.winfo_width())
+        assert not app.baum_roll_x.winfo_ismapped()
         pruefspalten_pruefen(app)
         datei_zeilen_pruefen(app)
 
