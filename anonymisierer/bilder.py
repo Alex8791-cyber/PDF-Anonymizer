@@ -171,16 +171,82 @@ def _komponenten(doc, xref) -> int | None:
     return None
 
 
+ZLIB_BLOCK = 1 << 22          # zlib arbeitet blockweise (4 MB): nie eine zweite volle Kopie der Pixel im Speicher
+# Speicher (Befund 3 der Runde 3a, gemessen mit dem Kernel-Hochwasser VmHWM): Der JPEG-Kodierer von MuPDF schreibt
+# progressiv und ohne Farbunterabtastung – er hält dafür alle DCT-Koeffizienten, 6 Byte je Pixel (48-MP-Foto: 288 MB)
+# neben der Pixmap (3 Byte je Pixel). Größere Fotos (Handy mit 48, 50, 108 MP) werden deshalb nach dem Schwärzen mit
+# höchstens so vielen Pixeln gespeichert – für jede Anzeige und jede KI mehr als genug (A4 mit 600 dpi: 35 MP; A3 mit
+# 300 dpi, 17 MP, bleibt unverändert). Verlustfreie Originale behalten ihre Auflösung.
+NEUKODIEREN_MAX_PIXEL = 24_000_000
+
+
+def _zlib(daten, stufe: int) -> bytes:
+    """zlib-Daten blockweise erzeugen (aus einem memoryview, ohne Kopie der Eingabe)."""
+    packer = zlib.compressobj(stufe)
+    mv = memoryview(daten)
+    teile = [packer.compress(mv[i:i + ZLIB_BLOCK]) for i in range(0, len(mv), ZLIB_BLOCK)]
+    teile.append(packer.flush())
+    return b"".join(teile)
+
+
+def flate_groesse(daten, grenze: float | None = None, stufe: int = 1) -> int:
+    """Größe der zlib-Daten (Stufe 1: schnelle Schätzung), blockweise und ohne die Ausgabe zu behalten – der Speicher
+    bleibt bei wenigen MB, auch für ein 48-MP-Foto. Mit grenze: Abbruch, sobald die Größe sie übersteigt (dann steht
+    der Vergleich schon fest)."""
+    packer = zlib.compressobj(stufe)
+    mv = memoryview(daten)
+    n = 0
+    for i in range(0, len(mv), ZLIB_BLOCK):
+        n += len(packer.compress(mv[i:i + ZLIB_BLOCK]))
+        if grenze is not None and n > grenze:
+            return n
+    return n + len(packer.flush())
+
+
 def _flate_packen(doc, xref) -> bool:
     """Unkomprimiertes Bild (1 Bit, oder nicht JPEG-geeignet) verlustfrei mit Flate packen. zlib-Stufe 6:
-    update_stream(compress=True) nutzt die höchste Stufe und braucht für eine 300-dpi-Seite rund 1 s."""
+    update_stream(compress=True) nutzt die höchste Stufe und braucht für eine 300-dpi-Seite rund 1 s.
+    Speicher: die Rohdaten liegen nur einmal vor – die Fassung im Dokument wird freigegeben, bevor gepackt wird."""
     if doc.xref_get_key(xref, "Filter")[0] != "null":
         return False
     roh = doc.xref_stream_raw(xref)
-    doc.update_stream(xref, zlib.compress(roh, 6), compress=False)
+    doc.update_stream(xref, b"", compress=False)
+    try:
+        gepackt = _zlib(roh, 6)
+    except BaseException:
+        doc.update_stream(xref, roh, compress=False)        # Rohdaten zurück (Bild bleibt unkomprimiert)
+        raise
+    roh = None
+    doc.update_stream(xref, gepackt, compress=False)
     doc.xref_set_key(xref, "Filter", "/FlateDecode")
     doc.xref_set_key(xref, "DecodeParms", "null")
     return True
+
+
+def _nur_pixel(doc, xref, pix) -> bool:
+    """Sind die Rohdaten des (unkomprimierten) Bilds genau die Pixel der Pixmap (8 Bit, ohne Zeilenauffüllung)? Nur
+    dann darf sein Strom fürs Kodieren freigegeben und notfalls aus der Pixmap zurückgeschrieben werden."""
+    try:
+        laenge = int(doc.xref_get_key(xref, "Length")[1] or 0)
+    except (TypeError, ValueError):
+        return False
+    return (doc.xref_get_key(xref, "Filter")[0] == "null" and pix.stride == pix.width * pix.n
+            and laenge == pix.width * pix.height * pix.n)
+
+
+def _pixel_zurueck(doc, xref, pix, flate: bool = False) -> None:
+    """Die Pixel der Pixmap als Bilddaten von xref schreiben (unkomprimiert bzw. Flate, mit ihrer Breite und Höhe) –
+    nachdem der Strom im Dokument für das Kodieren freigegeben wurde."""
+    daten = getattr(pix, "samples_mv", None) or pix.samples
+    if flate:
+        doc.update_stream(xref, _zlib(daten, 6), compress=False)
+        doc.xref_set_key(xref, "Filter", "/FlateDecode")
+    else:
+        doc.update_stream(xref, bytes(daten), compress=False)
+        doc.xref_set_key(xref, "Filter", "null")
+    doc.xref_set_key(xref, "DecodeParms", "null")
+    doc.xref_set_key(xref, "Width", str(pix.width))
+    doc.xref_set_key(xref, "Height", str(pix.height))
 
 
 def _neu_kodieren(doc, xref, original: dict, qualitaet: int) -> bool:
@@ -197,8 +263,8 @@ def _neu_kodieren(doc, xref, original: dict, qualitaet: int) -> bool:
     if (bpc != "8" or n is None or doc.xref_get_key(xref, "Decode")[0] != "null"
             or doc.xref_get_key(xref, "SMaskInData")[0] != "null"):
         return _flate_packen(doc, xref)
-    # Speicher (48-MP-Fotos): erst MuPDFs Zwischenspeicher leeren – dort liegt noch das dekodierte Original –, dann
-    # das neue Bild EINMAL dekodieren; Rohdaten ohne Kopie (samples_mv), Pixmap sofort wieder freigeben
+    # Speicher (gemessen mit VmHWM, Befund 3 der Runde 3a): erst MuPDFs Zwischenspeicher leeren – dort liegt noch das
+    # dekodierte Original –, dann das neue Bild EINMAL dekodieren
     speicher_freigeben()
     pix = fitz.Pixmap(doc, xref)
     if pix.alpha:
@@ -211,21 +277,47 @@ def _neu_kodieren(doc, xref, original: dict, qualitaet: int) -> bool:
     q = qualitaet
     if original.get("qualitaet"):
         q = max(JPEG_MIN_QUALITAET, min(qualitaet, int(original["qualitaet"])))
-    jpeg = pix.tobytes("jpeg", jpg_quality=q)
-    if not verlustbehaftet:
-        # Vergleichsgröße: Länge des verlustfreien Originals (die geschwärzte Fassung packt sich ebenso),
-        # sonst eine schnelle Schätzung (zlib-Stufe 1)
-        flate = original.get("laenge") if "Flate" in original_filter else None
-        if not flate:
-            flate = len(zlib.compress(getattr(pix, "samples_mv", None) or pix.samples, 1))
-        if len(jpeg) > VERLUSTFREI_SCHWELLE * flate:
-            pix = jpeg = None
-            return _flate_packen(doc, xref)
+    # Die Pixel liegen jetzt zweimal vor: unkomprimiert im Dokument und in der Pixmap. Der Strom im Dokument wird
+    # freigegeben, solange die Pixmap dieselben Pixel hält; scheitert etwas, werden sie zurückgeschrieben.
+    frei = _nur_pixel(doc, xref, pix)
+    if frei:
+        speicher_freigeben()                                # das Bildobjekt im Zwischenspeicher hielte die Daten
+        doc.update_stream(xref, b"", compress=False)
+    try:
+        if (frei and verlustbehaftet and pix.width * pix.height > NEUKODIEREN_MAX_PIXEL
+                and doc.xref_get_key(xref, "SMask")[0] == "null" and doc.xref_get_key(xref, "Mask")[0] == "null"):
+            faktor = (NEUKODIEREN_MAX_PIXEL / (pix.width * pix.height)) ** 0.5
+            pix = fitz.Pixmap(pix, max(1, int(pix.width * faktor)), max(1, int(pix.height * faktor)), None)
+        jpeg = pix.tobytes("jpeg", jpg_quality=q)
+        if not verlustbehaftet:
+            # Vergleichsgröße: Länge des verlustfreien Originals (die geschwärzte Fassung packt sich ebenso), sonst
+            # eine schnelle Schätzung (zlib-Stufe 1, blockweise, Abbruch sobald der Vergleich feststeht)
+            flate = original.get("laenge") if "Flate" in original_filter else None
+            if not flate:
+                flate = flate_groesse(getattr(pix, "samples_mv", None) or pix.samples,
+                                      len(jpeg) / VERLUSTFREI_SCHWELLE)
+            if len(jpeg) > VERLUSTFREI_SCHWELLE * flate:
+                jpeg = None
+                if frei:
+                    _pixel_zurueck(doc, xref, pix, flate=True)
+                    return True
+                pix = None
+                return _flate_packen(doc, xref)
+    except BaseException:
+        if frei:
+            try:
+                _pixel_zurueck(doc, xref, pix)
+            except BaseException:
+                bild_leeren(doc, xref)                      # nie ein Bild ohne Daten: lieber weiß als kaputt
+        raise
+    breite, hoehe = pix.width, pix.height
     pix = None
     doc.update_stream(xref, jpeg, compress=False)
     doc.xref_set_key(xref, "Filter", "/DCTDecode")
     doc.xref_set_key(xref, "DecodeParms", "null")
     doc.xref_set_key(xref, "BitsPerComponent", "8")
+    doc.xref_set_key(xref, "Width", str(breite))
+    doc.xref_set_key(xref, "Height", str(hoehe))
     return True
 
 

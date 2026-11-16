@@ -236,3 +236,139 @@ def test_menge_statt_zuordnung_und_robustheit(tmp_path):
     assert doc.xref_get_key(xref, "Filter")[1] == "/DCTDecode"
     assert bilder_neu_kodieren(doc, {xref}) == 0, "schon kompakt: nichts zu tun"
     doc.close()
+
+
+# ----------------------------------------------------------------------
+# Speicher der Neukodierung (Befund 3 der Runde 3a)
+# ----------------------------------------------------------------------
+def _foto_pdf(pfad, breite, hoehe, qualitaet=85):
+    """Seite mit einem JPEG-„Foto“ (glatte Verläufe mit Rauschen) über die ganze Seite."""
+    import numpy as np
+    rng = np.random.default_rng(7)
+    y, x = np.mgrid[:hoehe, :breite].astype(np.float32)
+    a = np.dstack([(x / breite * 200 + 30), (y / hoehe * 180 + 40), ((x + y) / (breite + hoehe) * 160 + 50)])
+    a += rng.normal(0, 6, a.shape)
+    pix = fitz.Pixmap(fitz.csRGB, breite, hoehe, np.clip(a, 0, 255).astype(np.uint8).tobytes(), False)
+    doc = fitz.open()
+    seite = doc.new_page(width=breite * 72 / 300, height=hoehe * 72 / 300)
+    seite.insert_image(seite.rect, stream=pix.tobytes("jpeg", jpg_quality=qualitaet), keep_proportion=False)
+    doc.save(pfad)
+    doc.close()
+    return Path(pfad)
+
+
+def _geschwaerzt(pdf, rect):
+    doc = fitz.open(pdf)
+    seite = doc[0]
+    vorher = bildzustand(seite)
+    seite.add_redact_annot(rect, fill=(0.5, 0.5, 0.5))
+    seite.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+    return doc, seite, geaenderte_bilder(seite, vorher)
+
+
+def test_riesenfoto_wird_mit_hoechstens_max_pixeln_gespeichert(tmp_path, monkeypatch):
+    """Ein Foto über NEUKODIEREN_MAX_PIXEL (hier auf 1 MP gesetzt) wird nach dem Schwärzen verkleinert gespeichert –
+    der JPEG-Kodierer von MuPDF bräuchte sonst 6 Byte je Pixel; die Schwärzung bleibt, das Bild füllt dieselbe
+    Fläche. Ein verlustfreies Original behält seine Auflösung."""
+    import numpy as np
+    monkeypatch.setattr(bilder, "NEUKODIEREN_MAX_PIXEL", 1_000_000)
+    pdf = _foto_pdf(tmp_path / "foto.pdf", 2000, 1500)
+    rect = fitz.Rect(100, 100, 200, 160)
+    doc, seite, neu = _geschwaerzt(pdf, rect)
+    assert bilder_neu_kodieren(doc, neu) == 1
+    xref = next(iter(neu))
+    breite, hoehe = int(doc.xref_get_key(xref, "Width")[1]), int(doc.xref_get_key(xref, "Height")[1])
+    assert 0.9e6 <= breite * hoehe <= 1e6 and abs(breite / hoehe - 2000 / 1500) < 0.01
+    assert doc.xref_get_key(xref, "Filter")[1] == "/DCTDecode"
+    (info,) = seite.get_image_info()
+    assert fitz.Rect(info["bbox"]) == seite.rect
+    pix = seite.get_pixmap(dpi=72, clip=rect + (4, 4, -4, -4), colorspace=fitz.csGRAY)
+    a = np.frombuffer(pix.samples, np.uint8)
+    assert a.std() < 4 and abs(float(a.mean()) - 128) < 8, "die geschwärzte Stelle bleibt gleichmäßig grau"
+    doc.close()
+
+
+def test_neukodierung_gibt_den_strom_vor_dem_kodieren_frei(tmp_path, monkeypatch):
+    """Während MuPDF das JPEG schreibt, liegen die unkomprimierten Pixel nicht mehr zusätzlich im Dokument; scheitert
+    das Kodieren, werden sie zurückgeschrieben – das Bild bleibt gültig und geschwärzt."""
+    import numpy as np
+    pdf = _foto_pdf(tmp_path / "foto.pdf", 800, 600)
+    rect = fitz.Rect(20, 20, 80, 50)
+    doc, seite, neu = _geschwaerzt(pdf, rect)
+    xref = next(iter(neu))
+    vorher = fitz.Pixmap(doc, xref)
+    beim_kodieren = []
+    original = fitz.Pixmap.tobytes
+
+    def beobachten(pix, *a, **k):
+        beim_kodieren.append(len(doc.xref_stream_raw(xref)))
+        return original(pix, *a, **k)
+    monkeypatch.setattr(fitz.Pixmap, "tobytes", beobachten)
+    assert bilder_neu_kodieren(doc, dict(neu)) == 1
+    assert beim_kodieren == [0]
+    doc.close()
+
+    doc, seite, neu = _geschwaerzt(pdf, rect)
+    xref = next(iter(neu))
+
+    def scheitern(pix, *a, **k):
+        raise RuntimeError("Kodierer ausgefallen (Probe)")
+    monkeypatch.setattr(fitz.Pixmap, "tobytes", scheitern)
+    assert bilder_neu_kodieren(doc, neu) == 0
+    nachher = fitz.Pixmap(doc, xref)
+    assert (nachher.width, nachher.height) == (vorher.width, vorher.height)
+    assert np.array_equal(np.frombuffer(nachher.samples, np.uint8), np.frombuffer(vorher.samples, np.uint8))
+    doc.close()
+
+
+_HOCHWASSER_SKRIPT = r"""
+import sys
+import numpy as np
+import pymupdf as fitz
+from anonymisierer import bilder
+
+breite, hoehe, grenze, pfad = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
+bilder.NEUKODIEREN_MAX_PIXEL = grenze
+
+
+def mb(feld):
+    with open("/proc/self/status") as f:
+        for z in f:
+            if z.startswith(feld + ":"):
+                return int(z.split()[1]) / 1024
+
+
+doc = fitz.open(pfad)
+seite = doc[0]
+vorher = bilder.bildzustand(seite)
+seite.add_redact_annot(fitz.Rect(100, 100, 200, 160), fill=(0.5, 0.5, 0.5))
+seite.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+neu = bilder.geaenderte_bilder(seite, vorher)
+bilder.speicher_freigeben()
+with open("/proc/self/clear_refs", "w") as f:
+    f.write("5")
+rss = mb("VmRSS")
+assert bilder.bilder_neu_kodieren(doc, neu) == 1
+print(mb("VmHWM") - rss)
+"""
+
+
+@pytest.mark.skipif(not Path("/proc/self/clear_refs").exists(), reason="Kernel-Hochwasser nur unter Linux")
+def test_neukodierung_spitze_mit_kernel_hochwasser(tmp_path):
+    """Ehrliche Messung (Befund 3): das Kernel-Hochwasser VmHWM (vorher zurückgesetzt) erfasst auch kurze Spitzen in
+    MuPDF-Aufrufen – gemessen in einem frischen Prozess (im Testprozess verdeckt wiederverwendeter Speicher die Spitze).
+    Ein 12-MP-Foto (Pixmap 34 MB) über der Höchstgrenze (hier 3 MP) braucht beim Neukodieren rund eine Pixmap
+    zusätzlich – vorher Pixmap plus Koeffizientenpuffer des JPEG-Kodierers (6 Byte je Pixel), rund das Dreifache."""
+    import os
+    import subprocess
+    import sys
+    pdf = _foto_pdf(tmp_path / "foto.pdf", 4000, 3000)
+    umgebung = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parent.parent))
+    lauf = subprocess.run([sys.executable, "-c", _HOCHWASSER_SKRIPT, "4000", "3000", "3000000", str(pdf)],
+                          capture_output=True, text=True, timeout=300, env=umgebung)
+    if lauf.returncode != 0 and "clear_refs" in lauf.stderr:
+        pytest.skip("clear_refs nicht beschreibbar")
+    assert lauf.returncode == 0, lauf.stderr[-2000:]
+    zuwachs = float(lauf.stdout.strip().splitlines()[-1])
+    pixmap_mb = 4000 * 3000 * 3 / 2 ** 20
+    assert zuwachs < 1.6 * pixmap_mb, f"Spitze +{zuwachs:.0f} MB bei {pixmap_mb:.0f} MB Pixmap"
