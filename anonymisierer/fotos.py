@@ -538,6 +538,9 @@ ANZEIGE = {KAT_LICHTBILD: "Lichtbild (Ausweis)", KAT_FOTO: "Foto", KAT_BILD: "Bi
 PLATZHALTER = {KAT_LICHTBILD: "[LICHTBILD]", KAT_FOTO: "[FOTO]", KAT_BILD: "[BILD]"}
 KONTEXT_TEXT = {KAT_LICHTBILD: "Foto auf einer Ausweiskopie", KAT_FOTO: "Foto auf einer Scan-Seite",
                 KAT_BILD: "eingebettetes Bild"}
+HINWEIS_LICHTBILD_UNSICHER = (" Nicht abgehakt: ein Foto auf einer ausweisartigen Fläche, das nicht sicher ein "
+                              "Lichtbild ist (z. B. eine stark vergrößerte Ausweiskopie) – bitte ansehen und abhaken, "
+                              "wenn es ein Gesicht zeigt.")
 HINWEIS_LICHTBILD = ("Lichtbild einer Ausweiskopie – wird abgedeckt. Abgewählt bleibt das Gesicht sichtbar; die "
                      "Ausgabe muss dann in der Vorschau freigegeben werden.")
 HINWEIS_MAXIMAL = "Schutzstufe „Maximal“: Bilder und Fotos werden abgedeckt (in der Vorschau abwählbar)."
@@ -744,11 +747,11 @@ def seite_pruefen(seite, m, profil: str = "hoch", woerter=None) -> dict:
     """Bildfunde einer Seite. seite: vorbereitete PyMuPDF-Seite, m: Modellseite (seitenmodell.Seite) derselben Seite,
     woerter: OCR-Wörter der Seite (Text-Veto der Fotoerkennung).
     Rückgabe: {"lichtbild": [Rect], "foto": [Rect], "bild": [(Rect, [xrefs])], "kontext": 0|1|2,
-               "ausweis_ohne_lichtbild": bool}."""
+               "ausweis_ohne_lichtbild": bool, "lichtbild_unsicher": [Rect]}."""
     from . import muster as _muster
     maximal = _muster.option(profil, "bilder_schwaerzen")
     aus = {KAT_LICHTBILD: [], KAT_FOTO: [], KAT_BILD: [], "kontext": KONTEXT_KEINER,
-           "ausweis_ohne_lichtbild": False}
+           "ausweis_ohne_lichtbild": False, "lichtbild_unsicher": []}
     modus = getattr(m, "ocr_modus", "nein")
     if modus not in ("seite", "bilder") and not maximal:
         return aus
@@ -788,6 +791,12 @@ def seite_pruefen(seite, m, profil: str = "hoch", woerter=None) -> dict:
                 aus[KAT_LICHTBILD].append(fitz.Rect(b.rect))
             elif maximal and (modus == "seite" or any(fitz.Rect(b.rect).intersects(s) for s in seitenbilder)):
                 aus[KAT_FOTO].append(fitz.Rect(b.rect))
+            elif not maximal and _kartenartig(b.karte):
+                # Foto auf einer ausweisartigen Fläche, das die Regel nicht sicher als Lichtbild wertet (ohne
+                # Ausweistext, quer, Karte stark vergrößert kopiert oder vom Foto fast gefüllt): als Lichtbild
+                # VORGESCHLAGEN, nicht abgehakt – die Ausgabe braucht dann die Freigabe in der Vorschau, statt still
+                # mit einem Gesicht als „fertig“ hinauszugehen (Befund 2 der Runde 3a, Vorschlag 3)
+                aus["lichtbild_unsicher"].append(fitz.Rect(b.rect))
         # Ausweiskopie (Ausweistext auf dem Bild selbst), aber kein Lichtbild gefunden: das Gesicht kann trotzdem da
         # sein – die Schwärzung verlangt dann die Freigabe in der Vorschau
         aus["ausweis_ohne_lichtbild"] = (modus in ("seite", "bilder") and not aus[KAT_LICHTBILD]
@@ -819,10 +828,13 @@ def _rect_liste(r) -> list:
 
 
 def funde_bilden(befunde: dict, start_id: int = 1) -> list:
-    """Bildfunde (ein Fund je Art, Stellen = Bereiche) aus {Seite: seite_pruefen(...)}."""
+    """Bildfunde (ein Fund je Art, Stellen = Bereiche) aus {Seite: seite_pruefen(...)}. Ein unsicheres Lichtbild
+    (Foto auf einer ausweisartigen Fläche, „lichtbild_unsicher“) steht als NICHT abgehakte Stelle im Lichtbild-Fund:
+    sichtbar in Fundliste und Vorschau, und weil es nicht abgedeckt ist, verlangt die Ausgabe die Freigabe."""
     funde = []
     for kategorie in BILD_KATEGORIEN:
         stellen = []
+        unsicher = 0
         for nr in sorted(befunde):
             for eintrag in befunde[nr].get(kategorie) or ():
                 rect, xrefs = (eintrag if kategorie == KAT_BILD else (eintrag, []))
@@ -830,6 +842,11 @@ def funde_bilden(befunde: dict, start_id: int = 1) -> list:
                 if xrefs:
                     stelle["bildxrefs"] = list(xrefs)
                 stellen.append(stelle)
+            if kategorie == KAT_LICHTBILD:
+                for rect in befunde[nr].get("lichtbild_unsicher") or ():
+                    stellen.append({"seite": nr, "start": 0, "ende": 0, "an": False, "text": "",
+                                    "bereich": _rect_liste(rect)})
+                    unsicher += 1
         if not stellen:
             continue
         seiten = sorted({st["seite"] + 1 for st in stellen})
@@ -839,7 +856,8 @@ def funde_bilden(befunde: dict, start_id: int = 1) -> list:
                       "text": "", "ersatz": PLATZHALTER[kategorie], "seiten": seiten, "anzahl": len(stellen),
                       "kontext": kontext, "stellen": stellen, "quellen": [f"{QUELLE}.{kategorie}"],
                       "sicherheit": 0.8 if kategorie == KAT_LICHTBILD else 1.0,
-                      "hinweis": HINWEIS_LICHTBILD if kategorie == KAT_LICHTBILD else HINWEIS_MAXIMAL})
+                      "hinweis": (HINWEIS_LICHTBILD + (HINWEIS_LICHTBILD_UNSICHER if unsicher else "")
+                                  if kategorie == KAT_LICHTBILD else HINWEIS_MAXIMAL)})
     return funde
 
 
@@ -868,6 +886,12 @@ def dokument_pruefen(doc, dok, profil: str = "hoch", ocr_cache=None) -> dict:
                               f"Seite {nr + 1} sieht aus wie eine Ausweiskopie, ein Lichtbild wurde aber nicht sicher "
                               f"erkannt – bitte in der Vorschau ansehen und einen Rahmen über das Gesicht ziehen. Die "
                               f"Ausgabe muss in der Vorschau freigegeben werden.", nr))
+        if b.get("lichtbild_unsicher"):
+            meldungen.append(("warnung", "LICHTBILD_UNSICHER",
+                              f"Seite {nr + 1}: Ein Foto liegt auf einer ausweisartigen Fläche, ist aber nicht sicher "
+                              f"ein Lichtbild (z. B. eine stark vergrößerte Ausweiskopie). Es steht als „Lichtbild“ in "
+                              f"der Fundliste, ist aber nicht abgehakt – bitte in der Vorschau ansehen und abhaken, "
+                              f"wenn es ein Gesicht zeigt. Die Ausgabe muss in der Vorschau freigegeben werden.", nr))
     anzahl = {k: sum(len(b[k]) for b in befunde.values()) for k in (KAT_BILD, KAT_FOTO)}
     if anzahl[KAT_BILD] or anzahl[KAT_FOTO]:
         meldungen.append(("hinweis", "BILDER_ABGEDECKT",
@@ -952,8 +976,8 @@ def text_ueber_bereich(rect, woerter) -> bool:
 
 def freigabe_gruende(auftrag: dict, dok) -> list:
     """[(Code, Seite, Text)]: Warum braucht die Ausgabe die Freigabe in der Vorschau? Ein abgewähltes Lichtbild bleibt
-    sichtbar; eine Ausweiskopie (Ausweistext auf dem Bild selbst) ohne abgedecktes Lichtbild kann ein Gesicht zeigen,
-    das die Erkennung nicht gefunden hat."""
+    sichtbar (ebenso ein unsicheres, das nicht abgehakt angeboten wird); eine Ausweiskopie (Ausweistext auf dem Bild
+    selbst) ohne abgedecktes Lichtbild kann ein Gesicht zeigen, das die Erkennung nicht gefunden hat."""
     gruende: dict = {}
     for nr, _ in (auftrag or {}).get("abgewaehlt", {}).get(KAT_LICHTBILD, ()):
         gruende.setdefault(nr, ("LICHTBILD_SICHTBAR", nr, f"Seite {nr + 1}: Lichtbild nicht abgedeckt"))

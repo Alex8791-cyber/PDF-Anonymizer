@@ -407,15 +407,15 @@ ANSCHREIBEN = ["Erika Musterfrau · Lindenallee 7 · 50667 Köln", "", "Muster-M
                "Mit freundlichen Grüßen", "Erika Musterfrau"]
 
 
-def _karte_auf_scan(pfad, rng, art="personalausweis", grad=0, text=None, oben=330.0):
+def _karte_auf_scan(pfad, rng, art="personalausweis", grad=0, text=None, oben=330.0, faktor=1.0, links=150.0):
     """Scan-Seite mit (optional) Anschreiben oben und einer Ausweiskarte darunter, die Karte um grad gedreht auf dem
-    Scanner. Rückgabe: Lichtbild-Rechteck auf der Seite (pt)."""
+    Scanner, mit faktor vergrößert kopiert. Rückgabe: Lichtbild-Rechteck auf der Seite (pt)."""
     karte, licht = fv.karte_rendern(rng, art, "vorn", dpi=300)
     k = (grad // 90) % 4
     gedreht = np.ascontiguousarray(np.rot90(karte, k=k))
     h, w = gedreht.shape[:2]
-    f = 72 / 300
-    rect = fitz.Rect(150, oben, 150 + w * f, oben + h * f)
+    f = 72 / 300 * faktor
+    rect = fitz.Rect(links, oben, links + w * f, oben + h * f)
     # Lichtbild im gedrehten Bild (np.rot90 dreht gegen den Uhrzeigersinn)
     x0, y0, x1, y1 = licht
     kh, kw = karte.shape[:2]
@@ -458,6 +458,51 @@ def test_hoch_quer_aufgelegte_ausweiskarte_lichtbild_abgedeckt(tmp_path, grad):
     (licht,) = [f for f in e["funde"] if f["kategorie"] == fotos.KAT_LICHTBILD]
     assert abdeckung(foto, [st["bereich"] for st in licht["stellen"]]) >= 0.85
     assert _ohne_platzhalter_gleichmaessig(s["ausgabe"], foto)
+
+
+def test_hoch_unsicheres_lichtbild_auf_karte_nicht_abgehakt_aber_freigabe(tmp_path):
+    """Befund 2 der Runde 3a, Vorschlag 3: Ein Foto auf einer ausweisartigen Fläche, das die Regel nicht sicher als
+    Lichtbild wertet – hier eine auf A4 vergrößerte (Kante 189 mm) und quer aufgelegte Karte ohne lesbaren Text –,
+    ging vorher mit Gesicht still als „fertig“ hinaus. Jetzt steht es als NICHT abgehakte Stelle im Lichtbild-Fund
+    (Fundliste, Vorschau), mit Warnung, und die Ausgabe verlangt die Freigabe. Abgehakt wird es abgedeckt."""
+    rng = np.random.default_rng(52)
+    pdf = tmp_path / "vergroessert.pdf"
+    foto = _karte_auf_scan(pdf, rng, grad=90, oben=60.0, links=40.0, faktor=2.2)
+    ocr = Attrappe({0: zeilenwoerter(["Kontakt: erika.musterfrau@example.org"], x0=60, y0=780)})
+    e, s = _analyse_und_schwaerzung(pdf, ocr)
+    assert fotos.ausweis_kontext(e["modell"].seiten[0].text) == fotos.KONTEXT_KEINER
+    (licht,) = [f for f in e["funde"] if f["kategorie"] == fotos.KAT_LICHTBILD]
+    assert [st["an"] for st in licht["stellen"]] == [False]
+    assert abdeckung(foto, [st["bereich"] for st in licht["stellen"]]) >= 0.85
+    assert "nicht abgehakt" in licht["hinweis"].lower()
+    assert "LICHTBILD_UNSICHER" in {m["code"] for m in e["meldungen"] if m["art"] == "warnung"}
+    assert s["status"] == "pruefen" and "Seite 1: Lichtbild nicht abgedeckt" in s["pruefen_gruende"]
+    assert s["lichtbilder_abgedeckt"] == 0 and _pixel(s["ausgabe"], foto + (6, 6, -6, -6)).std() > 20
+
+    def abhaken(funde):
+        for f in funde:
+            if f["kategorie"] == fotos.KAT_LICHTBILD:
+                for st in f["stellen"]:
+                    st["an"] = True
+    e, s = _analyse_und_schwaerzung(pdf, ocr, ziel=tmp_path / "abgehakt", aendern=abhaken)
+    assert s["lichtbilder_abgedeckt"] == 1 and _ohne_platzhalter_gleichmaessig(s["ausgabe"], foto)
+    assert not any("Lichtbild" in g or "Ausweiskopie" in g for g in s["pruefen_gruende"])
+
+
+def test_unsicheres_lichtbild_nur_auf_ausweisartiger_flaeche():
+    """Die Vorschlags-Regel greift nur bei einem Foto auf einer kartenartigen Fläche, das kein sicheres Lichtbild
+    ist – ein Foto ohne Karte (Schadenfoto auf Papier) bleibt ohne Fund und ohne Freigabezwang."""
+    karte = fitz.Rect(40, 60, 40 + 118 * MM, 60 + 189 * MM)                  # hochkant, stark vergrößert
+    foto = fitz.Rect(115, 397, 340, 578)
+    bereich = fotos.Fotobereich(foto, karte, False)
+    assert fotos._kartenartig(karte) and not fotos.auf_karte(bereich)
+    assert not fotos.ist_lichtbild(bereich, fotos.KONTEXT_KEINER)
+    assert fotos.ist_lichtbild(bereich, fotos.KONTEXT_SCHWACH)             # mit Ausweiswort: sicher (abgehakt)
+    funde = fotos.funde_bilden({0: {fotos.KAT_LICHTBILD: [], fotos.KAT_FOTO: [], fotos.KAT_BILD: [],
+                                    "lichtbild_unsicher": [foto]}})
+    assert [(f["kategorie"], [st["an"] for st in f["stellen"]]) for f in funde] == [(fotos.KAT_LICHTBILD, [False])]
+    assert not fotos.funde_bilden({0: {fotos.KAT_LICHTBILD: [], fotos.KAT_FOTO: [], fotos.KAT_BILD: [],
+                                       "lichtbild_unsicher": []}})
 
 
 def test_lichtbild_auf_karte_unabhaengig_von_lage_und_seitenverhaeltnis():
