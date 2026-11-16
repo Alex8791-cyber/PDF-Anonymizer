@@ -10,11 +10,12 @@ Verschlechterung ausmacht, mit Größen, die von der Last kaum abhängen:
   cpu_sekunden_abwechselnd({name: f})     dasselbe für mehrere Größen im Wechsel (klein, groß, klein, groß):
                                           beide sehen dieselbe Last, das Verhältnis bleibt stabil
   wachstum(klein, gross, faktor)          wie viel schneller die Zeit wächst als die Eingabe: 1,0 = linear.
-                                          Gemessen wird mit großer Spreizung (n gegen 8n bzw. 16n): ein Anteil
-                                          Funde x Seiten oder Funde² wächst quadratisch, die lineare Grundlast nur
-                                          mit dem Faktor – erst bei großer Spreizung überwiegt er. Bei n gegen 4n
-                                          ging eine echte Funde-x-Seiten-Regression in der Grundlast unter
-                                          (Schwärzung: Verhältnis 7,5 bei Schranke 8; Befund Runde 3a)
+                                          Gemessen wird mit großer Spreizung (n gegen 8n bzw. 16n) und mit einer
+                                          Schranke knapp über linear: ein quadratischer Anteil (Funde x Seiten,
+                                          Funde²) zählt in der kleinen Messung fast nicht, in der großen voll – je
+                                          größer die Spreizung, desto deutlicher. Bei n gegen 4n mit Schranke 8
+                                          (fast das Doppelte von linear) ging eine echte Funde-x-Seiten-Regression
+                                          unter (Schwärzung: Verhältnis 6,0 bis 9,4; Befund Runde 3a)
   gemessener_ocr_arbeiter(...)            Ersatz für ocr._ocr_worker, der in jedem Arbeitsprozess Prozessnummer,
                                           Beginn und Ende jedes Auftrags aufschreibt (Verzeichnis in der
                                           Umgebungsvariablen UMGEBUNG) – so lässt sich zeigen, dass zwei Arbeiter
