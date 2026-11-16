@@ -248,12 +248,41 @@ def test_restrisiko_kennzahlen_aus_dokumenten():
     assert rr["kern_lecks_ohne_pixelrest"] == 2 and rr["verdachtsabdeckung_ohne_pixelrest"] == 0.5
     assert rr["fehlverdacht"] == 1 and rr["fehlverdacht_je_seite"] == 0.25
     assert rr["ausgaben_pruefen"] == 2 and rr["pruefen_ohne_leck"] == 1 and rr["pruefen_ohne_leck_dokumente"] == ["c.pdf"]
+    assert rr["kern_lecks_ohne_pixelrest_verortet"] == 1 and rr["verdachtsabdeckung_verortet"] == 0.5
     # Verdacht (NamedTuple des Programms) wird JSON-tauglich
     from anonymisierer.restrisiko import Verdacht
     import pymupdf as fitz
     v = bewertung.verdacht_serialisieren(Verdacht(0, 1, 5, "Text", "Grund", [fitz.Rect(1, 2, 3, 4)]))
     assert v == {"seite": 0, "start": 1, "ende": 5, "text": "Text", "grund": "Grund", "rechtecke": [[1.0, 2.0, 3.0, 4.0]]}
     json.dumps(v)
+
+
+def test_verortete_abdeckung_zaehlt_kein_spaltenrechteck_und_keinen_seitenverdacht():
+    """Ein spaltenhohes Verdachtsrechteck, ein Seitenverdacht oder ein gemeinsames Token deckt ein Kern-Leck ab, zeigt
+    aber nicht auf seinen Wert: die verortete Abdeckung zählt nur Textüberlappung und Rechtecke bis zum Vierfachen der
+    Wortkästen des Eintrags (Review Runde 2b: Seed 7 verlor 12 verortete Verdachte, die Abdeckung nur einen)."""
+    def dok(name, verdacht):
+        return {"dokument": name, "seiten": 1, "status_ausgabe": "pruefen", "reste_verdacht": [], "verdacht": verdacht,
+                "eintraege": [{"id": "e1", "text": "14.10.1979", "kategorie": "geburt", "seite": 1,
+                               "erwartung": "schwaerzen", "umfang": "kern", "kanal": "text", "status": "leck",
+                               "reste": [], "pixel": None, "bemerkung": ""}]}
+    wahr = [{"id": "e1", "woerter": [[596, 400, 622, 410, "14.10.1979"]]}]
+    spalte = dok("spalte.pdf", [{"seite": 0, "start": 0, "ende": 3, "text": "Rest", "grund": "Rest neben Platzhalter",
+                                 "rechtecke": [[596, 294, 622, 529]]}])
+    seite = dok("seite.pdf", [{"seite": 0, "start": -1, "ende": -1, "text": "Seite 1", "grund": "Seite",
+                               "rechtecke": []}])
+    genau = dok("genau.pdf", [{"seite": 0, "start": 5, "ende": 15, "text": "14.10.1979", "grund": "Datum",
+                               "rechtecke": [[596, 399, 623, 411]]}])
+    neben = dok("neben.pdf", [{"seite": 0, "start": 5, "ende": 15, "text": "Kunde", "grund": "Name",
+                               "rechtecke": [[590, 398, 630, 412]]}])
+    for d in (spalte, seite, genau, neben):
+        bewertung.verdacht_bewerten(d, d["eintraege"], wahr)
+    assert [d["eintraege"][0]["verdacht_abgedeckt"] for d in (spalte, seite, genau, neben)] == [True] * 4
+    assert [d["eintraege"][0]["verdacht_verortet"] for d in (spalte, seite, genau, neben)] == [False, False, True, True]
+    rr = bewertung.restrisiko_kennzahlen([spalte, seite, genau, neben])
+    assert rr["kern_lecks_ohne_pixelrest_abgedeckt"] == 4 and rr["kern_lecks_ohne_pixelrest_verortet"] == 2
+    assert rr["verdachtsabdeckung_verortet"] == 0.5
+    assert [x["dokument"] for x in rr["abgedeckt_nicht_verortet"]] == ["spalte.pdf", "seite.pdf"]
 
 
 # ----------------------------------------------------------------------

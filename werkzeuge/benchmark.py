@@ -89,12 +89,16 @@ def main(argv=None) -> int:
     if rr.get("kern_lecks") is not None:
         abdeckung = rr.get("verdachtsabdeckung")
         ohne = rr.get("verdachtsabdeckung_ohne_pixelrest")
+        verortet = rr.get("verdachtsabdeckung_verortet")
         print(f"Restrisiko: stille Lecks {rr.get('stille_lecks')} in {rr.get('dokumente_mit_stillem_leck')} "
               f"Dokument(en), Verdachtsabdeckung "
               f"{'-' if abdeckung is None else f'{100 * abdeckung:.1f} %'} "
               f"({rr.get('kern_lecks_abgedeckt')}/{rr.get('kern_lecks')}), ohne reine Pixelreste "
               f"{'-' if ohne is None else f'{100 * ohne:.1f} %'} ({rr.get('kern_lecks_ohne_pixelrest_abgedeckt')}/"
-              f"{rr.get('kern_lecks_ohne_pixelrest')}), Fehlverdacht je Seite "
+              f"{rr.get('kern_lecks_ohne_pixelrest')}), davon verortet "
+              f"{'-' if verortet is None else f'{100 * verortet:.1f} %'} "
+              f"({rr.get('kern_lecks_ohne_pixelrest_verortet')}/{rr.get('kern_lecks_ohne_pixelrest')}), "
+              f"Fehlverdacht je Seite "
               f"{rr.get('fehlverdacht_je_seite')}, _PRUEFEN {rr.get('ausgaben_pruefen')} "
               f"(davon ohne Kern-Leck {rr.get('pruefen_ohne_leck')})")
     print(f"Bericht: {ausgabe / 'bericht.md'}")
