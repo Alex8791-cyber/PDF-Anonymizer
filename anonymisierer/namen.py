@@ -116,6 +116,12 @@ NAMEN_STOPPLISTE = {
     "vorsitz", "vorsitzender", "vorsitzende", "aufsichtsrat", "aufsichtsratsvorsitzender", "brutto", "netto",
     "sparte", "kollegen", "kollegin", "kollege", "gedruckt", "raucher", "nichtraucher", "behandelnder",
     "behandelnde", "bezugsberechtigt", "stadtauswärts", "stadteinwärts", "zeitart", "schadentag", "schadenort",
+    # mehrsprachige Feldnamen auf Ausweisen und Pässen (ICAO 9303: Landessprache + Englisch/Französisch)
+    "surname", "given", "names", "given names", "nom", "prénoms", "prenoms", "prénom", "prenom", "nationality",
+    "nationalité", "nationalite", "sex", "sexe", "authority", "autorité", "autorite", "birth", "naissance",
+    "date of birth", "place of birth", "date of issue", "date of expiry", "issue", "expiry", "passport",
+    "passeport", "identity", "carte", "identité", "identite", "d'identité", "d'identite", "card", "ausweisart",
+    "reisepass", "personalausweis", "führerschein", "kode", "code", "typ/type", "licence", "permis", "date",
 }
 
 # Adjektive, die Straßennamen einleiten (Lange Straße) — als Einzelwort kein Name,

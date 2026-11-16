@@ -802,3 +802,111 @@ def test_steuer_id_hinter_laengerer_wendung(text, erwartet):
 ])
 def test_steuer_id_mit_nummer_im_etikett(text, erwartet):
     assert mu.finde_steuer_id(text) == erwartet
+
+
+# ----------------------------------------------------------------------
+# Steuernummern der Länder, ELSTER-Nummer, Feldnamen mit Zusätzen (Generalisierung)
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, erwartet", [
+    ("St.-Nr. 22/815/0815/4.", "22/815/0815/4"),                               # RP: FF/BBB/UUUU/P, auch frei
+    ("Meine Steuernummer lautet 9181/815/08155.", "9181/815/08155"),           # ELSTER mit Schrägstrichen
+    ("Steuernummer beim Finanzamt Nürnberg-Süd: 9181081508155.", "9181081508155"),
+    ("Steuernummer beim Finanzamt Leipzig II: 201/123/12340", "201/123/12340"),
+    ("STEUERNR. (GEWERBE)      2893081508152", "2893081508152"),               # EDV-Ausdruck, breite Lücke
+    ("Steuernummer (bei Selbstständigen) 93815/08152", "93815/08152"),         # BW: FFBBB/UUUUP nur mit Etikett
+    ("Steuer-Nr.: 29 815 08158", "29 815 08158"),                              # SH/HB mit Leerzeichen
+    ("Bitte nennen Sie 2893/815/08152 im Schreiben.", "2893/815/08152"),
+    ("133/8150/8159", "133/8150/8159"),                                        # NW
+])
+def test_steuernummer_laenderformate(text, erwartet):
+    assert mu.finde_steuernummer(text) == [erwartet]
+
+
+@pytest.mark.parametrize("text", [
+    "Die Nummer 12345/67890 ist eine Durchwahl",       # 5/5 ohne Etikett
+    "Tel. 0911/123/45678",                              # Vorwahl mit 0: keine ELSTER-Nummer
+    "Az. 2024/123/45678",                               # Jahr vorn: kein Länderpräfix
+    "Rechnung 9181081508155",                           # 13 Ziffern ohne Etikett
+])
+def test_steuernummer_gegenproben(text):
+    assert mu.finde_steuernummer(text) == []
+
+
+def test_bic_hinter_dem_wort_bic():
+    assert mu.finde_bic("Kreditinstitut (Name und BIC)\nVR-Bank Rhein-Lahn   IRLGDEUGNN8\nIBAN …") == ["IRLGDEUGNN8"]
+    assert mu.finde_bic("Name und BIC: Sparkasse KölnBonn COLSDE33XXX") == ["COLSDE33XXX"]
+    assert mu.finde_bic("BIC\nJSWVDEVC") == ["JSWVDEVC"]
+    # Wortformen ohne Ziffer, ohne "XXX" und ohne DE/AT/CH an Stelle 5-6 bleiben stehen ("POSTBANK": BA)
+    assert mu.finde_bic("Name und BIC des Kreditinstituts\nPOSTBANK HAMBURG") == []
+    assert mu.finde_bic("Die BIC finden Sie auf Ihrer KONTOKARTE") == []
+
+
+def test_strasse_beginnt_nicht_beim_feldnamen_einer_edv_zeile():
+    text = "ANSCHRIFT             HOHE STRASSE 129-131, 96450 COBURG"
+    assert mu.finde_strasse(text) == ["HOHE STRASSE 129-131"]
+    assert mu.finde_strasse("Fürther  Str. 120") == ["Fürther  Str. 120"]       # zwei Leerzeichen: noch ein Name
+    assert mu.finde_strasse("wohnhaft Berliner Straße 5") == ["Berliner Straße 5"]
+
+
+# ----------------------------------------------------------------------
+# Review-Befund 4: Steuernummer hinter dem Etikett in jeder üblichen Schreibweise (Genitiv, Komma, "FA", Leerzeichen
+# am "/", Vierergruppen, 4/3/5 ohne Länderpräfix); ohne Etikett bleibt es streng
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, erwartet", [
+    ("Steuernummer des Finanzamts Fürth: 9218081508151", "9218081508151"),
+    ("Steuernummer des Finanzamtes Fürth: 9218081508151", "9218081508151"),
+    ("Steuernummer des Finanzamt Fürth: 9218081508151", "9218081508151"),
+    ("Steuernummer, Finanzamt Fürth: 9218081508151", "9218081508151"),
+    ("Steuernummer beim FA Fürth: 218/123/45678", "218/123/45678"),
+    ("Steuernummer beim Finanzamt Fürth (Gewerbe): 218/123/45678", "218/123/45678"),
+    ("Steuernummer beim Finanzamt Frankfurt am Main V-Höchst: 045 123 45678", "045 123 45678"),
+    ("Steuernummer: 181 / 815 / 08155", "181 / 815 / 08155"),
+    ("Steuer-Nr. lautet 181/ 815/ 08155", "181/ 815/ 08155"),
+    ("Steuernummer: 93815 / 08152", "93815 / 08152"),
+    ("Steuernummer des Finanzamts Stuttgart: 93815/08152", "93815/08152"),
+    ("Steuernummer des Finanzamts Kiel: 21 815 08151", "21 815 08151"),
+    ("St.-Nr.: 9218 0815 08151", "9218 0815 08151"),
+    ("Steuernummer: 1234/567/89012", "1234/567/89012"),              # 4/3/5 ohne ELSTER-Präfix hinter dem Etikett
+    ("Steuernummer beim Finanzamt Fürth: 1234/567/89012", "1234/567/89012"),
+    ("Steuer-Nr.: 181 / 815 / 08155 vom 12.03.2024", "181 / 815 / 08155"),
+])
+def test_steuernummer_hinter_dem_etikett_in_allen_schreibweisen(text, erwartet):
+    assert mu.finde_steuernummer(text) == [erwartet]
+
+
+@pytest.mark.parametrize("text", [
+    "Steuernummer: 12 Monate",                          # keine 10 bis 13 Ziffern
+    "Steuer-Nr. 2024 12345",
+    "Az. 2024/123/45678",                               # ohne Etikett: weiter streng
+    "Tel. 0911/123/45678",
+    "Die Nummer 93815 / 08152 ist eine Durchwahl",
+])
+def test_steuernummer_etikett_gegenproben(text):
+    assert mu.finde_steuernummer(text) == []
+
+
+# ----------------------------------------------------------------------
+# Review-Befund 14: Straße mit drei und mehr Leerzeichen zwischen den Wörtern (Courier, Blocksatz, EDV-Zeile); ein
+# Feldname davor wird abgeschnitten, nicht die Lücke begrenzt
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, erwartet", [
+    ("Berliner   Straße 5", "Berliner   Straße 5"),
+    ("Bad Homburger   Str. 5", "Bad Homburger   Str. 5"),
+    ("Hohe   Straße 129", "Hohe   Straße 129"),
+    ("BERLINER   STRASSE 5", "BERLINER   STRASSE 5"),
+    ("Fürther   Str. 120", "Fürther   Str. 120"),
+    ("Berliner    Straße 5", "Berliner    Straße 5"),            # vier Leerzeichen: "Straße 5" allein ist keine Straße
+    ("Berliner   Platz 1", "Berliner   Platz 1"),
+    ("Frankfurter   Allee 12", "Frankfurter   Allee 12"),
+    ("Anschrift: Berliner   Straße 5", "Berliner   Straße 5"),
+    ("wohnhaft in der Berliner   Straße 5 in 12345 Berlin.", "Berliner   Straße 5"),   # Fließtext
+    ("Herrn\nJonas Becker\nHohe   Straße 129\n50667 Köln", "Hohe   Straße 129"),       # Anschriftblock
+    ("ANSCHRIFT             BERLINER   STRASSE 5", "BERLINER   STRASSE 5"),            # EDV-Zeile mit Feldname
+    ("ANSCHRIFT             FRANKFURTER   ALLEE 12", "FRANKFURTER   ALLEE 12"),
+    ("ANSCHRIFT             HOHE STRASSE 129-131, 96450 COBURG", "HOHE STRASSE 129-131"),
+    ("STRASSE      HOHE STRASSE 12", "HOHE STRASSE 12"),
+    ("Wohnanschrift Berliner Straße 5", "Berliner Straße 5"),
+    ("Hauptstraße   12", "Hauptstraße   12"),
+])
+def test_strasse_mit_mehrfach_leerzeichen(text, erwartet):
+    assert mu.finde_strasse(text) == [erwartet]

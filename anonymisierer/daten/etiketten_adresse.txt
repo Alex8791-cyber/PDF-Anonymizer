@@ -56,6 +56,7 @@ Land
 Landkreis
 Lieferadresse
 Lieferanschrift
+Lieu de naissance
 Meldeadresse
 Meldeanschrift
 Name und Anschrift
@@ -70,6 +71,7 @@ Ort des Ereignisses
 Ort des Schadens
 Ort des Unfalls
 Ortsteil
+Place of birth
 PLZ
 PLZ Ort
 PLZ und Ort

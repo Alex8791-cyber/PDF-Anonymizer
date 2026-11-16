@@ -183,6 +183,8 @@ def stil_waehlen(rng, groesse=None, zeilenabstand=None, familie=None) -> Stil:
 class Dok:
     """Kontext eines Dokuments: Zufall, Satz, Stil, Personen, Datum."""
 
+    scan_geplant = None        # Scan-Variante des Plans (nur Typen der erweiterten Verteilung lesen sie)
+
     def __init__(self, rng, kennung: str, stil: Stil | None = None, querformat: bool = False):
         self.rng = rng
         self.satz = S.Satz(kennung)

@@ -6,6 +6,7 @@
 Alter
 Alter bei Beginn
 Birth date
+Date de naissance
 Date of birth
 Datum der Eheschließung
 Datum der Geburt
@@ -21,8 +22,12 @@ Geb.-Dat.
 Geb.-Datum
 Geb.-Jahr
 Geb.-Ort
+Geb.dat
 Geb.Dat.
 Geb.Datum
+Geb_Datum
+GebDat
+Gebdatum
 geboren
 geboren am
 geboren in

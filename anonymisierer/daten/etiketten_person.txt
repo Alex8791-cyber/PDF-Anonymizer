@@ -253,6 +253,8 @@ gesetzliche Vertreter
 gesetzliche Vertreterin
 gesetzlicher Vertreter
 Given name
+Given name(s)
+Given names
 Gläubiger
 Gläubiger(in)
 Gläubiger/-in
@@ -432,6 +434,7 @@ Nachlassverwalterin
 Nachname
 Nachname, Vorname
 Name
+Name at birth
 Name der Kundin
 Name der Mitarbeiterin
 Name der versicherten Person
@@ -448,6 +451,7 @@ Name des Patienten
 Name des Unfallgegners
 Name des Versicherten
 Name des Versicherungsnehmers
+Name des Zahlungspflichtigen
 Name des Zeugen
 Name und Anschrift
 Name und Vorname
@@ -456,6 +460,8 @@ Name VP
 Name, Anschrift
 Name, Vorname
 Name/Firma
+Nom
+Nom de naissance
 Notar
 Notarin
 Notfallkontakt
@@ -491,6 +497,7 @@ Prämienzahler(in)
 Prämienzahler/-in
 Prämienzahler/in
 Prämienzahlerin
+Prénoms
 Prokurist
 Prokurist(in)
 Prokurist/-in
@@ -690,6 +697,7 @@ Vor- und Zuname
 Vorgesetzte
 Vorgesetzter
 Vormund
+Vorn.
 Vorname
 Vorname und Name
 Vorname, Name

@@ -5,9 +5,12 @@ sind frei erfunden. Gültig heißt: Die Prüfsumme stimmt (IBAN Mod-97, Steuer-I
 SV-Nummer, KVNR, Ausweis-Seriennummer ICAO 9303, Kreditkarte Luhn, USt-IdNr., FIN-Prüfziffer) –
 so, wie echte Nummern in Dokumenten stehen. Steuernummern und Führerscheinnummern haben je
 Bundesland bzw. Behörde eigene Prüfverfahren; dort stimmt nur das Format (im Bericht vermerkt).
+Für die erweiterte Verteilung (Generator 1.2): maschinenlesbare Zonen (MRZ) nach ICAO 9303 mit allen
+Prüfziffern (TD1, TD2, TD3) und Steuernummern im Format der Länder bzw. im 13-stelligen ELSTER-Format.
 """
 
 import datetime
+import unicodedata
 
 # ----------------------------------------------------------------------
 # IBAN / BIC
@@ -581,3 +584,130 @@ def glaeubiger_id(rng) -> str:
     """Gläubiger-Identifikationsnummer eines Unternehmens (kein Personenbezug)."""
     rumpf = "ZZZ0" + _ziffern(rng, 10)
     return "DE" + _iban_pruefziffer("DE", rumpf.replace("ZZZ", "")) + rumpf
+
+
+# ----------------------------------------------------------------------
+# Erweiterte Verteilung (Generator 1.2): maschinenlesbare Zone nach ICAO 9303 und Steuernummern
+# im Format der Länder bzw. im bundeseinheitlichen 13-stelligen ELSTER-Format
+# ----------------------------------------------------------------------
+_MRZ_WERT = {**{str(i): i for i in range(10)}, **{chr(65 + i): 10 + i for i in range(26)}, "<": 0}
+# Umschrift nach ICAO 9303 Teil 3 (Deutschland: Ä -> AE, Ö -> OE, Ü -> UE, ß -> SS)
+_MRZ_UMSCHRIFT = {"Ä": "AE", "Ö": "OE", "Ü": "UE", "ß": "SS", "ẞ": "SS", "Æ": "AE", "Ø": "OE", "Å": "AA",
+                  "Œ": "OE", "Þ": "TH", "Ð": "D", "Ł": "L", "Đ": "D", "Ħ": "H", "İ": "I"}
+
+
+def mrz_pruefziffer(feld: str) -> str:
+    """Prüfziffer eines MRZ-Felds (Gewichte 7, 3, 1; Ziffern 0-9, A=10 … Z=35, Füllzeichen '<' = 0)."""
+    return str(sum(_MRZ_WERT[c] * (7, 3, 1)[i % 3] for i, c in enumerate(feld)) % 10)
+
+
+def mrz_umschrift(text: str) -> str:
+    """Namen in MRZ-Zeichen: Großbuchstaben A-Z, Umlaute nach ICAO, übrige Diakritika entfernt, Leerzeichen und
+    Bindestrich als '<', Apostroph und Punkt entfallen ("O'Brien" -> "OBRIEN", "Müller-Lüdenscheidt" ->
+    "MUELLER<LUEDENSCHEIDT")."""
+    aus = []
+    for c in text.upper():
+        if c in _MRZ_UMSCHRIFT:
+            aus.append(_MRZ_UMSCHRIFT[c])
+            continue
+        for z in unicodedata.normalize("NFKD", c):
+            if unicodedata.combining(z):
+                continue
+            if "A" <= z <= "Z" or z.isdigit():
+                aus.append(z)
+            elif z in " -":
+                aus.append("<")
+    return "".join(aus)
+
+
+def mrz_namensfeld(nachname: str, vornamen: str, laenge: int) -> str:
+    """Namensfeld "NACHNAME<<VORNAME<ZWEITNAME", auf `laenge` mit '<' aufgefüllt; zu lange Namen werden wie in
+    ICAO 9303 zuerst bei den Vornamen gekürzt."""
+    n, v = mrz_umschrift(nachname), mrz_umschrift(vornamen)
+    feld = f"{n}<<{v}"
+    if len(feld) > laenge:
+        rest = laenge - len(n) - 2
+        feld = f"{n}<<{v[:rest]}" if rest >= 1 else n[:laenge]
+    return feld.ljust(laenge, "<")
+
+
+def _mrz_datum(d) -> str:
+    return f"{d:%y%m%d}"
+
+
+def mrz_td1(staat: str, nummer: str, geburt, geschlecht: str, ablauf, nationalitaet: str, nachname: str,
+            vornamen: str, art: str = "ID", optional1: str = "", optional2: str = "") -> list:
+    """Drei Zeilen à 30 Zeichen (Personalausweis, Aufenthaltstitel): Art, Staat, Nummer + Prüfziffer, optionale
+    Daten | Geburtsdatum + Prüfziffer, Geschlecht, Ablauf + Prüfziffer, Staatsangehörigkeit, optionale Daten,
+    Gesamtprüfziffer | Namensfeld."""
+    z1 = (art.ljust(2, "<") + staat.ljust(3, "<") + nummer + mrz_pruefziffer(nummer) + optional1.ljust(15, "<"))[:30]
+    gd, ad = _mrz_datum(geburt), _mrz_datum(ablauf)
+    z2 = (gd + mrz_pruefziffer(gd) + geschlecht + ad + mrz_pruefziffer(ad) + nationalitaet.ljust(3, "<")
+          + optional2.ljust(11, "<")[:11])
+    gesamt = z1[5:30] + z2[0:7] + z2[8:15] + z2[18:29]
+    return [z1, z2 + mrz_pruefziffer(gesamt), mrz_namensfeld(nachname, vornamen, 30)]
+
+
+def mrz_td2(staat: str, nummer: str, geburt, geschlecht: str, ablauf, nationalitaet: str, nachname: str,
+            vornamen: str, art: str = "ID", optional: str = "") -> list:
+    """Zwei Zeilen à 36 Zeichen (vorläufiger/alter Personalausweis): Art, Staat, Namensfeld | Nummer + Prüfziffer,
+    Staatsangehörigkeit, Geburtsdatum + Prüfziffer, Geschlecht, Ablauf + Prüfziffer, optionale Daten,
+    Gesamtprüfziffer."""
+    z1 = art.ljust(2, "<") + staat.ljust(3, "<") + mrz_namensfeld(nachname, vornamen, 31)
+    gd, ad = _mrz_datum(geburt), _mrz_datum(ablauf)
+    z2 = (nummer + mrz_pruefziffer(nummer) + nationalitaet.ljust(3, "<") + gd + mrz_pruefziffer(gd) + geschlecht
+          + ad + mrz_pruefziffer(ad) + optional.ljust(7, "<")[:7])
+    gesamt = z2[0:10] + z2[13:20] + z2[21:35]
+    return [z1, z2 + mrz_pruefziffer(gesamt)]
+
+
+def mrz_td3(staat: str, nummer: str, geburt, geschlecht: str, ablauf, nationalitaet: str, nachname: str,
+            vornamen: str, persoenlich: str = "") -> list:
+    """Zwei Zeilen à 44 Zeichen (Reisepass): "P<", Staat, Namensfeld | Nummer + Prüfziffer, Staatsangehörigkeit,
+    Geburtsdatum + Prüfziffer, Geschlecht, Ablauf + Prüfziffer, persönliche Nummer + Prüfziffer,
+    Gesamtprüfziffer."""
+    z1 = "P<" + staat.ljust(3, "<") + mrz_namensfeld(nachname, vornamen, 39)
+    gd, ad = _mrz_datum(geburt), _mrz_datum(ablauf)
+    pn = persoenlich.ljust(14, "<")[:14]
+    pn_pruef = mrz_pruefziffer(pn) if persoenlich else "<"
+    z2 = (nummer + mrz_pruefziffer(nummer) + nationalitaet.ljust(3, "<") + gd + mrz_pruefziffer(gd) + geschlecht
+          + ad + mrz_pruefziffer(ad) + pn + pn_pruef)
+    gesamt = z2[0:10] + z2[13:20] + z2[21:43]
+    return [z1, z2 + mrz_pruefziffer(gesamt)]
+
+
+def ausweis_can(rng) -> str:
+    """Zugangsnummer (CAN) des Personalausweises: sechs Ziffern unten rechts auf der Vorderseite."""
+    return _ziffern(rng, 6)
+
+
+# Steuernummer je Land (Standardschema: F = Finanzamt, B = Bezirk, U = Unterscheidung, P = Prüfziffer) und Präfix des
+# bundeseinheitlichen 13-stelligen Formats (ELSTER: Land + Finanzamt + "0" + Bezirk + Unterscheidung + Prüfziffer)
+STEUERNR_LAENDER = {
+    "BW": ("FFBBB/UUUUP", "28"), "BY": ("FFF/BBB/UUUUP", "9"), "BE": ("FF/BBB/UUUUP", "11"),
+    "BB": ("0FF/BBB/UUUUP", "30"), "HB": ("FF BBB UUUUP", "24"), "HH": ("FF/BBB/UUUUP", "22"),
+    "HE": ("0FF BBB UUUUP", "26"), "MV": ("0FF/BBB/UUUUP", "40"), "NI": ("FF/BBB/UUUUP", "23"),
+    "NW": ("FFF/BBBB/UUUP", "5"), "RP": ("FF/BBB/UUUU/P", "27"), "SL": ("0FF/BBB/UUUUP", "10"),
+    "SN": ("2FF/BBB/UUUUP", "32"), "ST": ("1FF/BBB/UUUUP", "31"), "SH": ("FF BBB UUUUP", "21"),
+    "TH": ("1FF/BBB/UUUUP", "41"),
+}
+
+
+def steuernummer_land(rng, land: str | None = None, art: str = "land") -> tuple:
+    """(Land, Steuernummer) im Länderformat ("land", z. B. 181/815/08155), im 13-stelligen ELSTER-Format
+    ("elster", 9181081508155) oder als ELSTER-Nummer mit Schrägstrichen ohne die trennende 0 ("elster_schraeg",
+    9181/815/08155). Nur das Format stimmt; die Prüfziffer folgt nicht dem Verfahren des Landes."""
+    land = land or rng.choice(sorted(STEUERNR_LAENDER))
+    schema, praefix = STEUERNR_LAENDER[land]
+    nummer = "".join(rng.choice("0123456789") if c in "FBUP" else c for c in schema)
+    if art == "land":
+        return land, nummer
+    teile = {"F": "", "B": "", "U": "", "P": ""}
+    for c, z in zip(schema, nummer):
+        if c in teile:
+            teile[c] += z
+    fa = teile["F"].rjust(4 - len(praefix), "0")[-(4 - len(praefix)):]
+    rest = (teile["B"] + teile["U"] + teile["P"]).rjust(8, "0")[-8:]
+    if art == "elster":
+        return land, praefix + fa + "0" + rest
+    return land, f"{praefix}{fa}/{rest[:3]}/{rest[3:]}"

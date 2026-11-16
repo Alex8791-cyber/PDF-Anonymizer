@@ -376,7 +376,9 @@ def ocr_lesart(dok, kontext):
             nachher = _normiert(neu, eintrag.funktion(zweit, kontext))
         except Exception:
             continue                                  # die Regel selbst meldet ihren Ausfall im Hauptdurchlauf
-        bekannt = {(t.start, t.ende, t.kategorie) for t in vorher}
+        # Rohwerte (struktur.etikett_wert.rohwert: ganzer Eintrag hinter dem Feldnamen, ohne Wertform) zählen nicht als
+        # bekannt – liest die reparierte Lesart eine echte Wertform, ist das der bessere Beleg
+        bekannt = {(t.start, t.ende, t.kategorie) for t in vorher if not t.quelle.endswith(".rohwert")}
         for t in sorted(nachher):
             if (t.start, t.ende, t.kategorie) in bekannt:
                 continue
