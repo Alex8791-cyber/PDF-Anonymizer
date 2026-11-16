@@ -113,7 +113,8 @@ def analyse_dpi(rect, dpi: float = FOTO_DPI, max_pixel: int = FOTO_MAX_PIXEL) ->
 
 def _strukturbaum_ausgeblendet(doc):
     """Gerendert wird im Dokument der Analyse bzw. Schwärzung: ein Zyklus im Strukturbaum lässt MuPDF 1.28 dabei über
-    zehn Minuten hängen – wie analyse.tintenanteil nur für diesen Aufruf ohne Strukturbaum (ocr.strukturbaum_ausgeblendet)."""
+    zehn Minuten hängen – wie analyse.tintenanteil nur für diesen Aufruf ohne Strukturbaum
+    (ocr.strukturbaum_ausgeblendet)."""
     from contextlib import nullcontext
     try:
         from .ocr import strukturbaum_ausgeblendet
