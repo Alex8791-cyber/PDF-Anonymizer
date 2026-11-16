@@ -549,7 +549,9 @@ QUELLE = "fotos"
 BILD_WINZIG_PIXEL = 24 * 24
 BILD_WINZIG_KANTE = 6
 WENIG_WOERTER = 40            # Scan-Seite mit weniger OCR-Wörtern: Ausweisbild auch ohne lesbaren Ausweistext suchen
+MM_PT = 72 / 25.4             # pt je mm
 KARTE_SEITENVERHAELTNIS = (1.30, 1.80)   # ID-1 (Personalausweis, Führerschein) 1,59; ID-3 (Pass) 1,42
+PASSBILD_MAX_MM = (50.0, 65.0)  # Passbild 35 x 45 mm – mit Sicherheitsrand und etwas vergrößert kopiert
 # Ein Bild ist „die Seite selbst“ (Scan, Foto als PDF), wenn es mindestens die Hälfte der Seite bedeckt – oder auf einer
 # Scan-Seite als Streifen fast die ganze Breite bzw. Höhe einnimmt (Streifen-Scans). Dort werden in „maximal“ die
 # Fotobereiche abgedeckt, nicht das ganze Bild (sonst bliebe eine leere Seite).
@@ -573,19 +575,36 @@ def bild_winzig(breite, hoehe) -> bool:
 # ----------------------------------------------------------------------
 # Ausweis-Kontext aus dem Text der Seite
 # ----------------------------------------------------------------------
+# STARK ist nur echte Ausweis-Evidenz (Befund 4 der Runde 3a): eine maschinenlesbare Zone, der Ausweistitel als
+# eigene Überschrift – allein oder zweisprachig („Reisepass / Passport“), allenfalls mit Staatsnamen – oder mindestens
+# zwei zweisprachige Feldbeschriftungen der Karte („Name / Surname“). Gezählt wird das im BILDTEXT (OCR des Scans bzw.
+# eines eingebetteten Bilds, seiten_kontext); in der Textebene eines digitalen Formulars ist „Führerschein“ höchstens
+# SCHWACH. Formularfelder („Führerschein:“, „Führerscheinklasse:“, „Reisepassnummer:“, „ANGABEN ZUM FAHRER /
+# FÜHRERSCHEIN“) und Ausweiswörter im Fließtext sind SCHWACH; „ausweislich“, „ausweisen“ und „Ausweis vorlegen“ gar
+# nichts. Englische Feldbeschriftungen allein („Place of birth / Date of birth“) stehen auch in Formularen: nichts.
 KONTEXT_KEINER, KONTEXT_SCHWACH, KONTEXT_STARK = 0, 1, 2
-_TITEL = (r"personalausweis\w*|kinderreisepass\w*|reisepass\w*|f[uü]hrerschein\w*|aufenthaltstitel\w*|"
-          r"aufenthaltserlaubnis\w*|niederlassungserlaubnis\w*|identity\s*card|passport|residence\s*permit|"
-          r"driving\s*licen[cs]e|carte\s*d.\s*identit[eé]|passeport|permis\s*de\s*conduire|carta\s*d.\s*identit[aà]")
-_TITEL_RE = re.compile(r"(?i)(?<![\w])(?:" + _TITEL + r")")
-_TITEL_GROSS_RE = re.compile(r"(?<![\w])(?:PERSONALAUSWEIS|KINDERREISEPASS|REISEPASS|F[UÜ]HRERSCHEIN|"
-                             r"AUFENTHALTSTITEL|IDENTITY\s*CARD|PASSPORT|RESIDENCE\s*PERMIT|DRIVING\s*LICEN[CS]E|"
-                             r"PASSEPORT|PERMIS\s*DE\s*CONDUIRE)(?![a-zäöüß])")
-_NUR_TITEL_RE = re.compile(r"(?i)(?:" + _TITEL + r")[\s.:]*")
-_AUSWEIS_SCHWACH_RE = re.compile(r"(?i)(?<![\w])(?:ausweis\w*|lichtbild\w*|passfoto\w*)")
-# englische Feldbeschriftungen zweisprachiger Ausweise – deutsche Formulare (Antrag, Police) tragen sie nicht
-_FELD_RE = re.compile(r"(?i)(?<![\w])(surname|given\s*names?|date\s*of\s*birth|place\s*of\s*birth|nationality|"
-                      r"date\s*of\s*expiry|date\s*of\s*issue|colou?r\s*of\s*eyes|religious\s*name)(?![\w])")
+_TITEL = (r"personalausweis|kinderreisepass|reisepass|f[uü]hrerschein|aufenthaltstitel|aufenthaltserlaubnis|"
+          r"niederlassungserlaubnis|identity\s*card|passport|residence\s*permit|driving\s*licen[cs]e|"
+          r"carte\s*d.\s*identit[eé]|passeport|permis\s*de\s*conduire|carta\s*d.\s*identit[aà]")
+_TITEL_RE = re.compile(r"(?i)(?<![\w])(?:" + _TITEL + r")(?![\w])")          # genau der Titel, keine Zusammensetzung
+_TITEL_TEIL_RE = re.compile(r"(?i)(?<![\w])(?:" + _TITEL + r")\w*")          # auch „Führerscheinklasse“, „Reisepasses“
+# Staatsname und Kürzel neben dem Titel einer Karte („BUNDESREPUBLIK DEUTSCHLAND“, „FEDERAL REPUBLIC OF GERMANY“)
+_STAAT_RE = re.compile(r"(?i)(?<![\w])(?:bundesrepublik|deutschland|federal|republic|of|germany|r[eé]publique|"
+                       r"f[eé]d[eé]rale|d.?allemagne|europ[aä]ische|union|european|brd)(?![\w])")
+_WORT3_RE = re.compile(r"[^\W\d_]{3,}")
+# Ausweiswörter im Text (SCHWACH): Ausweis, Ausweises, Ausweiskopie, Lichtbildausweis, Schwerbehindertenausweis,
+# Lichtbild, Passfoto, Passbild – nicht „ausweislich“, „ausweisen“, „ausweist“, „Ausweisung“
+_AUSWEIS_SCHWACH_RE = re.compile(r"(?i)(?<![\w])(?:\w*ausweis(?!lich|en(?![\w])|t(?![\w])|ung)\w*|lichtbild\w*|"
+                                 r"passfoto\w*|passbild\w*)")
+# „Lichtbildausweis vorlegen“, „Ausweis bitte mitbringen“: ein Termin, keine Ausweiskopie (außer es steht „Kopie“ dabei)
+_VORLEGEN_RE = re.compile(r"(?i)(?:vorleg|vorzuleg|vorzeig|vorzuzeig|mitbring|mitzubring|mitf[uü]hr|bereithalt)")
+_KOPIE_RE = re.compile(r"(?i)kopie|scan|abbild|anbei|anlage|beigef[uü]gt")
+# zweisprachige Feldbeschriftungen einer Ausweiskarte („Name / Surname“, „Geburtsort / Place of birth“)
+_FELD_PAAR_RE = re.compile(
+    r"(?i)(?<![\w])(?:name|vornamen|geburtsdatum|geburtstag|geburtsort|staatsangeh[oö]rigkeit|g[uü]ltig\s*bis|"
+    r"augenfarbe|gr[oö](?:ß|ss)e|anschrift|ausstellungsdatum|beh[oö]rde|ordens-?\s*(?:und|/)?\s*k[uü]nstlername)"
+    r"\s*/\s*(surname|given\s*names?|date\s*of\s*birth|place\s*of\s*birth|nationality|date\s*of\s*expiry|"
+    r"date\s*of\s*issue|colou?r\s*of\s*eyes|height|address|authority|religious\s*name)(?![\w])")
 _MRZ_ZEICHEN = "<«‹"
 _MRZ_RE = re.compile(r"[A-Z0-9<«‹]{20,}")
 
@@ -600,31 +619,51 @@ def _mrz(zeile: str) -> bool:
             or re.search(r"[<«‹]{5,}", kompakt) is not None)
 
 
+def _titelzeile(zeile: str) -> bool:
+    """Ist die Zeile eine Ausweis-Überschrift: nur der Titel („PERSONALAUSWEIS“, „Führerschein“) bzw. Titel in mehreren
+    Sprachen („Reisepass / Passport“) – allenfalls mit Staatsnamen, Trennzeichen und Nummern –, aber kein Formularfeld
+    („Führerschein:“) und keine Zeile mit weiteren Wörtern („ANGABEN ZUM FAHRER / FÜHRERSCHEIN“, „Personalausweis oder
+    Reisepass mitbringen“)?"""
+    if ":" in zeile or not _TITEL_RE.search(zeile):
+        return False
+    rest = _STAAT_RE.sub(" ", _TITEL_RE.sub(" ", zeile))
+    return not _WORT3_RE.search(rest)
+
+
 def ausweis_kontext(text: str) -> int:
-    """KONTEXT_STARK: maschinenlesbare Zone, Ausweistitel als Überschrift (Großbuchstaben, kurze Zeile oder mit
-    Gegenstück in einer zweiten Sprache: „PERSONALAUSWEIS / IDENTITY CARD“) oder zwei englische Ausweis-
-    Feldbeschriftungen; KONTEXT_SCHWACH: ein Ausweiswort irgendwo im Text („Kopie meines Personalausweises“);
-    sonst KONTEXT_KEINER."""
+    """Ausweis-Kontext eines Texts (am besten des Bildtexts: OCR eines Scans oder eines eingebetteten Bilds).
+    KONTEXT_STARK nur bei echter Ausweis-Evidenz: maschinenlesbare Zone; der Ausweistitel als eigene Überschrift
+    („PERSONALAUSWEIS“, „FÜHRERSCHEIN Bundesrepublik Deutschland“, „Reisepass / Passport“); mindestens zwei
+    zweisprachige Feldbeschriftungen der Karte („Name / Surname“, „Vornamen / Given names“).
+    KONTEXT_SCHWACH: ein Ausweiswort („Kopie meines Personalausweises“, „Führerschein-Nr.:“, „Führerscheinklasse:“,
+    „ANGABEN ZUM FAHRER / FÜHRERSCHEIN“) – nicht „ausweislich“, „ausweisen“ oder „Lichtbildausweis vorlegen“.
+    Sonst KONTEXT_KEINER."""
     if not text:
         return KONTEXT_KEINER
     schwach = False
     felder: set = set()
     for zeile in text.splitlines():
-        if _mrz(zeile):
+        if _mrz(zeile) or _titelzeile(zeile):
             return KONTEXT_STARK
-        titel = _TITEL_RE.findall(zeile)
-        if titel:
-            schwach = True
-            # Überschrift: in Großbuchstaben, zweisprachig, oder die Zeile ist nur der Titel („Reisepass“) – nicht aber
-            # ein Feld „Führerschein-Nr.:“ oder „Kopie Ihres Reisepasses“
-            if _TITEL_GROSS_RE.search(zeile) or len(titel) >= 2 or _NUR_TITEL_RE.fullmatch(zeile.strip()):
-                return KONTEXT_STARK
-        elif _AUSWEIS_SCHWACH_RE.search(zeile):
-            schwach = True
-        felder.update(re.sub(r"\s+", " ", f.lower()) for f in _FELD_RE.findall(zeile))
+        felder.update(re.sub(r"\s+", " ", f.lower()) for f in _FELD_PAAR_RE.findall(zeile))
         if len(felder) >= 2:
             return KONTEXT_STARK
+        if _TITEL_TEIL_RE.search(zeile) or _AUSWEIS_SCHWACH_RE.search(zeile):
+            if not (_VORLEGEN_RE.search(zeile) and not _KOPIE_RE.search(zeile)):
+                schwach = True
     return KONTEXT_SCHWACH if schwach else KONTEXT_KEINER
+
+
+def seiten_kontext(m) -> int:
+    """Ausweis-Kontext einer Modellseite: aus dem Bildtext (OCR) voll; aus der Textebene höchstens SCHWACH – eine
+    Überschrift „Führerschein“ in einem digitalen Formular ist keine Ausweiskopie –, außer einer maschinenlesbaren Zone."""
+    bild = ausweis_kontext(_bildtext(m))
+    if bild >= KONTEXT_STARK:
+        return bild
+    zeilen = (getattr(m, "text", "") or "").splitlines()
+    if any(_mrz(z) for z in zeilen):
+        return KONTEXT_STARK
+    return max(bild, min(KONTEXT_SCHWACH, ausweis_kontext("\n".join(zeilen))))
 
 
 def _kartenartig(karte) -> bool:
@@ -637,13 +676,21 @@ def _kartenartig(karte) -> bool:
     return KARTE_SEITENVERHAELTNIS[0] <= v <= KARTE_SEITENVERHAELTNIS[1]
 
 
+def passbildgross(bereich: Fotobereich) -> bool:
+    """Hat der Fotobereich (mit Sicherheitsrand) höchstens Passbildgröße (etwa 50 x 65 mm), gleich in welcher Lage?"""
+    r = fitz.Rect(bereich.rect)
+    kurz, lang = sorted((r.width / MM_PT, r.height / MM_PT))
+    return kurz <= PASSBILD_MAX_MM[0] and lang <= PASSBILD_MAX_MM[1]
+
+
 def ist_lichtbild(bereich: Fotobereich, kontext: int) -> bool:
-    """Ist ein Fotobereich ein Lichtbild? Mit starkem Ausweis-Kontext jedes Foto der Seite; mit schwachem ein Foto
-    im Passbild-Format oder auf einer Karte; ohne Text nur ein Passbild auf einer ausweisgroßen Karte."""
+    """Ist ein Fotobereich ein Lichtbild? Mit starkem Ausweis-Kontext (Ausweistext auf dem Bild) jedes Foto der Seite;
+    mit schwachem ein Foto in Passbildgröße oder auf einer kartenartigen Fläche – nicht jedes Hochformat-Foto, nicht ein
+    Schadenfoto, nur weil irgendwo „Führerschein“ steht; ohne Text nur ein Passbild auf einer ausweisgroßen Karte."""
     if kontext >= KONTEXT_STARK:
         return True
     if kontext == KONTEXT_SCHWACH:
-        return bool(bereich.hochformat or bereich.karte is not None)
+        return passbildgross(bereich) or _kartenartig(bereich.karte)
     return bool(bereich.hochformat and _kartenartig(bereich.karte))
 
 
@@ -686,7 +733,7 @@ def seite_pruefen(seite, m, profil: str = "hoch", woerter=None) -> dict:
     modus = getattr(m, "ocr_modus", "nein")
     if modus not in ("seite", "bilder") and not maximal:
         return aus
-    kontext = ausweis_kontext(m.text)
+    kontext = seiten_kontext(m)
     aus["kontext"] = kontext
     seitenrect = fitz.Rect(seite.rect)
     flaeche = max(1.0, abs(seitenrect))

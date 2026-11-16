@@ -146,9 +146,39 @@ AUSWEIS_WOERTER = [(95, 70, 250, 82, "PERSONALAUSWEIS"), (252, 70, 260, 82, "/")
     ("Staatsangehörigkeit: deutsch\nGeburtsort: Köln\nGültig bis: 12/2027", fotos.KONTEXT_KEINER),
     ("Vertrag Kfz-Haftpflicht, Schadenmeldung vom 12.03.2025", fotos.KONTEXT_KEINER),
     ("Summe <<< Zwischensumme", fotos.KONTEXT_KEINER),
+    # Befund 4 der Runde 3a: STARK nur bei echter Ausweis-Evidenz – Formularfelder sind höchstens SCHWACH …
+    ("FÜHRERSCHEIN Bundesrepublik Deutschland", fotos.KONTEXT_STARK),
+    ("PERSONALAUSWEIS T22000129", fotos.KONTEXT_STARK),
+    ("ANGABEN ZUM FAHRER / FÜHRERSCHEIN", fotos.KONTEXT_SCHWACH),
+    ("Führerschein:", fotos.KONTEXT_SCHWACH),
+    ("Führerscheinklasse:", fotos.KONTEXT_SCHWACH),
+    ("FÜHRERSCHEINKLASSE", fotos.KONTEXT_SCHWACH),
+    ("Reisepassnummer:", fotos.KONTEXT_SCHWACH),
+    ("Kopie von Personalausweis oder Reisepass anbei", fotos.KONTEXT_SCHWACH),
+    ("Lichtbildausweis", fotos.KONTEXT_SCHWACH),
+    # … englische Feldbeschriftungen allein, „ausweislich“, „ausweisen“ und ein Termin mit Ausweis gar nichts
+    ("Place of birth / Date of birth", fotos.KONTEXT_KEINER),
+    ("Place of birth\nDate of birth", fotos.KONTEXT_KEINER),
+    ("Ausweislich des Gutachtens ist der Schaden durch Leitungswasser entstanden.", fotos.KONTEXT_KEINER),
+    ("Der Fahrer konnte sich vor Ort nicht ausweisen.", fotos.KONTEXT_KEINER),
+    ("Bitte zum Termin den Lichtbildausweis vorlegen.", fotos.KONTEXT_KEINER),
+    ("Bitte Personalausweis oder Reisepass mitbringen.", fotos.KONTEXT_KEINER),
 ])
 def test_ausweis_kontext(text, erwartet):
     assert fotos.ausweis_kontext(text) == erwartet
+
+
+def test_seitenkontext_textebene_hoechstens_schwach():
+    """Eine Überschrift „Führerschein“ in der TEXTEBENE eines digitalen Formulars ist keine Ausweiskopie (höchstens
+    SCHWACH); im Bildtext (OCR) zählt sie voll, eine maschinenlesbare Zone überall."""
+    from types import SimpleNamespace
+
+    def seite(text, modus="nein"):
+        return SimpleNamespace(ocr_modus=modus, text=text, zeichen=[])
+    assert fotos.seiten_kontext(seite("Führerschein\nKlasse B")) == fotos.KONTEXT_SCHWACH
+    assert fotos.seiten_kontext(seite("Führerschein\nKlasse B", "seite")) == fotos.KONTEXT_STARK
+    assert fotos.seiten_kontext(seite("Antrag\nIDD<<T220001294<<<<<<<<<<<<<<<")) == fotos.KONTEXT_STARK
+    assert fotos.seiten_kontext(seite("Schadenmeldung vom 12.02.2025")) == fotos.KONTEXT_KEINER
 
 
 def test_winzige_bilder():
@@ -442,6 +472,48 @@ def test_hoch_sonstige_fotos_bleiben_unberuehrt(tmp_path):
     assert s["lichtbilder_abgedeckt"] == 0 and s["bilder_abgedeckt"] == 0
     assert _pixel(s["ausgabe"], r).std() > 20
     assert "BILDER_UNGEPRUEFT" in {m["code"] for m in s["meldungen"]}
+
+
+@pytest.mark.parametrize("zeilen", [
+    ["Schadenmeldung Leitungswasser – Schaden-Nr. 2025-0417",
+     "Ausweislich des beigefügten Fotos ist die Küchenzeile durchfeuchtet.", "Kontakt: erika.musterfrau@example.org"],
+    ["Kfz-Schadenanzeige", "Führerschein:", "Klasse B seit 1998", "Kontakt: erika.musterfrau@example.org"],
+    ["Bitte zum Termin den Lichtbildausweis vorlegen.", "Foto des Schadens anbei.",
+     "Kontakt: erika.musterfrau@example.org"],
+], ids=["ausweislich", "fuehrerschein-feld", "ausweis-vorlegen"])
+def test_hoch_schadenfoto_neben_ausweiswort_bleibt_unberuehrt(tmp_path, zeilen):
+    """Befund 4 der Runde 3a: ein Handyfoto (Hochformat) eines Schadens neben „ausweislich“, einem Formularfeld
+    „Führerschein:“ oder einem Termin mit Lichtbildausweis ist kein Lichtbild – es bleibt stehen, die Ausgabe ist
+    „fertig“ (vorher: angehakter Lichtbild-Fund über das ganze Foto, Abwählen erzwang _PRUEFEN)."""
+    rng = np.random.default_rng(25)
+    doc = fitz.open()
+    s = fv.textseite(doc, zeilen)
+    r = fitz.Rect(150, 200, 150 + 75 * MM, 200 + 100 * MM)
+    s.insert_image(r, stream=fv.jpeg(fv.objektfoto(rng, 480, 640), 75), keep_proportion=False)
+    assert fotos.fotobereiche(s, clip=r)                 # Kontrolle: das Foto wird als Foto erkannt
+    pdf = tmp_path / "schadenfoto.pdf"
+    doc.save(pdf)
+    doc.close()
+    e, s = _analyse_und_schwaerzung(pdf, Attrappe())
+    assert not [f for f in e["funde"] if f["kategorie"] == fotos.KAT_LICHTBILD]
+    assert s["status"] == "fertig" and s["lichtbilder_abgedeckt"] == 0
+    assert _pixel(s["ausgabe"], r).std() > 20
+
+
+def test_hoch_gescannte_kfz_schadenanzeige_schadenfoto_bleibt(tmp_path):
+    """Befund 4: Kfz-Schadenanzeige (Scan) mit der Überschrift „ANGABEN ZUM FAHRER / FÜHRERSCHEIN“ und einem
+    Schadenfoto (quer) – SCHWACHER Kontext, das Foto bleibt unberührt (vorher STARK: als Lichtbild abgedeckt)."""
+    rng = np.random.default_rng(26)
+    r = (60, 300, 60 + 120 * MM, 300 + 90 * MM)
+    pdf = scan_mit(tmp_path / "kfz.pdf", rng, [(fv.objektfoto(rng), r)], dpi=150,
+                   text=["KFZ-SCHADENANZEIGE", "", "ANGABEN ZUM FAHRER / FÜHRERSCHEIN", "Klasse B, erteilt 1998"])
+    ocr = Attrappe({0: zeilenwoerter(["KFZ-SCHADENANZEIGE", "ANGABEN ZUM FAHRER / FÜHRERSCHEIN",
+                                      "Klasse B, erteilt 1998", "Kontakt: erika.musterfrau@example.org"],
+                                     x0=60, y0=60)})
+    e, s = _analyse_und_schwaerzung(pdf, ocr)
+    assert fotos.ausweis_kontext(e["modell"].seiten[0].text) == fotos.KONTEXT_SCHWACH
+    assert not [f for f in e["funde"] if f["kategorie"] == fotos.KAT_LICHTBILD]
+    assert s["lichtbilder_abgedeckt"] == 0 and _pixel(s["ausgabe"], fitz.Rect(r) + (4, 4, -4, -4)).std() > 20
 
 
 # ----------------------------------------------------------------------
