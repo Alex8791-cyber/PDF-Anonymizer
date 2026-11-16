@@ -37,7 +37,9 @@ try:
 except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
     import fitz
 
-FOTO_DPI = 100                # Analyseauflösung: ein Lichtbild (25 x 32 mm) hat rund 100 x 125 Pixel
+from . import bilder as _bilder
+
+FOTO_DPI = 100               # Analyseauflösung: ein Lichtbild (25 x 32 mm) hat rund 100 x 125 Pixel
 FOTO_MAX_PIXEL = 3_000_000    # höchstens so viele Pixel je Analyse (Riesenseiten werden gröber gelesen)
 ZELLE_MM = 2.0                # Kantenlänge einer Zelle
 STRICH_MM = 1.2               # dunkle Striche bis zu dieser Breite (Schrift bis ~20 pt fett, Linien, Stempel,
@@ -859,61 +861,15 @@ def freigabe_gruende(auftrag: dict, dok) -> list:
 
 
 # --- „maximal“: Bilder, die apply_redactions nicht erreicht (Kachelmuster, Type3-Schriften, ungenutzte Ressourcen)
-_XREF_RE = re.compile(rb"(\d+)\s+0\s+R")
+# Nicht angezeigte Bilder (auch in geerbten oder geteilten Ressourcen) leert in JEDER Schutzstufe
+# bilder.bildreste_entfernen vor dem Speichern (Befund 1 der Runde 3a).
+bild_leeren = _bilder.bild_leeren
 
 
-def _verweise(doc, xref: int, schluessel: str) -> list:
-    """xrefs in einem (Ressourcen-)Unterwörterbuch, z. B. "Resources/XObject"."""
-    try:
-        art, wert = doc.xref_get_key(xref, schluessel)
-    except Exception:
-        return []
-    if art == "xref":
-        try:
-            wert = doc.xref_object(int(wert.split()[0]), compressed=True)
-        except Exception:
-            return []
-    elif art != "dict":
-        return []
-    return [int(x) for x in _XREF_RE.findall(wert.encode("latin-1", "replace"))]
-
-
-def bilder_in_ressourcen(doc, seite_xref: int, grenze: int = 2000) -> set:
-    """Alle Bild-XObjects, die die Seite über ihre Ressourcen erreicht – auch über Form-XObjects, Kachelmuster und
-    Type3-Schriften, und auch solche, die nie gezeichnet werden (ungenutzte Ressourcen)."""
-    bilder, gesehen, stapel = set(), set(), [seite_xref]
-    while stapel and len(gesehen) < grenze:
-        x = stapel.pop()
-        if x in gesehen or x <= 0:
-            continue
-        gesehen.add(x)
-        for schluessel in ("Resources/XObject", "Resources/Pattern", "Resources/Font", "CharProcs"):
-            for kind in _verweise(doc, x, schluessel):
-                try:
-                    subtyp = doc.xref_get_key(kind, "Subtype")[1]
-                except Exception:
-                    continue
-                if subtyp == "/Image":
-                    bilder.add(kind)
-                elif kind not in gesehen:
-                    stapel.append(kind)              # Form-XObject, Muster, Schrift (Type3), Glyphe: weiter hinein
-    return bilder
-
-
-def bild_leeren(doc, xref: int) -> bool:
-    """Ersetzt ein Bild-XObject durch ein weißes 1 x 1-Bild (Maske, Alternativbilder und Metadaten fallen weg)."""
-    try:
-        doc.update_stream(xref, b"\xff", compress=False)
-        for schluessel, wert in (("Width", "1"), ("Height", "1"), ("BitsPerComponent", "8"),
-                                 ("ColorSpace", "/DeviceGray")):
-            doc.xref_set_key(xref, schluessel, wert)
-        for schluessel in ("Filter", "DecodeParms", "SMask", "Mask", "Decode", "ImageMask", "Alternates",
-                           "Metadata", "Intent", "Interpolate", "SMaskInData", "OC", "Name"):
-            if doc.xref_get_key(xref, schluessel)[0] != "null":
-                doc.xref_set_key(xref, schluessel, "null")
-        return True
-    except Exception:
-        return False
+def bilder_in_ressourcen(doc, seite_xref: int) -> set:
+    """Alle Bild-XObjects, die die Seite über ihre (auch geerbten) Ressourcen erreicht – über Form-XObjects,
+    Kachelmuster, Type3-Schriften, weiche Masken und Anmerkungen, auch ungenutzte (bilder.erreichbare_bilder)."""
+    return set(_bilder.erreichbare_bilder(doc, seite_xref))
 
 
 def bilder_nachkontrolle(doc, seiten, behalten_xrefs=()) -> int:

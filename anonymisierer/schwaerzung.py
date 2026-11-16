@@ -1998,6 +1998,63 @@ def _bilder_nachkontrolle(lauf: _Lauf, dok, ergebnis: dict, profil: str) -> None
 
 
 # ----------------------------------------------------------------------
+# Bildreste (Befund 1 der Runde 3a): nicht angezeigte Bilder vor und nach dem Speichern leeren (bilder.py)
+# ----------------------------------------------------------------------
+def _bildreste_grund(lauf: _Lauf, seite, text: str) -> None:
+    grund = _Grund("BILDRESTE", seite, f"Seite {seite + 1}: {text}" if isinstance(seite, int) else text)
+    if grund not in lauf.leckrelevant:
+        lauf.leckrelevant.append(grund)
+
+
+def _bildreste_entfernen(lauf: _Lauf, ergebnis: dict) -> None:
+    """Vor dem Speichern, in jeder Schutzstufe: Bilder, die keine Seite zeichnet – das ungeschwärzte Original eines
+    Scans in geerbten oder geteilten Ressourcen, ungenutzt mitgeschleppte Bilder – werden geleert
+    (bilder.bildreste_entfernen). Was sich nicht prüfen oder leeren ließ, macht die Ausgabe _PRUEFEN."""
+    if _bilder is None or not hasattr(_bilder, "bildreste_entfernen"):
+        return
+    try:
+        befund = _bilder.bildreste_entfernen(lauf.doc)
+    except Exception as e:
+        befund = {"geleert": 0, "unsicher": [], "rest": [], "fehler": f"{type(e).__name__}: {e}"}
+    ergebnis["bilder_entfernt"] = int(befund.get("geleert") or 0)
+    if ergebnis["bilder_entfernt"]:
+        lauf.melden("hinweis", "BILDER_ENTFERNT",
+                    f"{ergebnis['bilder_entfernt']} nicht angezeigte(s) Bild(er) aus der Datei entfernt – z. B. das "
+                    f"ungeschwärzte Original eines geschwärzten Scans, das die Datei sonst unsichtbar mitgeführt hätte.")
+    if befund.get("fehler") or befund.get("rest") or befund.get("unsicher"):
+        seiten = list(befund.get("unsicher") or [])
+        _bildreste_grund(lauf, seiten[0] if len(seiten) == 1 and not befund.get("rest") else None,
+                         "nicht angezeigte Bilder nicht sicher entfernt")
+        lauf.melden("warnung", "BILDER_UNGEPRUEFT",
+                    "Die Datei enthält womöglich Bilder, die nicht angezeigt werden (z. B. das Original eines "
+                    "geschwärzten Scans), und sie ließen sich nicht sicher entfernen – die Ausgabe wird als _PRUEFEN "
+                    "abgelegt." + (f" ({befund['fehler']})" if befund.get("fehler") else ""),
+                    seiten[0] if len(seiten) == 1 else None)
+
+
+def _bildreste_nachpruefen(lauf: _Lauf, ausgabe: Path) -> None:
+    """Netz nach dem Speichern (Befund 1 der Runde 3a): Steckt in der GESCHRIEBENEN Ausgabe noch ein Bild, das keine
+    Seite zeichnet, wird es geleert und die Datei neu geschrieben – und weil das nicht vorkommen sollte, wird die Ausgabe
+    _PRUEFEN. Lässt sich die Datei nicht prüfen, ebenso."""
+    if _bilder is None or not hasattr(_bilder, "bildreste_in_datei_entfernen"):
+        return
+    try:
+        befund = _bilder.bildreste_in_datei_entfernen(ausgabe, lauf.tmp_pfad("bildreste"))
+    except Exception as e:
+        befund = {"geleert_alle": 0, "unsicher": [], "rest": [], "fehler": f"{type(e).__name__}: {e}"}
+    if befund.get("geleert_alle"):
+        _bildreste_grund(lauf, None, "nicht angezeigte Bilder nachträglich entfernt")
+        lauf.melden("warnung", "BILDER_UNGEPRUEFT",
+                    f"Die gespeicherte Ausgabe enthielt noch {befund['geleert_alle']} nicht angezeigte(s) Bild(er) – "
+                    f"sie wurden entfernt. Die Ausgabe wird als _PRUEFEN abgelegt: bitte ansehen.")
+    if befund.get("fehler") or befund.get("rest") or befund.get("unsicher"):
+        _bildreste_grund(lauf, None, "nicht angezeigte Bilder nicht sicher entfernt")
+        lauf.melden("warnung", "BILDER_UNGEPRUEFT",
+                    "Die gespeicherte Ausgabe ließ sich nicht vollständig auf nicht angezeigte Bilder prüfen – sie wird "
+                    "als _PRUEFEN abgelegt." + (f" ({befund['fehler']})" if befund.get("fehler") else ""))
+
+
+# ----------------------------------------------------------------------
 # Hauptfunktion
 # ----------------------------------------------------------------------
 def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=None, ocr=None,
@@ -2249,6 +2306,7 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
                 lauf.hinweise.append(h)
 
     # 7) Speichern (erst unter Hilfsnamen), Selbstkontrolle, Restrisiko, dann endgültiger Name
+    _bildreste_entfernen(lauf, ergebnis)          # nicht angezeigte Bilder (geerbte/geteilte Ressourcen) leeren
     lauf.bilder_kodieren()
     if lauf.bilder_neu_kodiert:
         lauf.hinweise.append(f"{lauf.bilder_neu_kodiert} geschwärzte(s) Bild(er) neu komprimiert.")
@@ -2266,6 +2324,7 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
     _spaete_reparatur_pruefen(lauf, doc)          # auch eine Reparatur während des Speicherns zählt
     doc.close()
     lauf.doc = None
+    _bildreste_nachpruefen(lauf, tmp)             # Netz: nicht angezeigte Bilder in der geschriebenen Datei
     reste = list(_selbstkontrolle(lauf, tmp))
     if lauf.teilreste:
         reste += [t for t in lauf.teilreste if t not in reste]

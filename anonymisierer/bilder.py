@@ -16,9 +16,18 @@ Stempelmasken). Die Schwärzung selbst bleibt erhalten: kodiert wird das bereits
     seite_als_bild_schwaerzen(doc, seite, fuellen, leeren=(), farbe=…, dpi=200) -> xref
         Rückfall, wenn apply_redactions an einer Seite scheitert (Befund R-08): Seite durch ein Bild mit
         eingebrannten Schwärzungen ersetzen.
+    bild_leeren(doc, xref) -> bool              Bild durch ein weißes 1 x 1-Bild ersetzen
+    erreichbare_bilder(doc, seite_xref) -> {xref: indirekt}   Bilder, die die Seite über ihre (auch geerbten)
+        Ressourcen erreicht – auch über Form-XObjects, Kachelmuster, Type3-Schriften, weiche Masken, Anmerkungen
+    gezeichnete_bilder(doc) -> (gezeichnet, unsicher, vollstaendig)   was die Seiten zeichnen
+    bildreste_entfernen(doc) -> {"geleert", "geleert_alle", "unsicher", "rest"}   vor dem Speichern: Bilder, die keine
+        Seite zeichnet (das ungeschwärzte Original in geerbten oder geteilten Ressourcen, ungenutzte Bilder), leeren
+    bildreste_in_datei_entfernen(pfad, hilfspfad) -> dict   dasselbe als Netz in der gespeicherten Datei
 
 Ablauf beim Aufrufer:  vorher = bildzustand(seite); seite.apply_redactions(...);
                        nach_schwaerzung(doc, seite, vorher)
+                       … alle Seiten …; bildreste_entfernen(doc); doc.save(pfad, garbage=4)
+                       bildreste_in_datei_entfernen(pfad, hilfspfad)
 """
 
 import re
@@ -244,6 +253,450 @@ def nach_schwaerzung(doc, seite, vorher: dict, qualitaet: int = JPEG_QUALITAET) 
     """Nach apply_redactions einer Seite: geänderte Bilder finden und neu kodieren."""
     geaendert = geaenderte_bilder(seite, vorher)
     return bilder_neu_kodieren(doc, geaendert, qualitaet) if geaendert else 0
+
+
+def bild_leeren(doc, xref: int) -> bool:
+    """Ersetzt ein Bild-XObject durch ein weißes 1 x 1-Bild (Maske, Alternativbilder und Metadaten fallen weg)."""
+    try:
+        doc.update_stream(xref, b"\xff", compress=False)
+        for schluessel, wert in (("Width", "1"), ("Height", "1"), ("BitsPerComponent", "8"),
+                                 ("ColorSpace", "/DeviceGray")):
+            doc.xref_set_key(xref, schluessel, wert)
+        for schluessel in ("Filter", "DecodeParms", "SMask", "Mask", "Decode", "ImageMask", "Alternates",
+                           "Metadata", "Intent", "Interpolate", "SMaskInData", "OC", "Name"):
+            if doc.xref_get_key(xref, schluessel)[0] != "null":
+                doc.xref_set_key(xref, schluessel, "null")
+        return True
+    except Exception:
+        return False
+
+
+LEER_MAX_BYTES = 64           # ein geleertes Bild (1 x 1) hat so viele Bytes Daten höchstens
+
+
+def _ist_leer(doc, xref: int) -> bool:
+    """Ist das Bild schon leer (1 x 1 Pixel und kaum Daten – ein größerer Strom könnte etwas anderes tragen)?"""
+    try:
+        return (int(doc.xref_get_key(xref, "Width")[1] or 0) <= 1 and int(doc.xref_get_key(xref, "Height")[1] or 0) <= 1
+                and int(doc.xref_get_key(xref, "Length")[1] or 0) <= LEER_MAX_BYTES)
+    except (TypeError, ValueError):
+        return False
+
+
+# ----------------------------------------------------------------------
+# Bildreste (Befund 1 der Runde 3a): Originale in geerbten, geteilten oder ungenutzten Ressourcen
+# ----------------------------------------------------------------------
+# apply_redactions(images=PDF_REDACT_IMAGE_PIXELS) gibt der geschwärzten Seite ein EIGENES Ressourcen-Wörterbuch mit
+# dem neuen, geschwärzten Bild. Erbt die Seite ihre Ressourcen vom Seitenbaum (/Pages) oder teilt sie das Wörterbuch
+# mit anderen Seiten (LibreOffice hängt EIN Wörterbuch an alle Seiten und an den Seitenbaum), bleibt das ungeschwärzte
+# Original dort verwiesen: save(garbage=4) behält es, jedes Programm kann es herausziehen, sichtbar ist es nirgends.
+# Ebenso ein Original, das die Schwärzung ganz entfernt hat (vollständig abgedeckt), und mitgeschleppte, nie
+# gezeichnete Bilder. Deshalb wird vor dem Speichern – und nach dem Speichern noch einmal in der geschriebenen Datei –
+# jedes Bild geleert (weißes 1 x 1-Bild), das keine Seite zeichnet. Gezeichnet ist:
+#   * was der Inhalt einer Seite mit dem Operator „Do“ aufruft, auch in Form-XObjects, samt Masken und
+#     Alternativbildern (gelesen werden nur die Inhaltsströme, kein Bild wird dekodiert, kein Inhalt umgeschrieben);
+#   * alles, was eine Seite über Kachelmuster, Type3-Schriften, Grafikzustände (weiche Masken) und Anmerkungen erreicht
+#     – dort wird nicht nachgezählt: lieber stehen lassen als ein sichtbares Bild leeren („indirekt“).
+SUCHE_GRENZE = 50_000         # so viele Objekte besucht die Suche je Seite höchstens (Schutz vor Riesendateien)
+_REF_RE = re.compile(r"(\d+)\s+(\d+)\s+R(?![\w])")
+_ALLE_REFS_RE = re.compile(r"(\d+)\s+\d+\s+R(?![\w])")
+_KEINE_INHALTSOBJEKTE = ("/Page", "/Pages", "/Catalog", "/Annot", "/Metadata", "/OCG", "/OCMD", "/StructElem",
+                         "/StructTreeRoot")
+_SCHRIFTARTEN = ("/Type1", "/TrueType", "/Type0", "/CIDFontType0", "/CIDFontType2", "/MMType1", "/PS")
+# „/Name Do“ im Inhaltsstrom: Name bis zum nächsten PDF-Leerraum oder Trennzeichen, dann der Operator
+_REGULAER = rb"[^\x00\t\n\f\r /<>\[\]()%{}]"
+_DO_RE = re.compile(rb"/(" + _REGULAER + rb"+)[\x00\t\n\f\r ]*Do(?!" + _REGULAER + rb")")
+_NAME_ESCAPE_RE = re.compile(r"#([0-9A-Fa-f]{2})")
+
+
+def _wert_ende(text: str, i: int) -> int:
+    """Ende (exklusiv) des PDF-Werts, der bei text[i] beginnt (Wörterbuch, Feld, Zeichenkette, Name, Zahl, Verweis)."""
+    n = len(text)
+    if text.startswith("<<", i) or text[i] == "[":
+        tiefe = 0
+        while i < n:
+            if text.startswith("<<", i):
+                tiefe += 1
+                i += 2
+                continue
+            if text.startswith(">>", i):
+                tiefe -= 1
+                i += 2
+            elif text[i] == "[":
+                tiefe += 1
+                i += 1
+            elif text[i] == "]":
+                tiefe -= 1
+                i += 1
+            elif text[i] == "(":
+                i = _wert_ende(text, i)
+            elif text[i] == "<":
+                ende = text.find(">", i)
+                i = n if ende < 0 else ende + 1
+            else:
+                i += 1
+            if tiefe == 0:
+                return i
+        return n
+    if text[i] == "(":                                       # Zeichenkette mit Klammern und Escapes
+        tiefe = 0
+        while i < n:
+            c = text[i]
+            if c == "\\":
+                i += 2
+                continue
+            if c == "(":
+                tiefe += 1
+            elif c == ")":
+                tiefe -= 1
+                if tiefe == 0:
+                    return i + 1
+            i += 1
+        return n
+    if text[i] == "<":                                       # Hex-Zeichenkette
+        ende = text.find(">", i)
+        return n if ende < 0 else ende + 1
+    treffer = _REF_RE.match(text, i)
+    if treffer:
+        return treffer.end()
+    j = i + 1
+    while j < n and not text[j].isspace() and text[j] not in "/<>[]()":
+        j += 1
+    return j
+
+
+def _eintraege(text: str) -> list:
+    """[(Schlüssel, Werttext)] der obersten Ebene eines Wörterbuchs in PDF-Schreibweise (<</A 1 0 R/B<<…>>>>)."""
+    text = (text or "").strip()
+    if not text.startswith("<<"):
+        return []
+    aus = []
+    i, n = 2, len(text) - 2
+    while i < n:
+        if text[i].isspace():
+            i += 1
+            continue
+        if text[i] != "/":
+            i = _wert_ende(text, i)                          # unerwartet: Wert überspringen
+            continue
+        j = i + 1
+        while j < n and not text[j].isspace() and text[j] not in "/<>[]()":
+            j += 1
+        name = text[i + 1:j]
+        while j < n and text[j].isspace():
+            j += 1
+        if j >= n:
+            break
+        ende = _wert_ende(text, j)
+        aus.append((name, text[j:ende].strip()))
+        i = ende
+    return aus
+
+
+def _verweis(wert: str):
+    treffer = _REF_RE.match((wert or "").strip())
+    return int(treffer.group(1)) if treffer else None
+
+
+def _name(text: str) -> str:
+    """PDF-Name ohne #xx-Schreibweise (im Inhaltsstrom und im Wörterbuch gleich vergleichen)."""
+    return _NAME_ESCAPE_RE.sub(lambda t: chr(int(t.group(1), 16)), text)
+
+
+def _schluessel(doc, xref, pfad):
+    try:
+        return doc.xref_get_key(xref, pfad)
+    except Exception:
+        return ("null", "null")
+
+
+def _objekttext(doc, xref, pfad) -> str:
+    """Text des Werts unter pfad (Wörterbuch oder Feld; ein Verweis wird aufgelöst), sonst ""."""
+    art, wert = _schluessel(doc, xref, pfad)
+    if art == "xref":
+        try:
+            return doc.xref_object(int(wert.split()[0]), compressed=True)
+        except Exception:
+            return ""
+    return wert if art in ("dict", "array") else ""
+
+
+class _Bildsuche:
+    """Bilder, die eine Seite über ihre Ressourcen erreicht: {xref: indirekt} – indirekt = True, wenn (auch) über ein
+    Kachelmuster, eine Type3-Schrift, einen Grafikzustand oder eine Anmerkung (dort erreicht apply_redactions sie nicht,
+    und ob sie gezeichnet werden, zählt bildreste_entfernen nicht nach). vollstaendig = False, wenn die Suche an
+    SUCHE_GRENZE abgebrochen wurde."""
+
+    def __init__(self, doc):
+        self.doc = doc
+        self.bilder: dict = {}
+        self.gesehen: set = set()
+        self.schritte = 0
+        self.vollstaendig = True
+
+    def ressourcen(self, halter: int, indirekt: bool) -> None:
+        """Die Ressourcen des Objekts halter (Seite, Seitenbaum-Knoten, Form-XObject, Muster, Type3-Schrift)."""
+        for kategorie in ("XObject", "Pattern", "Font", "ExtGState"):
+            weiter = indirekt or kategorie != "XObject"
+            for _name_, wert in _eintraege(_objekttext(self.doc, halter, "Resources/" + kategorie)):
+                ref = _verweis(wert)
+                if ref is not None:
+                    self.objekt(ref, weiter)
+                else:                          # direktes Wörterbuch (Grafikzustand mit weicher Maske, Schrift)
+                    for x in _ALLE_REFS_RE.findall(wert):
+                        self.objekt(int(x), True)
+
+    def objekt(self, xref: int, indirekt: bool) -> None:
+        if xref <= 0 or (xref, indirekt) in self.gesehen:
+            return
+        if self.schritte >= SUCHE_GRENZE:
+            self.vollstaendig = False
+            return
+        self.gesehen.add((xref, indirekt))
+        self.schritte += 1
+        subtyp = _schluessel(self.doc, xref, "Subtype")[1]
+        if subtyp == "/Image":
+            self.bilder[xref] = self.bilder.get(xref, False) or indirekt
+            for schluessel in ("SMask", "Mask"):           # Masken gehören zum Bild (nie einzeln leeren)
+                art, wert = _schluessel(self.doc, xref, schluessel)
+                if art == "xref":
+                    self.objekt(int(wert.split()[0]), indirekt)
+            for x in _ALLE_REFS_RE.findall(_objekttext(self.doc, xref, "Alternates")):
+                self.objekt(int(x), indirekt)               # Alternativbilder (z. B. für den Druck)
+            return
+        if subtyp == "/Form":
+            self.ressourcen(xref, indirekt)
+            return
+        if subtyp == "/Type3":
+            self.ressourcen(xref, True)
+            return
+        if _schluessel(self.doc, xref, "PatternType")[1] == "1":     # Kachelmuster
+            self.ressourcen(xref, True)
+            return
+        if subtyp in _SCHRIFTARTEN:
+            return                                            # gewöhnliche Schrift: keine Bilder
+        if _schluessel(self.doc, xref, "Type")[1] in _KEINE_INHALTSOBJEKTE:
+            return
+        # Grafikzustand (/Type ist dort freiwillig), weiche Maske, Schattierung, Alternativbild-Eintrag …: allen
+        # Verweisen folgen – die Gruppe /G einer weichen Maske ist ein Form-XObject, das ein Bild zeichnen kann
+        try:
+            text = self.doc.xref_object(xref, compressed=True)
+        except Exception:
+            return
+        for x in _ALLE_REFS_RE.findall(text):
+            self.objekt(int(x), True)
+
+    def anmerkungen(self, seite_xref: int) -> None:
+        """Erscheinungsbilder (/AP) der Anmerkungen der Seite."""
+        for x in _ALLE_REFS_RE.findall(_objekttext(self.doc, seite_xref, "Annots")):
+            x = int(x)
+            for y in _ALLE_REFS_RE.findall(_objekttext(self.doc, x, "AP")):
+                self.objekt(int(y), True)
+            if _schluessel(self.doc, x, "Subtype")[1] == "/Form":    # Verweis aus einer direkt eingetragenen Anmerkung
+                self.objekt(x, True)
+
+
+def ressourcen_halter(doc, seite_xref: int):
+    """xref des Objekts, dessen /Resources für die Seite gelten: die Seite selbst oder der nächste Knoten des
+    Seitenbaums, von dem sie sie erbt; None, wenn es keine gibt."""
+    x, gesehen = seite_xref, set()
+    while x and x not in gesehen and len(gesehen) < 64:
+        gesehen.add(x)
+        try:
+            if doc.xref_get_key(x, "Resources")[0] != "null":
+                return x
+            art, wert = doc.xref_get_key(x, "Parent")
+        except Exception:
+            return None
+        if art != "xref":
+            return None
+        x = int(wert.split()[0])
+    return None
+
+
+def _erreichbar(doc, seite_xref: int) -> tuple:
+    suche = _Bildsuche(doc)
+    halter = ressourcen_halter(doc, seite_xref)
+    if halter is not None:
+        suche.ressourcen(halter, False)
+    suche.anmerkungen(seite_xref)
+    return suche.bilder, suche.vollstaendig
+
+
+def erreichbare_bilder(doc, seite_xref: int) -> dict:
+    """{xref: indirekt} aller Bild-XObjects, die die Seite über ihre (auch geerbten) Ressourcen erreicht – auch über
+    Form-XObjects, Kachelmuster, Type3-Schriften, weiche Masken und Anmerkungen, auch ungenutzte. indirekt = True,
+    wenn das Bild (auch) in einem Kachelmuster, einer Type3-Schrift, einem Grafikzustand oder einer Anmerkung liegt
+    (apply_redactions erreicht es dort nicht)."""
+    return _erreichbar(doc, seite_xref)[0]
+
+
+def _xobjekte(doc, halter: int) -> dict:
+    """{Name: xref} des XObject-Wörterbuchs in den Ressourcen von halter."""
+    aus = {}
+    for name, wert in _eintraege(_objekttext(doc, halter, "Resources/XObject")):
+        ref = _verweis(wert)
+        if ref is not None:
+            aus[_name(name)] = ref
+    return aus
+
+
+def _aufgerufen(doc, seite) -> set:
+    """Bild-XObjects, die der Inhalt der Seite mit „Do“ aufruft – auch in (verschachtelten) Form-XObjects; ein Form-
+    XObject ohne eigene Ressourcen nutzt die des Aufrufers. Ausnahmen (unlesbarer Inhalt) gehen an den Aufrufer."""
+    bilder: set = set()
+    stapel = [(seite.read_contents() or b"", ressourcen_halter(doc, seite.xref), 0)]
+    gesehen: set = set()
+    while stapel:
+        daten, halter, tiefe = stapel.pop()
+        if halter is None or not daten:
+            continue
+        namen = {_name(n.decode("latin-1")) for n in _DO_RE.findall(daten)}
+        if not namen:
+            continue
+        xobjekte = _xobjekte(doc, halter)
+        for name in namen:
+            x = xobjekte.get(name)
+            if x is None or (x, halter) in gesehen:
+                continue
+            gesehen.add((x, halter))
+            subtyp = doc.xref_get_key(x, "Subtype")[1]
+            if subtyp == "/Image":
+                bilder.add(x)
+            elif subtyp == "/Form" and tiefe < 64:
+                eigen = x if doc.xref_get_key(x, "Resources")[0] != "null" else halter
+                stapel.append((doc.xref_stream(x) or b"", eigen, tiefe + 1))
+    return bilder
+
+
+def _mit_masken(doc, xrefs) -> set:
+    """xrefs samt Masken (SMask, Mask) und Alternativbildern."""
+    aus, stapel = set(xrefs), list(xrefs)
+    while stapel:
+        x = stapel.pop()
+        dazu = [_schluessel(doc, x, s) for s in ("SMask", "Mask")]
+        weitere = [int(w.split()[0]) for art, w in dazu if art == "xref"]
+        weitere += [int(y) for y in _ALLE_REFS_RE.findall(_objekttext(doc, x, "Alternates"))]
+        for y in weitere:
+            if y not in aus and _schluessel(doc, y, "Subtype")[1] == "/Image":
+                aus.add(y)
+                stapel.append(y)
+    return aus
+
+
+def alle_bilder(doc) -> list:
+    """xrefs aller Bild-XObjects der Datei – gezeichnet oder nicht."""
+    aus = []
+    for x in range(1, doc.xref_length()):
+        if _schluessel(doc, x, "Subtype")[1] == "/Image":
+            aus.append(x)
+    return aus
+
+
+def gezeichnet_auf_seite(doc, seite) -> tuple:
+    """(gezeichnet, suche_vollstaendig, inhalt_lesbar): die Bilder, die die Seite zeichnet – was ihr Inhalt mit „Do“
+    aufruft und was sie indirekt erreicht (Kachelmuster, Type3-Schriften, Grafikzustände, Anmerkungen), mit Masken.
+    Ist der Inhalt unlesbar, zählt alles, was die Seite erreicht; ist die Suche abgebrochen, ist auch das unvollständig."""
+    erreichbar, vollstaendig = _erreichbar(doc, seite.xref)
+    if not erreichbar:
+        return set(), vollstaendig, True
+    gezeichnet = {x for x, indirekt in erreichbar.items() if indirekt}
+    lesbar = True
+    try:
+        gezeichnet.update(x for x in _aufgerufen(doc, seite) if x in erreichbar)
+    except Exception:
+        lesbar = False
+        gezeichnet.update(erreichbar)              # Inhalt unlesbar: alles stehen lassen, was die Seite erreicht
+    return _mit_masken(doc, gezeichnet), vollstaendig, lesbar
+
+
+def gezeichnete_bilder(doc) -> tuple:
+    """(gezeichnet, unsicher, vollstaendig): die Bilder, die irgendeine Seite zeichnet (siehe oben; mit Masken), die
+    Seiten (0-basiert), deren Inhalt oder Ressourcen sich nicht vollständig lesen ließen (dort zählt alles als
+    gezeichnet, was die Seite erreicht), und ob die Prüfung vollständig ist (sonst darf nichts geleert werden: was eine
+    Seite zeichnet, ist unbekannt)."""
+    gezeichnet: set = set()
+    unsicher: list = []
+    vollstaendig = True
+    for nr in range(len(doc)):
+        try:
+            bilder, voll, lesbar = gezeichnet_auf_seite(doc, doc[nr])
+        except Exception:
+            unsicher.append(nr)
+            vollstaendig = False
+            continue
+        gezeichnet |= bilder
+        if not (voll and lesbar):
+            unsicher.append(nr)
+        vollstaendig = vollstaendig and voll
+    return gezeichnet, unsicher, vollstaendig
+
+
+def _verwiesen(doc) -> set:
+    """xrefs, die vom Trailer aus über Verweise erreichbar sind – was save(garbage) behält (verwaiste Objekte, etwa das
+    Original eines Bilds mit seiteneigenen Ressourcen nach apply_redactions, fallen beim Speichern ohnehin weg)."""
+    try:
+        stapel = [int(x) for x in _ALLE_REFS_RE.findall(doc.pdf_trailer(compressed=True))]
+    except Exception:
+        return set()
+    aus: set = set()
+    while stapel:
+        x = stapel.pop()
+        if x <= 0 or x in aus or x >= doc.xref_length():
+            continue
+        aus.add(x)
+        try:
+            stapel += [int(y) for y in _ALLE_REFS_RE.findall(doc.xref_object(x, compressed=True))]
+        except Exception:
+            continue
+    return aus
+
+
+def bildreste_entfernen(doc) -> dict:
+    """Vor dem Speichern, in jeder Schutzstufe (und als Netz in der gespeicherten Datei): jedes Bild, das keine Seite
+    zeichnet, wird geleert – das ungeschwärzte Original in geerbten oder geteilten Ressourcen (auch eines, das
+    apply_redactions ganz entfernt hat), ungenutzt mitgeschleppte Bilder. Sichtbar ändert sich nichts.
+    Rückgabe: {"geleert": Anzahl geleerter Bilder, die die Datei sonst behalten hätte (verwaiste zählen nicht),
+    "geleert_alle": Anzahl aller geleerten, "unsicher": Seiten, deren Inhalt oder Ressourcen sich nicht vollständig
+    prüfen ließen (dort kann ein nicht angezeigtes Bild stehen bleiben), "rest": [(xref, Breite, Höhe)] nicht
+    angezeigter Bilder, die stehen geblieben sind}."""
+    gezeichnet, unsicher, vollstaendig = gezeichnete_bilder(doc)
+    kandidaten = [x for x in alle_bilder(doc) if x not in gezeichnet and not _ist_leer(doc, x)]
+    befund = {"geleert": 0, "geleert_alle": 0, "unsicher": sorted(set(unsicher)), "rest": []}
+    if not kandidaten:
+        return befund
+    if not vollstaendig:                       # was die Seiten zeichnen, ist nicht sicher bekannt: nichts leeren
+        befund["rest"] = [_masse(doc, x) for x in kandidaten]
+        return befund
+    verwiesen = _verwiesen(doc)
+    for x in kandidaten:
+        if bild_leeren(doc, x):
+            befund["geleert_alle"] += 1
+            befund["geleert"] += int(x in verwiesen)
+        else:
+            befund["rest"].append(_masse(doc, x))
+    return befund
+
+
+def _masse(doc, xref: int) -> tuple:
+    try:
+        return (xref, int(doc.xref_get_key(xref, "Width")[1] or 0), int(doc.xref_get_key(xref, "Height")[1] or 0))
+    except (TypeError, ValueError):
+        return (xref, 0, 0)
+
+
+def bildreste_in_datei_entfernen(pfad, hilfspfad) -> dict:
+    """Netz nach dem Speichern: dieselbe Prüfung in der geschriebenen Datei. Steckt dort noch ein Bild, das keine Seite
+    zeichnet, wird es geleert und die Datei über hilfspfad neu geschrieben (garbage=4) und ersetzt.
+    Rückgabe wie bildreste_entfernen; Ausnahmen gehen an den Aufrufer."""
+    import os
+    with fitz.open(pfad) as d:
+        befund = bildreste_entfernen(d)
+        if not befund["geleert_alle"]:
+            return befund
+        d.save(hilfspfad, garbage=4, deflate=True)
+    os.replace(hilfspfad, pfad)
+    return befund
 
 
 # ----------------------------------------------------------------------
