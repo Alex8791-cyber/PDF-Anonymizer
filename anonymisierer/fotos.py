@@ -740,6 +740,9 @@ def seite_pruefen(seite, m, profil: str = "hoch", woerter=None) -> dict:
                 gruppen.append([fitz.Rect(r), {xref}])
         # 1 pt Rand: MuPDF entfernt ein Bild nur dann ganz, wenn die Schwärzung es vollständig überdeckt
         aus[KAT_BILD] = [((r + (-1, -1, 1, 1)) & seitenrect, sorted(x for x in xrefs if x > 0)) for r, xrefs in gruppen]
+        # Ein Bild über mindestens die Hälfte einer TEXTseite (Formular- oder Briefhintergrund, fotografiertes Blatt)
+        # bleibt wie ein Scan stehen – abgedeckt werden die Fotos darin; das wird ausdrücklich gemeldet (Befund 6)
+        aus["seitenbild_bleibt"] = modus != "seite" and bool(seitenbilder)
     return aus
 
 
@@ -802,6 +805,12 @@ def dokument_pruefen(doc, dok, profil: str = "hoch", ocr_cache=None) -> dict:
         meldungen.append(("hinweis", "BILDER_ABGEDECKT",
                           f"Schutzstufe „Maximal“: {anzahl[KAT_BILD]} Bild(er) und {anzahl[KAT_FOTO]} Fotobereich(e) "
                           f"werden abgedeckt (in der Fundliste bzw. Vorschau abwählbar).", None))
+    for nr, b in sorted(befunde.items()):
+        if b.get("seitenbild_bleibt"):
+            meldungen.append(("hinweis", "BILDER_ABGEDECKT",
+                              f"Seite {nr + 1}: Ein Bild bedeckt mindestens die Hälfte der Seite (Hintergrund oder "
+                              f"fotografiertes Blatt) – es bleibt wie ein Scan stehen; abgedeckt werden nur die Fotos "
+                              f"darin und die gefundenen Angaben. Bitte in der Vorschau ansehen.", nr))
     return {"funde": funde, "meldungen": meldungen}
 
 
@@ -814,10 +823,12 @@ def ist_bildfund(fund: dict) -> bool:
 
 def bildfunde_trennen(funde: list) -> tuple:
     """(Textfunde, Auftrag): Bildfunde werden zu Bereichen {Seite: [(Rect, Platzhalter)]} (nur angehakte Stellen);
-    der Auftrag merkt sich je Art die abgedeckten und die abgewählten Bereiche und die Bilder (xrefs) abgewählter
-    Bildbereiche, die auch die Nachkontrolle in „maximal“ stehen lässt."""
+    der Auftrag merkt sich je Art die abgedeckten und die abgewählten Bereiche, die Bilder (xrefs) abgewählter
+    Bildbereiche und die Seiten mit abgewählten Bild- oder Fotobereichen – beides lässt auch die Nachkontrolle in
+    „maximal“ stehen."""
     text, auftrag = [], {"bereiche": {}, "abgedeckt": {k: [] for k in BILD_KATEGORIEN},
-                         "abgewaehlt": {k: [] for k in BILD_KATEGORIEN}, "behalten_xrefs": set()}
+                         "abgewaehlt": {k: [] for k in BILD_KATEGORIEN}, "behalten_xrefs": set(),
+                         "abgewaehlt_seiten": set()}
     for fund in funde or ():
         if not ist_bildfund(fund):
             text.append(fund)
@@ -837,6 +848,7 @@ def bildfunde_trennen(funde: list) -> tuple:
             else:
                 auftrag["abgewaehlt"][kategorie].append((nr, r))
                 auftrag["behalten_xrefs"].update(int(x) for x in st.get("bildxrefs") or ())
+                auftrag["abgewaehlt_seiten"].add(nr)
     return text, auftrag
 
 
@@ -872,18 +884,38 @@ def bilder_in_ressourcen(doc, seite_xref: int) -> set:
     return set(_bilder.erreichbare_bilder(doc, seite_xref))
 
 
-def bilder_nachkontrolle(doc, seiten, behalten_xrefs=()) -> int:
-    """„maximal“, nach dem Schwärzen: Bilder, die die Textseiten über ihre Ressourcen noch erreichen (in Kachelmustern,
-    Type3-Schriften, ungenutzt mitgeschleppt), werden geleert – außer winzigen und bewusst abgewählten.
+def bilder_nachkontrolle(doc, seiten, behalten_xrefs=(), seiten_behalten=()) -> int:
+    """„maximal“, nach dem Schwärzen: Bilder, die eine Textseite in einem Kachelmuster, einer Type3-Schrift, einer
+    weichen Maske oder einer Anmerkung zeichnet (dort erreicht apply_redactions sie nicht), werden geleert – außer
+    winzigen, bewusst abgewählten (behalten_xrefs; seiten_behalten: Seiten mit abgewählten Bildbereichen) und solchen,
+    die auch eine andere Seite (Scan, Seite mit Abwahl) zeichnet.
+    Bilder, die eine Textseite direkt zeichnet, entscheiden die Bildfunde – Vorschau, Fundliste und Abwahl gelten auch
+    in der Ausgabe; ein Wörterbuch, das eine Textseite mit einer Scan-Seite teilt, leert nie deren Seitenbild; nicht
+    angezeigte Bilder leert bilder.bildreste_entfernen (Befund 6 der Runde 3a).
     seiten: Seitenindizes der Textseiten. Rückgabe: Anzahl geleerter Bilder."""
     behalten = set(behalten_xrefs or ())
-    geleert = 0
-    for nr in seiten:
+    seiten_behalten = set(seiten_behalten or ())
+    textseiten = [nr for nr in sorted(set(seiten)) if 0 <= nr < len(doc) and nr not in seiten_behalten]
+    andere: set = set()                        # was eine andere Seite zeichnet, bleibt (auch bei Lesefehlern)
+    for nr in range(len(doc)):
+        if nr in textseiten:
+            continue
         try:
-            xrefs = bilder_in_ressourcen(doc, doc[nr].xref)
+            andere |= _bilder.gezeichnet_auf_seite(doc, doc[nr])[0]
+        except Exception:
+            try:
+                andere |= set(_bilder.erreichbare_bilder(doc, doc[nr].xref))
+            except Exception:
+                return 0                       # unklar, was die Seite zeigt: lieber nichts leeren
+    geleert = 0
+    for nr in textseiten:
+        try:
+            erreichbar = _bilder.erreichbare_bilder(doc, doc[nr].xref)
         except Exception:
             continue
-        for x in sorted(xrefs - behalten):
+        for x in sorted(x for x, indirekt in erreichbar.items() if indirekt):
+            if x in behalten or x in andere:
+                continue
             try:
                 breite = int(doc.xref_get_key(x, "Width")[1] or 0)
                 hoehe = int(doc.xref_get_key(x, "Height")[1] or 0)

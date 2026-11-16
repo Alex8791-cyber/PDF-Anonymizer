@@ -1964,8 +1964,9 @@ def _bilder_gruende(lauf: _Lauf, dok) -> None:
 
 
 def _bilder_nachkontrolle(lauf: _Lauf, dok, ergebnis: dict, profil: str) -> None:
-    """Nach dem Schwärzen: abgedeckte Bilder/Fotos/Lichtbilder zählen und melden; in „maximal“ Bilder leeren, die die
-    Textseiten noch über ihre Ressourcen erreichen (Kachelmuster, Type3-Schriften, ungenutzt mitgeschleppt)."""
+    """Nach dem Schwärzen: abgedeckte Bilder/Fotos/Lichtbilder zählen und melden; in „maximal“ Bilder leeren, die eine
+    Textseite in Kachelmustern, Type3-Schriften, weichen Masken oder Anmerkungen zeichnet (fotos.bilder_nachkontrolle –
+    nie ein Bild einer Scan-Seite, nie ein abgewähltes)."""
     auftrag = getattr(lauf, "bildauftrag", None) or {}
     try:
         from . import fotos as _fotos
@@ -1978,7 +1979,8 @@ def _bilder_nachkontrolle(lauf: _Lauf, dok, ergebnis: dict, profil: str) -> None
         textseiten = [nr for nr, m in enumerate(dok.seiten)
                       if m.ocr_modus != "seite" and lauf.ocr_modus.get(nr) != "seite"]
         try:
-            geleert = _fotos.bilder_nachkontrolle(lauf.doc, textseiten, auftrag.get("behalten_xrefs"))
+            geleert = _fotos.bilder_nachkontrolle(lauf.doc, textseiten, auftrag.get("behalten_xrefs"),
+                                                  auftrag.get("abgewaehlt_seiten"))
         except Exception as e:
             lauf.melden("warnung", "BILDER_UNGEPRUEFT", f"Nachkontrolle der Bilder fehlgeschlagen ({e}) – Bilder in der "
                                                        f"Ausgabe bitte selbst prüfen.")
@@ -1993,8 +1995,8 @@ def _bilder_nachkontrolle(lauf: _Lauf, dok, ergebnis: dict, profil: str) -> None
     if teile:
         lauf.melden("hinweis", "BILDER_ABGEDECKT", "Abgedeckt: " + ", ".join(teile) + ".")
     if geleert:
-        lauf.melden("hinweis", "BILDER_ABGEDECKT", f"{geleert} weitere(s) Bild(er) in Mustern oder ungenutzten "
-                                                   f"Ressourcen der Seiten geleert.")
+        lauf.melden("hinweis", "BILDER_ABGEDECKT", f"{geleert} weitere(s) Bild(er) geleert, die als Füllmuster oder in "
+                                                   f"Schriftzeichen gezeichnet werden (Schutzstufe „Maximal“).")
 
 
 # ----------------------------------------------------------------------

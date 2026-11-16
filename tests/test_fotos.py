@@ -595,6 +595,123 @@ def test_maximal_fotobereich_auf_scan_abgedeckt_text_bleibt(tmp_path):
     assert tinte_vorher > 0.005 and tinte > 0.8 * tinte_vorher   # der Brieftext oberhalb des Fotos ist noch da
 
 
+def test_maximal_geteiltes_woerterbuch_leert_kein_scanbild(tmp_path):
+    """Befund 6a der Runde 3a: Textseite (ohne Fund) und Scan-Seite teilen EIN Ressourcen-Wörterbuch – die
+    Nachkontrolle in „maximal“ leerte über die Textseite das Seitenbild des Scans (leere Seite in der Ausgabe)."""
+    rng = np.random.default_rng(35)
+    doc = fitz.open()
+    fv.textseite(doc, ["Anlagen", "", "Die Unterlagen folgen auf der nächsten Seite."])
+    scan = fv.textseite_bild(rng, zeilen=["KOSTENVORANSCHLAG Nr. 2025-117", "", "Malerbetrieb Beispiel GmbH",
+                                         "Summe netto 1.234,00 EUR"], dpi=100, grau_=True)
+    s2 = doc.new_page(width=595, height=842)
+    s2.insert_image(s2.rect, stream=fv.jpeg(scan, 70), keep_proportion=False)
+    x2 = s2.get_images()[0][0]
+    schrift = doc.xref_get_key(doc[0].xref, "Resources/Font")[1]
+    gemeinsam = doc.get_new_xref()
+    doc.update_object(gemeinsam, f"<</Font {schrift}/XObject<</Scan {x2} 0 R>>>>")
+    _inhalt_anhaengen(doc, s2, b"")
+    doc.xref_set_key(s2.xref, "Contents", "[]")
+    _inhalt_anhaengen(doc, s2, b"q 595 0 0 842 0 0 cm /Scan Do Q")
+    for nr in (0, 1):
+        doc.xref_set_key(doc[nr].xref, "Resources", f"{gemeinsam} 0 R")
+    fv.textseite(doc, ["Kontakt für Rückfragen: erika.musterfrau@example.org"])
+    pdf = tmp_path / "geteilt.pdf"
+    doc.save(pdf, garbage=3)
+    doc.close()
+    ocr = Attrappe({1: [(60, 60, 300, 75, "KOSTENVORANSCHLAG"), (60, 100, 300, 115, "Malerbetrieb")]})
+    e, s = _analyse_und_schwaerzung(pdf, ocr, profil="maximal")
+    assert any(f["kategorie"] == "email" for f in e["funde"])
+    assert s["bilder_geleert"] == 0
+    with fitz.open(pdf) as vorher, fitz.open(s["ausgabe"]) as aus:
+        assert [(i["width"], i["height"]) for i in aus[1].get_image_info()] == [(scan.shape[1], scan.shape[0])]
+        p0, p1 = vorher[1].get_pixmap(dpi=40), aus[1].get_pixmap(dpi=40)
+        assert p0.samples == p1.samples or np.abs(np.frombuffer(p0.samples, np.uint8).astype(int)
+                                                  - np.frombuffer(p1.samples, np.uint8)).max() <= 8
+
+
+def _grosses_bild_auf_textseite(pfad, rng, portraet: bool):
+    """Textseite (Fließtext) mit einem Bild über rund zwei Drittel der Seite: ein Porträt bzw. ein fotografiertes
+    Formular ohne Foto. Rückgabe: Rechteck des Bilds."""
+    doc = fitz.open()
+    s = fv.textseite(doc, ["Anlage zum Schreiben vom 12.03.2025 – Schadennummer 2025-00417 – Vollmacht und "
+                           "Abtretungserklärung",
+                           "Sehr geehrte Damen und Herren, anbei erhalten Sie die unterschriebene Vollmacht als Foto, "
+                           "wie besprochen.",
+                           "Bitte bestätigen Sie den Eingang kurz per E-Mail. Mit freundlichen Grüßen, Ihr Maklerbüro.",
+                           "Kontakt: erika.musterfrau@example.org"], groesse=8.5, abstand=11)
+    assert len(s.get_text()) > 300                         # genug Text: eine Textseite mit Bild, kein Scan
+    if portraet:
+        blatt = fv.portraet(rng, 700, 900)
+    else:
+        blatt = fv.textseite_bild(rng, zeilen=["VOLLMACHT", "", "Hiermit bevollmächtige ich die Firma",
+                                              "Muster-Makler GmbH ...", "", "Köln, den 01.02.2025"], dpi=100,
+                                  grau_=False)
+    r = fitz.Rect(40, 160, 560, 800)
+    s.insert_image(r, stream=fv.jpeg(blatt, 80), keep_proportion=False)
+    doc.save(pfad)
+    doc.close()
+    return r
+
+
+@pytest.mark.parametrize("abwaehlen", [False, True])
+def test_maximal_grosses_foto_auf_textseite_folgt_der_vorschau(tmp_path, abwaehlen):
+    """Befund 6b: Ein Bild über mehr als die Hälfte einer Textseite bleibt wie ein Scan stehen, abgedeckt wird der
+    Fotobereich darin (Fund „Foto“). Abgewählt bleibt das Porträt ganz stehen – die Nachkontrolle leerte es vorher
+    trotzdem (1 x 1)."""
+    rng = np.random.default_rng(36)
+    r = _grosses_bild_auf_textseite(tmp_path / "portraet.pdf", rng, portraet=True)
+
+    def aendern(funde):
+        for f in funde:
+            if f["kategorie"] in fotos.BILD_KATEGORIEN:
+                for st in f["stellen"]:
+                    st["an"] = not abwaehlen
+    e, s = _analyse_und_schwaerzung(tmp_path / "portraet.pdf", Attrappe(), profil="maximal", aendern=aendern)
+    (foto,) = [f for f in e["funde"] if f["kategorie"] == fotos.KAT_FOTO]
+    assert not [f for f in e["funde"] if f["kategorie"] == fotos.KAT_BILD]
+    assert s["bilder_geleert"] == 0
+    with fitz.open(s["ausgabe"]) as aus:
+        assert [(i["width"], i["height"]) for i in aus[0].get_image_info()] == [(700, 900)]
+    vorher = _pixel(tmp_path / "portraet.pdf", r).std()
+    if abwaehlen:
+        assert abs(_pixel(s["ausgabe"], r).std() - vorher) < 1.0
+        assert not any("Bild" in g or "Foto" in g for g in s["pruefen_gruende"])
+    else:
+        assert s["fotobereiche_abgedeckt"] == 1
+        assert _ohne_platzhalter_gleichmaessig(s["ausgabe"], fitz.Rect(foto["stellen"][0]["bereich"]) & r)
+
+
+def test_maximal_formularhintergrund_bleibt_mit_hinweis(tmp_path):
+    """Befund 6c: ein fotografiertes Formular ohne Foto über zwei Drittel einer Textseite – kein Bildfund, und es
+    bleibt stehen (vorher leerte die Nachkontrolle es); die Analyse sagt das ausdrücklich."""
+    rng = np.random.default_rng(37)
+    r = _grosses_bild_auf_textseite(tmp_path / "formular.pdf", rng, portraet=False)
+    e, s = _analyse_und_schwaerzung(tmp_path / "formular.pdf", Attrappe(), profil="maximal")
+    assert not [f for f in e["funde"] if f["kategorie"] in fotos.BILD_KATEGORIEN]
+    assert any(m["code"] == "BILDER_ABGEDECKT" and m["seite"] == 0 and "bleibt wie ein Scan stehen" in m["text"]
+               for m in e["meldungen"])
+    assert s["bilder_geleert"] == 0
+    assert abs(_pixel(s["ausgabe"], r).std() - _pixel(tmp_path / "formular.pdf", r).std()) < 2.0
+
+
+def test_maximal_musterbild_bleibt_auf_seite_mit_abwahl(tmp_path):
+    """Abgewählt heißt abgewählt: auf einer Seite mit abgewähltem Bildbereich leert die Nachkontrolle auch kein Bild in
+    einem Kachelmuster (dessen Bildbereich trägt keine xref)."""
+    rng = np.random.default_rng(38)
+    pdf = tmp_path / "allebilder.pdf"
+    rects = textseite_mit_allen_bildarten(pdf, rng)
+
+    def abwaehlen(funde):
+        for f in funde:
+            if f["kategorie"] == fotos.KAT_BILD:
+                for st in f["stellen"]:
+                    st["an"] = False
+    e, s = _analyse_und_schwaerzung(pdf, Attrappe(), profil="maximal", aendern=abwaehlen)
+    assert s["bilder_geleert"] == 0 and s["bilder_abgedeckt"] == 0
+    assert not _ohne_platzhalter_gleichmaessig(s["ausgabe"], rects["muster"])
+    assert not _ohne_platzhalter_gleichmaessig(s["ausgabe"], rects["xobject"])
+
+
 def test_maximal_ohne_bilder_keine_bildfunde(tmp_path):
     doc = fitz.open()
     fv.textseite(doc)
