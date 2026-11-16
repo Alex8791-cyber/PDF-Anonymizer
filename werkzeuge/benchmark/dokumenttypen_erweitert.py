@@ -56,6 +56,13 @@ TINTE_SCHWARZ = (0.1, 0.1, 0.12)
 NEUE_TYPEN_REIHENFOLGE = ["personalausweis", "reisepass", "fuehrerschein", "sepa_mandat", "bestandsliste_excel",
                           "unfallbericht", "fax", "schreibmaschine", "handschrift_formular", "blockschrift_formular"]
 QUERFORMAT_NEU = frozenset({"bestandsliste_excel"})
+# Zeilen je Excel-Liste (Generator 1.2: 22-40 – eine Liste trug dann zwei Drittel aller Kern-Einträge eines Korpus)
+EXCEL_ZEILEN = (8, 14)
+# Absender von Versicherer-Faxen (Markennamen der Erlaubnisliste – kein Personenname)
+FAX_MARKEN = ["HUK-COBURG", "ERGO", "SIGNAL IDUNA", "Debeka", "Provinzial", "Gothaer", "ALLIANZ", "AXA",
+              "Alte Leipziger", "HanseMerkur", "DEVK", "Barmenia"]
+# vorläufige Personalausweise (TD2): jeder dritte Personalausweis eines erweiterten Korpus, mindestens zwei
+TD2_JE_PERSONALAUSWEIS = 3
 # Scan-Wahrscheinlichkeit und Varianten je neuem Typ (Ausweiskopien und handschriftliche Formulare sind fast
 # immer Scans, Excel-Listen fast nie; Faxe immer 1 Bit)
 SCAN_NEU = {
@@ -120,10 +127,15 @@ def plane_erweitert(anzahl: int, seed: int, je_typ: int = 6, alte_typen=None, al
                 scan_index += 1
         neben = tuple(n for n in nebenkanaele if rng.random() < 0.12)
         plaene.append(Plan(nr, typ, scan, neben, mischung="erweitert"))
+    # Mindestzahl vorläufiger Personalausweise (TD2) ohne eigenen Zufall: der 2., 5., 8. … Personalausweis
+    ausweise = [p for p in plaene if p.typ == "personalausweis"]
+    for i, p in enumerate(ausweise):
+        if i % TD2_JE_PERSONALAUSWEIS == 1 or (len(ausweise) >= 2 and i == len(ausweise) - 1 and len(ausweise) < 5):
+            p.variante = "td2"
     return plaene
 
 
-def dok_fuer(typ: str, rng, kennung: str, scan: str | None) -> Dok:
+def dok_fuer(typ: str, rng, kennung: str, scan: str | None, variante: str | None = None) -> Dok:
     """Dokument-Kontext für einen neuen Typ: Schreibmaschine und EDV-Ausdruck in Courier, Excel in Calibri/Arial."""
     stil = None
     if typ == "schreibmaschine":
@@ -135,6 +147,7 @@ def dok_fuer(typ: str, rng, kennung: str, scan: str | None) -> Dok:
         stil = stil_waehlen(rng, familie=rng.choice(["carlito", "carlito", "sans", "helv"]))
     dok = Dok(rng, kennung, stil=stil, querformat=typ in QUERFORMAT_NEU)
     dok.scan_geplant = scan
+    dok.variante = variante
     return dok
 
 
@@ -421,7 +434,7 @@ def typ_personalausweis(dok: Dok) -> str:
     st = dok.stil
     p = _person_ausweis(dok)
     seite = dok.satz.neue_seite()
-    vorlaeufig = rng.random() < 0.25
+    vorlaeufig = rng.random() < 0.25 or getattr(dok, "variante", None) == "td2"
     nummer = K.personalausweisnummer(rng, False)
     if vorlaeufig:
         nummer = rng.choice("ABCDEFGHJ") + "".join(rng.choice("0123456789") for _ in range(8))
@@ -711,7 +724,7 @@ def typ_fuehrerschein(dok: Dok) -> str:
         seite.text(fx + 12, yy, wert, st.fett, g)
         yy += zh
     seite.text(fx, yy, "4a.", st.normal, g * 0.8)
-    seite.text(fx + 14, yy, datum_fmt(ausstellung), st.fett, g)
+    seite.text(fx + 14, yy, k(datum_fmt(ausstellung)), st.fett, g)
     seite.text(fx + kb * 0.3, yy, "4c.", st.normal, g * 0.8)
     if land == "D":
         behoerde = rng.choice(["Landratsamt ", "Stadt ", "Kreis ", "Bürgerbüro "]) + p.ort.split(" (")[0]
@@ -722,7 +735,7 @@ def typ_fuehrerschein(dok: Dok) -> str:
     seite.text(fx + kb * 0.3 + 14, yy, m("sonstiges", behoerde, "Führerschein Feld 4c Behörde"), st.fett, g * 0.9)
     yy += zh
     seite.text(fx, yy, "4b.", st.normal, g * 0.8)
-    seite.text(fx + 14, yy, datum_fmt(ablauf), st.fett, g)
+    seite.text(fx + 14, yy, k(datum_fmt(ablauf)), st.fett, g)
     if mit_4d:
         seite.text(fx + kb * 0.3, yy, "4d.", st.normal, g * 0.8)
         kennziffer = "".join(rng.choice("0123456789") for _ in range(rng.choice([9, 10, 11])))
@@ -742,7 +755,7 @@ def typ_fuehrerschein(dok: Dok) -> str:
         yy += zh
     klassen = rng.choice(["AM/B/L", "AM/A1/B/BE/L", "B/BE/C1/C1E/L", "AM/A/B/L/T"])
     seite.text(x + 8, y + kh - 8, "9.", st.normal, g * 0.8)
-    seite.text(x + 20, y + kh - 8, klassen, st.fett, g)
+    seite.text(x + 20, y + kh - 8, k(klassen), st.fett, g)
     # Rückseite: Klassentabelle
     y2 = y + kh + rng.uniform(8, 16) * MM
     _karte(seite, (x, y2, x + kb, y2 + kh), rand=(0.6, 0.45, 0.5), fuellung=(0.98, 0.95, 0.96))
@@ -951,7 +964,7 @@ def typ_bestandsliste_excel(dok: Dok) -> str:
         return _versal(text, umschrift) if versal else text
     geb_art = rng.choice(["punkt", "punkt", "punkt", "iso", "kurz"])     # ein Datumsformat je Export
     zeilen = []
-    for i in range(rng.randint(22, 40)):
+    for i in range(rng.randint(EXCEL_ZEILEN[0], EXCEL_ZEILEN[1])):
         q = dok.person(alter=(18, 88), titel_quote=0.02, adel_quote=0.03)
         geb, gbem = dok.geburtsdatum_text(q.geburtsdatum, geb_art)
         sparte = rng.choice(["HR", "PHV", "KFZ", "BU", "LV", "WG", "RS", "PKV", "UNF", "RIESTER"])
@@ -1190,6 +1203,7 @@ def typ_fax(dok: Dok) -> str:
     Seite x/y) auf jeder Seite. Gescannt wird mit der Fax-Variante (1 Bit)."""
     rng = dok.rng
     st = dok.stil
+    kopf_rng = random.Random(f"faxkopf/{dok.satz.kennung}")    # eigener Strom (Generator 1.3)
     art = rng.choice(["kunde", "kunde", "praxis", "versicherer"])
     if art == "praxis":
         arzt = dok.person(titel_quote=0.0, alter=(35, 65))
@@ -1198,6 +1212,8 @@ def typ_fax(dok: Dok) -> str:
         absender_tel = "0" + arzt.vorwahl + " " + "".join(rng.choice("0123456789") for _ in range(6))
     elif art == "versicherer":
         kennung_markup = rng.choice(["SCHADENSERVICE", "KUNDENSERVICE", "VERTRAGSSERVICE", "LEISTUNGSABTEILUNG"])
+        if kopf_rng.random() < 0.6:
+            kennung_markup = k(kopf_rng.choice(FAX_MARKEN))            # Markenname des Versicherers: bleibt
         absender_tel = "0" + rng.choice(["69", "221", "89", "40"]) + " " + "".join(rng.choice("0123456789")
                                                                                    for _ in range(7))
     else:
@@ -1211,14 +1227,31 @@ def typ_fax(dok: Dok) -> str:
         f"{rng.randint(0, 59):02d}"
     form = rng.randint(0, 2)
     kopf_schrift = mrz_schrift() if rng.random() < 0.5 else st.normal
+    if kopf_rng.random() < 0.6:
+        form = kopf_rng.choice([3, 4, 5, 6, 7])                       # Kopfzeilen realer Geräte
+    sekunden = kopf_rng.randint(0, 59)
+    stunde, minute = int(zeit[-5:-3]), int(zeit[-2:])
+    ampm = f"{(stunde - 1) % 12 + 1:02d}:{minute:02d}{'PM' if stunde >= 12 else 'AM'}"
+    monate_en = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+    datum_en = f"{monate_en[dok.heute.month - 1]}-{dok.heute.day:02d}-{dok.heute.year}"
 
     def kopf(seite, nr, gesamt):
         if form == 0:
             text = f"{zeit}   {kennung_markup}   FAX {fax_m}   S. {nr:02d}/{gesamt:02d}"
         elif form == 1:
             text = f"Von: {kennung_markup}  Fax: {fax_m}   An: Maklerbüro   {zeit}   Seite {nr} von {gesamt}"
-        else:
+        elif form == 2:
             text = f"{fax_m}   {kennung_markup}   {zeit}   P.{nr:03d}"
+        elif form == 3:
+            text = f"{zeit}   {kennung_markup}   {fax_m}   S. {nr}/{gesamt}"
+        elif form == 4:
+            text = f"{dok.heute:%d/%m/%Y} {zeit[-5:]}  FROM: {kennung_markup}  {fax_m}  PAGE {nr:02d}/{gesamt:02d}"
+        elif form == 5:
+            text = f"{datum_en} {ampm}   {kennung_markup}   {fax_m}   P. {nr}/{gesamt}"
+        elif form == 6:
+            text = f"{zeit}:{sekunden:02d}   {kennung_markup}   Fax {fax_m}   Seite {nr}/{gesamt}"
+        else:
+            text = f"{zeit}   {kennung_markup}   {fax_m}   Page {nr} of {gesamt}"
         seite.text(8 * MM, 6 * MM, text, kopf_schrift, 7.5, zusatz="Fax-Kopfzeile")
     dok.kopf_fuss.append(kopf)
     if art == "kunde":
@@ -1607,8 +1640,8 @@ def typ_blockschrift_formular(dok: Dok) -> str:
     felder = [("Name", "namen", _versal(p.nachname), name_bem(p, "Kammfeld Name; Versalien")),
               ("Vorname(n)", "namen", _versal(p.vornamen), "Kammfeld Vorname; Versalien"),
               ("Geburtsdatum (TTMMJJJJ)", "geburt", geb, "Kammfeld Geburtsdatum ohne Trenner"),
-              ("Straße", "strasse", _versal(p.strasse), "Kammfeld Straße (Hausnummer eigenes Feld); Versalien"),
-              ("Hausnr.", "strasse", p.hausnummer.upper().replace(" ", ""), "Kammfeld Hausnummer"),
+              ("Straße, Hausnr.", "strasse", _versal(p.strasse) + " " + p.hausnummer.upper().replace(" ", ""),
+               "Kammfeld Straße und Hausnummer; Versalien"),
               ("PLZ", "plzort", p.plz, "Kammfeld PLZ (Ort eigenes Feld)"),
               ("Ort", "plzort", _versal(p.ort), "Kammfeld Ort (PLZ eigenes Feld); Versalien"),
               ("Telefon", "telefon", "0" + p.vorwahl + "".join(rng.choice("0123456789") for _ in range(6)),

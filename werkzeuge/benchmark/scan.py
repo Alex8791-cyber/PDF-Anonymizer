@@ -39,6 +39,7 @@ class ScanParameter:
     farbig: bool = False              # RGB statt Graustufen
     durchsuchbar: bool = False        # unsichtbare Textebene (Render-Modus 3)
     versatz: tuple = (0.0, 0.0)       # Versatz der unsichtbaren Textebene in pt
+    textebene_einpassen: bool = False  # unsichtbare Wörter auf die Breite des Originals (erweitert, 1.3)
     papier: int = 246                 # Grauwert des Papiers
     seed: int = 0
     merkmale: list = field(default_factory=list)
@@ -151,23 +152,73 @@ def seite_scannen(quelle_page, ziel_doc, p: ScanParameter, eintraege: list, schr
     return seite
 
 
+def _mitte(span) -> float:
+    """Waagrechte Mitte eines Spans (Zeichen stehen mittig in ihren Kästchen)."""
+    return (span["bbox"][0] + span["bbox"][2]) / 2
+
+
+def _woerter_einpassen(spans: list) -> list:
+    """Wörter der Seite für die unsichtbare Textebene, wie eine Texterkennung sie schriebe: einzeln stehende Zeichen
+    (Kammfeld, ein Zeichen je Kästchen – MuPDF liefert sie als eigene Spans, auch in eigenen Zeilen) werden nach ihrer
+    Lage zu Wörtern zusammengefasst: dieselbe Zeile (Mitte innerhalb einer halben Schriftgröße), gewöhnlicher
+    Kästchenabstand; ein leeres Kästchen trennt. Alle übrigen Spans bleiben, wie sie sind. [(Text, origin, Breite,
+    Größe)]."""
+    einzeln = sorted((sp for sp in spans if len(sp["text"].strip()) == 1),
+                     key=lambda sp: (sp["bbox"][1] + sp["bbox"][3]) / 2)
+    aus = [(sp["text"], sp["origin"], sp["bbox"][2] - sp["bbox"][0], sp["size"]) for sp in spans
+           if len(sp["text"].strip()) > 1]
+    reihen = []
+    for sp in einzeln:
+        ym = (sp["bbox"][1] + sp["bbox"][3]) / 2
+        if reihen and abs(ym - reihen[-1][0]) <= 0.5 * sp["size"]:
+            reihen[-1][1].append(sp)
+        else:
+            reihen.append([ym, [sp]])
+    for _, reihe in reihen:
+        reihe.sort(key=_mitte)
+        abstaende = sorted(_mitte(b) - _mitte(a) for a, b in zip(reihe, reihe[1:]))
+        teilung = abstaende[len(abstaende) // 2] if abstaende else 0.0
+        wort = [reihe[0]]
+        for a, b in zip(reihe, reihe[1:]):
+            if teilung <= 0 or _mitte(b) - _mitte(a) > 1.5 * teilung:
+                aus.append(_wort(wort))
+                wort = []
+            wort.append(b)
+        aus.append(_wort(wort))
+    return aus
+
+
+def _wort(zeichen: list) -> tuple:
+    links = min(zeichen, key=lambda sp: sp["bbox"][0])
+    return ("".join(sp["text"].strip() for sp in zeichen), (links["bbox"][0], max(sp["origin"][1] for sp in zeichen)),
+            max(sp["bbox"][2] for sp in zeichen) - links["bbox"][0], max(sp["size"] for sp in zeichen))
+
+
 def _textebene(quelle_page, seite, abb: _Abbildung, p: ScanParameter, schrift):
-    """Unsichtbare Textebene (Render-Modus 3) aus dem Vektortext, leicht versetzt."""
+    """Unsichtbare Textebene (Render-Modus 3) aus dem Vektortext, leicht versetzt. Mit p.textebene_einpassen
+    (Generator 1.3, erweiterte Verteilung und Gegenproben) so, wie eine Texterkennung sie schriebe: jedes Wort in der
+    Breite des Originals (die Ersatzschrift ist breiter als eine Handschrift – überlappende Wörter läse die Textebene
+    als "Hauptstraße88"), die Zeichen eines Kammfelds als Wort (sonst ein Zeichen je Wort)."""
     dx, dy = p.versatz
-    for block in quelle_page.get_text("dict")["blocks"]:
-        for zeile in block.get("lines", []):
-            for span in zeile["spans"]:
-                text = span["text"]
-                if not text.strip():
-                    continue
-                ursprung = abb.unrotiert(span["origin"])
-                groesse = span["size"]
-                if schrift is None:
-                    seite.insert_text((ursprung.x + dx, ursprung.y + dy), text, fontsize=groesse,
-                                      fontname="helv", render_mode=3)
-                else:
-                    schrift.setzen(seite, ursprung.x + dx, ursprung.y + dy, schrift.darstellbar(text),
-                                   groesse, unsichtbar=True)
+    spans = [sp for block in quelle_page.get_text("dict")["blocks"] for zeile in block.get("lines", [])
+             for sp in zeile["spans"] if sp["text"].strip()]
+    if p.textebene_einpassen:
+        woerter = _woerter_einpassen(spans)
+    else:
+        woerter = [(sp["text"], sp["origin"], 0.0, sp["size"]) for sp in spans]
+    for text, origin, soll, groesse in woerter:
+        ursprung = abb.unrotiert(origin)
+        if p.textebene_einpassen:
+            ist = (schrift.breite(schrift.darstellbar(text), groesse) if schrift is not None
+                   else fitz.get_text_length(text, fontname="helv", fontsize=groesse))
+            if ist > soll > 0:
+                groesse *= soll / ist
+        if schrift is None:
+            seite.insert_text((ursprung.x + dx, ursprung.y + dy), text, fontsize=groesse,
+                              fontname="helv", render_mode=3)
+        else:
+            schrift.setzen(seite, ursprung.x + dx, ursprung.y + dy, schrift.darstellbar(text),
+                           groesse, unsichtbar=True)
 
 
 def bild_einfuegen(quelle_page, ziel_page, rechteck, p: ScanParameter, eintraege: list):

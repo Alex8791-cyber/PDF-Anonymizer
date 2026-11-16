@@ -25,7 +25,8 @@ from bisect import bisect_left
 from typing import NamedTuple
 
 from . import Treffer, detektor
-from .struktur import (_ORG_ROLLEN_RE, ABKUERZUNG_RE, ALLE_KATEGORIEN, PARTIKEL, PII_ARTEN, SICHERHEIT_SPALTE, Lage,
+from .struktur import (_ORG_ROLLEN_RE, _ROH_FUNKTIONSWORT, _ROH_KEIN_WOHNORT, _ROH_ORTSZUSATZ, ABKUERZUNG_RE,
+                       ALLE_KATEGORIEN, PARTIKEL, PII_ARTEN, SICHERHEIT_SPALTE, Lage,
                        _wissen, NR_VORSATZ_RE, datums_spannen, etikett_fuer_text, etiketten,
                        geburtsdatum_plausibel, ist_kennungsform, kennung_spanne, lage, muster_spannen,
                        namen_spanne, ort_spanne, plz_ort_spannen, strasse_spanne, ueberlappung, _muster,
@@ -495,11 +496,25 @@ def _adresse(text: str, s: int, e: int, eintrag: str) -> list:
             # Spalte "Ort": die ganze Zelle ist der Ort ("ST. WENDEL", "LAUF A.D.PEGNITZ", "NEUSTADT AN DER
             # WEINSTRASSE") – ort_spanne kennt nicht jede Abkürzung und hört vor "AN DER" auf
             m = _GANZER_ORT_RE.fullmatch(text, s, e)
-            if m and (sp is None or m.end(1) > sp[1]):
+            if m and (sp is None or m.end(1) > sp[1]) and _ganzer_ort_plausibel(m.group(1)):
                 return [(m.start(1), m.end(1), "plzort", None)]
         if sp:
             return [(sp[0], sp[1], "plzort", None)]
     return []
+
+
+def _ganzer_ort_plausibel(wert: str) -> bool:
+    """Ganze Zelle einer Ort-Spalte als Ort: kein Ereignis- oder Betriebsort ("Parkplatz Rewe-Markt", "Tiefgarage
+    Altstadt" in einer Schadenliste), kein Funktionswort ("Werkstatt Ihrer Wahl"), kleingeschrieben nur Ortszusätze
+    ("Frankfurt am Main")."""
+    woerter = re.findall(r"[^\W\d_][^\W\d_'’\-]*", wert)
+    for w in woerter:
+        k = w.casefold()
+        if k in _ROH_ORTSZUSATZ:
+            continue
+        if k in _ROH_KEIN_WOHNORT or k in _ROH_FUNKTIONSWORT or w[0].islower():
+            return False
+    return bool(woerter)
 
 
 _GANZER_ORT_RE = re.compile(r"[ \t]*([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]*(?:[ \u00a0][A-Za-zÄÖÜäöüß(][A-Za-zÄÖÜäöüß.()\-]*){0,5})"

@@ -20,10 +20,11 @@ passende Kennungsart, Geburt -> geburt, Anschrift -> strasse/plzort, Kontakt -> 
 Vertragsdaten (Beginn, Ablauf, Stand …) bleiben stehen. Gremien-Etiketten (Vorstand, Aufsichtsrat,
 Geschäftsführer) lesen eine ganze Namensliste, auch über die Folgezeilen derselben Spalte. Quer gestellte
 Tabellen (eine Spalte je Beteiligtem: "Führerschein-Nr. ⇥⇥ H996KNYGE24 ⇥⇥ P9873B6ND15") liefern jede weitere
-Wertzelle derselben Art (folgezellen_werte). Kopfzeilen aus Feldnamen/Kürzeln ("NAME ⇥⇥ VORN. ⇥⇥ GEB.-DAT.")
-haben keinen Wert in derselben Zeile (kopfzeile). Auf OCR-Zeilen gilt ohne lesbare Wertform der Rohwert hinter
-dem Feldnamen (Handschrift, Kästchen, Schreibmaschine), wenn er die grobe Gestalt seiner Kategorie hat
-(ocr_rohwert, Quelle "struktur.etikett_wert.rohwert").
+Wertzelle derselben Art (folgezellen_werte). Kopfzeilen aus Feldnamen/Kürzeln ("NAME ⇥⇥ VORN. ⇥⇥ GEB.-DAT.") mit
+einer Wertzeile darunter haben keinen Wert in derselben Zeile (kopfzeile); eine ausgefüllte Formularzeile in
+Versalien ("NAME: KOCH ⇥⇥ VORNAME: UWE ⇥⇥ ORT: BONN") ist nie Kopfzeile. Auf OCR-Zeilen gilt ohne lesbare
+Wertform der Rohwert hinter dem Feldnamen (Handschrift, Kästchen, Schreibmaschine), wenn er die grobe Gestalt
+seiner Kategorie hat (ocr_rohwert, Quelle "struktur.etikett_wert.rohwert").
 """
 
 from __future__ import annotations
@@ -1062,10 +1063,13 @@ _ORT_RE = re.compile(
     r"|[A-ZÄÖÜ]{2,}(?:[ \-][A-ZÄÖÜ]{2,}){0,2}")
 _HAUSNUMMER_RE = re.compile(r"\d{1,4}(?:[ ]?[a-zA-Z](?![\wäöüß]))?"
                             r"(?:[ ]?[-/][ ]?\d{1,4}(?:[ ]?[a-zA-Z](?![\wäöüß]))?)?")
+# Wörter durch ein Leerzeichen getrennt; vor einem Straßenwort auch durch mehrere (Blocksatz/Ausrichtung in Courier:
+# "Hohe   Straße 129") – sonst verbände die Lücke zwei Zellen ("Kreissparkasse Talheim   SWBPDEZ7")
 _STRASSE_FREI_RE = re.compile(
     r"(?:[A-ZÄÖÜ][\wäöüß'’.\-]*|(?:am|an|auf|im|in|zum|zur|unter|hinter|vor|bei|der|die|das|den|dem|des|von)"
-    r"(?=[ ]))(?:[ ](?:[A-ZÄÖÜ][\wäöüß'’.\-]*|am|an|auf|im|in|zum|zur|der|die|das|den|dem|des|von|vom|"
-    r"\d{1,2}\.))*[ ]?(" + _HAUSNUMMER_RE.pattern + r")(?![\w])", re.IGNORECASE)
+    r"(?=[ ]))(?:(?:[ ]|[ ]{2,4}(?=(?:stra(?:ß|ss)e|str\.|weg|platz|allee|gasse|ring|damm|ufer|chaussee|"
+    r"promenade|markt|steig|pfad)(?![\wäöüß])))(?:[A-ZÄÖÜ][\wäöüß'’.\-]*|am|an|auf|im|in|zum|zur|der|die|das|den|"
+    r"dem|des|von|vom|\d{1,2}\.))*[ ]?(" + _HAUSNUMMER_RE.pattern + r")(?![\w])", re.IGNORECASE)
 _POSTFACH_RE = re.compile(r"(?i)Postfach[ ]?\d{1,3}(?:[ ]?\d{2,4}){0,3}(?!\d)")
 _PLZ_RE = re.compile(r"(?<![\w\-/.,])(?:(?:D|DE|A|AT|CH|L|FL|B|NL|F|I|PL|CZ|DK)[-\s])?\d{4,5}(?![\w])")
 
@@ -1640,13 +1644,29 @@ def etikett_kategorie(et: Etikett, etikett_text: str, wert: str = "") -> str | N
 # Rohwerte: Funktionswörter verraten Satzreste und Überschriften ("für Innere Medizin", "Ich kündige daher den")
 _ROH_FUNKTIONSWORT = frozenset(
     "für und oder das die dem des zum zur im am an auf aus bei mit nach vom zu sie ich wir ihr er es mein meine "
-    "meinen meiner ihre ihren unser unsere daher bitte nicht diese dieser dieses wie ist sind wird werden wurde hat "
-    "haben kein keine sowie siehe".split())
+    "meinen meiner ihre ihren ihrer ihrem ihres unser unsere unserer unserem unseres sein seine seiner seinem "
+    "seines dessen deren ein eine einen einem einer eines daher bitte nicht diese dieser dieses wie ist sind wird "
+    "werden wurde hat haben kein keine sowie siehe".split())
 _ROH_NAMENSPARTIKEL = frozenset("von van de der den del della di da dos du la le ter ten zu vom y".split())
 _ROH_KENNUNG = frozenset({"vertrag", "ausweis", "kvnr", "svnr", "steuerid", "steuernr", "iban", "kfz", "fin",
                           "mandat", "kreditkarte", "kindergeld", "postfach"})
-# Ort eines Ereignisses (Unfall, Schaden, Einsatz) ist keine Anschrift; Unterschrift/Stempel sind Felder für Tinte
-_ROH_KEIN_FELD_RE = re.compile(r"(?i)(?:schadens?|unfall|ereignis|tat|einsatz)(?:ort|stelle)|unterschrift|stempel")
+# Ort eines Ereignisses (Unfall, Schaden, Einsatz, Besichtigung) ist keine Anschrift – in jeder Wortstellung
+# ("Schadenort", "Ort des Schadens", "Stelle des Unfalls"); Unterschrift/Stempel sind Felder für Tinte
+_ROH_KEIN_FELD_RE = re.compile(
+    r"(?i)(?:schadens?|unfall|ereignis|tat|einsatz|besichtigungs?|übergabe|uebergabe)(?:ort|stelle)|"
+    r"(?:ort|stelle)[ \t]+(?:des|der|vom)[ \t]+(?:schadens?|schadenfalls|unfall(?:e?s)?|ereignisses|geschehens|tat|"
+    r"einsatzes|besichtigung|übergabe|uebergabe|untersuchung|termins?)|unterschrift|stempel")
+# Ortsangaben: Zusätze zwischen den Wörtern eines Orts ("Frankfurt am Main", "Bad Homburg v. d. Höhe")
+_ROH_ORTSZUSATZ = frozenset("am an der den dem im in ob bei vor unter auf a d v i b u".split())
+# Ereignis- und Betriebsorte, nie ein Wohnort ("Ort: Parkplatz Rewe-Markt", "Ort: Werkstatt Ihrer Wahl")
+_ROH_KEIN_WOHNORT = frozenset("parkplatz parkhaus tiefgarage garage kreuzung einmündung einmuendung ausfahrt "
+                              "einfahrt auffahrt autobahn bab bundesstraße bundesstrasse landstraße landstrasse "
+                              "kreisstraße kreisstrasse raststätte raststaette rastplatz tankstelle werkstatt "
+                              "baustelle supermarkt firmengelände firmengelaende betriebsgelände".split())
+# Feldnummer eines Formulars am Wertanfang: das nächste gedruckte Feld ("3. Verletzte", "5) Polizei"), kein Wert
+_ROH_FELDNUMMER_RE = re.compile(r"^\(?\d{1,2}[a-z]?(?:[.)][ \t]*|[ \t]+)(?=[^\W\d_])")
+# Fortsetzung des gedruckten Feldnamens hinter dem Etikett bis zum Doppelpunkt ("Ort| der Besichtigung:")
+_FELDNAME_REST_RE = re.compile(r"[ ]((?:[^\W\d_][\w'’.\-]*[ ]?){1,4}?)[ ]?:")
 
 
 # Führungspunkte mit eingestreutem OCR-Rest ("2..........;", "i....."): höchstens zwei Zeichen zwischen Punkten
@@ -1674,11 +1694,15 @@ def _rohwert_passt(wert: str, kat: str) -> bool:
         return sum(c.isalnum() for c in w) >= 8
     if kat in _ROH_KENNUNG:
         return ziffern >= 2
+    if kat in ("plzort", "namen") and _ROH_FELDNUMMER_RE.match(w):
+        return False                                  # "Ort: 3. Verletzte": das nächste Feld des Formulars
     if kat == "strasse":
         return ziffern >= 1 or bool(re.search(r"(?i)stra(?:ß|ss)e|str\.|weg\b|platz\b|allee\b|gasse\b", w))
     woerter = re.findall(r"[^\W\d_][^\W\d_'’.\-]*", w)
     if not woerter:
         return False
+    if kat == "plzort":
+        return _roh_ort_passt(w, woerter, ziffern)
     if kat == "namen":
         if ziffern > 1:
             return False
@@ -1689,6 +1713,24 @@ def _rohwert_passt(wert: str, kat: str) -> bool:
         lang = [x.strip(".") for x in woerter if len(x) >= 3]
         return bool(lang) and not all(_roh_feldwort(x) for x in lang)
     return True
+
+
+def _roh_ort_passt(w: str, woerter: list, ziffern: int) -> bool:
+    """Grobe Gestalt eines Orts (PLZ, Wohnort, Geburtsort) als Rohwert: eine Postleitzahl oder ein bis drei Wörter mit
+    großem Anfang – Ortszusätze ("am Main", "v. d. Höhe") dazwischen –, ohne Funktionswort ("Werkstatt Ihrer Wahl",
+    "bitte angeben"), ohne kleingeschriebenen Anfang ("der Besichtigung", "unbekannt verzogen"), ohne Feldnummer und
+    ohne Ereignis- oder Betriebsort ("Parkplatz Rewe-Markt")."""
+    if re.search(r"(?<!\d)\d{4,5}(?!\d)", w):
+        return ziffern <= 6                           # PLZ (mit Ort): "90402 Nürnberg", "D-90402"
+    if ziffern:
+        return False
+    # Ortszusätze zuerst ausnehmen: "am", "an", "im" sind auch Funktionswörter ("Frankfurt am Main" ist ein Ort)
+    kern = [x for x in woerter if x.rstrip(".").casefold() not in _ROH_ORTSZUSATZ]
+    if any(x.casefold() in _ROH_FUNKTIONSWORT or x.casefold() in _ROH_KEIN_WOHNORT for x in kern):
+        return False
+    if not kern or not woerter[0][0].isupper() or any(not x[0].isupper() for x in kern) or len(kern) > 3:
+        return False
+    return not all(_roh_feldwort(x) for x in kern if len(x) >= 3)
 
 
 def _roh_feldwort(wort: str) -> bool:
@@ -1707,7 +1749,10 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
     Eintrag bis zum nächsten Feldnamen bzw. Zeilenende als Wert (Kategorie nach dem Feldnamen); steht er allein in
     seiner Zeile, der Eintrag der Zeile darunter in derselben Spalte. Nur auf OCR-Zeilen: auf der Textebene sind
     die Wertformen verlässlich. Ausgenommen sind Füllwerte ("wie oben", "entfällt", "nein"), Werte ohne die grobe
-    Gestalt ihrer Kategorie (_rohwert_passt), Ereignisorte ("Schadenort", "Unfallort") und Unterschriftsfelder."""
+    Gestalt ihrer Kategorie (_rohwert_passt: ein Ort ist eine PLZ oder bis zu drei großgeschriebene Wörter ohne
+    Funktionswort und ohne Feldnummer – nicht "Werkstatt Ihrer Wahl", "3. Verletzte", "bitte angeben"), Ereignisorte
+    in jeder Wortstellung ("Schadenort", "Ort des Schadens", "Ort der Besichtigung"), Anschrift-Felder, deren
+    gedruckter Feldname über das Etikett hinausgeht ("Ort| der Besichtigung:"), und Unterschriftsfelder."""
     zelle = lg.zelle_bei(et.start)
     if zelle is None or not lg.zeilen_ocr.get(zelle.zeile) or not _etikett_am_zellanfang(seite, lg, et):
         return []
@@ -1719,6 +1764,15 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
     if zeile is None:
         return []
     starts = sorted(n.start for n in alle if n.arten)
+    # Der gedruckte Feldname reicht bis zum Doppelpunkt: "Ort der Besichtigung:", "Stelle des Unfalls:" – ein
+    # Ereignisort ist keine Anschrift, und deckt das Etikett ("Ort") den Feldnamen nicht ganz ab, ist der Rest
+    # ("der Besichtigung") kein Wert (Anschrift-Kategorien; "Name des Kindes:" liest weiter den Namen)
+    fm = _FELDNAME_REST_RE.match(text, et.ende, zelle.ende)
+    if fm is not None:
+        if _ROH_KEIN_FELD_RE.search(text[et.start:fm.end()]):
+            return []
+        if kat in ("plzort", "strasse") and not any(fm.start(1) <= s0 < fm.end(1) for s0 in starts):
+            return []
 
     def bereich(s: int, ende: int):
         h = _HINWEIS_KLAMMER_RE.match(text, s, ende)       # "(TTMMJJJJ)", "(bei Selbstständigen)"
@@ -1880,26 +1934,95 @@ def gremium_folgezeilen(seite, lg: Lage, et: Etikett, letzte_ende: int, alle_sta
     return aus
 
 
+_KOPF_TOKEN_RE = re.compile(r"[^\s:;,/()\-–+&#]+")
+
+
+def _kopf_kuerzel(token: str) -> bool:
+    """Spaltenkürzel ohne Etikett: mit Punkt oder Unterstrich ("VORN.", "GEB.-DAT.", "TEL_PRIVAT") oder höchstens
+    zwei Versalien ("VU", "HF", "ZW"). Ein Versalwort mit drei oder vier Buchstaben ohne Punkt ("KOCH", "UWE",
+    "BONN", "PRÜM") ist ein WERT – in einer Formularzeile in Versalien sieht es aus wie ein Kürzel."""
+    return bool(ABKUERZUNG_RE.fullmatch(token)) and ("." in token or "_" in token or len(token) <= 2)
+
+
+def _kopf_wort(token: str) -> bool:
+    """Rest einer Kopfzelle neben den Etiketten: Kürzel oder für sich ein Feldname ("VN-NAME": "NAME")."""
+    kern = token.strip("._")
+    if _kopf_kuerzel(token.lstrip("._")):
+        return True
+    k = kern.casefold()
+    return k in NEUTRALE_KOEPFE or k in _LAUFEND or etikett_fuer_text(kern, mit_vertragsdaten=True) is not None
+
+
+def _kopfzelle(text: str, z: Zelle, ets: list) -> str | None:
+    """Art einer Zelle für die Kopfzeilen-Regel: "etikett" (ganz aus Feldnamen, ggf. mit ":"/"." und Kürzeln –
+    "NAME", "VORNAME:", "Name, Vorname", "VN_PLZ"), "kuerzel" bzw. "kurz" (ganz aus Spaltenkürzeln; "kurz": höchstens
+    zwei Versalien ohne Punkt, "VU"), "feldwert" (Feldname, Doppelpunkt und Wert: "NAME: KOCH") oder None (anderer
+    Inhalt, z. B. ein Wert)."""
+    inhalt = list(text[z.start:z.ende])
+    for et in ets:
+        for i in range(max(et.start, z.start), min(et.ende, z.ende)):
+            inhalt[i - z.start] = " "
+    rest = "".join(inhalt)
+    if ets and ":" in rest and any(c.isalnum() for c in rest[rest.index(":"):]):
+        return "feldwert"
+    tokens = [t for t in _KOPF_TOKEN_RE.findall(rest) if t.strip("._")]
+    if not tokens:
+        return "etikett" if ets else None
+    if not all(_kopf_wort(t) for t in tokens):
+        return None
+    if ets:
+        return "etikett"
+    if len(tokens) == 1 and "." not in tokens[0] and "_" not in tokens[0] and len(tokens[0]) <= 2:
+        return "kurz"
+    return "kuerzel"
+
+
+def _wertzeile_darunter(text: str, lg: Lage, zelle: Zelle, zellen: list, alle: list) -> bool:
+    """Steht unter einer Kopfzeile eine Wertzeile (mindestens zwei Zellen unter Kopfzellen, davon mindestens eine
+    mit Wert statt Feldname)? Eine zweite Kopfzeile darunter (zweizeiliger Kopf) wird übersprungen."""
+    h = max(max((z.hoehe for z in zellen), default=0.0), 4.0)
+    for zid in lg.zeilen_darunter(zelle.zeile, 2.6 * h)[:2]:
+        unter = [c for c in lg.zellen_je_zeile.get(zid, ()) if any(ueberlappung(c.x0, c.x1, k.x0, k.x1) > 0
+                                                                     for k in zellen)]
+        if len(unter) < 2:
+            continue
+        arten = [_kopfzelle(text, c, [et for et in alle if c.start <= et.start < c.ende]) for c in unter]
+        if any(a is None or a == "feldwert" for a in arten):
+            return True
+    return False
+
+
 def kopfzeile(seite, lg: Lage, pos: int, alle: list, cache: dict | None = None) -> bool:
     """Steht `pos` in einer Kopfzeile (Spaltenköpfe einer Liste: mindestens drei Zellen, keine Ziffern, fast jede
-    Zelle ein Etikett oder Spaltenkürzel – "NAME ⇥⇥ VORN. ⇥⇥ GEBDAT ⇥⇥ PLZ")? Rechts neben einem Kopf steht der
-    nächste Kopf, kein Wert."""
+    Zelle ganz ein Etikett oder Spaltenkürzel – "NAME ⇥⇥ VORN. ⇥⇥ GEBDAT ⇥⇥ PLZ" – und darunter eine Wertzeile)?
+    Rechts neben einem Kopf steht der nächste Kopf, kein Wert.
+
+    Eine ausgefüllte Formularzeile ist nie Kopfzeile, auch in Versalien: eine Zelle "NAME: KOCH" (Feldname mit Wert)
+    schließt die Regel aus, ein Versalwort ohne Punkt ("KOCH", "UWE", "BONN") ist kein Kürzel, und ein Kürzel direkt
+    rechts neben einem Personen-/Anschrift-Feldnamen ("NAME ⇥⇥ LI ⇥⇥ VORNAME ⇥⇥ YU") ist dessen Wert."""
     zelle = lg.zelle_bei(pos)
     if zelle is None:
         return False
     if cache is not None and zelle.zeile in cache:
         return cache[zelle.zeile]
-    zellen = lg.zellen_je_zeile.get(zelle.zeile, ())
+    zellen = sorted(lg.zellen_je_zeile.get(zelle.zeile, ()), key=lambda z: z.start)
     text = seite.text
     ergebnis = False
     if len(zellen) >= 3 and not any(c.isdigit() or c == "@" for z in zellen for c in text[z.start:z.ende]):
-        starts = sorted(et.start for et in alle)
         mit = 0
+        feldwert = False
+        vorher_pii = False
         for z in zellen:
-            i = bisect_left(starts, z.start)
-            if (i < len(starts) and starts[i] < z.ende) or ABKUERZUNG_RE.fullmatch(text[z.start:z.ende].strip()):
+            ets = [et for et in alle if z.start <= et.start < z.ende]
+            art = _kopfzelle(text, z, ets)
+            if art == "feldwert":
+                feldwert = True
+                break
+            if art in ("etikett", "kuerzel") or (art == "kurz" and not vorher_pii):
                 mit += 1
-        ergebnis = mit >= max(3, 0.75 * len(zellen))
+            vorher_pii = art == "etikett" and any(et.arten & PII_ARTEN for et in ets)
+        ergebnis = (not feldwert and mit >= max(3, 0.75 * len(zellen))
+                    and _wertzeile_darunter(text, lg, zelle, zellen, alle))
     if cache is not None:
         cache[zelle.zeile] = ergebnis
     return ergebnis

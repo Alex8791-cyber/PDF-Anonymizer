@@ -34,6 +34,15 @@ und Blockschriftformulare mit Kammfeldern), jeder mindestens sechsmal. Alles dar
 erweitert=True erzeugt der Generator Byte für Byte dieselben Dateien wie Generator 1.1 (Seeds 1 und 7, CI-Korpus;
 geprüft in tests/test_generator_erweitert.py). Die Wahrheit erweiterter Dokumente nennt "generator": "1.2" und
 "mischung": "erweitert". Aufruf: python -m werkzeuge.benchmark.generator --erweitert --seed 3 --anzahl 80 --ziel <ordner>
+
+Generator 1.3 (nur erweiterte Verteilung und Gegenproben; Plan, Typen und Scans der erweiterten Verteilung wie 1.2,
+die Korpora s3x/s9x stammen aus 1.2): mindestens zwei vorläufige Personalausweise (TD2) je erweitertem Korpus
+(Plan-Variante "td2"), Excel-Listen mit 8 bis 14 statt 22 bis 40 Zeilen, Kopfzeilen realer Faxgeräte und
+Versicherer-Marken als Absender (eigener Strom "faxkopf/<kennung>"), Straße und Hausnummer im Kammfeld als ein
+Eintrag, Ausstellungsdaten und Klassen des Führerscheins als zu behaltende Einträge, unsichtbare Textebene
+durchsuchbarer Scans mit Wortgrenzen (Wörter in der Breite des Originals, Kammfeld-Zeichen als Wort). Dazu der
+Gegenproben-Strom (gegenproben=True bzw. --gegenproben, dokumenttypen_gegenproben.py, Strom "g<seed>"): Unterlagen,
+auf die eine zu weite Erkennungsregel anspräche, mit vollständiger Wahrheit.
 """
 
 import json
@@ -56,7 +65,7 @@ from .dokumenttypen import TYPEN, typ_antrag_formular
 from .normalisierung import Gefaltet
 
 GENERATOR_VERSION = "1.1"
-GENERATOR_VERSION_ERWEITERT = "1.2"     # nur Dokumente der erweiterten Verteilung
+GENERATOR_VERSION_ERWEITERT = "1.3"     # nur Dokumente der erweiterten Verteilung (s3x/s9x: 1.2)
 SONDERZEICHEN_QUOTE = 0.18      # Anteil der Textdokumente mit Merkmal "sonderzeichen_windows"
 
 # ----------------------------------------------------------------------
@@ -90,6 +99,7 @@ class Plan:
     scan: str | None = None            # Schlüssel aus SCAN_VARIANTEN oder "gemischt" (nur letzte Seite)
     neben: tuple = ()
     mischung: str = "standard"         # "erweitert": eigene Zufallsströme, neue Typen (Generator 1.2)
+    variante: str | None = None        # erzwungene Variante eines Typs ("td2": vorläufiger Personalausweis)
 
     def name(self, hauptname: str | None = None) -> str:
         basis = f"{self.nr:03d}_{self.typ}"
@@ -122,8 +132,12 @@ _TYP_GEWICHTE = {"brief_form_a": 10, "brief_form_b": 8, "versicherungsschein": 8
                  "email_ausdruck": 6, "bestandsliste": 4}
 
 
-def plane_korpus(anzahl: int, seed: int, erweitert: bool = False) -> list:
-    """Deterministischer Plan für `anzahl` Dokumente (erweitert=True: erweiterte Verteilung, eigener Strom)."""
+def plane_korpus(anzahl: int, seed: int, erweitert: bool = False, gegenproben: bool = False) -> list:
+    """Deterministischer Plan für `anzahl` Dokumente (erweitert=True: erweiterte Verteilung, gegenproben=True:
+    Gegenproben-Strom – je eigener Zufallsstrom)."""
+    if gegenproben:
+        from .dokumenttypen_gegenproben import plane_gegenproben
+        return plane_gegenproben(anzahl, seed)
     if erweitert:
         from .dokumenttypen_erweitert import plane_erweitert
         typen = list(_TYP_GEWICHTE)
@@ -318,6 +332,7 @@ def _scannen(dok: Dok, plan: Plan) -> list:
         eintraege = [e for e in dok.satz.eintraege if e["seite"] == i + 1 and e["kanal"] in ("text", "scan", "formular")]
         if i in scan_seiten:
             p = _scan_parameter(variante, basis_rng, i)
+            p.textebene_einpassen = plan.mischung != "standard"      # Generator 1.3, Standard byte-gleich
             SC.seite_scannen(alt[i], neu, p, eintraege, schrift_unsichtbar=dok.stil.normal)
             merkmale.update(p.beschreibung())
         else:
@@ -349,7 +364,7 @@ def _merkmale_aus_eintraegen(eintraege: list) -> set:
 
 def _strom(plan: Plan, seed: int) -> str:
     """Kennung des Zufallsstroms: "<seed>" (Standardverteilung, wie Generator 1.0/1.1) bzw. "x<seed>" (erweitert)."""
-    return f"x{seed}" if plan.mischung == "erweitert" else f"{seed}"
+    return {"erweitert": f"x{seed}", "gegenproben": f"g{seed}"}.get(plan.mischung, f"{seed}")
 
 
 def sonderzeichen_gewaehlt(plan: Plan, seed: int) -> bool:
@@ -369,10 +384,13 @@ def erzeuge_dokument(plan: Plan, seed: int, ordner: Path, max_versuche: int = 40
     if plan.mischung == "erweitert":
         from . import dokumenttypen_erweitert as neu
         neue_typen = neu.NEUE_TYPEN
+    elif plan.mischung == "gegenproben":
+        from . import dokumenttypen_gegenproben as neu
+        neue_typen = neu.TYPEN_GEGENPROBEN
     for versuch in range(max_versuche):
         rng = random.Random(f"{strom}/{plan.nr}/{versuch}")
         if plan.typ in neue_typen:
-            dok = neu.dok_fuer(plan.typ, rng, f"{strom}-{plan.nr:03d}", plan.scan)
+            dok = neu.dok_fuer(plan.typ, rng, f"{strom}-{plan.nr:03d}", plan.scan, plan.variante)
         else:
             dok = Dok(rng, f"{strom}-{plan.nr:03d}", querformat=(plan.typ == "bestandsliste"))
         if sonderzeichen_gewaehlt(plan, seed):
@@ -422,9 +440,9 @@ def erzeuge_dokument(plan: Plan, seed: int, ordner: Path, max_versuche: int = 40
                              "versuch": versuch, "schrift": dok.stil.familie.name,
                              "schrift_datei": Path(dok.stil.normal.datei).name if dok.stil.normal.datei else None,
                              "groesse": dok.stil.groesse, "zeilenabstand": dok.stil.zeilenabstand}
-    if plan.mischung == "erweitert":
+    if plan.mischung in ("erweitert", "gegenproben"):
         wahrheit["erzeugung"]["generator"] = GENERATOR_VERSION_ERWEITERT
-        wahrheit["erzeugung"]["mischung"] = "erweitert"
+        wahrheit["erzeugung"]["mischung"] = plan.mischung
     if rest_kollisionen:
         wahrheit["erzeugung"]["kollisionen"] = rest_kollisionen
     (ordner / (Path(name).stem + ".wahrheit.json")).write_text(
@@ -432,10 +450,12 @@ def erzeuge_dokument(plan: Plan, seed: int, ordner: Path, max_versuche: int = 40
     return wahrheit
 
 
-def erzeuge_korpus(ordner: Path, anzahl: int, seed: int = 1, melde=None, erweitert: bool = False) -> list:
-    """Erzeugt `anzahl` Dokumente in `ordner` und liefert die Wahrheiten (erweitert=True: erweiterte Verteilung)."""
+def erzeuge_korpus(ordner: Path, anzahl: int, seed: int = 1, melde=None, erweitert: bool = False,
+                   gegenproben: bool = False) -> list:
+    """Erzeugt `anzahl` Dokumente in `ordner` und liefert die Wahrheiten (erweitert=True: erweiterte Verteilung,
+    gegenproben=True: Gegenproben-Strom)."""
     ergebnisse = []
-    for plan in plane_korpus(anzahl, seed, erweitert=erweitert):
+    for plan in plane_korpus(anzahl, seed, erweitert=erweitert, gegenproben=gegenproben):
         w = erzeuge_dokument(plan, seed, ordner)
         ergebnisse.append(w)
         if melde:
@@ -451,9 +471,12 @@ def main(argv=None) -> int:
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--anzahl", type=int, default=60)
     parser.add_argument("--erweitert", action="store_true", help="erweiterte Verteilung (neue Dokumenttypen)")
+    parser.add_argument("--gegenproben", action="store_true",
+                        help="Gegenproben-Strom (Unterlagen, auf die eine zu weite Regel anspräche)")
     parser.add_argument("--ziel", type=Path, required=True)
     args = parser.parse_args(argv)
-    erzeuge_korpus(args.ziel, args.anzahl, args.seed, melde=print, erweitert=args.erweitert)
+    erzeuge_korpus(args.ziel, args.anzahl, args.seed, melde=print, erweitert=args.erweitert,
+                   gegenproben=args.gegenproben)
     return 0
 
 
