@@ -214,7 +214,8 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
         + grenzen_kopf + grenzen_umfang +
         "  • Gesichter und Fotos: Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt (Fund „Lichtbild“), "
         "aber nicht immer gefunden; andere Gesichter bleiben stehen – außer in der Schutzstufe „Maximal“, die alle "
-        "Bilder und Fotos abdeckt\n"
+        "Bilder und Fotos abdeckt (Text über einem Bild bleibt lesbar; ein Bild über mindestens die halbe Seite "
+        "bleibt wie ein Scan stehen, abgedeckt werden die Fotos darin)\n"
         "  • Unterschriften, Stempel, Handschrift\n"
         "  • Text in Bildern, Fotos und Logos wird per OCR nur unsicher gelesen (Handyfotos, geringe Auflösung)\n"
         "  • Freitext, aus dem eine Person erkennbar bleibt\n"
