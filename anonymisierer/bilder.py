@@ -707,7 +707,8 @@ def alle_bilder(doc) -> list:
 def gezeichnet_auf_seite(doc, seite) -> tuple:
     """(gezeichnet, suche_vollstaendig, inhalt_lesbar): die Bilder, die die Seite zeichnet – was ihr Inhalt mit „Do“
     aufruft und was sie indirekt erreicht (Kachelmuster, Type3-Schriften, Grafikzustände, Anmerkungen), mit Masken.
-    Ist der Inhalt unlesbar, zählt alles, was die Seite erreicht; ist die Suche abgebrochen, ist auch das unvollständig."""
+    Ist der Inhalt unlesbar, zählt alles, was die Seite erreicht; ist die Suche abgebrochen, ist auch das
+    unvollständig."""
     erreichbar, vollstaendig = _erreichbar(doc, seite.xref)
     if not erreichbar:
         return set(), vollstaendig, True

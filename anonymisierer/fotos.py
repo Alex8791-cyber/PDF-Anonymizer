@@ -658,7 +658,8 @@ def ausweis_kontext(text: str) -> int:
 
 def seiten_kontext(m) -> int:
     """Ausweis-Kontext einer Modellseite: aus dem Bildtext (OCR) voll; aus der Textebene höchstens SCHWACH – eine
-    Überschrift „Führerschein“ in einem digitalen Formular ist keine Ausweiskopie –, außer einer maschinenlesbaren Zone."""
+    Überschrift „Führerschein“ in einem digitalen Formular ist keine Ausweiskopie –, außer einer maschinenlesbaren
+    Zone."""
     bild = ausweis_kontext(_bildtext(m))
     if bild >= KONTEXT_STARK:
         return bild
@@ -686,8 +687,8 @@ def passbildgross(bereich: Fotobereich) -> bool:
 
 
 def auf_karte(bereich: Fotobereich) -> bool:
-    """Liegt das Foto auf einer ausweisartigen Karte (Befund 2 der Runde 3a)? Die Karte (heller, gleichmäßiger Grund) hat
-    das Seitenverhältnis einer ID-1- bzw. ID-3-Karte und eine plausible Größe (auch verkleinert oder vergrößert
+    """Liegt das Foto auf einer ausweisartigen Karte (Befund 2 der Runde 3a)? Die Karte (heller, gleichmäßiger Grund)
+    hat das Seitenverhältnis einer ID-1- bzw. ID-3-Karte und eine plausible Größe (auch verkleinert oder vergrößert
     kopiert), das Foto nimmt höchstens KARTE_FOTO_MAX_ANTEIL davon ein. Die Lage des Fotos zählt nicht: auf einer quer
     aufgelegten Karte ist das Lichtbild querformatig, und die Erkennung trifft nicht immer das Passbildformat
     (Höhe/Breite 1,07)."""

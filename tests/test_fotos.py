@@ -399,7 +399,8 @@ def test_hoch_abgewaehltes_lichtbild_braucht_freigabe(tmp_path):
     assert not _ohne_platzhalter_gleichmaessig(s["ausgabe"], foto)
 
 
-ANSCHREIBEN = ["Erika Musterfrau · Lindenallee 7 · 50667 Köln", "", "Muster-Makler GmbH", "Marktplatz 1", "50667 Köln", "",
+ANSCHREIBEN = ["Erika Musterfrau · Lindenallee 7 · 50667 Köln", "", "Muster-Makler GmbH", "Marktplatz 1",
+               "50667 Köln", "",
                "Köln, 03.03.2025", "", "Sehr geehrte Damen und Herren,",
                "wie telefonisch besprochen sende ich Ihnen die gewünschte Kopie für meinen",
                "Antrag auf die neue Kfz-Versicherung. Bitte melden Sie sich bei Rückfragen.",
@@ -886,7 +887,8 @@ def test_maximal_hintergrundbild_hinter_text_text_bleibt(tmp_path, hoehe_anteil)
     doc.close()
     with fitz.open(pdf) as d:
         woerter_vorher = [w[4] for w in d[0].get_text("words")]
-        ueber_bild = [w[4] for w in d[0].get_text("words") if r.contains(fitz.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2))]
+        ueber_bild = [w[4] for w in d[0].get_text("words")
+                      if r.contains(fitz.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2))]
     assert len(ueber_bild) >= 10                          # Kontrolle des Aufbaus: Text liegt über dem Bild
     e, s = _analyse_und_schwaerzung(pdf, Attrappe(), profil="maximal")
     (bildfund,) = [f for f in e["funde"] if f["kategorie"] == fotos.KAT_BILD]

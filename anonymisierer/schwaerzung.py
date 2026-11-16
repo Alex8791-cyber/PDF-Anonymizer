@@ -2021,8 +2021,8 @@ def _bilder_nachkontrolle(lauf: _Lauf, dok, ergebnis: dict, profil: str) -> None
         lauf.melden("hinweis", "BILDER_ABGEDECKT", "Abgedeckt: " + ", ".join(teile) + ".")
     hinter_text = getattr(lauf, "bilder_hinter_text", 0)
     if hinter_text:
-        lauf.melden("hinweis", "BILDER_ABGEDECKT", f"Davon {hinter_text} Bild(er) hinter Text (Hintergrund, Wasserzeichen) "
-                                                   f"entfernt – der Text darüber bleibt lesbar.")
+        lauf.melden("hinweis", "BILDER_ABGEDECKT", f"Davon {hinter_text} Bild(er) hinter Text (Hintergrund, "
+                                                   f"Wasserzeichen) entfernt – der Text darüber bleibt lesbar.")
     if geleert:
         lauf.melden("hinweis", "BILDER_ABGEDECKT", f"{geleert} weitere(s) Bild(er) geleert, die als Füllmuster oder in "
                                                    f"Schriftzeichen gezeichnet werden (Schutzstufe „Maximal“).")
@@ -2051,7 +2051,8 @@ def _bildreste_entfernen(lauf: _Lauf, ergebnis: dict) -> None:
     if ergebnis["bilder_entfernt"]:
         lauf.melden("hinweis", "BILDER_ENTFERNT",
                     f"{ergebnis['bilder_entfernt']} nicht angezeigte(s) Bild(er) aus der Datei entfernt – z. B. das "
-                    f"ungeschwärzte Original eines geschwärzten Scans, das die Datei sonst unsichtbar mitgeführt hätte.")
+                    f"ungeschwärzte Original eines geschwärzten Scans, das die Datei sonst unsichtbar mitgeführt "
+                    f"hätte.")
     if befund.get("fehler") or befund.get("rest") or befund.get("unsicher"):
         seiten = list(befund.get("unsicher") or [])
         _bildreste_grund(lauf, seiten[0] if len(seiten) == 1 and not befund.get("rest") else None,
@@ -2065,8 +2066,8 @@ def _bildreste_entfernen(lauf: _Lauf, ergebnis: dict) -> None:
 
 def _bildreste_nachpruefen(lauf: _Lauf, ausgabe: Path) -> None:
     """Netz nach dem Speichern (Befund 1 der Runde 3a): Steckt in der GESCHRIEBENEN Ausgabe noch ein Bild, das keine
-    Seite zeichnet, wird es geleert und die Datei neu geschrieben – und weil das nicht vorkommen sollte, wird die Ausgabe
-    _PRUEFEN. Lässt sich die Datei nicht prüfen, ebenso."""
+    Seite zeichnet, wird es geleert und die Datei neu geschrieben – und weil das nicht vorkommen sollte, wird die
+    Ausgabe _PRUEFEN. Lässt sich die Datei nicht prüfen, ebenso."""
     if _bilder is None or not hasattr(_bilder, "bildreste_in_datei_entfernen"):
         return
     try:
@@ -2081,8 +2082,8 @@ def _bildreste_nachpruefen(lauf: _Lauf, ausgabe: Path) -> None:
     if befund.get("fehler") or befund.get("rest") or befund.get("unsicher"):
         _bildreste_grund(lauf, None, "nicht angezeigte Bilder nicht sicher entfernt")
         lauf.melden("warnung", "BILDER_UNGEPRUEFT",
-                    "Die gespeicherte Ausgabe ließ sich nicht vollständig auf nicht angezeigte Bilder prüfen – sie wird "
-                    "als _PRUEFEN abgelegt." + (f" ({befund['fehler']})" if befund.get("fehler") else ""))
+                    "Die gespeicherte Ausgabe ließ sich nicht vollständig auf nicht angezeigte Bilder prüfen – sie "
+                    "wird als _PRUEFEN abgelegt." + (f" ({befund['fehler']})" if befund.get("fehler") else ""))
 
 
 # ----------------------------------------------------------------------
