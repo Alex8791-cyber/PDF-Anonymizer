@@ -21,7 +21,7 @@ from pathlib import Path
 import pymupdf as fitz
 import pytest
 
-from anonymisierer import analyse, nebenkanaele, schwaerzung, vorschau
+from anonymisierer import analyse, dateien, nebenkanaele, schwaerzung, vorschau
 from anonymisierer import ocr as ocr_modul
 from anonymisierer.analyse import analysiere_pdf, analysiere_text
 from anonymisierer.muster import KATEGORIEN
@@ -651,13 +651,16 @@ def test_titel_treffer_eines_detektors_wird_keine_person():
 # ----------------------------------------------------------------------
 def test_zuordnung_standard_unveraendert_im_ausgabeordner(tmp_path):
     """Name historisch: bis Runde 2 war M-25 ausgeschaltet und die Zuordnung lag im Ausgabeordner. Seit Runde 3 liegt
-    sie standardmäßig NEBEN dem Ausgabeordner (auch neben einem eigenen Zielordner); nur ohne Ordner darüber (eine
-    Laufwerkswurzel) bleibt sie darin."""
+    sie standardmäßig NEBEN dem Ausgabeordner (auch neben einem eigenen Zielordner). Ohne Ordner darüber (Laufwerks-
+    oder Freigabe-Wurzel) lag sie bis Runde 3 darin – im Ordner, der hochgeladen wird (Befund Runde 3a); jetzt im
+    Programmordner, nie in der Wurzel selbst."""
     assert schwaerzung.ZUORDNUNG_NEBEN_AUSGABEORDNER is True
     assert schwaerzung.zuordnung_pfad(tmp_path / "anonymisiert") == tmp_path / "_zuordnung_anonymisiert.txt"
     assert schwaerzung.zuordnung_pfad(tmp_path / "KI-Upload") == tmp_path / "_zuordnung_KI-Upload.txt"
     wurzel = Path(tmp_path.anchor)
-    assert schwaerzung.zuordnung_pfad(wurzel) == wurzel / "_zuordnung.txt"
+    datei = schwaerzung.zuordnung_pfad(wurzel)
+    assert datei != wurzel / "_zuordnung.txt" and datei.parent == dateien.zuordnungen_ordner()
+    assert not schwaerzung.zuordnung_im_ausgabeordner(datei, wurzel)
 
 
 def test_zuordnung_neben_dem_ausgabeordner(tmp_path, monkeypatch):

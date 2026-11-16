@@ -229,15 +229,21 @@ def test_leckrelevante_meldungen_der_analyse_wirken_ueber_das_modell(tmp_path, m
 
 
 def test_leere_datei_ohne_tinte_ist_trotz_kein_text_fertig(tmp_path):
-    """KEIN_TEXT ist leckrelevant – außer die Datei hat gar keine Tinte (leere Seiten): dort steht nichts."""
+    """KEIN_TEXT ist leckrelevant – ohne Ausnahme. Eine Datei, auf deren Seiten gar nichts gezeichnet ist, meldet die
+    Analyse seit Runde 3a nicht mehr als KEIN_TEXT, sondern mit dem Hinweis LEERE_SEITEN (dort steht nachweislich
+    nichts; sonst kündigte die Oberfläche ein „_PRUEFEN“ an, das nicht kam). Die Ausgabe heißt „fertig“ – mit und ohne
+    Modell der Analyse."""
     pdf = tmp_path / "leer.pdf"
     doc = fitz.open()
     doc.new_page()
     doc.save(pdf)
     e = analysiere_pdf(pdf, STANDARD, [], [])
-    assert "KEIN_TEXT" in codes(e)
-    s = schwaerze_pdf(pdf, e["funde"], ocr=Attrappe(), modell=e["modell"])
-    assert s["status"] == "fertig", s["pruefen_gruende"]
+    assert "LEERE_SEITEN" in codes(e) and "KEIN_TEXT" not in codes(e) and not e["warnungen"]
+    assert not e["modell"].leckrelevant
+    for modell in (e["modell"], None):
+        s = schwaerze_pdf(pdf, e["funde"], ocr=Attrappe(), modell=modell,
+                          ziel_ordner=tmp_path / ("mit" if modell else "ohne"))
+        assert s["status"] == "fertig" and s["pruefen_gruende"] == [], s["pruefen_gruende"]
 
 
 def test_fehlende_restrisiko_pruefung_ist_nie_still(tmp_path, monkeypatch):

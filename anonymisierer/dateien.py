@@ -22,6 +22,7 @@ from pathlib import Path
 PROGRAMM_NAME = "PDF-Anonymisierer"
 EINSTELLUNGEN_DATEI = "einstellungen.json"
 KUNDENLISTE_DATEI = "kundenliste.dat"
+ZUORDNUNGEN_ORDNER = "Zuordnungen"     # Zuordnungsdateien für Zielordner ohne Ordner darüber (Laufwerkswurzel)
 SPERR_DATEI = "instanz.lock"
 FEHLERLOG_DATEI = "fehler.log"
 FEHLERLOG_MAX_BYTES = 200_000          # danach wird nach fehler.log.1 rotiert
@@ -782,6 +783,14 @@ def einstellungen_pfad() -> Path:
 def kundenliste_pfad() -> Path:
     """Speicherort der Kundenliste (nur gesalzene Prüfwerte, kein Klartext) neben den Einstellungen."""
     return einstellungen_pfad().parent / KUNDENLISTE_DATEI
+
+
+def zuordnungen_ordner() -> Path:
+    """%APPDATA%\\PDF-Anonymisierer\\Zuordnungen bzw. ~/.config/PDF-Anonymisierer/Zuordnungen (neben den
+    Einstellungen, wie die Kundenliste): hier liegt die Zuordnungsdatei, wenn der Zielordner eine Laufwerks- oder
+    Freigabe-Wurzel ist (E:\\ auf einem USB-Stick, \\\\server\\freigabe\\) – neben ihm ist kein Platz, und in ihm würde
+    sie mit hochgeladen (M-25, Befund Runde 3)."""
+    return einstellungen_pfad().parent / ZUORDNUNGEN_ORDNER
 
 
 def einstellungen_laden(pfad: Path | None = None) -> dict:

@@ -45,12 +45,15 @@ Ablauf:
   „fehler“ und jede leckrelevante oder unbekannte Warnung macht die Ausgabe _PRUEFEN (oder verhindert sie), ein
   Hinweis nie. Die leckrelevanten Meldungen der Analyse stehen am Modell (dok.leckrelevant, R-07), alle Meldungen
   der Analyse in dok.meldungen_analyse.
+  Ohne jeden Text: KEIN_TEXT (leckrelevant) – auch für einen hellen Scan; nur eine Datei, auf deren Seiten gar nichts
+  gezeichnet ist, meldet stattdessen den Hinweis LEERE_SEITEN (nur_leere_seiten). Ob eine Scan-Seite, auf der die OCR
+  nichts gelesen hat, wirklich leer ist, misst seite_nachweislich_leer (sieht auch hell gedruckten Text).
 
 Öffentlich: analysiere_pdf, analysiere_text, weitergabe_anwenden, LaufWissen, hinweis_kategorien,
 gesundheit_nur_vermutet, ANZEIGE_BEGRIFF, PLATZHALTER_BEGRIFF, HINWEIS_GESUNDHEIT, HINWEIS_GESUNDHEIT_VERMUTET,
 keine_pdf_meldung, datei_repariert, reparatur_erzwingen, bild_schaeden, scan_kaum_lesbar, tintenanteil,
-KAUM_LESBAR_WOERTER, nebenkanaele_pruefen, NEBENKANAELE_LEER, HINWEIS_FIRMENANSCHRIFT, HINWEIS_ABSENDER,
-ANZEIGE_TITEL.
+seite_nachweislich_leer, nur_leere_seiten, KAUM_LESBAR_WOERTER, nebenkanaele_pruefen, NEBENKANAELE_LEER,
+HINWEIS_FIRMENANSCHRIFT, HINWEIS_ABSENDER, ANZEIGE_TITEL.
 """
 
 from __future__ import annotations
@@ -1480,13 +1483,15 @@ WARNUNGS_CODES = {
     "DREHUNG": (True, "Drehung nicht verlustfrei entfernbar: Lage der Fundstellen auf dieser Seite unsicher"),
     "ERKENNUNG_FEHLER": (True, "eine Erkennungsregel ist ausgefallen: ihre Kategorie wurde nicht gesucht"),
     "KAUM_LESBAR": (True, "Scan kaum lesbar (nach scan_kaum_lesbar): dort kann nichts erkannt werden"),
-    "KEIN_TEXT": (True, "weder Textebene noch OCR lieferten Text: nichts wurde geprüft (leere Datei ohne Tinte: nein)"),
+    "KEIN_TEXT": (True, "weder Textebene noch OCR lieferten Text: nichts wurde geprüft (auch kein heller Scan ist "
+                        "ausgenommen; eine Datei nur aus leeren Seiten meldet stattdessen den Hinweis LEERE_SEITEN)"),
     "MODELL_ABWEICHUNG": (True, "die Datei liest sich beim Schwärzen anders als bei der Analyse"),
     "NAMEN_INAKTIV": (True, "Namenserkennung ohne Sprachmodell: Namen wurden nicht gesucht"),
     "NEBENKANAL_ENTFERNT": (True, "als Warnung: versteckte Teile ließen sich nur teilweise entfernen (als Hinweis "
                                   "zählt derselbe Code nur auf, was entfernt wurde)"),
     "NICHT_LOKALISIERT": (True, "ein angehakter Fund wurde nicht (ganz) gefunden: er steht vermutlich noch da"),
-    "OCR_FEHLER": (True, "OCR fehlgeschlagen, mit zu geringer Auflösung oder ohne Text trotz Tinte"),
+    "OCR_FEHLER": (True, "OCR fehlgeschlagen, mit zu geringer Auflösung oder ohne Text auf einer Seite, die nicht "
+                         "nachweislich leer ist (seite_nachweislich_leer; ein Ausfall zählt immer)"),
     "OCR_UNPLAUSIBEL": (True, "OCR-Lesung ist Buchstabensalat bzw. Zeilenlage unsicher"),
     "RESTE": (True, "die Selbstkontrolle findet Fundtext in der Ausgabe"),
     "SCHLUESSELWORT_OHNE_FUND": (True, "Etikett (IBAN, Geburtsdatum …) ohne geschwärzten Wert: OCR-Verleser?"),
@@ -1521,7 +1526,7 @@ FEHLER_CODES = {
 }
 # Codes, die das Programm nur als Hinweis meldet – sie ändern den Status nie
 HINWEIS_CODES = frozenset({
-    "ABGEBROCHEN", "AUSGABE_PRUEFEN", "BILDER_UNGEPRUEFT", "FORMULAR_EINGEBRANNT", "GESUNDHEITSDATEN",
+    "ABGEBROCHEN", "AUSGABE_PRUEFEN", "BILDER_UNGEPRUEFT", "FORMULAR_EINGEBRANNT", "GESUNDHEITSDATEN", "LEERE_SEITEN",
     "NACHBARWORT_BESCHAEDIGT", "NEBENKANAL_ENTFERNT", "NICHTS_GESCHWAERZT", "NIE_FREIGABE", "OCR_GELESEN",
     "OCR_UNPLAUSIBEL", "PLATZHALTER_GEKUERZT", "SEITE_ALS_BILD", "VEKTORGRAFIK", "WENIG_TEXT", "ZUORDNUNG"})
 # Analyse-Meldungen, deren Ursache bis in die Ausgabe wirkt (Gutachten R-07): die Schwärzung legt die Ausgabe dann
@@ -1708,12 +1713,83 @@ TINTE_SOCKEL = 0.004            # Linien, Logo, Stempel, Unterschrift einer sons
 
 
 def tintenanteil(seite) -> float:
-    """Anteil dunkler Pixel (grob gerendert): eine leere Scan-Rückseite hat fast keine, eine unlesbare Seite viele."""
+    """Anteil dunkler Pixel (grob gerendert): eine unlesbare Seite hat viele. Nur ein Maß für „viel Tinte“ – für „die
+    Seite ist leer“ übersieht es hell gedruckten Text (dafür seite_nachweislich_leer)."""
     try:
         daten = seite.get_pixmap(dpi=50, colorspace=fitz.csGRAY, alpha=False).samples
     except Exception:
         return 1.0
     return (len(daten) - len(bytes(daten).translate(None, bytes(range(180))))) / max(1, len(daten))
+
+
+# ----------------------------------------------------------------------
+# Leere Seiten (Befund Runde 3, „heller Scan“): EIN Maß dafür, dass auf einer Seite nachweislich nichts steht – für
+# Analyse, Schwärzung (und die Restrisiko-Prüfung). tintenanteil (50 dpi, nur Pixel dunkler als Grau 180) hält hell
+# gedruckten, für Menschen gut lesbaren Text für „keine Tinte“: fünf Zeilen in Grau 150 ergeben 0,0001, in Grau 160
+# 0,00002. Hier zählt jedes Pixel, das deutlich dunkler ist als das Papier (Median der Seite), sofern ein Nachbarpixel
+# (links oder darüber) es auch ist: einzelne Rauschpixel und Staubkörner zählen nicht, ein weißer Rand um ein graues
+# Foto oder eine helle Bildkante am Seitenrand auch nicht.
+# Kalibriert an synthetischen Scans (Messung im Bericht): leer bleiben Papier Grau 230–255 mit Rauschen und
+# JPEG-Artefakten, Staub, ein Falz, Scannerstreifen und Durchschlag bis 20 Grauwerte; nicht leer sind Text bis Grau 230,
+# ein einzelnes Wort in Grau 215 und eine Unterschrift in Bleistift (Grau 190). Lochung und dunkle Ränder (Pixel dunkler
+# als Grau 180) gelten wie bisher nicht als leer.
+# ----------------------------------------------------------------------
+LEER_DPI = 100                   # Auflösung der Prüfung (Text-Striche sind dort 1–3 Pixel breit)
+LEER_MAX_PIXEL = 4_000_000       # größere Seiten (Pläne, Riesenseiten) werden entsprechend gröber gerendert
+LEER_ABSTAND_PAPIER = 20         # so viel dunkler als das Papier ist ein Pixel „Tinte“ (auf Weiß: ab Grau 234)
+LEER_MAX_ANTEIL = 0.0001         # höchstens so viele Tintenpixel mit Tintennachbar hat eine leere Seite (A4: ~100)
+LEER_DUNKEL = 180                # Pixel dunkler als dieser Grauwert …
+LEER_DUNKEL_MAX = 0.0003         # … hat eine leere Seite höchstens so viele (wie bisher: Lochung, Ränder sind Tinte)
+
+
+def _bits(zahl: int) -> int:
+    zaehlen = getattr(zahl, "bit_count", None)
+    return zaehlen() if zaehlen is not None else bin(zahl).count("1")
+
+
+def seite_nachweislich_leer(seite) -> bool:
+    """Steht auf der Seite nachweislich nichts – auch kein hell gedruckter Text, kein Bleistift? Nur dann ist „die OCR
+    hat dort nichts gelesen“ kein Grund für _PRUEFEN (leere Rückseite eines Scans). Seiten ohne jeden gezeichneten
+    Inhalt sind immer leer. Im Zweifel (Fehler beim Rendern): nein."""
+    try:
+        if not seite.get_bboxlog():
+            return True
+    except Exception:
+        pass
+    try:
+        flaeche = max(1.0, float(abs(seite.rect)))
+        dpi = LEER_DPI
+        if flaeche * (dpi / 72) ** 2 > LEER_MAX_PIXEL:
+            dpi = max(10, int(72 * (LEER_MAX_PIXEL / flaeche) ** 0.5))
+        pix = seite.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY, alpha=False)
+        breite, daten = int(pix.width), bytes(pix.samples)
+    except Exception:
+        return False
+    n = len(daten)
+    if not n or breite <= 0 or n % breite:
+        return False
+    if (n - len(daten.translate(None, bytes(range(LEER_DUNKEL))))) / n > LEER_DUNKEL_MAX:
+        return False
+    probe = sorted(daten[::7])
+    papier = probe[len(probe) // 2]
+    tabelle = bytes(1 if v < papier - LEER_ABSTAND_PAPIER else 0 for v in range(256))
+    maske = int.from_bytes(daten.translate(tabelle), "big")
+    mit_nachbar = (maske & (maske >> 8)) | (maske & (maske >> (8 * breite)))
+    return _bits(mit_nachbar) <= LEER_MAX_ANTEIL * n
+
+
+def nur_leere_seiten(doc) -> bool:
+    """Ist auf KEINER Seite etwas gezeichnet (leeres Bounding-Box-Protokoll – kein Text, kein Bild, keine Linie)? Eine
+    Scan-Seite trägt immer ihr Bild: ein Scan ist in diesem Sinn nie leer. Im Zweifel (Fehler): nein."""
+    try:
+        if not len(doc):
+            return False
+        for nr in range(len(doc)):
+            if doc[nr].get_bboxlog():
+                return False
+        return True
+    except Exception:
+        return False
 
 
 def scan_kaum_lesbar(seite, woerter) -> bool:
@@ -2283,6 +2359,8 @@ def analysiere_pdf(pdf_pfad: Path, aktive: set[str], whitelist: list[str], immer
         except Abgebrochen:
             return abgebrochen()
         _kaum_lesbar_nachpruefen(doc, ergebnis["ocr_cache"], meldungen, warnungen, hinweise)
+        # Ohne jeden Text: sind alle Seiten wirklich leer (nichts gezeichnet), gibt es nichts zu prüfen (unten)
+        alle_seiten_leer = not dok.text.strip() and nur_leere_seiten(doc)
         # Netz: hat MuPDF trotzdem erst beim Lesen der Seiten repariert, gilt die Datei ebenso als repariert
         repariert = repariert or datei_repariert(doc)
         if repariert:
@@ -2304,7 +2382,14 @@ def analysiere_pdf(pdf_pfad: Path, aktive: set[str], whitelist: list[str], immer
     ergebnis["felder"] = list(dok.felder)
     ergebnis["ocr_seiten"] = sum(1 for s in dok.seiten if s.ocr_modus == "seite" and s.ocr_woerter)
     if not dok.text.strip():
-        _melde(meldungen, warnungen, "warnung", "KEIN_TEXT", "Kein Text lesbar — weder direkt noch per OCR.")
+        if alle_seiten_leer:
+            # Nichts gezeichnet – kein Text, kein Bild, keine Linie (Befund Runde 3): dort steht nachweislich nichts. Ein
+            # Hinweis statt der Warnung KEIN_TEXT – die Ausgabe darf „fertig“ heißen, und die Oberfläche kündigt kein
+            # „_PRUEFEN“ an. Ein Scan ist nie in diesem Sinn leer: er bleibt KEIN_TEXT (leckrelevant).
+            _melde(meldungen, hinweise, "hinweis", "LEERE_SEITEN",
+                   "Die Datei enthält nur leere Seiten – dort steht nichts, es gibt nichts zu schwärzen.")
+        else:
+            _melde(meldungen, warnungen, "warnung", "KEIN_TEXT", "Kein Text lesbar — weder direkt noch per OCR.")
         _leckrelevant_merken(dok, meldungen)
         return ergebnis
     ergebnis["text_lesbar"] = True

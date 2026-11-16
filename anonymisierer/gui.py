@@ -3338,10 +3338,20 @@ class AnonymisiererApp:
                       "ok" if alles_geprueft else "warnung", zaehlen=False)
             status = (f"Keine Personendaten zum Schwärzen – nur {was} angeboten (nicht angehakt). Bitte prüfen; "
                       f"zum Schwärzen anhaken.")
+        elif alles_geprueft and ohne_text:
+            # Befund Runde 3a: für eine Datei ohne lesbaren Text (heller oder unlesbarer Scan) gilt kein „nichts zu
+            # schwärzen“ – dort wurde nichts geprüft, ihre Ausgabe wird _PRUEFEN
+            self._log(f"Analyse fertig: 0 Funde in {len(ergebnisse)} Datei(en) – soweit Text lesbar war, gibt es auf "
+                      f"den Seiten nichts zu schwärzen; in {len(ohne_text)} Datei(en) war KEIN Text lesbar – dort wurde "
+                      f"nichts geprüft, ihre bereinigte Ausgabe wird „_PRUEFEN“. „Schwärzen starten“ erzeugt je Datei "
+                      f"eine bereinigte Ausgabe (ohne versteckte Teile) – nur diese weitergeben.", "warnung",
+                      zaehlen=False)
+            status = (f"Keine Funde – aber in {len(ohne_text)} Datei(en) war kein Text lesbar: dort wurde nichts "
+                      f"geprüft (Ausgabe als „_PRUEFEN“). Bitte Hinweise im Protokoll lesen.")
         elif alles_geprueft:
             self._log(f"Analyse fertig: 0 Funde in {len(ergebnisse)} Datei(en) – auf den Seiten gibt es nichts zu "
                       f"schwärzen. „Schwärzen starten“ erzeugt trotzdem je Datei eine bereinigte Ausgabe (ohne "
-                      f"versteckte Teile) – nur diese weitergeben.", "warnung" if ohne_text else "ok", zaehlen=False)
+                      f"versteckte Teile) – nur diese weitergeben.", "ok", zaehlen=False)
             status = ("Keine Funde – nichts zu schwärzen. „Schwärzen starten“ erzeugt eine bereinigte Ausgabe; bitte "
                       "Hinweise im Protokoll lesen.")
         else:
@@ -3363,19 +3373,46 @@ class AnonymisiererApp:
         bloecke: list[list[str]] = []
         art = "info" if alles_geprueft else "warning"
         nicht_block = self._nicht_geprueft_block()
+        ohne_text_block = (["ACHTUNG – in diesen Dateien war kein Text lesbar (z. B. unlesbarer Scan). "
+                            "Dort konnte NICHTS geprüft werden; ihre bereinigte Ausgabe wird als „_PRUEFEN“ "
+                            "abgelegt – bitte selbst ansehen, diese Dateien nicht ungeprüft weitergeben:"]
+                           + [f"  • {self._anzeigename(p)}" for p in ohne_text[:10]])
         if gesamt == 0 and nebenkanal:
             art = "warning"
             bloecke.append(nebenkanal_block)
-            ohne = [p for p, e in ergebnisse.items() if not e["fehler"] and p not in dict(nebenkanal)]
+            ohne = [p for p, e in ergebnisse.items() if not e["fehler"] and p not in dict(nebenkanal)
+                    and p not in ohne_text]
             if ohne:
                 bloecke.append([f"In {len(ohne)} weiteren Datei(en) wurde nichts gefunden – bitte selbst durchsehen "
                                 f"(Doppelklick = Vorschau):"] + [f"  • {self._anzeigename(p)}" for p in ohne[:10]])
+            if ohne_text:                                  # auch hier: dort wurde nichts geprüft (Befund Runde 3a)
+                bloecke.append(ohne_text_block)
         elif gesamt == 0:
-            if alles_geprueft:
+            # Dateien ohne lesbaren Text (Befund Runde 3a, heller oder unlesbarer Scan): für sie gilt kein „keine
+            # personenbezogenen Daten erkannt – nichts zu schwärzen“ – dort wurde nichts geprüft (Block ACHTUNG unten)
+            lesbar = [p for p in geprueft if p not in ohne_text]
+            if alles_geprueft and not ohne_text:
                 bloecke.append(["Es wurden keine personenbezogenen Daten erkannt – auf den Seiten gibt es nichts zu "
                                 "schwärzen. „Schwärzen starten“ erzeugt trotzdem für jede Datei eine bereinigte Ausgabe "
                                 "(ohne Dateieigenschaften, Anhänge, Formulardaten und andere versteckte Teile). "
                                 "Hochladen bitte nur diese Ausgabe, nicht das Original."])
+            elif alles_geprueft and lesbar:
+                bloecke.append([f"In den {len(lesbar)} Datei(en) mit lesbarem Text wurden keine personenbezogenen "
+                                f"Daten erkannt – dort gibt es nichts zu schwärzen. „Schwärzen starten“ erzeugt trotzdem "
+                                f"für jede Datei eine bereinigte Ausgabe (ohne Dateieigenschaften, Anhänge, Formulardaten "
+                                f"und andere versteckte Teile). Hochladen bitte nur diese Ausgabe, nicht das Original."])
+            elif alles_geprueft:
+                bloecke.append(["In keiner Datei war Text lesbar – auf personenbezogene Daten konnte NICHTS geprüft "
+                                "werden. „Schwärzen starten“ erzeugt trotzdem für jede Datei eine bereinigte Ausgabe "
+                                "(ohne Dateieigenschaften, Anhänge, Formulardaten und andere versteckte Teile), abgelegt "
+                                "als „_PRUEFEN“: erst selbst ansehen, dann in der Vorschau freigeben."])
+            elif geprueft and ohne_text:
+                bloecke.append([(f"In den {len(lesbar)} geprüften Datei(en) mit lesbarem Text wurde nichts gefunden – "
+                                 f"dort gibt es nichts zu schwärzen. " if lesbar else
+                                 "In keiner geprüften Datei war Text lesbar (siehe unten). ")
+                                + f"„Schwärzen starten“ erzeugt für die geprüften Dateien trotzdem eine bereinigte "
+                                  f"Ausgabe (ohne versteckte Teile). Das gilt NICHT für die {nicht_zahl} Datei(en), die "
+                                  f"nicht geprüft werden konnten (siehe unten) – für sie entsteht keine Ausgabe."])
             elif geprueft:
                 bloecke.append(["In den geprüften Dateien wurde nichts gefunden – dort gibt es nichts zu schwärzen. "
                                 "„Schwärzen starten“ erzeugt für sie trotzdem eine bereinigte Ausgabe (ohne versteckte "
@@ -3386,10 +3423,7 @@ class AnonymisiererApp:
                                 f"unten) – es wird keine Ausgabedatei erzeugt."])
             if ohne_text:
                 art = "warning"
-                bloecke.append(["ACHTUNG – in diesen Dateien war kein Text lesbar (z. B. unlesbarer Scan). "
-                                "Dort konnte NICHTS geprüft werden; ihre bereinigte Ausgabe wird als „_PRUEFEN“ "
-                                "abgelegt – bitte selbst ansehen, diese Dateien nicht ungeprüft weitergeben:"]
-                               + [f"  • {self._anzeigename(p)}" for p in ohne_text[:10]])
+                bloecke.append(ohne_text_block)
             elif geprueft:
                 bloecke.append(["Mögliche Gründe: Das Dokument enthält keine Namen, IBANs, Adressen usw. "
                                 "(z. B. ein Bedingungswerk), oder die Daten stehen in Bildern oder Handschrift. "
@@ -3785,15 +3819,28 @@ class AnonymisiererApp:
                 teile.append("Stellen nicht lokalisiert")
         if status == "pruefen" and pdf is not None and self._ist_foto(pdf):
             teile.append("Foto: Gesicht, Unterschrift und Handschrift selbst prüfen")
+        # ohne Schwärzung (Runde 3): bereinigte Ausgabe – so klar wie möglich sagen, was das heißt; auch wenn sie nur
+        # wegen „Freigabe vor Weitergabe“ (Standard) noch _PRUEFEN heißt (Befund Runde 3: dort stand nur „Freigabe
+        # ausstehend“, und die Maklerin sah in der Vorschau keine einzige Schwärzung ohne Erklärung)
+        ohne_schwaerzung = None
+        if not teile and not int(ergebnis.get("treffer") or 0):
+            ohne_schwaerzung = ("nichts angehakt – nur versteckte Teile entfernt"
+                                if auftrag is not None and auftrag.get("gefunden") and auftrag.get("ohne_haken")
+                                else "keine personenbezogenen Daten gefunden")
         if status == "pruefen" and not teile:
-            teile.append("Freigabe ausstehend")
-        if status == "fertig" and not teile and not int(ergebnis.get("treffer") or 0):
-            # „fertig“ ohne Schwärzung (Runde 3): bereinigte Ausgabe – so klar wie möglich sagen, was das heißt
-            if auftrag is not None and auftrag.get("gefunden") and auftrag.get("ohne_haken"):
-                teile.append("nichts angehakt – nur versteckte Teile entfernt")
-            else:
-                teile.append("keine personenbezogenen Daten gefunden")
+            teile.append(f"{ohne_schwaerzung} – Freigabe ausstehend" if ohne_schwaerzung else "Freigabe ausstehend")
+        if status == "fertig" and not teile and ohne_schwaerzung:
+            teile.append(ohne_schwaerzung)
         return " · ".join(teile)
+
+    @staticmethod
+    def _nur_freigabe_offen(ergebnis: dict, status: str) -> bool:
+        """„fertig“, oder _PRUEFEN allein wegen „Freigabe vor Weitergabe“ – kein Grund der Engine, kein Verdacht."""
+        if status == "fertig":
+            return True
+        return (status == "pruefen" and not ergebnis.get("verdacht") and not ergebnis.get("reste")
+                and not int(ergebnis.get("stellen_nicht_lokalisiert") or 0)
+                and all(str(g) == "Freigabe ausstehend" for g in ergebnis.get("pruefen_gruende") or ()))
 
     def _schwaerzen_fertig(self, auftraege, ergebnisse, abgebrochen, fehler_intern, erster_fehler=None,
                            ersetzt=None):
@@ -3837,8 +3884,11 @@ class AnonymisiererApp:
         # Dateien, die gar nicht bearbeitet werden konnten (Analyse gescheitert): keine Ausgabe (Runde 3: nur sie und
         # Dateien, an denen die Schwärzung scheiterte, stehen unter „OHNE Ausgabedatei“)
         ohne_auftrag = [(p, f) for p, f in getattr(self, "_ohne_auftrag", None) or () if p not in verarbeitet]
+        # ohne Schwärzung und ohne Grund – „fertig“ oder nur noch freizugeben (Befund Runde 3: gezählt wurden nur
+        # „fertig“-Ausgaben, mit „Freigabe vor Weitergabe“ (Standard) stand die Zeile also nie da)
         nur_bereinigt = [pdf for pdf, e in geschrieben if not int(e.get("treffer") or 0)
-                         and self.ausgaben.get(pdf, {}).get("status") == "fertig"]
+                         and self._nur_freigabe_offen(e, self.ausgaben.get(pdf, {}).get("status"))]
+        noch_freizugeben = [pdf for pdf in nur_bereinigt if self.ausgaben.get(pdf, {}).get("status") == "pruefen"]
         zuordnung_warnungen = [m.get("text", "") for _, e in geschrieben for m in e.get("meldungen") or ()
                                if isinstance(m, dict) and m.get("code") == "ZUORDNUNG" and m.get("art") == "warnung"]
         alles_gut = (not ohne_ausgabe and not nicht_verarbeitet and not pruefen and not abgebrochen
@@ -3865,10 +3915,17 @@ class AnonymisiererApp:
                 fenster.modus_wechseln("nachher")
 
         zeilen = [f"{len(geschrieben)} von {gesamt} Datei(en) geschrieben, {stellen} Stelle(n) ersetzt.",
-                  "Hochladen nur aus dem Ausgabeordner – nie das Original."]
-        if nur_bereinigt:
+                  "Hochladen nur aus dem Ausgabeordner – nie das Original" +
+                  ("; „_PRUEFEN“-Dateien erst nach der Freigabe." if pruefen else ".")]
+        if nur_bereinigt and not noch_freizugeben:
             zeilen.append(f"Davon {len(nur_bereinigt)} ohne Schwärzung („fertig“): auf den Seiten war nichts angehakt "
                           f"bzw. nichts gefunden – versteckte Teile (Metadaten, Anhänge …) sind entfernt.")
+        elif nur_bereinigt:
+            # „Freigabe vor Weitergabe“ (Standard) oder ein Foto (immer mit Freigabe): ohne Fund heißen sie _PRUEFEN
+            zeilen.append(f"Davon {len(nur_bereinigt)} ohne Schwärzung: auf den Seiten war nichts angehakt bzw. nichts "
+                          f"gefunden – versteckte Teile (Metadaten, Anhänge …) sind entfernt. "
+                          f"{len(noch_freizugeben)} davon noch freizugeben („_PRUEFEN“): in der Vorschau ansehen und "
+                          f"„Freigeben“ drücken.")
         if abgebrochen:
             zeilen.append("Der Lauf wurde abgebrochen.")
         if ohne_ausgabe or nicht_verarbeitet or ohne_auftrag:

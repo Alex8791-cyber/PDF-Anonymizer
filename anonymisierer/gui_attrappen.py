@@ -510,12 +510,24 @@ def zuordnung_dateien(ordner: Path) -> list[Path]:
     return list(dict.fromkeys(dateien_))
 
 
+def _zuordnung_lesen(pfad: Path) -> str:
+    """Inhalt einer Zuordnungsdatei in jeder Kodierung (wie schwaerzung.zuordnung_lesen): von Hand im Editor als ANSI
+    oder „Unicode“ gespeichert, darf sie Freigeben und Verwerfen nicht scheitern lassen."""
+    daten = pfad.read_bytes()
+    if daten.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return daten.decode("utf-16", errors="replace")
+    try:
+        return daten.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return daten.decode("cp1252", errors="replace")
+
+
 def _zuordnung_umschreiben(ordner: Path, alt_name: str, neu_name: str | None):
     """Zeile „<alt_name>  <-  …“ in der Zuordnungsdatei umbenennen (neu_name) oder entfernen (None) – neben dem
-    Ausgabeordner und in einer älteren _zuordnung.txt darin."""
+    Ausgabeordner und in einer älteren _zuordnung.txt darin. Gelesen wird jede Kodierung, geschrieben UTF-8."""
     for pfad in zuordnung_dateien(ordner):
         try:
-            zeilen = pfad.read_text(encoding="utf-8").splitlines(keepends=True)
+            zeilen = _zuordnung_lesen(pfad).splitlines(keepends=True)
         except OSError:
             continue
         neu = []

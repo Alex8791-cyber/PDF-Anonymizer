@@ -11,7 +11,7 @@ Ablauf: Alle PDFs im Ordner (auch in Unterordnern, ohne bereits anonymisierte Au
 Oberfläche analysiert und geschwärzt – jede lesbare PDF bekommt eine Ausgabe, auch ohne Fund (dann bereinigt) –
 in einen temporären Ordner, der danach samt Zuordnungsdatei gelöscht wird (außer mit
 --behalten <ordner>: dann liegen die Ausgaben dort, wie bei normaler Benutzung; die Zuordnungsdatei liegt daneben,
-_zuordnung_<ordner>.txt).
+_zuordnung_<ordner>.txt – bei einer Laufwerkswurzel wie E:\\ im Programmordner, siehe README „Ausgabedateien“).
 
 Ausgegeben werden NUR Zählwerte: Dokumente (als laufende Nummer, ohne Dateinamen), Seiten, OCR-Seiten, Funde je
 Kategorie, Verdachtsstellen je Dokument und je Regel, wie viele Ausgaben _PRUEFEN sind, Meldungs-Codes, Fehlerarten

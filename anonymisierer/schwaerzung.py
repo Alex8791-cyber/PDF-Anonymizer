@@ -23,8 +23,9 @@ Arbeitsweise:
     Seitenzugriff abgewiesen (sonst Absturz im C-Code von PyMuPDF).
   * Status _PRUEFEN (Gutachten R-07/R-11) außer bei Resten, Verdacht, nicht lokalisierten Stellen und
     Modellabweichung auch, wenn die Ausgabe aus anderen Gründen nicht als geprüft gelten kann: Scan-Seite kaum
-    lesbar (wenige Wörter UND schlecht gelesen oder viel ungelesene Tinte), OCR unplausibel oder ohne Text (aber mit
-    Tinte), OCR-Fehler, XFA-Formular, beschädigte und von MuPDF reparierte Datei, beschädigtes Bild (abgebrochenes
+    lesbar (wenige Wörter UND schlecht gelesen oder viel ungelesene Tinte), OCR unplausibel oder ohne Text auf einer
+    Seite, die nicht nachweislich leer ist (analyse.seite_nachweislich_leer – sieht auch hell gedruckten Text), gar kein
+    Text, OCR-Fehler, XFA-Formular, beschädigte und von MuPDF reparierte Datei, beschädigtes Bild (abgebrochenes
     JPEG), Schlüsselwort mit ungeschwärztem Wert dahinter, Ausgabe nur wegen der Nebenkanäle. Die Gründe stehen in
     der Warnung AUSGABE_PRUEFEN und in „pruefen_gruende“; Seiten mit einem Seitenverdacht der Restrisiko-Prüfung
     werden nicht doppelt gemeldet.
@@ -44,16 +45,23 @@ Arbeitsweise:
     Ausgabe nicht schreibbar) – dann mit „fehler“ und einer Meldung der Art „fehler“.
   * Eine Regel für den Status (analyse.ist_leckrelevant): Jede Meldung der Art „fehler“ und jede leckrelevante oder
     unbekannte Warnung – aus Analyse, OCR, Seitenmodell, Schwärzung, Nebenkanälen und Restrisiko-Prüfung – macht die
-    Ausgabe _PRUEFEN und steht verständlich in „pruefen_gruende“; „fertig“ heißt: keine einzige solche Meldung.
+    Ausgabe _PRUEFEN und steht verständlich in „pruefen_gruende“; „fertig“ heißt: keine einzige solche Meldung. Die
+    einzige Ausnahme: „OCR hat (fehlerfrei) nichts gelesen“ auf einer nachweislich leeren Scan-Seite; ein Ausfall der
+    OCR zählt immer.
   * Zuordnungsdatei (M-25): neben dem Ausgabeordner (_zuordnung_<Ausgabeordner>.txt), nicht darin – sie enthält die
-    Original-Dateinamen und wird so nicht mit hochgeladen. Eine alte _zuordnung.txt im Ausgabeordner wird übernommen.
+    Original-Dateinamen und wird so nicht mit hochgeladen; bei einer Laufwerks- oder Freigabe-Wurzel im Programmordner
+    (dateien.zuordnungen_ordner). Eine alte _zuordnung.txt im Ausgabeordner wird übernommen, in jeder Kodierung. Liegt
+    die Datei doch im Ausgabeordner (Rückfall), ist das immer eine Warnung. Nach dem Ablegen der Ausgabe bricht der
+    Eintrag in die Zuordnung nie mehr ab.
 """
 
 from __future__ import annotations
 
+import codecs
 import datetime
 import os
 import re
+import sys
 import unicodedata
 from collections import Counter
 from pathlib import Path
@@ -65,6 +73,7 @@ except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
     import fitz
 
 from . import analyse as _analyse
+from . import dateien as _dateien
 from . import ocr as _ocr
 from . import seitenmodell as sm
 from .ocr import OcrDienst, bild_bereiche, ocr_noetig  # noqa: F401  (Namen bleiben importierbar)
@@ -118,8 +127,10 @@ _NAMENSMUSTER = re.compile(r"^anonym_(\d+)(?:_PRUEFEN)?\.pdf$", re.IGNORECASE)
 _ZUORDNUNG = "_zuordnung.txt"
 # Gutachten M-25 (eingeschaltet in Runde 3): Die Zuordnungsdatei enthält die Original-Dateinamen (oft mit
 # Kundennamen). Sie liegt NEBEN dem Ausgabeordner („<Ordner>/_zuordnung_<Ausgabeordner>.txt“, im Standardfall neben
-# den Originalen „_zuordnung_anonymisiert.txt“), nicht in dem Ordner, den die Nutzerin hochlädt. Lässt sich dort nicht
-# schreiben (Ordner darüber schreibgeschützt, Laufwerkswurzel), landet sie im Ausgabeordner – mit deutlicher Warnung.
+# den Originalen „_zuordnung_anonymisiert.txt“), nicht in dem Ordner, den die Nutzerin hochlädt. Ist der Ausgabeordner
+# eine Laufwerks- oder Freigabe-Wurzel (E:\ auf einem USB-Stick, \\server\freigabe\), gibt es kein „daneben“: dann liegt
+# sie im Programmordner (dateien.zuordnungen_ordner, %APPDATA%\PDF-Anonymisierer\Zuordnungen). Lässt sich dort nicht
+# schreiben (Ordner schreibgeschützt), landet sie im Ausgabeordner – dann IMMER mit deutlicher Warnung.
 ZUORDNUNG_NEBEN_AUSGABEORDNER = True
 
 _norm_fund = suchtext_normalisieren      # Kompatibilität (alter Name)
@@ -442,13 +453,46 @@ def _ausgabe_reservieren(ziel: Path, pruefen: bool) -> Path:
     return _nummer_reservieren(ziel, pruefen)
 
 
+def ist_wurzel(ordner) -> bool:
+    """Ist `ordner` eine Laufwerks- oder Freigabe-Wurzel (E:\\, \\\\server\\freigabe\\, /) – ein Ordner ohne Ordner
+    darüber, neben den sich eine Datei legen ließe?"""
+    ordner = Path(ordner)
+    if ordner.name and ordner.parent != ordner:
+        return False
+    absolut = Path(os.path.abspath(ordner))            # „.“ ist der aktuelle Ordner, keine Wurzel
+    return not absolut.name or absolut.parent == absolut
+
+
+def _wurzel_kennung(ordner: Path) -> str:
+    """Lesbarer Name einer Wurzel für den Dateinamen: „Laufwerk_E“, „server_freigabe“, „Wurzel“."""
+    anker = Path(os.path.abspath(ordner)).anchor
+    m = re.search(r"([A-Za-z]):[\\/]*$", anker)          # auch „\\?\E:\“
+    if m:
+        return f"Laufwerk_{m.group(1).upper()}"
+    return re.sub(r"[^0-9A-Za-zÄÖÜäöüß]+", "_", anker).strip("_") or "Wurzel"
+
+
 def zuordnung_pfad(ziel) -> Path:
     """Zuordnungsdatei des Ausgabeordners `ziel`: darin (_zuordnung.txt) oder – mit ZUORDNUNG_NEBEN_AUSGABEORDNER –
-    daneben (_zuordnung_<Ausgabeordner>.txt), damit sie nicht mit hochgeladen wird."""
+    daneben (_zuordnung_<Ausgabeordner>.txt), damit sie nicht mit hochgeladen wird. Für eine Laufwerks- oder
+    Freigabe-Wurzel (kein „daneben“) im Programmordner: dateien.zuordnungen_ordner()/_zuordnung_<Wurzel>.txt."""
     ziel = Path(ziel)
-    if ZUORDNUNG_NEBEN_AUSGABEORDNER and ziel.name and ziel.parent != ziel:
-        return ziel.parent / f"_zuordnung_{ziel.name}.txt"
-    return ziel / _ZUORDNUNG
+    if not ZUORDNUNG_NEBEN_AUSGABEORDNER:
+        return ziel / _ZUORDNUNG
+    if ist_wurzel(ziel):
+        return _dateien.zuordnungen_ordner() / f"_zuordnung_{_wurzel_kennung(ziel)}.txt"
+    if not ziel.is_absolute():                           # „.“, „..\Upload“: erst den echten Ordner bestimmen
+        ziel = Path(os.path.abspath(ziel))
+    return ziel.parent / f"_zuordnung_{ziel.name}.txt"
+
+
+def zuordnung_im_ausgabeordner(datei, ziel) -> bool:
+    """Liegt die Zuordnungsdatei `datei` im Ausgabeordner `ziel` selbst – also in dem Ordner, der hochgeladen wird?"""
+    try:
+        return (os.path.normcase(os.path.abspath(Path(datei).parent))
+                == os.path.normcase(os.path.abspath(Path(ziel))))
+    except (OSError, ValueError):
+        return True
 
 
 def _atomar_schreiben(datei: Path, text: str):
@@ -466,52 +510,86 @@ def _mit_zeilenende(text: str) -> str:
     return text if not text or text.endswith("\n") else text + "\n"
 
 
+def zuordnung_lesen(datei) -> str:
+    """Inhalt einer Zuordnungsdatei, gleich in welcher Kodierung sie gespeichert ist. Das Programm schreibt UTF-8; im
+    Editor von Hand gespeichert kann sie aber ANSI (Windows-1252) oder „Unicode“ (UTF-16) sein. Ein Lesefehler darf das
+    Schwärzen nie abbrechen (Befund Runde 3): Zeichen, die sich nicht lesen lassen, werden ersetzt. OSError (Datei
+    fehlt, gesperrt) geht an den Aufrufer."""
+    daten = Path(datei).read_bytes()
+    if daten.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return daten.decode("utf-16", errors="replace")
+    try:
+        return daten.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return daten.decode("cp1252", errors="replace")
+
+
+def _ist_utf8(datei: Path) -> bool:
+    try:
+        datei.read_bytes().decode("utf-8")
+        return True
+    except UnicodeDecodeError:
+        return False
+
+
+def _zeile_anhaengen(datei: Path, zeile: str):
+    """Zeile in UTF-8 anhängen. Ist die vorhandene Datei in einer anderen Kodierung gespeichert (von Hand im Editor),
+    wird sie dabei einmal ganz nach UTF-8 umgeschrieben – sonst stünden zwei Kodierungen in einer Datei."""
+    datei.parent.mkdir(parents=True, exist_ok=True)
+    if datei.exists() and not _ist_utf8(datei):
+        _atomar_schreiben(datei, _mit_zeilenende(zuordnung_lesen(datei)) + zeile)
+        return
+    with open(datei, "a", encoding="utf-8") as f:
+        f.write(zeile)
+
+
 def _zuordnung_migrieren(ziel) -> Path:
     """Liegt (von einer älteren Programmversion) noch eine _zuordnung.txt IM Ausgabeordner, wird ihr Inhalt der
     Zuordnungsdatei neben dem Ausgabeordner vorangestellt und die alte Datei gelöscht – sie soll nicht mehr mit
     hochgeladen werden. Liefert die Datei, in die geschrieben wird: neben dem Ordner, oder – ist dort nicht
-    beschreibbar – die im Ordner (Rückfall, siehe _zuordnung_anhaengen)."""
+    beschreibbar – die im Ordner (Rückfall, siehe _zuordnung_anhaengen). Eine alte Datei in anderer Kodierung (ANSI,
+    UTF-16) wird gelesen und als UTF-8 übernommen."""
     datei, alt = zuordnung_pfad(ziel), Path(ziel) / _ZUORDNUNG
     if datei == alt:
         return alt
     try:
         if alt.exists():
-            altbestand = _mit_zeilenende(alt.read_text(encoding="utf-8"))
-            neu = datei.read_text(encoding="utf-8") if datei.exists() else ""
+            altbestand = _mit_zeilenende(zuordnung_lesen(alt))
+            neu = zuordnung_lesen(datei) if datei.exists() else ""
+            datei.parent.mkdir(parents=True, exist_ok=True)
             _atomar_schreiben(datei, altbestand + neu)
             _aufraeumen([alt])
         return datei
-    except OSError:
+    except (OSError, ValueError):
         return alt                              # z. B. Ordner darüber schreibgeschützt: es bleibt beim alten Ort
 
 
 def _zuordnung_anhaengen(ziel: Path, ausgabe: Path, original: Path) -> Path:
     """Zeile „anonym_NN.pdf  <-  Original.pdf  (Zeit)“ anhängen; liefert die Datei. Eine alte _zuordnung.txt IM
     Ausgabeordner wird dabei übernommen (_zuordnung_migrieren). Ist neben dem Ordner nicht beschreibbar, bleibt es beim
-    alten Ort im Ausgabeordner – der Aufrufer warnt dann deutlich."""
+    alten Ort im Ausgabeordner – der Aufrufer warnt dann deutlich (zuordnung_im_ausgabeordner)."""
     zeit = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     zeile = f"{ausgabe.name}  <-  {original.name}  ({zeit})\n"
     datei, alt = _zuordnung_migrieren(ziel), Path(ziel) / _ZUORDNUNG
     if datei != alt:
         try:
-            with open(datei, "a", encoding="utf-8") as f:
-                f.write(zeile)
+            _zeile_anhaengen(datei, zeile)
             return datei
-        except OSError:
+        except (OSError, ValueError):
             pass                                      # z. B. Ordner darüber schreibgeschützt: alter Ort
-    with open(alt, "a", encoding="utf-8") as f:
-        f.write(zeile)
+    _zeile_anhaengen(alt, zeile)
     return alt
 
 
 def _zuordnung_umschreiben(ziel: Path, alt: str, neu: str | None):
     """Zeile der Ausgabe `alt` in der Zuordnungsdatei auf `neu` umbenennen (neu=None: Zeile entfernen) – am neuen
     und am alten Ort, falls es beide gibt. Übernommen wird eine alte Datei im Ausgabeordner beim nächsten Schwärzen
-    in diesen Ordner (_zuordnung_anhaengen) – Freigeben und Verwerfen ändern nur die vorhandenen Zeilen."""
+    in diesen Ordner (_zuordnung_anhaengen) – Freigeben und Verwerfen ändern nur die vorhandenen Zeilen. Jede
+    Kodierung wird gelesen, geschrieben wird UTF-8."""
     for datei in dict.fromkeys((zuordnung_pfad(ziel), Path(ziel) / _ZUORDNUNG)):
         if not datei.exists():
             continue
-        zeilen = datei.read_text(encoding="utf-8").splitlines(keepends=True)
+        zeilen = zuordnung_lesen(datei).splitlines(keepends=True)
         aus = []
         for z in zeilen:
             if z.startswith(alt + "  <-  "):
@@ -520,6 +598,15 @@ def _zuordnung_umschreiben(ziel: Path, alt: str, neu: str | None):
                 z = neu + z[len(alt):]
             aus.append(z)
         _atomar_schreiben(datei, "".join(aus))
+
+
+def _zuordnung_nachfuehren(ziel: Path, alt: str, neu: str | None):
+    """Für Freigeben und Verwerfen: die Datei ist dann schon umbenannt bzw. gelöscht – ein Fehler beim Nachführen der
+    Zuordnung (Datei gesperrt, Ordner schreibgeschützt) darf das nicht als gescheitert melden. Er steht in fehler.log."""
+    try:
+        _zuordnung_umschreiben(ziel, alt, neu)
+    except (OSError, ValueError):
+        _dateien.fehler_protokollieren(*sys.exc_info())
 
 
 def _aufraeumen(pfade):
@@ -553,7 +640,7 @@ def freigeben(ausgabe_pfad) -> Path:
     except OSError:
         _aufraeumen([neu])
         raise
-    _zuordnung_umschreiben(ziel, pfad.name, neu.name)
+    _zuordnung_nachfuehren(ziel, pfad.name, neu.name)
     return neu
 
 
@@ -564,7 +651,7 @@ def verwerfen(ausgabe_pfad) -> None:
         pfad.unlink()
     except FileNotFoundError:
         pass
-    _zuordnung_umschreiben(pfad.parent, pfad.name, None)
+    _zuordnung_nachfuehren(pfad.parent, pfad.name, None)
 
 
 # ----------------------------------------------------------------------
@@ -620,8 +707,7 @@ class _Lauf:
         self.nebenkanal_bezug = None         # personenbezogene Daten in Nebenkanälen (R-04); None = ungeprüft
         self.manuelle_platzhalter: set = set()   # Platzhalter manueller Stellen (für die Selbstkontrolle)
         self.abgeschnitten_seiten: set = set()   # Seiten, deren abgeschnittener Text entfernt wurde (Nachprüfung)
-        self.leere_scanseiten: set = set()   # Scan-Seiten ohne Tinte (Rückseiten): „kein Text“ ist dort kein Grund
-        self.tinte_vorhanden = None          # irgendeine Seite mit Tinte? (KEIN_TEXT ist auf leeren Dateien kein Grund)
+        self.leere_scanseiten: set = set()   # nachweislich leere Scan-Seiten (Rückseiten): „nichts gelesen“ kein Grund
 
     def abbruch_pruefen(self):
         if self.abbruch is not None and self.abbruch.is_set():
@@ -1903,7 +1989,9 @@ def _selbstkontrolle(lauf: _Lauf, ausgabe: Path) -> list:
 # ----------------------------------------------------------------------
 KAUM_LESBAR_WOERTER = _analyse.KAUM_LESBAR_WOERTER   # weniger OCR-Wörter: Seite KANN kaum lesbar sein (siehe
 #                                                     analyse.scan_kaum_lesbar – dieselbe Regel wie die Analyse)
-TINTE_MIN = 0.0003              # Anteil dunkler Pixel (wie die Restrisiko-Prüfung): darunter ist eine Seite leer
+# Anteil dunkler Pixel (Grau < 180), den eine leere Seite höchstens hat – nur noch ein Teil des Maßes „leer“
+# (analyse.seite_nachweislich_leer): allein hielt es hell gedruckten Text für „leer“ (Befund Runde 3)
+TINTE_MIN = _analyse.LEER_DUNKEL_MAX
 # Meldungen, deren Ursache bis in die Ausgabe wirkt: EINE Tabelle für Analyse und Schwärzung (analyse.WARNUNGS_CODES,
 # analyse.ist_leckrelevant); der Name bleibt für ältere Aufrufer
 LECKRELEVANTE_CODES = _analyse.LECKRELEVANTE_CODES
@@ -1955,7 +2043,8 @@ def _meldungs_grund(m: dict, seite) -> _Grund:
     return _Grund(code, seite, f"Seite {seite + 1}: {text}" if seite is not None else text)
 
 
-_tintenanteil = _analyse.tintenanteil     # Anteil dunkler Pixel (eine Regel für Analyse und Schwärzung)
+_tintenanteil = _analyse.tintenanteil     # Anteil dunkler Pixel (eine Regel für Analyse und Schwärzung; „leer“ misst
+#                                           analyse.seite_nachweislich_leer)
 _kaum_lesbar = _analyse.scan_kaum_lesbar
 
 
@@ -1979,10 +2068,28 @@ def _analyse_meldungen(lauf) -> list:
     return [m for m in getattr(lauf.analyse_modell, "leckrelevant", None) or () if isinstance(m, dict)]
 
 
+# Text der Meldung des Seitenmodells (seitenmodell.dokument_aufbauen, nur in der Analyse) für eine Scan-Seite, auf der
+# die OCR FEHLERFREI lief und kein einziges Wort las. Sie ist die einzige OCR_FEHLER-Meldung, die keinen Ausfall meldet
+# (die Oberfläche erkennt sie am selben Text, gui_attrappen._TEXT_CODES). Ändert sich der Text dort, entfällt nur die
+# Ausnahme unten – leere Rückseiten werden dann _PRUEFEN, nie still „fertig“ (tests/test_ausgabe_status_befunde.py
+# prüft den Text und beide Fälle).
+OCR_NICHTS_GELESEN = "OCR hat keinen Text gelesen"
+
+
+def _nichts_gelesen(m: dict) -> bool:
+    """Meldet `m` nur „die OCR lief fehlerfrei und las kein Wort“? Nie für eine Meldung der Art „fehler“ (zentrale
+    Regel: jede Meldung der Art „fehler“ zählt)."""
+    return (m.get("art") == "warnung" and m.get("code") == "OCR_FEHLER"
+            and OCR_NICHTS_GELESEN in str(m.get("text") or ""))
+
+
 def _meldungs_gruende(lauf, meldungen) -> list:
     """Gründe aus Meldungen nach der zentralen Regel (analyse.ist_leckrelevant): jede Meldung der Art „fehler“ und
-    jede leckrelevante oder unbekannte Warnung. Ausnahmen mit Begründung: OCR ohne Text auf einer leeren Scan-Seite
-    (Rückseite ohne Tinte), „kein Text lesbar“ in einer Datei ohne jede Tinte (nur leere Seiten)."""
+    jede leckrelevante oder unbekannte Warnung. Eine einzige Ausnahme (Befund Runde 3): „die OCR hat (fehlerfrei)
+    nichts gelesen“ auf einer Scan-Seite, die nachweislich leer ist (leere Rückseite, analyse.seite_nachweislich_leer –
+    ein Maß, das auch hell gedruckten Text und Bleistift sieht). Ein Ausfall der OCR (Absturz, Zeitüberschreitung,
+    Speicher, fehlende Sprachdatei) zählt immer, auch auf einer leeren Seite. Eine Datei nur aus leeren Seiten meldet
+    die Analyse gar nicht erst als KEIN_TEXT (Hinweis LEERE_SEITEN); KEIN_TEXT gilt daher ohne Ausnahme."""
     aus = []
     for m in meldungen:
         if not _analyse.ist_leckrelevant(m):
@@ -1991,31 +2098,20 @@ def _meldungs_gruende(lauf, meldungen) -> list:
         seite = seite if isinstance(seite, int) and not isinstance(seite, bool) else None
         if code in _EIGENS_GEPRUEFT:
             continue
-        if code == "OCR_FEHLER" and seite in lauf.leere_scanseiten:
-            continue
-        if code == "KEIN_TEXT" and lauf.tinte_vorhanden is False:
+        if seite in lauf.leere_scanseiten and _nichts_gelesen(m):
             continue
         aus.append(_meldungs_grund(m, seite))
     return aus
 
 
-def _tinte_irgendwo(doc, hoechstens: int = 60) -> bool:
-    """Ist auf irgendeiner Seite Tinte (grob gerendert)? Im Zweifel ja."""
-    try:
-        if len(doc) > hoechstens:
-            return True
-        return any(_tintenanteil(doc[nr]) > TINTE_MIN for nr in range(len(doc)))
-    except Exception:
-        return True
-
-
 def _leckrelevant_ermitteln(lauf: _Lauf, dok, zaehler: dict) -> list:
-    """Gründe, die Ausgabe nicht als geprüft gelten zu lassen (R-07/R-11) – vor dem Schwärzen ermittelt, damit die
-    Tinte leerer Scan-Seiten am Original gemessen wird. Quellen: das Dokument (XFA, Reparatur), das frische Modell
-    mit der OCR der Analyse (kaum lesbar, unplausibel, ohne Text aber mit Tinte), die Meldungen der OCR beim
-    Aufbau des Modells (OCR-Fehler, Bilder nicht prüfbar) und – falls übergeben – die Meldungen der Analyse (alle
-    leckrelevanten, analyse.ist_leckrelevant). Meldungen, die erst beim Schwärzen entstehen, nimmt _status_gruende
-    nach derselben Regel dazu."""
+    """Gründe, die Ausgabe nicht als geprüft gelten zu lassen (R-07/R-11) – vor dem Schwärzen ermittelt, damit leere
+    Scan-Seiten am Original gemessen werden. Quellen: das Dokument (XFA, Reparatur), das frische Modell mit der OCR der
+    Analyse (kaum lesbar, unplausibel, ohne Text auf einer nicht nachweislich leeren Seite, gar kein Text), die
+    Meldungen der OCR beim Aufbau des Modells (OCR-Fehler, Bilder nicht prüfbar) und – falls übergeben – die Meldungen
+    der Analyse (alle leckrelevanten, analyse.ist_leckrelevant). Meldungen, die erst beim Schwärzen entstehen, nimmt
+    _status_gruende nach derselben Regel dazu. Ohne Modell der Analyse (Benchmark, alte Aufrufer) entstehen so
+    dieselben Gründe wie mit ihm."""
     gruende: dict = {}
 
     def dazu(code, seite=None):
@@ -2035,18 +2131,23 @@ def _leckrelevant_ermitteln(lauf: _Lauf, dok, zaehler: dict) -> list:
         elif anzahl and _lesung_unplausibel(lauf.ocr_cache.get(nr) or ()):
             dazu("OCR_UNPLAUSIBEL", nr)
         elif anzahl == 0:
-            if _tintenanteil(lauf.doc[nr]) > TINTE_MIN:
-                dazu("OCR_FEHLER", nr)
+            # Kein Wort gelesen: nur eine nachweislich leere Seite (Rückseite) ist kein Grund – ein hell gedruckter
+            # Scan, Bleistift oder Handschrift, die die OCR nicht liest, sind es (Befund Runde 3)
+            if _analyse.seite_nachweislich_leer(lauf.doc[nr]):
+                leer.add(nr)
             else:
-                leer.add(nr)                               # leere Scan-Seite (Rückseite): kein Grund
+                dazu("OCR_FEHLER", nr)
     lauf.leere_scanseiten = leer
+    text = getattr(dok, "text", None)
+    if isinstance(text, str) and not text.strip() and not _analyse.nur_leere_seiten(lauf.doc):
+        # Gar kein Text, aber etwas auf den Seiten: nichts wurde geprüft (wie KEIN_TEXT der Analyse – auch ohne ihr
+        # Modell, z. B. im Benchmark)
+        dazu("KEIN_TEXT")
     if lauf.analyse_modell is None:
         # Beschädigte Bilder (R-07, scan_bild_defekt) – mit dem Modell der Analyse stehen sie in dessen Meldungen
         for nr in _analyse.bild_schaeden(lauf.pdf_pfad):
             dazu("BILD_BESCHAEDIGT", nr)
     meldungen = list(lauf.meldungen) + _analyse_meldungen(lauf)
-    if any(m.get("code") == "KEIN_TEXT" for m in meldungen):
-        lauf.tinte_vorhanden = _tinte_irgendwo(lauf.doc)
     for g in _meldungs_gruende(lauf, meldungen):
         if g.code == "SCHLUESSELWORT_OHNE_FUND":
             continue                                       # die Seitenschleife prüft die Schlüsselwörter selbst
@@ -2253,6 +2354,36 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
             eigener_dienst.schliessen()
         ergebnis["meldungen"] = lauf.meldungen
     return ergebnis
+
+
+def _zuordnung_eintragen(lauf: _Lauf, ausgabe: Path) -> None:
+    """Zeile für die gerade abgelegte Ausgabe in die Zuordnungsdatei schreiben und melden, wo sie steht. Die Ausgabe
+    existiert dann schon: hier bricht nichts mehr ab (Befund Runde 3: eine alte Zuordnungsdatei in ANSI-Kodierung ließ
+    sonst die Schwärzung als „ohne Ausgabe“ enden, obwohl anonym_NN.pdf längst im Ordner lag) – ein Fehler wird eine
+    Warnung ZUORDNUNG. Liegt die Datei im Ausgabeordner selbst (Rückfall, gleich aus welchem Grund), ist das immer eine
+    Warnung: dieser Ordner wird hochgeladen."""
+    try:
+        datei = _zuordnung_anhaengen(lauf.ziel, ausgabe, lauf.pdf_pfad)
+    except Exception as e:
+        lauf.melden("warnung", "ZUORDNUNG",
+                    f"Zuordnungsdatei konnte nicht geschrieben werden ({e}) – welche Ausgabe zu welchem Original gehört, "
+                    f"steht nur im Protokoll: {ausgabe.name} ← {lauf.pdf_pfad.name}.")
+        return
+    if zuordnung_im_ausgabeordner(datei, lauf.ziel):
+        # M-25: die Datei liegt doch im Ordner, der hochgeladen wird – keine Nebensache (Warnung statt Hinweis)
+        lauf.melden("warnung", "ZUORDNUNG",
+                    f"Zuordnung Original ↔ Ausgabe steht in {datei} – im Ordner der Ausgaben, weil sie nirgends daneben "
+                    f"geschrieben werden konnte. Diese Datei enthält die Original-Dateinamen (oft mit Kundennamen): "
+                    f"beim Hochladen NICHT mit auswählen, nur die anonym_….pdf-Dateien weitergeben.")
+    elif ist_wurzel(lauf.ziel):
+        lauf.melden("hinweis", "ZUORDNUNG",
+                    f"Zuordnung Original ↔ Ausgabe steht in {datei} (Programmordner – der Zielordner {lauf.ziel} ist ein "
+                    f"ganzes Laufwerk bzw. eine Freigabe, daneben ist kein Platz). Diese Datei enthält die "
+                    f"Original-Dateinamen (oft mit Kundennamen) – nicht weitergeben.")
+    else:
+        lauf.melden("hinweis", "ZUORDNUNG", f"Zuordnung Original ↔ Ausgabe steht in {datei}. Diese Datei enthält "
+                                            f"die Original-Dateinamen (oft mit Kundennamen) – nicht mit hochladen, "
+                                            f"nur die anonym_….pdf-Dateien weitergeben.")
 
 
 def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: dict,
@@ -2507,20 +2638,6 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
     ergebnis["ausgabe"] = ausgabe
     ergebnis["status"] = "pruefen" if pruefen else "fertig"
     ergebnis["ausgabe_pruefen"] = pruefen
-    try:
-        datei = _zuordnung_anhaengen(lauf.ziel, ausgabe, lauf.pdf_pfad)
-        if datei != zuordnung_pfad(lauf.ziel):
-            # M-25: neben dem Ausgabeordner ließ sich nicht schreiben – die Datei liegt doch im Ordner, der hochgeladen
-            # wird. Das ist dann keine Nebensache mehr (Warnung statt Hinweis).
-            lauf.melden("warnung", "ZUORDNUNG",
-                        f"Zuordnung Original ↔ Ausgabe steht in {datei} – im Ordner der Ausgaben, weil daneben nicht "
-                        f"geschrieben werden konnte. Diese Datei enthält die Original-Dateinamen (oft mit Kundennamen): "
-                        f"beim Hochladen NICHT mit auswählen, nur die anonym_….pdf-Dateien weitergeben.")
-        else:
-            lauf.melden("hinweis", "ZUORDNUNG", f"Zuordnung Original ↔ Ausgabe steht in {datei}. Diese Datei enthält "
-                                                f"die Original-Dateinamen (oft mit Kundennamen) – nicht mit hochladen, "
-                                                f"nur die anonym_….pdf-Dateien weitergeben.")
-    except OSError as e:
-        lauf.melden("warnung", "ZUORDNUNG", f"Zuordnungsdatei konnte nicht geschrieben werden: {e}")
+    _zuordnung_eintragen(lauf, ausgabe)
     ergebnis["warnungen"] = lauf.warnungen
     ergebnis["hinweise"] = lauf.hinweise
