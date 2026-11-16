@@ -176,6 +176,15 @@ def leer():
             analyse.seite_nachweislich_leer(d[i])
         assert baum(d) == "xref", "Strukturbaum nach der Leer-Prüfung nicht wiederhergestellt"
 schritt("analyse.seite_nachweislich_leer", leer)
+
+def foto():
+    # Fotobereich-Erkennung (Runde 3, fotos.py): rendert jede Scan-/Bildseite im Dokument der Analyse/Schwärzung
+    from anonymisierer import fotos
+    with fitz.open(pfad) as d:
+        for i in range(seiten):
+            fotos.grau_rendern(d[i])
+        assert baum(d) == "xref", "Strukturbaum nach der Fotoerkennung nicht wiederhergestellt"
+schritt("fotos.grau_rendern", foto)
 print("ALLES FERTIG", flush=True)
 '''
 

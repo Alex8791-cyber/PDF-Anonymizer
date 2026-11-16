@@ -1269,6 +1269,7 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
     # 2) Redaktionen und Platzhalter planen (nur ENTHALTENE Rechtecke verwerfen). Treffer werden OHNE Füllung
     #    angewendet; die grauen Kästen zeichnet _platzhalter_kaesten_zeichnen danach an der gemessenen Lage
     #    (MuPDF verschiebt den Rest einer Zeile, Befund M-31).
+    bereiche = _nur_bildbereiche(lauf, nr, seite, m, bereiche)    # „maximal“: Bilder hinter Text ohne den Text
     bereits: list = []
     kaesten: list = []          # graue Kästen der Treffer (werden nach dem Anwenden gezeichnet)
     verschiebbar: list = []     # je Kasten: darf er der verschobenen Zeile folgen (sichtbarer Text, kein Bild)?
@@ -2265,6 +2266,159 @@ def _verdacht_feld(v, name, standard=None):
 
 
 # ----------------------------------------------------------------------
+# Bildfunde (fotos.py): Lichtbilder, in „maximal“ Bilder und Fotobereiche – Haken in die Schwärzung
+# ----------------------------------------------------------------------
+def _bildfunde_trennen(funde: list, bereiche: dict) -> tuple:
+    """Bildfunde aus den Funden lösen: ihre angehakten Bereiche werden wie Rahmen aus der Vorschau geschwärzt (Text
+    UND Bildpixel, Platzhalter „[LICHTBILD]“, „[FOTO]“, „[BILD]“) – auf Textseiten verlieren Bilder und Fotos unter Text
+    nur ihre Bildpixel (_nur_bildbereiche). Rückgabe: (Textfunde, Auftrag der Bildfunde)."""
+    try:
+        from . import fotos as _fotos
+    except ImportError:
+        return funde, None
+    funde, auftrag = _fotos.bildfunde_trennen(funde)
+    for nr, liste in auftrag["bereiche"].items():
+        bereiche.setdefault(nr, []).extend(liste)
+    return funde, auftrag
+
+
+def _bilder_gruende(lauf: _Lauf, dok) -> None:
+    """Gründe für _PRUEFEN aus den Bildfunden: abgewähltes Lichtbild, Ausweiskopie ohne abgedecktes Lichtbild
+    (die Ausgabe braucht dann die Freigabe in der Vorschau)."""
+    auftrag = getattr(lauf, "bildauftrag", None)
+    try:
+        from . import fotos as _fotos
+        gruende = _fotos.freigabe_gruende(auftrag, dok)
+    except Exception:
+        return
+    for code, seite, text in gruende:
+        grund = _Grund(code, seite, text)
+        if grund not in lauf.leckrelevant:
+            lauf.leckrelevant.append(grund)
+
+
+def _nur_bildbereiche(lauf: _Lauf, nr: int, seite, m, bereiche: list) -> list:
+    """„Maximal“, Textseite (Befund 5 der Runde 3a): Bild- und Fotobereiche (fotos.Bildbereich mit nur_bild) verlieren
+    zuerst nur ihre Bildpixel – Text und Linien darüber bleiben (Hintergrundbild, Wasserzeichen, Formularhintergrund).
+    Liegt kein Text darüber, wird der Bereich danach wie bisher als Rahmen mit Platzhalter gefüllt. Rückgabe: die
+    Bereiche für den Rahmen-Durchgang; scheitert MuPDF, bleiben alle dabei (Rahmen, notfalls Seite als Bild)."""
+    nur_bild = [e for e in bereiche if getattr(e, "nur_bild", False)]
+    if not nur_bild or m.ocr_modus == "seite" or _bilder is None or not hasattr(_bilder, "nur_bildpixel_schwaerzen"):
+        return bereiche
+    try:
+        from . import fotos as _fotos
+        woerter = seite.get_text("words", flags=sm.TEXT_FLAGS)
+        hinter_text = [e for e in nur_bild if _fotos.text_ueber_bereich(e[0], woerter)]
+        if not hinter_text:
+            return bereiche
+        lauf.bilder_neu_kodiert += int(_bilder.nur_bildpixel_schwaerzen(lauf.doc, seite, [e[0] for e in nur_bild])
+                                       or 0)
+    except Exception:
+        return bereiche
+    lauf.treffer += len(hinter_text)
+    lauf.bilder_hinter_text = getattr(lauf, "bilder_hinter_text", 0) + len(hinter_text)
+    return [e for e in bereiche if not any(e is h for h in hinter_text)]
+
+
+def _bilder_nachkontrolle(lauf: _Lauf, dok, ergebnis: dict, profil: str) -> None:
+    """Nach dem Schwärzen: abgedeckte Bilder/Fotos/Lichtbilder zählen und melden; in „maximal“ Bilder leeren, die eine
+    Textseite in Kachelmustern, Type3-Schriften, weichen Masken oder Anmerkungen zeichnet (fotos.bilder_nachkontrolle –
+    nie ein Bild einer Scan-Seite, nie ein abgewähltes)."""
+    auftrag = getattr(lauf, "bildauftrag", None) or {}
+    try:
+        from . import fotos as _fotos
+        from . import muster as _muster
+    except ImportError:
+        return
+    zahl = {k: len(v) for k, v in (auftrag.get("abgedeckt") or {}).items()}
+    geleert = 0
+    if _muster.option(profil, "bilder_schwaerzen"):
+        textseiten = [nr for nr, m in enumerate(dok.seiten)
+                      if m.ocr_modus != "seite" and lauf.ocr_modus.get(nr) != "seite"]
+        try:
+            geleert = _fotos.bilder_nachkontrolle(lauf.doc, textseiten, auftrag.get("behalten_xrefs"),
+                                                  auftrag.get("abgewaehlt_seiten"))
+        except Exception as e:
+            lauf.melden("warnung", "BILDER_UNGEPRUEFT", f"Nachkontrolle der Bilder fehlgeschlagen ({e}) – Bilder in der "
+                                                       f"Ausgabe bitte selbst prüfen.")
+            lauf.restrisiko_fehler = True
+    ergebnis["bilder_abgedeckt"] = zahl.get(_fotos.KAT_BILD, 0)
+    ergebnis["fotobereiche_abgedeckt"] = zahl.get(_fotos.KAT_FOTO, 0)
+    ergebnis["lichtbilder_abgedeckt"] = zahl.get(_fotos.KAT_LICHTBILD, 0)
+    ergebnis["bilder_geleert"] = geleert
+    teile = [f"{n} {name}" for n, name in ((zahl.get(_fotos.KAT_LICHTBILD, 0), "Lichtbild(er)"),
+                                            (zahl.get(_fotos.KAT_BILD, 0), "Bild(er)"),
+                                            (zahl.get(_fotos.KAT_FOTO, 0), "Fotobereich(e)")) if n]
+    if teile:
+        lauf.melden("hinweis", "BILDER_ABGEDECKT", "Abgedeckt: " + ", ".join(teile) + ".")
+    hinter_text = getattr(lauf, "bilder_hinter_text", 0)
+    if hinter_text:
+        lauf.melden("hinweis", "BILDER_ABGEDECKT", f"Davon {hinter_text} Bild(er) hinter Text (Hintergrund, "
+                                                   f"Wasserzeichen) entfernt – der Text darüber bleibt lesbar.")
+    if geleert:
+        lauf.melden("hinweis", "BILDER_ABGEDECKT", f"{geleert} weitere(s) Bild(er) geleert, die als Füllmuster oder in "
+                                                   f"Schriftzeichen gezeichnet werden (Schutzstufe „Maximal“).")
+
+
+# ----------------------------------------------------------------------
+# Bildreste (Befund 1 der Runde 3a): nicht angezeigte Bilder vor und nach dem Speichern leeren (bilder.py)
+# ----------------------------------------------------------------------
+def _bildreste_grund(lauf: _Lauf, seite, text: str) -> None:
+    grund = _Grund("BILDRESTE", seite, f"Seite {seite + 1}: {text}" if isinstance(seite, int) else text)
+    if grund not in lauf.leckrelevant:
+        lauf.leckrelevant.append(grund)
+
+
+def _bildreste_entfernen(lauf: _Lauf, ergebnis: dict) -> None:
+    """Vor dem Speichern, in jeder Schutzstufe: Bilder, die keine Seite zeichnet – das ungeschwärzte Original eines
+    Scans in geerbten oder geteilten Ressourcen, ungenutzt mitgeschleppte Bilder – werden geleert
+    (bilder.bildreste_entfernen). Was sich nicht prüfen oder leeren ließ, macht die Ausgabe _PRUEFEN."""
+    if _bilder is None or not hasattr(_bilder, "bildreste_entfernen"):
+        return
+    try:
+        befund = _bilder.bildreste_entfernen(lauf.doc)
+    except Exception as e:
+        befund = {"geleert": 0, "unsicher": [], "rest": [], "fehler": f"{type(e).__name__}: {e}"}
+    ergebnis["bilder_entfernt"] = int(befund.get("geleert") or 0)
+    if ergebnis["bilder_entfernt"]:
+        lauf.melden("hinweis", "BILDER_ENTFERNT",
+                    f"{ergebnis['bilder_entfernt']} nicht angezeigte(s) Bild(er) aus der Datei entfernt – z. B. das "
+                    f"ungeschwärzte Original eines geschwärzten Scans, das die Datei sonst unsichtbar mitgeführt "
+                    f"hätte.")
+    if befund.get("fehler") or befund.get("rest") or befund.get("unsicher"):
+        seiten = list(befund.get("unsicher") or [])
+        _bildreste_grund(lauf, seiten[0] if len(seiten) == 1 and not befund.get("rest") else None,
+                         "nicht angezeigte Bilder nicht sicher entfernt")
+        lauf.melden("warnung", "BILDER_UNGEPRUEFT",
+                    "Die Datei enthält womöglich Bilder, die nicht angezeigt werden (z. B. das Original eines "
+                    "geschwärzten Scans), und sie ließen sich nicht sicher entfernen – die Ausgabe wird als _PRUEFEN "
+                    "abgelegt." + (f" ({befund['fehler']})" if befund.get("fehler") else ""),
+                    seiten[0] if len(seiten) == 1 else None)
+
+
+def _bildreste_nachpruefen(lauf: _Lauf, ausgabe: Path) -> None:
+    """Netz nach dem Speichern (Befund 1 der Runde 3a): Steckt in der GESCHRIEBENEN Ausgabe noch ein Bild, das keine
+    Seite zeichnet, wird es geleert und die Datei neu geschrieben – und weil das nicht vorkommen sollte, wird die
+    Ausgabe _PRUEFEN. Lässt sich die Datei nicht prüfen, ebenso."""
+    if _bilder is None or not hasattr(_bilder, "bildreste_in_datei_entfernen"):
+        return
+    try:
+        befund = _bilder.bildreste_in_datei_entfernen(ausgabe, lauf.tmp_pfad("bildreste"))
+    except Exception as e:
+        befund = {"geleert_alle": 0, "unsicher": [], "rest": [], "fehler": f"{type(e).__name__}: {e}"}
+    if befund.get("geleert_alle"):
+        _bildreste_grund(lauf, None, "nicht angezeigte Bilder nachträglich entfernt")
+        lauf.melden("warnung", "BILDER_UNGEPRUEFT",
+                    f"Die gespeicherte Ausgabe enthielt noch {befund['geleert_alle']} nicht angezeigte(s) Bild(er) – "
+                    f"sie wurden entfernt. Die Ausgabe wird als _PRUEFEN abgelegt: bitte ansehen.")
+    if befund.get("fehler") or befund.get("rest") or befund.get("unsicher"):
+        _bildreste_grund(lauf, None, "nicht angezeigte Bilder nicht sicher entfernt")
+        lauf.melden("warnung", "BILDER_UNGEPRUEFT",
+                    "Die gespeicherte Ausgabe ließ sich nicht vollständig auf nicht angezeigte Bilder prüfen – sie "
+                    "wird als _PRUEFEN abgelegt." + (f" ({befund['fehler']})" if befund.get("fehler") else ""))
+
+
+# ----------------------------------------------------------------------
 # Hauptfunktion
 # ----------------------------------------------------------------------
 def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=None, ocr=None,
@@ -2299,6 +2453,7 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
         f["text"] = str(f.get("text", "")).strip()
     bereiche = {int(k): [fitz.Rect(r) for r in v] for k, v in (manuelle_bereiche or {}).items() if v}
     stellen_manuell = {int(k): list(v) for k, v in (manuelle_stellen or {}).items() if v}
+    funde, bildauftrag = _bildfunde_trennen(funde, bereiche)     # Lichtbilder, Bilder, Fotos: Bereiche (fotos.py)
     nebenkanal_bezug = None
     if isinstance(nebenkanaele, dict) and "personenbezug" in nebenkanaele:
         nebenkanal_bezug = bool(nebenkanaele["personenbezug"])
@@ -2308,6 +2463,7 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
     if ocr is None:
         ocr = eigener_dienst = OcrDienst()
     lauf = _Lauf(pdf_pfad, funde, melde, fortschritt, abbruch, ocr, ocr_cache, ziel)
+    lauf.bildauftrag = bildauftrag
     lauf.analyse_modell = modell
     lauf.nebenkanal_bezug = nebenkanal_bezug
 
@@ -2436,6 +2592,7 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
                         f"die Fundstellen wurden dort neu gesucht. Ergebnis bitte prüfen.")
     # Gründe für _PRUEFEN aus Lesbarkeit und Zustand der Datei (R-07/R-11) – vor dem Schwärzen (Tinte am Original)
     lauf.leckrelevant = _leckrelevant_ermitteln(lauf, dok, zaehler)
+    _bilder_gruende(lauf, dok)                     # abgewähltes Lichtbild, Ausweiskopie ohne Lichtbild (fotos.py)
 
     # 3) Stellen planen
     plan = _Plan()
@@ -2462,6 +2619,7 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
     doc = lauf.doc
     ergebnis["treffer"] = lauf.treffer
     ergebnis["stellen_geschwaerzt"] = lauf.stellen_geschwaerzt
+    _bilder_nachkontrolle(lauf, dok, ergebnis, profil)   # Zahlen melden; „maximal“: Bildreste leeren (fotos.py)
 
     # 5a) Nebenkanäle – nach allen Schwärzungen, vor dem Speichern (Vertrag des Moduls nebenkanaele)
     lauf.melden("hinweis", "NEBENKANAL_ENTFERNT", _nebenkanaele_bereinigen(lauf, doc, zaehler))
@@ -2539,6 +2697,7 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
                 lauf.hinweise.append(h)
 
     # 7) Speichern (erst unter Hilfsnamen), Selbstkontrolle, Restrisiko, dann endgültiger Name
+    _bildreste_entfernen(lauf, ergebnis)          # nicht angezeigte Bilder (geerbte/geteilte Ressourcen) leeren
     lauf.bilder_kodieren()
     if lauf.bilder_neu_kodiert:
         lauf.hinweise.append(f"{lauf.bilder_neu_kodiert} geschwärzte(s) Bild(er) neu komprimiert.")
@@ -2553,6 +2712,7 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
     _spaete_reparatur_pruefen(lauf, doc)          # auch eine Reparatur während des Speicherns zählt
     doc.close()
     lauf.doc = None
+    _bildreste_nachpruefen(lauf, tmp)             # Netz: nicht angezeigte Bilder in der geschriebenen Datei
     reste = list(_selbstkontrolle(lauf, tmp))
     if lauf.teilreste:
         reste += [t for t in lauf.teilreste if t not in reste]

@@ -138,14 +138,17 @@ ERSTSTART_TEXT = (
     "Telefon- und Vertragsnummern durch Platzhalter wie [PERSON A].\n\n"
     "Andere Angaben bleiben je nach Schutzstufe lesbar – zum Beispiel Diagnosen, Beruf, Beträge oder Orte. "
     "Daraus kann eine Person unter Umständen noch zu erkennen sein.\n\n"
-    "Gesichter und Lichtbilder (etwa auf einer Ausweiskopie), Unterschriften und Handschrift werden NICHT "
-    "geschwärzt – sie bleiben sichtbar, wenn Sie in der Vorschau keinen Rahmen darüber ziehen.\n\n"
+    "Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt – aber nicht immer gefunden. Andere Gesichter "
+    "und Fotos, Unterschriften und Handschrift werden NICHT geschwärzt (außer in der Schutzstufe „Maximal“, die "
+    "alle Bilder abdeckt) – sie bleiben sichtbar, wenn Sie in der Vorschau keinen Rahmen darüber ziehen.\n\n"
     "Keine automatische Erkennung ist fehlerfrei. Sehen Sie sich deshalb jedes Ergebnis in der Vorschau an, "
     "bevor Sie es weitergeben.\n\n"
     "Die Verantwortung für die Weitergabe an einen KI-Dienst bleibt bei Ihnen.")
 # Fotos und Ausweiskopien (Befund Runde 2): Gesicht/Lichtbild, Unterschrift und Handschrift bleiben stehen
-FOTO_GRENZEN = ("Gesichter und Lichtbilder (z. B. auf einer Ausweiskopie), Unterschriften und Handschrift werden "
-                "NICHT geschwärzt – in der Vorschau unter „Geplante Schwärzung“ einen Rahmen darüber ziehen.")
+FOTO_GRENZEN = ("Gesichter und Lichtbilder: nur Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt – aber "
+                "nicht immer gefunden; andere Gesichter, Unterschriften und Handschrift werden NICHT geschwärzt (außer "
+                "in der Schutzstufe „Maximal“) – in der Vorschau unter „Geplante Schwärzung“ prüfen und einen Rahmen "
+                "darüber ziehen.")
 KENNWORT_TITEL = "Kennwort erforderlich"
 ANZEIGE_ART = {"bild": " (Bild → PDF)", "entschluesselt": " (Kennwort entfernt)", "kopie": " (als PDF)"}
 # derselbe Hinweis in der Kontextspalte der Dateizeile (dort ist Platz; Wortlaut wie im Laufprotokoll)
@@ -164,6 +167,19 @@ STATUS_TEXT = {"fertig": "✔ fertig", "pruefen": "⚠ prüfen", "fehler": "✖ 
                "keine": "keine Ausgabe"}
 
 _KATEGORIE_SCHLUESSEL = {eintrag[0] for eintrag in KATEGORIEN}
+
+
+def _ist_bildfund(fund: dict) -> bool:
+    """Bildfund (Lichtbild, Bild, Foto): Stellen sind Bereiche im Bild statt Textstellen."""
+    return any("bereich" in st for st in fund.get("stellen") or ())
+
+
+def _fundtext_anzeige(fund: dict) -> str:
+    """Text eines Funds für die Fundliste; Bildfunde (Lichtbild, Bild, Foto) haben keinen Text, nur Bereiche."""
+    text = str(fund.get("text") or "").replace("\n", " ")
+    if not text and _ist_bildfund(fund):
+        return "(Bereich im Bild)"
+    return text
 
 
 def _ohne_marke(anzeige: str) -> str:
@@ -189,9 +205,10 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
     """Untertitel, Hinweiskasten und Hilfetext – wahrheitsgemäß für den Funktionsumfang der Engine (GR-09)."""
     if neue_kategorien:
         lesbar = "je nach Schutzstufe bleiben Diagnosen, Beruf, Arbeitgeber, Beträge und Orte lesbar"
-        kasten = ("Nur je nach Schutzstufe erkannt: Diagnosen, Beruf, Arbeitgeber. Nicht erkannt und nicht geschwärzt "
-                  "werden: Gesichter/Lichtbilder (z. B. auf Ausweiskopien), Unterschriften, Handschrift, Freitext; "
-                  "Text in Bildern nur unsicher (OCR).")
+        kasten = ("Nur je nach Schutzstufe erkannt: Diagnosen, Beruf, Arbeitgeber; „Maximal“ deckt alle Bilder und "
+                  "Fotos ab. Lichtbilder auf Ausweiskopien werden gesucht, aber nicht immer gefunden. Nicht erkannt "
+                  "werden: andere Gesichter, Unterschriften, Handschrift, Freitext; Text in Bildern nur unsicher "
+                  "(OCR).")
         grenzen_kopf = "NICHT oder nur teilweise erkannt werden:\n"
         grenzen_umfang = ("  • Diagnosen, Krankheiten, Medikamente: nur bekannte Begriffe, angehakt erst in der "
                           "Schutzstufe „Maximal“ (sonst gemeldet und nicht angehakt in der Fundliste angeboten, "
@@ -213,7 +230,10 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
     grenzen = (
         "Das Programm ersetzt direkte Identifikatoren durch Platzhalter (Pseudonymisierung).\n\n"
         + grenzen_kopf + grenzen_umfang +
-        "  • Gesichter und Lichtbilder (z. B. das Passfoto auf einer Ausweiskopie) – sie werden NICHT geschwärzt\n"
+        "  • Gesichter und Fotos: Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt (Fund „Lichtbild“), "
+        "aber nicht immer gefunden; andere Gesichter bleiben stehen – außer in der Schutzstufe „Maximal“, die alle "
+        "Bilder und Fotos abdeckt (Text über einem Bild bleibt lesbar; ein Bild über mindestens die halbe Seite "
+        "bleibt wie ein Scan stehen, abgedeckt werden die Fotos darin)\n"
         "  • Unterschriften, Stempel, Handschrift\n"
         "  • Text in Bildern, Fotos und Logos wird per OCR nur unsicher gelesen (Handyfotos, geringe Auflösung)\n"
         "  • Freitext, aus dem eine Person erkennbar bleibt\n"
@@ -225,8 +245,9 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
         "braucht es weiterhin eine Rechtsgrundlage und in der Regel einen Auftragsverarbeitungsvertrag. Die "
         "Verantwortung für die Weitergabe bleibt bei Ihnen (Hilfe → „Hinweise vor der Nutzung …“).\n\n"
         "Fotos und Bild-Scans (JPEG, PNG, TIFF, BMP, PNM) werden auf Wunsch in eine PDF umgewandelt und per "
-        "Texterkennung gelesen. Gesichter, Lichtbilder, Unterschriften und Handschrift darauf werden NICHT "
-        "geschwärzt: in der Vorschau unter „Geplante Schwärzung“ einen Rahmen darüber ziehen. Die Ausgabe eines "
+        "Texterkennung gelesen. Gesichter, Unterschriften und Handschrift darauf werden NICHT geschwärzt (ein "
+        "Lichtbild nur, wenn es als solches erkannt wird; in „Maximal“ alle Fotobereiche): in der Vorschau unter "
+        "„Geplante Schwärzung“ prüfen und einen Rahmen darüber ziehen. Die Ausgabe eines "
         "Fotos muss deshalb immer in der Vorschau freigegeben werden („_PRUEFEN“). "
         "PDFs mit Kennwort werden nach Eingabe des Kennworts geprüft – die Ausgabe hat "
         "dann kein Kennwort mehr. Die umgewandelte bzw. entschlüsselte Arbeitskopie liegt nur während der "
@@ -2323,7 +2344,7 @@ class AnonymisiererApp:
             marke = MARKE_GESUNDHEIT if fund.get("kategorie") in GESUNDHEIT_KATEGORIEN else MARKE_HINWEIS
             anzeige = marke + anzeige
         self.baum.insert(iid, "end", iid=f"{iid}::{index}", text=HAKEN[zustand],
-                         values=(anzeige, str(fund["text"]).replace("\n", " "), seiten_text,
+                         values=(anzeige, _fundtext_anzeige(fund), seiten_text,
                                  fund.get("anzahl", 1), _kontext_anzeige(fund.get("kontext", "")),
                                  fund["ersatz"]),
                          tags=("fund", zustand))
@@ -3857,14 +3878,19 @@ class AnonymisiererApp:
         ergebnis = self.analyse_ergebnisse.get(pdf)
         if not ergebnis or ergebnis.get("fehler"):
             return None
-        funde = []
+        funde, abgewaehlte_bilder = [], []
         for index, fund in enumerate(ergebnis["funde"]):
+            ziel = funde
             if self.fund_zustand(pdf, index) == "aus":
-                continue
+                if not _ist_bildfund(fund):
+                    continue
+                ziel = abgewaehlte_bilder   # gehen mit, wenn geschwärzt wird: ein abgewähltes Lichtbild verlangt die Freigabe
             kopie = dict(fund)
-            if self._fund_hat_stellen(pdf, fund):
+            if ziel is abgewaehlte_bilder:      # abgewählt: alle Bereiche bleiben stehen (auch ohne Einzelstellen)
+                kopie["stellen"] = [dict(s, an=False) for s in fund.get("stellen") or ()]
+            elif self._fund_hat_stellen(pdf, fund):
                 kopie["stellen"] = [dict(s) for s in fund["stellen"]]
-            funde.append(kopie)
+            ziel.append(kopie)
         bereiche: dict[int, list] = {}
         stellen: dict[int, list] = {}
         for eintrag in self.manuell.get(pdf, {}).values():
@@ -3877,6 +3903,7 @@ class AnonymisiererApp:
                     (int(eintrag["start"]), int(eintrag["ende"]), PLATZHALTER_MANUELL))
         nebenkanal = _nebenkanal_bezug(ergebnis)
         ohne_haken = not funde and not bereiche and not stellen
+        funde += abgewaehlte_bilder     # abgewählte Lichtbilder gehen mit (Freigabe), zählen aber nicht als Haken
         kopie = self.arbeitskopien.get(pdf)
         return {"pdf": pdf, "funde": funde, "ocr_cache": ergebnis.get("ocr_cache"),
                 "modell": ergebnis.get("modell") if self.einzelstellen_moeglich(pdf) else None,
@@ -4132,6 +4159,8 @@ class AnonymisiererApp:
                 teile.append("Stellen nicht lokalisiert")
         if status == "pruefen" and pdf is not None and self._ist_foto(pdf):
             teile.append("Foto: Gesicht, Unterschrift und Handschrift selbst prüfen")
+        if status == "pruefen" and any("Lichtbild" in str(g) for g in ergebnis.get("pruefen_gruende") or ()):
+            teile.append("Ausweis: Lichtbild nicht abgedeckt bzw. nicht sicher gefunden – selbst prüfen")
         # ohne Schwärzung (Runde 3): bereinigte Ausgabe – so klar wie möglich sagen, was das heißt; auch wenn sie nur
         # wegen „Freigabe vor Weitergabe“ (Standard) noch _PRUEFEN heißt (Befund Runde 3: dort stand nur „Freigabe
         # ausstehend“, und die Maklerin sah in der Vorschau keine einzige Schwärzung ohne Erklärung)
@@ -4429,7 +4458,8 @@ class AnonymisiererApp:
 
     def _kategorie_namen(self) -> dict:
         namen = {e[0]: e[1] for e in KATEGORIEN}
-        namen.update({"begriff": "Begriffe (IMMER-Liste)", "manuell": "manuell markiert"})
+        namen.update({"begriff": "Begriffe (IMMER-Liste)", "manuell": "manuell markiert",
+                      "lichtbild": "Lichtbilder (Ausweis)", "bild": "Bilder", "foto": "Fotobereiche"})
         return namen
 
     def _protokoll_analyse(self, pdfs, ergebnisse: dict, abgebrochen: bool):

@@ -1502,6 +1502,15 @@ WARNUNGS_CODES = {
     "XFA": (True, "XFA-Formular: Feldinhalte lassen sich nicht prüfen"),
     # nicht leckrelevant
     "AUSGABE_PRUEFEN": (False, "fasst nur die Gründe einer ohnehin _PRUEFEN abgelegten Ausgabe zusammen"),
+    # Lichtbilder (fotos.py): ob die AUSGABE ein Lichtbild zeigen kann, entscheidet die Schwärzung selbst nach dem,
+    # was wirklich abgedeckt wurde (fotos.freigabe_gruende: abgewähltes oder unsicheres Lichtbild sichtbar, Ausweis-
+    # kopie ohne abgedecktes Lichtbild -> _PRUEFEN mit eigenem Grund). Als Analyse-Warnung zählen sie deshalb nicht
+    # noch einmal – sonst bliebe eine Ausgabe _PRUEFEN, obwohl das Lichtbild inzwischen abgedeckt ist.
+    "AUSWEIS_OHNE_LICHTBILD": (False, "Ausweiskopie ohne gefundenes Lichtbild: die Schwärzung macht die Ausgabe "
+                                      "_PRUEFEN, solange dort kein Lichtbild abgedeckt ist (fotos.freigabe_gruende)"),
+    "LICHTBILD_UNSICHER": (False, "unsicheres Lichtbild nicht abgehakt angeboten: bleibt es stehen, macht die "
+                                  "Schwärzung die Ausgabe _PRUEFEN (Lichtbild nicht abgedeckt), abgehakt wird es "
+                                  "abgedeckt"),
     "FORMULAR_EINGEBRANNT": (False, "nicht eingebrannte Feldwerte entfernt die Ausgabe mit den Formularfeldern "
                                     "(Daten fehlen dann, sie gehen nicht hinaus)"),
     "KEIN_TREFFER": (False, "nur ältere Programmversionen: dort entstand keine Ausgabe"),
@@ -1526,7 +1535,8 @@ FEHLER_CODES = {
 }
 # Codes, die das Programm nur als Hinweis meldet – sie ändern den Status nie
 HINWEIS_CODES = frozenset({
-    "ABGEBROCHEN", "AUSGABE_PRUEFEN", "BILDER_UNGEPRUEFT", "FORMULAR_EINGEBRANNT", "GESUNDHEITSDATEN", "LEERE_SEITEN",
+    "ABGEBROCHEN", "AUSGABE_PRUEFEN", "BILDER_ABGEDECKT", "BILDER_ENTFERNT", "BILDER_UNGEPRUEFT", "FORMULAR_EINGEBRANNT",
+    "GESUNDHEITSDATEN", "LEERE_SEITEN", "LICHTBILD",
     "NACHBARWORT_BESCHAEDIGT", "NEBENKANAL_ENTFERNT", "NICHTS_GESCHWAERZT", "NIE_FREIGABE", "OCR_GELESEN",
     "OCR_UNPLAUSIBEL", "PLATZHALTER_GEKUERZT", "SEITE_ALS_BILD", "VEKTORGRAFIK", "WENIG_TEXT", "ZUORDNUNG"})
 # Analyse-Meldungen, deren Ursache bis in die Ausgabe wirkt (Gutachten R-07): die Schwärzung legt die Ausgabe dann
@@ -1595,47 +1605,15 @@ def reparatur_erzwingen(doc) -> bool:
 # ----------------------------------------------------------------------
 BILD_MIN_PIXEL = 2500            # kleinere Bilder (Symbole, Linien) tragen keine lesbare Zeile
 BILD_MAX_ANZAHL = 400            # so viele Bilder je Dokument werden höchstens geprüft
-_DEKODIER_WARNUNG_RE = re.compile(r"(?i)premature end|corrupt|truncat|padding|unexpected end|not enough data|"
-                                  r"bad (?:huffman|data|code|marker)|jpeg error|jbig2|jpx|invalid")
-_BILD_KANTE_ZEILEN = 24          # so viele Zeilen über der Abbruchkante werden auf Tinte geprüft
-
-
-def _kante_mit_tinte(pix) -> bool:
-    """Bricht das Bild unten ab (MuPDF füllt fehlende Daten mit einer einheitlichen Fläche, z. B. Grau 128 oder der
-    letzten Farbe) und liegt direkt über der Kante Tinte – eine halb sichtbare Zeile, die die OCR nicht liest, ein Mensch
-    oder eine Bild-KI aber schon? Ein vollständiges Bild, dem nur die Endmarke fehlt, hat unten keine solche Fläche."""
-    try:
-        if pix.colorspace is not None and pix.colorspace.n != 1:
-            pix = fitz.Pixmap(fitz.csGRAY, pix)
-        elif pix.alpha:
-            pix = fitz.Pixmap(pix, 0)
-        breite, hoehe, n = pix.width, pix.height, pix.n
-        daten = pix.samples
-    except Exception:
-        return False
-    zeile = breite * n
-    if hoehe < 16 or zeile <= 0:
-        return False
-    flach = 0
-    for y in range(hoehe - 1, -1, -1):
-        z = daten[y * zeile:(y + 1) * zeile]
-        if z.count(z[:1]) != len(z):
-            break
-        flach += 1
-    if flach < 8 or flach >= hoehe:
-        return False                      # keine Füllfläche – oder gar nichts sichtbar
-    ende = hoehe - flach
-    band = daten[max(0, ende - _BILD_KANTE_ZEILEN) * zeile:ende * zeile]
-    dunkel = len(band) - len(band.translate(None, bytes(range(128))))
-    return dunkel > 0.002 * len(band)
 
 
 def bild_schaeden(pfad) -> dict:
     """Seiten (0-basiert) mit beschädigten Bildern: {Seite: Beschreibung}. Jedes Bild wird einmal dekodiert (in einem
     eigenen, frisch geöffneten Dokument – MuPDF merkt sich dekodierte Bilder und warnte beim zweiten Mal nicht mehr):
     bricht es mitten im Bild ab (MuPDF: „premature end of file in jpeg“, „padding truncated image“) und ist über der
-    Abbruchkante etwas halb zu sehen, oder lässt es sich gar nicht dekodieren, gilt die Seite als nicht geprüft
-    (Gutachten R-07: die halbe Zeile mit Geburtsdatum bzw. IBAN blieb lesbar, die OCR las sie nicht)."""
+    Abbruchkante etwas halb zu sehen, fehlen einem progressiven JPEG spätere Scans (überall unscharf) oder lässt es sich
+    gar nicht dekodieren, gilt die Seite als nicht geprüft (Gutachten R-07: die halbe Zeile mit Geburtsdatum bzw. IBAN
+    blieb lesbar, die OCR las sie nicht)."""
     schaeden: dict = {}
     try:
         doc = fitz.open(pfad)
@@ -1667,36 +1645,11 @@ def bild_schaeden(pfad) -> dict:
     return schaeden
 
 
-def _warnungen_zuruecksetzen():
-    """MuPDF unterdrückt eine Warnung, die genauso lautet wie die vorige („… repeated 2 times“) – nach einem anderen
-    beschädigten Bild käme „premature end of file in jpeg“ sonst nicht mehr an. Deshalb erst MuPDFs Gedächtnis leeren,
-    dann die gesammelten Warnungen."""
-    try:
-        fitz.mupdf.fz_flush_warnings()
-    except Exception:
-        pass
-    try:
-        fitz.TOOLS.reset_mupdf_warnings()
-    except Exception:
-        pass
-
-
 def _bild_beschaedigt(doc, xref: int, filter_name: str):
-    """Beschreibung des Schadens eines Bild-XObjects oder None."""
-    _warnungen_zuruecksetzen()
-    try:
-        pix = fitz.Pixmap(doc, xref)
-    except Exception:
-        return "lässt sich nicht dekodieren"
-    try:
-        warnungen = fitz.TOOLS.mupdf_warnings() or ""
-    except Exception:
-        warnungen = ""
-    if not _DEKODIER_WARNUNG_RE.search(warnungen):
-        return None
-    # Ein progressives JPEG, das in einer späteren Stufe abbricht, ist überall gleich unscharf – die OCR sieht dasselbe
-    # Bild wie ein Mensch; nur eine Füllfläche unter einer halb sichtbaren Zeile ist das hier gemeinte Leck
-    return "bricht mitten im Bild ab" if _kante_mit_tinte(pix) else None
+    """Beschreibung des Schadens eines Bild-XObjects oder None (bilder.bild_beschaedigt: abgebrochene Baseline- und
+    progressive JPEGs, nicht dekodierbare Bilder; große JPEGs werden verkleinert dekodiert)."""
+    from . import bilder as _bilder
+    return _bilder.bild_beschaedigt(doc, xref, filter_name)
 
 
 # ----------------------------------------------------------------------
@@ -2281,6 +2234,21 @@ def _hat_xfa(doc) -> bool:
     return hat_xfa(doc)
 
 
+def _bildfunde(doc, dok, profil, ergebnis, warnungen, hinweise) -> list:
+    """Bildfunde (fotos.py): Lichtbilder auf Ausweiskopien, in „maximal“ auch alle Bilder und Fotobereiche – samt
+    Meldungen. Scheitert die Bildprüfung, wird das gemeldet und die Analyse geht ohne Bildfunde weiter."""
+    try:
+        from . import fotos as _fotos
+        pruefung = _fotos.dokument_pruefen(doc, dok, profil, ergebnis.get("ocr_cache"))
+    except Exception as e:
+        _melde(ergebnis["meldungen"], warnungen, "warnung", "BILDER_UNGEPRUEFT",
+               f"Bildprüfung fehlgeschlagen ({type(e).__name__}) – Fotos und Ausweiskopien bitte selbst ansehen.")
+        return []
+    for art, code, text, seite in pruefung["meldungen"]:
+        _melde(ergebnis["meldungen"], warnungen if art == "warnung" else hinweise, art, code, text, seite)
+    return list(pruefung["funde"])
+
+
 def analysiere_pdf(pdf_pfad: Path, aktive: set[str], whitelist: list[str], immer_schwaerzen: list[str],
                    melde=None, fortschritt=None, abbruch=None, ocr=None, profil: str = "hoch",
                    kundenliste=None, lauf=None) -> dict:
@@ -2367,6 +2335,7 @@ def analysiere_pdf(pdf_pfad: Path, aktive: set[str], whitelist: list[str], immer
         except Abgebrochen:
             return abgebrochen()
         _kaum_lesbar_nachpruefen(doc, ergebnis["ocr_cache"], meldungen, warnungen, hinweise)
+        ergebnis["funde"] = bildfunde = _bildfunde(doc, dok, profil, ergebnis, warnungen, hinweise)
         # Ohne jeden Text: sind alle Seiten wirklich leer (nichts gezeichnet), gibt es nichts zu prüfen (unten)
         alle_seiten_leer = not dok.text.strip() and nur_leere_seiten(doc)
         # Netz: hat MuPDF trotzdem erst beim Lesen der Seiten repariert, gilt die Datei ebenso als repariert
@@ -2412,6 +2381,7 @@ def analysiere_pdf(pdf_pfad: Path, aktive: set[str], whitelist: list[str], immer
     ergebnis["funde"] = _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil=profil,
                                              kundenliste=kundenliste, lauf=lauf, hinweise=hinweise,
                                              warnungen=warnungen, meldungen=meldungen)
+    ergebnis["funde"] += bildfunde                  # Lichtbilder; „maximal“: Bilder und Fotobereiche (fotos.py)
     if any(any(st.get("an", True) for st in f.get("stellen") or ()) for f in ergebnis["funde"]):
         # Auf den Seiten wird ohnehin geschwärzt, die Ausgabe entfernt die Nebenkanäle sowieso: dann ist der Fund in
         # den Nebenkanälen keine Warnung (nichts zu tun), sondern ein Hinweis
