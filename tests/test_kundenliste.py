@@ -189,10 +189,12 @@ def test_geschwindigkeit_10000_kunden_50_seiten(tmp_path):
     """Lastunabhängig (Runde 3): gemessen wird die CPU-Zeit des eigenen Prozesses statt der Wanduhr – parallele
     Benchmarks oder ein langsamer CI-Runner verlängern nur die Wartezeit, nicht die Rechenzeit. Zwei Prüfungen:
     (1) Skalierung: 4-mal so viele Kunden UND gut 4-mal so viel Text kosten bei linearem Abgleich etwa 4-mal so
-    viel (gemessen 3,4), ein Abgleich Kunden x Text (z. B. ohne Index) etwa 16-mal – Schranke 8; (2) die bisherige
-    Schranke 2 s für 10 000 Kunden und 50 Seiten, jetzt als CPU-Zeit (gemessen 0,85 s). Jede Messung mit frischer
-    Liste (der Index entsteht im ersten treffer()); gemessen wird abwechselnd klein/groß, je das Minimum von drei
-    Läufen – so sehen beide Größen dieselbe Last."""
+    viel (gemessen 3,4 bis 4,7, auch unter Last), ein Abgleich Kunden x Text (eingebaut: Index je 25 Zeilen neu
+    gebaut) 10,2 bis 21,7-mal – Schranke 8. Hier wachsen Kunden und Text zugleich, ein solcher Anteil also mit
+    dem Faktor 16 statt 4 und überwiegt schon bei dieser Spreizung (anders als bei Schwärzung und
+    analysiere_text, Befund Runde 3a); (2) die bisherige Schranke 2 s für 10 000 Kunden und 50 Seiten, jetzt als
+    CPU-Zeit (gemessen 0,7 bis 0,85 s). Jede Messung mit frischer Liste (der Index entsteht im ersten treffer());
+    gemessen wird abwechselnd klein/groß, je das Minimum von drei Läufen – so sehen beide Größen dieselbe Last."""
     import zeitmessung
     seite = ("Sehr geehrte Frau Beispiel, Ihr Vertrag LV-2024-887766 vom 01.01.2020 wurde angepasst. Der Beitrag "
              "beträgt 120,00 EUR monatlich. Bei Fragen erreichen Sie uns unter 0800 123456. Kunde KD-001234, "

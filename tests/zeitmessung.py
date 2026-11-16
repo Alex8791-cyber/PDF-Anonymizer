@@ -5,10 +5,16 @@ belegen – der eigene Prozess wartet dann, er rechnet nicht mehr. Die Laufzeitt
 Verschlechterung ausmacht, mit Größen, die von der Last kaum abhängen:
 
   cpu_sekunden(funktion, wiederholungen)  CPU-Zeit dieses Prozesses statt Wanduhr (das Minimum mehrerer Läufe
-                                          glättet geteilte Kerne und Caches); daraus Verhältnisse n gegen 4n –
-                                          linear bleibt bei etwa 4, quadratisch wird es etwa 16
+                                          glättet geteilte Kerne und Caches); die Speicherbereinigung ist dabei
+                                          aus, wie bei timeit
   cpu_sekunden_abwechselnd({name: f})     dasselbe für mehrere Größen im Wechsel (klein, groß, klein, groß):
                                           beide sehen dieselbe Last, das Verhältnis bleibt stabil
+  wachstum(klein, gross, faktor)          wie viel schneller die Zeit wächst als die Eingabe: 1,0 = linear.
+                                          Gemessen wird mit großer Spreizung (n gegen 8n bzw. 16n): ein Anteil
+                                          Funde x Seiten oder Funde² wächst quadratisch, die lineare Grundlast nur
+                                          mit dem Faktor – erst bei großer Spreizung überwiegt er. Bei n gegen 4n
+                                          ging eine echte Funde-x-Seiten-Regression in der Grundlast unter
+                                          (Schwärzung: Verhältnis 7,5 bei Schranke 8; Befund Runde 3a)
   gemessener_ocr_arbeiter(...)            Ersatz für ocr._ocr_worker, der in jedem Arbeitsprozess Prozessnummer,
                                           Beginn und Ende jedes Auftrags aufschreibt (Verzeichnis in der
                                           Umgebungsvariablen UMGEBUNG) – so lässt sich zeigen, dass zwei Arbeiter
@@ -21,6 +27,7 @@ Dieses Modul ist kein Testmodul (wird nicht gesammelt); die Arbeitsprozesse des 
 importieren es über den von pytest gesetzten Suchpfad.
 """
 
+import gc
 import os
 import time
 from collections import namedtuple
@@ -36,14 +43,31 @@ Lauf = namedtuple("Lauf", "prozess seite beginn ende")
 
 def cpu_sekunden(funktion, wiederholungen: int = 1):
     """(Ergebnis des letzten Aufrufs, kleinste CPU-Zeit dieses Prozesses in Sekunden über die Wiederholungen).
-    Zählt alle Threads des Prozesses (time.process_time), nicht aber Wartezeit auf einen belegten Kern."""
+    Zählt alle Threads des Prozesses (time.process_time), nicht aber Wartezeit auf einen belegten Kern. Die
+    Speicherbereinigung ist während des Aufrufs aus (wie bei timeit): ihre Läufe kosten mit der Zahl lebender
+    Objekte mehr und ließen eine lineare Laufzeit überlinear aussehen (analysiere_text, 500 gegen 4000 Zeilen:
+    Verhältnis gemessen 9,4 bis 10,5 mit, 8,5 bis 8,8 ohne Speicherbereinigung)."""
     beste, ergebnis = None, None
     for _ in range(max(1, wiederholungen)):
-        anfang = time.process_time()
-        ergebnis = funktion()
-        dauer = time.process_time() - anfang
+        ergebnis = None
+        gc.collect()
+        war_an = gc.isenabled()
+        gc.disable()
+        try:
+            anfang = time.process_time()
+            ergebnis = funktion()
+            dauer = time.process_time() - anfang
+        finally:
+            if war_an:
+                gc.enable()
         beste = dauer if beste is None else min(beste, dauer)
     return ergebnis, beste
+
+
+def wachstum(zeit_klein: float, zeit_gross: float, faktor: float) -> float:
+    """(zeit_gross / zeit_klein) / faktor, wenn die Eingabe um faktor wächst: 1,0 = linear, ein quadratischer
+    Anteil hebt den Wert umso stärker, je größer faktor ist."""
+    return zeit_gross / max(zeit_klein, 1e-6) / faktor
 
 
 def cpu_sekunden_abwechselnd(funktionen: dict, wiederholungen: int = 2) -> dict:
