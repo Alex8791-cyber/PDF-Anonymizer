@@ -111,12 +111,19 @@ MARKE_HINWEIS = "⚑ "
 MARKE_GESUNDHEIT = "⚕ "
 GESUNDHEIT_KATEGORIEN = frozenset(getattr(_muster_modul, "GESUNDHEIT", ("diagnose", "medikament")))
 SPALTEN = ("kategorie", "text", "seiten", "anzahl", "kontext", "ersatz")
-# Spalte -> (Breite, Mindestbreite, dehnbar) bei 100 %. Die erste Spalte (Häkchen / Datei) wächst mit dem längsten
-# Dateinamen samt Zusatz „(Bild → PDF)“ / „(Kennwort entfernt)“ bis SPALTE0_MAX_ANTEIL der Breite; dafür geben
-# „Gefundener Text“ und „Kontext“ (vollständig in der Statuszeile) bis zu ihrer Mindestbreite nach.
-SPALTEN_MASSE = {"#0": (185, 150, False), "kategorie": (130, 105, False), "text": (160, 110, True),
-                 "seiten": (60, 52, False), "anzahl": (55, 48, False), "kontext": (210, 100, True),
+# Spalte -> (Breite, Mindestbreite, dehnbar) bei 100 %. „Gefundener Text“ und „Kontext“ sind der Prüfschritt: Sie
+# bekommen ihre Entwurfsbreite (im knappen Fenster ihren Anteil daran) und wachsen bei mehr Platz zuerst bis
+# SPALTEN_KOMFORT (ganze IBAN oder E-Mail, Vorlauf samt Fund). Erst was danach frei ist, bekommt die erste Spalte
+# (Häkchen / Datei) – bis zum längsten Dateinamen, höchstens SPALTE0_MAX_ANTEIL der Breite (spalten_verteilen).
+# Befund Runde 3a: wuchs sie auf Kosten der Prüfspalten, standen beide selbst auf 1920x1080 auf ihrer Mindestbreite.
+# Lange Namen werden in der Mitte gekürzt; der Zusatz „Kennwort entfernt“ / „Bild → PDF“ steht deshalb in der
+# Kontextspalte der Dateizeile (DATEI_KONTEXT_ART). Die erste Spalte ist dehnbar: Zieht man „Gefundener Text“ oder
+# „Kontext“ von Hand breiter, holt ttk beim Loslassen den Platz aus den dehnbaren Spalten (die Summe bleibt die
+# Breite der Liste) – ohne die Dateispalte nur aus dem Rest der Kontextspalte (Befund: „hilft nicht“).
+SPALTEN_MASSE = {"#0": (185, 150, True), "kategorie": (130, 105, False), "text": (160, 130, True),
+                 "seiten": (60, 52, False), "anzahl": (55, 48, False), "kontext": (210, 160, True),
                  "ersatz": (95, 85, False)}
+SPALTEN_KOMFORT = {"text": 210, "kontext": 250}
 SPALTE0_MAX_ANTEIL = 0.4
 SPALTE0_EINZUG = 30                 # bei 100 %: Aufklapp-Zeichen und Rand links vom Text der Dateizeile
 ANALYSE_TEXT = "  Analysieren – Funde anzeigen  "
@@ -141,6 +148,8 @@ FOTO_GRENZEN = ("Gesichter und Lichtbilder (z. B. auf einer Ausweiskopie), Unter
                 "NICHT geschwärzt – in der Vorschau unter „Geplante Schwärzung“ einen Rahmen darüber ziehen.")
 KENNWORT_TITEL = "Kennwort erforderlich"
 ANZEIGE_ART = {"bild": " (Bild → PDF)", "entschluesselt": " (Kennwort entfernt)", "kopie": " (als PDF)"}
+# derselbe Hinweis in der Kontextspalte der Dateizeile (dort ist Platz; Wortlaut wie im Laufprotokoll)
+DATEI_KONTEXT_ART = {"bild": "Bild → PDF", "entschluesselt": "Kennwort entfernt", "kopie": "PDF ohne Endung"}
 NEBENKANAL_NAMEN = (("metadaten", "Metadaten"), ("lesezeichen", "Lesezeichen"), ("anhaenge", "Anhänge"),
                     ("xfa", "Formulardaten (XFA)"))
 BAUM_HINWEIS = ("Kästchen (oder Leertaste) = Fund an/aus · Doppelklick auf eine Datei = Vorschau (dort per Klick "
@@ -400,6 +409,57 @@ def name_einpassen(name: str, zusatz: str, platz: float, messen) -> str:
     if unten > 0 or messen(gekuerzt(0)) <= platz:
         return gekuerzt(unten)
     return "…" + zusatz
+
+
+def spalten_verteilen(verfuegbar: int, masse: dict, komfort: dict, bedarf0: int, max_anteil0: float) -> dict:
+    """Breiten der Fundliste in Pixeln; ihre Summe ist genau `verfuegbar`, solange die Mindestbreiten hineinpassen.
+    masse: {Spalte: (Entwurf, Mindestbreite, dehnbar)}, schon skaliert; komfort: Wunschbreiten von „text“ und
+    „kontext“ (ganze IBAN/E-Mail, Vorlauf samt Fund); bedarf0: Breite, die der längste Dateiname in der ersten
+    Spalte braucht.
+
+    Die Prüfspalten „Gefundener Text“ und „Kontext“ gehen der Dateispalte vor (Befund Runde 3a):
+      1. Die festen Spalten bekommen ihren Entwurf, die erste Spalte ihren Entwurf (bei kurzen Namen weniger, nie
+         unter ihrer Mindestbreite); „text“ und „kontext“ teilen sich den Rest im Verhältnis ihrer Entwurfsbreiten,
+         im knappen Fenster bis hinunter zu ihrer Mindestbreite – so wie vor Runde 3.
+      2. Ist mehr Platz da, wachsen zuerst „text“ und „kontext“ bis zur Komfortbreite (im selben Verhältnis), dann
+         die erste Spalte bis zu bedarf0 (höchstens max_anteil0 der Breite); was übrig bleibt, geht wieder an „text“
+         und „kontext“.
+      3. Passen nicht einmal deren Mindestbreiten, schrumpft die erste Spalte bis zu ihrer Mindestbreite, danach die
+         festen Spalten; reicht auch das nicht, behalten alle ihre Mindestbreite (dann rollt die Liste waagrecht)."""
+    breiten = {sp: e for sp, (e, _, _) in masse.items() if sp not in ("#0", "text", "kontext")}
+    frei = verfuegbar - sum(breiten.values())
+    e0, m0, _ = masse["#0"]
+    et, mt, _ = masse["text"]
+    ek, mk, _ = masse["kontext"]
+    anteil_t = et / (et + ek)
+    basis0 = max(m0, min(e0, bedarf0))
+    if frei >= basis0 + et + ek:                          # 2. mehr Platz als die Entwurfsbreiten
+        rest = frei - basis0 - et - ek
+        luecke_t, luecke_k = max(0, komfort.get("text", et) - et), max(0, komfort.get("kontext", ek) - ek)
+        dazu = min(rest, luecke_t + luecke_k)
+        dazu_t = min(luecke_t, max(dazu - luecke_k, dazu * anteil_t))   # Verhältnis, keine über die Komfortbreite
+        t = et + dazu_t                                   # („kontext“ bekommt unten den Rest)
+        rest -= dazu
+        dazu0 = max(0, min(rest, min(bedarf0, int(verfuegbar * max_anteil0)) - basis0))
+        b0 = basis0 + dazu0
+        t += (rest - dazu0) * anteil_t
+    elif frei >= basis0 + mt + mk:                        # 1. Entwurfsverhältnis, nie unter der Mindestbreite
+        b0, rest = basis0, frei - basis0
+        t = min(max(mt, rest * anteil_t), rest - mk)
+    else:                                                 # 3. zu schmal
+        b0, t = max(m0, frei - mt - mk), mt
+        mangel = m0 + mt + mk - frei
+        spiel = {sp: breiten[sp] - masse[sp][1] for sp in breiten}
+        gesamt = sum(spiel.values())
+        for sp in breiten:                  # feste Spalten anteilig kürzen (genau um den Mangel), nie unter Mindestbreite
+            if mangel <= 0 or gesamt <= 0:
+                break
+            weg = min(spiel[sp], -(-spiel[sp] * mangel // gesamt))
+            breiten[sp] -= weg
+            mangel, gesamt = mangel - weg, gesamt - spiel[sp]
+    breiten["#0"], breiten["text"] = int(b0), int(t)
+    breiten["kontext"] = max(mk, verfuegbar - sum(breiten.values()))
+    return breiten
 
 
 def _seitenzahl(pdf: Path) -> int:
@@ -1261,11 +1321,11 @@ class AnonymisiererApp:
                              anchor="center" if spalte in ("seiten", "anzahl") else "w")
         roll_y = ttk.Scrollbar(baum_rahmen, orient="vertical", command=self.baum.yview)
         roll_x = ttk.Scrollbar(baum_rahmen, orient="horizontal", command=self.baum.xview)
-        self.baum.configure(yscrollcommand=roll_y.set, xscrollcommand=roll_x.set)
+        self.baum_roll_x = roll_x            # nur sichtbar, wenn die Spalten breiter sind als die Liste
+        self.baum.configure(yscrollcommand=roll_y.set, xscrollcommand=self._roll_x_melden)
         self.baum.grid(row=0, column=0, sticky="nsew")
         roll_y.grid(row=0, column=1, sticky="ns")
         roll_x.grid(row=1, column=0, sticky="ew")
-        self.baum_roll_x = roll_x            # nur sichtbar, wenn die Spalten breiter sind als die Liste
         self.baum.tag_configure("aus", foreground=FARBE_TEXT_GRAU)
         self.baum.tag_configure("teil", foreground=FARBE_WARNUNG)
         self.baum.tag_configure("datei", font=self.f_fett)
@@ -1277,77 +1337,116 @@ class AnonymisiererApp:
         self.baum.bind("<Return>", lambda e: self.vorschau_auswahl())
         self.baum.bind("<<TreeviewSelect>>", self._auswahl_geaendert)
         self.baum.bind("<Configure>", self._spalten_anpassen)
+        self.baum.bind("<ButtonRelease-1>", self._maus_losgelassen, add="+")
 
     def _spalten_anpassen(self, ereignis=None):
-        """Die erste Spalte bekommt den Platz für die Dateinamen samt Zusatz (höchstens SPALTE0_MAX_ANTEIL), dehnbare
-        Spalten füllen den Rest; reicht er nicht, bleibt die Mindestbreite (dann – und nur dann – erscheint die
-        horizontale Bildlaufleiste). Zu lange Dateinamen werden in der Mitte gekürzt, der Zusatz „(Bild → PDF)“ /
-        „(Kennwort entfernt)“ bleibt sichtbar (der volle Pfad steht in der Statuszeile, sobald die Datei gewählt ist)."""
+        """Spaltenbreiten der Fundliste nach spalten_verteilen: „Gefundener Text“ und „Kontext“ zuerst, die erste
+        Spalte nur in den Platz, der danach frei ist. Neu verteilt wird nur, wenn sich die Breite der Liste oder der
+        Platzbedarf der Dateinamen geändert hat – ändert sich nur die Höhe (Bildlaufleiste, Protokollzeilen), bleiben
+        auch Breiten stehen, die der Nutzer am Spaltenrand gezogen hat. Zu lange Dateinamen werden in der Mitte
+        gekürzt (der volle Pfad steht in der Statuszeile, sobald die Datei gewählt ist)."""
         try:
             verfuegbar = self.baum.winfo_width() - 4
         except tk.TclError:
             return
         if verfuegbar < 50:
             return
-        breite0 = self._erste_spalte_breite(verfuegbar)
-        if self.baum.column("#0", "width") != breite0:
-            self.baum.column("#0", width=breite0)
-        fest = sum(self.baum.column(sp, "width") for sp, (_, _, dehnbar) in SPALTEN_MASSE.items() if not dehnbar)
-        dehnbare = [sp for sp, (_, _, dehnbar) in SPALTEN_MASSE.items() if dehnbar]
-        # Rest im Verhältnis der Entwurfsbreiten verteilen; wer dabei unter seine Mindestbreite fiele, bekommt sie,
-        # und die übrigen teilen sich, was dann noch bleibt (sonst ragte die Summe über die Liste hinaus)
-        frei, offen, breiten = verfuegbar - fest, list(dehnbare), {}
-        while offen:
-            gesamt = sum(SPALTEN_MASSE[sp][0] for sp in offen)
-            zu_schmal = [sp for sp in offen
-                         if frei * SPALTEN_MASSE[sp][0] / gesamt < self._px(SPALTEN_MASSE[sp][1])]
-            if not zu_schmal:
-                breiten.update({sp: int(frei * SPALTEN_MASSE[sp][0] / gesamt) for sp in offen})
-                break
-            for sp in zu_schmal:
-                breiten[sp] = self._px(SPALTEN_MASSE[sp][1])
-                frei -= breiten[sp]
-                offen.remove(sp)
-        summe = fest
-        for sp in dehnbare:
-            self.baum.column(sp, width=breiten[sp])
-            summe += breiten[sp]
-        roll_x = getattr(self, "baum_roll_x", None)
-        if roll_x is not None:                     # jede Zeile zählt: die Bildlaufleiste nur, wenn sie etwas bewirkt
-            if summe > verfuegbar + 2:
-                if not roll_x.winfo_manager():
-                    roll_x.grid()
-            elif roll_x.winfo_manager():
-                roll_x.grid_remove()
-                self.baum.xview_moveto(0)
+        bedarf0 = self._erste_spalte_bedarf()
+        if (verfuegbar, bedarf0) != getattr(self, "_spalten_schluessel", None):
+            self._spalten_schluessel = (verfuegbar, bedarf0)
+            masse = {sp: (self._px(e), self._px(m), d) for sp, (e, m, d) in SPALTEN_MASSE.items()}
+            komfort = {sp: self._px(b) for sp, b in SPALTEN_KOMFORT.items()}
+            for sp, breite in spalten_verteilen(verfuegbar, masse, komfort, bedarf0, SPALTE0_MAX_ANTEIL).items():
+                if self.baum.column(sp, "width") != breite:
+                    self.baum.column(sp, width=breite)
+        self._dateinamen_einpassen()
+        self._roll_x_pruefen()
+
+    def _erste_spalte_bedarf(self) -> int:
+        """Breite, die die erste Spalte für den längsten Dateinamen braucht – ohne den Zusatz „Kennwort entfernt“ /
+        „Bild → PDF“, der in der Kontextspalte der Dateizeile steht; ohne Dateien die Entwurfsbreite."""
+        namen = tuple(self._name_ohne_zusatz(iid) for iid in self.zeilen)
+        gemerkt = getattr(self, "_bedarf0_gemerkt", None)
+        if gemerkt is not None and gemerkt[0] == namen:
+            return gemerkt[1]
+        if namen:
+            bedarf = max(self._px(SPALTE0_EINZUG) + self.f_fett.measure(f"{HAKEN['an']}  {name}") for name in namen)
+        else:
+            bedarf = self._px(SPALTEN_MASSE["#0"][0])
+        self._bedarf0_gemerkt = (namen, bedarf)
+        return bedarf
+
+    def _dateinamen_einpassen(self):
+        """Dateinamen der ersten Spalte an deren aktuelle Breite anpassen (nur wenn sie sich geändert hat)."""
+        try:
+            breite0 = self.baum.column("#0", "width")
+        except tk.TclError:
+            return
+        if breite0 == getattr(self, "_dateinamen_breite", None):
+            return
+        self._dateinamen_breite = breite0
         for iid in self.zeilen:
             if self.baum.exists(iid):
                 self._zeilentext_setzen(iid)
 
-    def _erste_spalte_breite(self, verfuegbar: int) -> int:
-        """Breite der ersten Spalte: Entwurfsbreite oder mehr, wenn ein Dateiname samt Zusatz sie braucht – aber
-        höchstens SPALTE0_MAX_ANTEIL der Liste, und die übrigen Spalten behalten ihre Mindestbreite."""
-        entwurf, mindest = self._px(SPALTEN_MASSE["#0"][0]), self._px(SPALTEN_MASSE["#0"][1])
-        andere = sum(self._px(m if dehnbar else b) for sp, (b, m, dehnbar) in SPALTEN_MASSE.items() if sp != "#0")
-        obergrenze = min(int(verfuegbar * SPALTE0_MAX_ANTEIL), verfuegbar - andere)
-        bedarf = max([entwurf] + [self._px(SPALTE0_EINZUG) + self.f_fett.measure(f"{HAKEN['an']}  {name}")
-                                  for name in self.beschriftungen.values()])
-        return max(mindest, min(bedarf, max(obergrenze, entwurf)))
+    def _roll_x_melden(self, anfang, ende):
+        """xscrollcommand der Fundliste: Bildlaufleiste nachführen und nur zeigen, wenn sie etwas bewirkt – auch
+        nachdem eine Spalte von Hand breiter gezogen wurde, als die Liste ist."""
+        self.baum_roll_x.set(anfang, ende)
+        self._roll_x_pruefen()
+
+    def _roll_x_pruefen(self):
+        """Waagrechte Bildlaufleiste nur, wenn die Spalten breiter sind als die Liste (jede Zeile zählt)."""
+        roll_x = getattr(self, "baum_roll_x", None)
+        if roll_x is None or self.beendet:
+            return
+        try:
+            summe = sum(self.baum.column(sp, "width") for sp in ("#0",) + SPALTEN)
+            noetig = summe > self.baum.winfo_width() - 2 or float(self.baum.xview()[0]) > 0.0
+            if noetig and not roll_x.winfo_manager():
+                roll_x.grid()
+            elif not noetig and roll_x.winfo_manager():
+                roll_x.grid_remove()
+                self.baum.xview_moveto(0)
+        except tk.TclError:
+            pass
+
+    def _maus_losgelassen(self, ereignis=None):
+        """Nach einem Zug am Spaltenrand (ttk ändert die Breiten selbst, ohne <Configure>): die Dateinamen an die neue
+        Breite der ersten Spalte anpassen – im Leerlauf, also nach der Klassenbindung von ttk."""
+        def danach():
+            if not self.beendet:
+                self._dateinamen_einpassen()
+        self.root.after_idle(danach)
+
+    def _name_ohne_zusatz(self, iid) -> str:
+        """Anzeigename der Datei ohne den Zusatz „(Bild → PDF)“ / „(Kennwort entfernt)“."""
+        voll = self.beschriftungen.get(iid, "")
+        zusatz = ANZEIGE_ART.get((self.arbeitskopien.get(self.zeilen.get(iid)) or {}).get("art"), "")
+        return voll[:len(voll) - len(zusatz)] if zusatz and voll.endswith(zusatz) else voll
+
+    def _datei_zusatz(self, pdf) -> str:
+        """„Kennwort entfernt“ / „Bild → PDF“ / „PDF ohne Endung“ (leer bei einer gewöhnlichen PDF) – steht in der
+        Kontextspalte der Dateizeile, damit die erste Spalte für keine Zeile breiter werden muss (Befund Runde 3a)."""
+        return DATEI_KONTEXT_ART.get((self.arbeitskopien.get(pdf) or {}).get("art"), "")
+
+    def _datei_kontext_setzen(self, pdf):
+        """Kontextspalte der Dateizeile: der Grund aus der Ausgabe (prüfen, Fehler), sonst der Zusatz."""
+        iid = str(pdf)
+        if self.baum.exists(iid):
+            grund = (self.ausgaben.get(pdf) or {}).get("grund", "")
+            self.baum.set(iid, "kontext", grund or self._datei_zusatz(pdf))
 
     def _beschriftung_passend(self, iid) -> str:
-        """Anzeigename der Datei-Zeile, passend zur ersten Spalte: zu lange Namen in der Mitte gekürzt – Anfang,
-        Endung und der Zusatz „(Bild → PDF)“ / „(Kennwort entfernt)“ bleiben sichtbar."""
-        voll = self.beschriftungen.get(iid, "")
+        """Anzeigename der Datei-Zeile, passend zur ersten Spalte: zu lange Namen in der Mitte gekürzt – Anfang und
+        Endung bleiben sichtbar; der Zusatz steht in der Kontextspalte (_datei_zusatz)."""
+        name = self._name_ohne_zusatz(iid)
         try:
             platz = (self.baum.column("#0", "width") - self._px(SPALTE0_EINZUG)
                      - self.f_fett.measure(f"{HAKEN['an']}  "))
         except tk.TclError:
-            return voll
-        pdf = self.zeilen.get(iid)
-        zusatz = ANZEIGE_ART.get((self.arbeitskopien.get(pdf) or {}).get("art"), "") if pdf is not None else ""
-        if not zusatz or not voll.endswith(zusatz):
-            zusatz = ""
-        return name_einpassen(voll[:len(voll) - len(zusatz)], zusatz, platz, self.f_fett.measure)
+            return name
+        return name_einpassen(name, "", platz, self.f_fett.measure)
 
     def _menue_anlegen(self):
         menue = tk.Menu(self.root)
@@ -2114,7 +2213,8 @@ class AnonymisiererApp:
 
     def _beschriftungen_aktualisieren(self):
         """Dateinamen relativ zum gemeinsamen Stammordner anzeigen (KundeA/Police.pdf, KundeB/Police.pdf); Bilder
-        und entsperrte PDFs tragen einen Zusatz („(Bild → PDF)“, „(Kennwort entfernt)“)."""
+        und entsperrte PDFs tragen einen Zusatz („(Bild → PDF)“, „(Kennwort entfernt)“) – in Dialogen und Titeln
+        hinter dem Namen, in der Liste in der Kontextspalte der Dateizeile."""
         stamm = dateien.gemeinsamer_stamm(self.dateien)
         ein_ordner = len({Path(dateien.ohne_langpfad(p)).parent for p in self.dateien}) <= 1
         for iid, pdf in self.zeilen.items():
@@ -2129,7 +2229,8 @@ class AnonymisiererApp:
             art = (self.arbeitskopien.get(pdf) or {}).get("art")
             self.beschriftungen[iid] = name + ANZEIGE_ART.get(art, "")
             self._zeilentext_setzen(iid)
-        self._spalten_anpassen()                   # erste Spalte folgt dem längsten Namen samt Zusatz
+            self._datei_kontext_setzen(pdf)
+        self._spalten_anpassen()                   # erste Spalte folgt dem längsten Namen (nur in freien Platz)
         for fenster in self.vorschauen.values():
             fenster.titel_setzen()
 
@@ -2277,12 +2378,12 @@ class AnonymisiererApp:
         eintrag = self.ausgaben.get(pdf)
         if not eintrag:
             self.baum.set(iid, "text", "")
-            self.baum.set(iid, "kontext", "")
+            self._datei_kontext_setzen(pdf)        # Grund, sonst „Kennwort entfernt“ / „Bild → PDF“
             return
         status = STATUS_TEXT.get(eintrag["status"], eintrag["status"])
         ausgabe = eintrag.get("pfad")
         self.baum.set(iid, "text", f"{status}: {ausgabe.name}" if ausgabe is not None else status)
-        self.baum.set(iid, "kontext", eintrag.get("grund", ""))
+        self._datei_kontext_setzen(pdf)
 
     def _baum_klick(self, ereignis):
         """Einfachklick in die Häkchen-Spalte schaltet um; Dreieck, Kopfzeile und Trenner bleiben Tk überlassen."""
