@@ -53,9 +53,14 @@ HINWEIS_VORHER = ("Klick auf ein Wort: schwärzen an/aus · Rahmen ziehen: Berei
 HINWEIS_NACHHER = ("Ausgabe nach dem Schwärzen. Orange = Verdacht der Restrisiko-Prüfung. Markierte Verdachtsstellen "
                    "nachschwärzen – oder, wenn nichts Persönliches mehr zu sehen ist, „Freigeben“.")
 # Fotos und Ausweiskopien (Befund Runde 2): Gesicht/Lichtbild, Unterschrift und Handschrift erkennt das Programm nicht
-HINWEIS_FOTO = ("Foto: Gesichter/Lichtbilder, Unterschriften und Handschrift werden NICHT automatisch geschwärzt – "
-                "unter „Geplante Schwärzung“ einen Rahmen darüber ziehen.")
+HINWEIS_FOTO = ("Foto: Lichtbilder auf Ausweisen werden gesucht, andere Gesichter, Unterschriften und Handschrift NICHT "
+                "automatisch geschwärzt – unter „Geplante Schwärzung“ prüfen und einen Rahmen darüber ziehen.")
 GANZE_SEITE_RAND = 3.0        # pt: Rahmen eines Seitenverdachts liegt knapp innerhalb des Seitenrands
+
+
+def _fundname(fund: dict) -> str:
+    """Fundtext für Statuszeile und Kontextmenü; Bildfunde (Lichtbild, Bild, Foto) haben keinen Text, nur ihre Art."""
+    return str(fund.get("text") or fund.get("anzeige") or "")
 
 
 def _engine_hat(name: str) -> bool:
@@ -597,6 +602,11 @@ class VorschauFenster:
                 continue
             eintraege.append((fitz.Rect(rect), index, si))
             vertreten.add(index)
+        for index, fund in enumerate(funde):          # Bildfunde (Lichtbild, Bild, Foto): Stellen sind Bereiche
+            for si, st in enumerate(fund.get("stellen") or ()):
+                if st.get("seite") == nr and st.get("bereich"):
+                    eintraege.append((fitz.Rect(st["bereich"]), index, si))
+                    vertreten.add(index)
         for index, fund in enumerate(funde):
             if index in vertreten or fund.get("stellen"):
                 continue
@@ -804,10 +814,10 @@ class VorschauFenster:
             fund = self.app.analyse_ergebnisse[self.pdf]["funde"][index]
             if si is not None and self.app._fund_hat_stellen(self.pdf, fund):
                 self.app.stelle_setzen(self.pdf, index, si, not an)
-                self.status(f"Stelle „{fund['text']}“ {'wird nicht' if an else 'wird'} geschwärzt.")
+                self.status(f"Stelle „{_fundname(fund)}“ {'wird nicht' if an else 'wird'} geschwärzt.")
             else:
                 self.app.fund_setzen(self.pdf, index, not an)
-                self.status(f"„{fund['text']}“ {'wird nirgends' if an else 'wird überall'} geschwärzt "
+                self.status(f"„{_fundname(fund)}“ {'wird nirgends' if an else 'wird überall'} geschwärzt "
                             f"(dieser Fund gilt für alle seine Stellen).")
         elif art == "wort":
             self.wort_schwaerzen(treffer[1])
@@ -867,7 +877,7 @@ class VorschauFenster:
             _, index, si = treffer
             fund = app.analyse_ergebnisse[pdf]["funde"][index]
             an = self.stelle_an(index, si)
-            kurz = str(fund["text"]).replace("\n", " ")[:40]
+            kurz = _fundname(fund).replace("\n", " ")[:40]
             if si is not None and app._fund_hat_stellen(pdf, fund):
                 eintraege.append(("Diese Stelle nicht schwärzen" if an else "Diese Stelle schwärzen",
                                   lambda: app.stelle_setzen(pdf, index, si, not an)))

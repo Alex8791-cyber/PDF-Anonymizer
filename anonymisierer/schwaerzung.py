@@ -1933,6 +1933,71 @@ def _verdacht_feld(v, name, standard=None):
 
 
 # ----------------------------------------------------------------------
+# Bildfunde (fotos.py): Lichtbilder, in „maximal“ Bilder und Fotobereiche – Haken in die Schwärzung
+# ----------------------------------------------------------------------
+def _bildfunde_trennen(funde: list, bereiche: dict) -> tuple:
+    """Bildfunde aus den Funden lösen: ihre angehakten Bereiche werden wie Rahmen aus der Vorschau geschwärzt (Text
+    UND Bildpixel, Platzhalter „[LICHTBILD]“, „[FOTO]“, „[BILD]“). Rückgabe: (Textfunde, Auftrag der Bildfunde)."""
+    try:
+        from . import fotos as _fotos
+    except ImportError:
+        return funde, None
+    funde, auftrag = _fotos.bildfunde_trennen(funde)
+    for nr, liste in auftrag["bereiche"].items():
+        bereiche.setdefault(nr, []).extend(liste)
+    return funde, auftrag
+
+
+def _bilder_gruende(lauf: _Lauf, dok) -> None:
+    """Gründe für _PRUEFEN aus den Bildfunden: abgewähltes Lichtbild, Ausweiskopie ohne abgedecktes Lichtbild
+    (die Ausgabe braucht dann die Freigabe in der Vorschau)."""
+    auftrag = getattr(lauf, "bildauftrag", None)
+    try:
+        from . import fotos as _fotos
+        gruende = _fotos.freigabe_gruende(auftrag, dok)
+    except Exception:
+        return
+    for code, seite, text in gruende:
+        grund = _Grund(code, seite, text)
+        if grund not in lauf.leckrelevant:
+            lauf.leckrelevant.append(grund)
+
+
+def _bilder_nachkontrolle(lauf: _Lauf, dok, ergebnis: dict, profil: str) -> None:
+    """Nach dem Schwärzen: abgedeckte Bilder/Fotos/Lichtbilder zählen und melden; in „maximal“ Bilder leeren, die die
+    Textseiten noch über ihre Ressourcen erreichen (Kachelmuster, Type3-Schriften, ungenutzt mitgeschleppt)."""
+    auftrag = getattr(lauf, "bildauftrag", None) or {}
+    try:
+        from . import fotos as _fotos
+        from . import muster as _muster
+    except ImportError:
+        return
+    zahl = {k: len(v) for k, v in (auftrag.get("abgedeckt") or {}).items()}
+    geleert = 0
+    if _muster.option(profil, "bilder_schwaerzen"):
+        textseiten = [nr for nr, m in enumerate(dok.seiten)
+                      if m.ocr_modus != "seite" and lauf.ocr_modus.get(nr) != "seite"]
+        try:
+            geleert = _fotos.bilder_nachkontrolle(lauf.doc, textseiten, auftrag.get("behalten_xrefs"))
+        except Exception as e:
+            lauf.melden("warnung", "BILDER_UNGEPRUEFT", f"Nachkontrolle der Bilder fehlgeschlagen ({e}) – Bilder in der "
+                                                       f"Ausgabe bitte selbst prüfen.")
+            lauf.restrisiko_fehler = True
+    ergebnis["bilder_abgedeckt"] = zahl.get(_fotos.KAT_BILD, 0)
+    ergebnis["fotobereiche_abgedeckt"] = zahl.get(_fotos.KAT_FOTO, 0)
+    ergebnis["lichtbilder_abgedeckt"] = zahl.get(_fotos.KAT_LICHTBILD, 0)
+    ergebnis["bilder_geleert"] = geleert
+    teile = [f"{n} {name}" for n, name in ((zahl.get(_fotos.KAT_LICHTBILD, 0), "Lichtbild(er)"),
+                                            (zahl.get(_fotos.KAT_BILD, 0), "Bild(er)"),
+                                            (zahl.get(_fotos.KAT_FOTO, 0), "Fotobereich(e)")) if n]
+    if teile:
+        lauf.melden("hinweis", "BILDER_ABGEDECKT", "Abgedeckt: " + ", ".join(teile) + ".")
+    if geleert:
+        lauf.melden("hinweis", "BILDER_ABGEDECKT", f"{geleert} weitere(s) Bild(er) in Mustern oder ungenutzten "
+                                                   f"Ressourcen der Seiten geleert.")
+
+
+# ----------------------------------------------------------------------
 # Hauptfunktion
 # ----------------------------------------------------------------------
 def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=None, ocr=None,
@@ -1965,6 +2030,7 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
         f["text"] = str(f.get("text", "")).strip()
     bereiche = {int(k): [fitz.Rect(r) for r in v] for k, v in (manuelle_bereiche or {}).items() if v}
     stellen_manuell = {int(k): list(v) for k, v in (manuelle_stellen or {}).items() if v}
+    funde, bildauftrag = _bildfunde_trennen(funde, bereiche)     # Lichtbilder, Bilder, Fotos: Bereiche (fotos.py)
     nebenkanal_bezug = None
     if not funde and not bereiche and not stellen_manuell:
         nebenkanal_bezug = _nebenkanal_bezug(pdf_pfad, nebenkanaele, modell, profil)
@@ -1981,6 +2047,7 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
     if ocr is None:
         ocr = eigener_dienst = OcrDienst()
     lauf = _Lauf(pdf_pfad, funde, melde, fortschritt, abbruch, ocr, ocr_cache, ziel)
+    lauf.bildauftrag = bildauftrag
     lauf.analyse_modell = modell
     lauf.nebenkanal_bezug = nebenkanal_bezug
     try:
@@ -2075,6 +2142,7 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
                         f"die Fundstellen wurden dort neu gesucht. Ergebnis bitte prüfen.")
     # Gründe für _PRUEFEN aus Lesbarkeit und Zustand der Datei (R-07/R-11) – vor dem Schwärzen (Tinte am Original)
     lauf.leckrelevant = _leckrelevant_ermitteln(lauf, dok, zaehler)
+    _bilder_gruende(lauf, dok)                     # abgewähltes Lichtbild, Ausweiskopie ohne Lichtbild (fotos.py)
 
     # 3) Stellen planen
     plan = _Plan()
@@ -2101,6 +2169,7 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
     doc = lauf.doc
     ergebnis["treffer"] = lauf.treffer
     ergebnis["stellen_geschwaerzt"] = lauf.stellen_geschwaerzt
+    _bilder_nachkontrolle(lauf, dok, ergebnis, profil)   # Zahlen melden; „maximal“: Bildreste leeren (fotos.py)
 
     # 5a) Nebenkanäle – nach allen Schwärzungen, vor dem Speichern (Vertrag des Moduls nebenkanaele)
     lauf.melden("hinweis", "NEBENKANAL_ENTFERNT", _nebenkanaele_bereinigen(lauf, doc, zaehler))

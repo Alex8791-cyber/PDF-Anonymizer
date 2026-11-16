@@ -21,6 +21,7 @@ Ablauf beim Aufrufer:  vorher = bildzustand(seite); seite.apply_redactions(...);
                        nach_schwaerzung(doc, seite, vorher)
 """
 
+import re
 import zlib
 
 try:
@@ -185,10 +186,14 @@ def _neu_kodieren(doc, xref, original: dict, qualitaet: int) -> bool:
     if (bpc != "8" or n is None or doc.xref_get_key(xref, "Decode")[0] != "null"
             or doc.xref_get_key(xref, "SMaskInData")[0] != "null"):
         return _flate_packen(doc, xref)
+    # Speicher (48-MP-Fotos): erst MuPDFs Zwischenspeicher leeren – dort liegt noch das dekodierte Original –, dann
+    # das neue Bild EINMAL dekodieren; Rohdaten ohne Kopie (samples_mv), Pixmap sofort wieder freigeben
+    speicher_freigeben()
     pix = fitz.Pixmap(doc, xref)
     if pix.alpha:
         pix = fitz.Pixmap(pix, 0)
     if pix.n != n or pix.width * pix.height < MIN_PIXEL_JPEG:
+        pix = None
         return _flate_packen(doc, xref)
     original_filter = original.get("filter", "") or ""
     verlustbehaftet = any(f in original_filter for f in VERLUSTBEHAFTET)
@@ -201,9 +206,11 @@ def _neu_kodieren(doc, xref, original: dict, qualitaet: int) -> bool:
         # sonst eine schnelle Schätzung (zlib-Stufe 1)
         flate = original.get("laenge") if "Flate" in original_filter else None
         if not flate:
-            flate = len(zlib.compress(pix.samples, 1))
+            flate = len(zlib.compress(getattr(pix, "samples_mv", None) or pix.samples, 1))
         if len(jpeg) > VERLUSTFREI_SCHWELLE * flate:
+            pix = jpeg = None
             return _flate_packen(doc, xref)
+    pix = None
     doc.update_stream(xref, jpeg, compress=False)
     doc.xref_set_key(xref, "Filter", "/DCTDecode")
     doc.xref_set_key(xref, "DecodeParms", "null")
@@ -222,12 +229,14 @@ def bilder_neu_kodieren(doc, xrefs, qualitaet: int = JPEG_QUALITAET) -> int:
     else:                       # Original unbekannt: JPEG nur, wenn es deutlich kleiner ist als Flate
         eintraege = ((x, {}) for x in xrefs)
     anzahl = 0
-    for xref, original in eintraege:
+    for xref, original in eintraege:               # ein Bild nach dem anderen, Speicher dazwischen freigeben
         try:
             if _neu_kodieren(doc, int(xref), original or {}, qualitaet):
                 anzahl += 1
         except Exception:
             continue                                        # Bild bleibt wie es ist (unkomprimiert, aber geschwärzt)
+        finally:
+            speicher_freigeben()
     return anzahl
 
 
@@ -238,11 +247,242 @@ def nach_schwaerzung(doc, seite, vorher: dict, qualitaet: int = JPEG_QUALITAET) 
 
 
 # ----------------------------------------------------------------------
+# Beschädigte Bilder (Gutachten R-07): abgebrochene JPEGs – auch progressive
+# ----------------------------------------------------------------------
+SCHADEN_ABBRUCH = "bricht mitten im Bild ab"
+SCHADEN_PROGRESSIV = "unvollständig übertragen, überall unscharf"
+SCHADEN_DEKODIEREN = "lässt sich nicht dekodieren"
+DEKODIER_WARNUNG_RE = re.compile(r"(?i)premature end|corrupt|truncat|padding|unexpected end|not enough data|"
+                                 r"bad (?:huffman|data|code|marker)|jpeg error|jbig2|jpx|invalid")
+KANTE_ZEILEN = 24             # so viele Zeilen über der Abbruchkante werden auf Tinte geprüft
+VERKLEINERT_AB_PIXEL = 16_000_000  # größere JPEGs (Handyfotos ab 16 MP) werden verkleinert dekodiert (DCT-Skalierung
+                                   # von MuPDF): ein 48-MP-Foto kostet sonst rund 150 MB, so rund 40 MB. Warnungen und
+                                   # Füllfläche bleiben; Scans (300 dpi A4: 8,7 MP) werden weiter voll dekodiert
+VERKLEINERT_MAX_KANTE = 4000  # längste Kante des verkleinert dekodierten Bilds (Pixel)
+FUELL_ZEILEN = 8              # so viele einheitliche Zeilen unten (in voller Auflösung) sind eine Füllfläche
+_SOF_MARKER = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+_SOF_PROGRESSIV = {0xC2, 0xC6, 0xCA, 0xCE}
+
+
+def jpeg_struktur(daten: bytes):
+    """Aufbau eines JPEG aus seinen Markern (ohne zu dekodieren): {"progressiv", "komponenten", "scans": [(Komponenten,
+    Ss, Se, Ah, Al)], "ende": bool (EOI-Marker vorhanden)} – None, wenn es kein JPEG ist. Bricht ein Segmentkopf ab,
+    endet die Liste der Scans dort (der Rest fehlt)."""
+    if not daten or not daten.startswith(b"\xff\xd8"):
+        return None
+    n = len(daten)
+    aus = {"progressiv": False, "komponenten": [], "scans": [], "ende": False}
+    i = 2
+    while i + 1 < n:
+        if daten[i] != 0xFF:
+            i = daten.find(b"\xff", i)
+            if i < 0:
+                break
+            continue
+        marker = daten[i + 1]
+        if marker == 0xFF:                              # Füllbyte
+            i += 1
+            continue
+        if marker == 0xD9:
+            aus["ende"] = True
+            break
+        if marker in (0x00, 0x01, 0xD8) or 0xD0 <= marker <= 0xD7:
+            i += 2
+            continue
+        if i + 4 > n:
+            break
+        laenge = int.from_bytes(daten[i + 2:i + 4], "big")
+        if laenge < 2 or i + 2 + laenge > n:
+            break                                       # Segment abgeschnitten
+        segment = daten[i + 4:i + 2 + laenge]
+        if marker in _SOF_MARKER and len(segment) >= 6:
+            aus["progressiv"] = marker in _SOF_PROGRESSIV
+            anzahl = segment[5]
+            aus["komponenten"] = [segment[6 + 3 * k] for k in range(anzahl) if 6 + 3 * k < len(segment)]
+        elif marker == 0xDA and segment:
+            anzahl = segment[0]
+            if len(segment) < 4 + 2 * anzahl:
+                break
+            komponenten = [segment[1 + 2 * k] for k in range(anzahl)]
+            ss, se, a = segment[1 + 2 * anzahl], segment[2 + 2 * anzahl], segment[3 + 2 * anzahl]
+            aus["scans"].append((komponenten, ss, se, a >> 4, a & 0x0F))
+            # Bilddaten des Scans überspringen: bis zum nächsten echten Marker (nicht FF00, nicht RSTn)
+            j = i + 2 + laenge
+            while True:
+                j = daten.find(b"\xff", j)
+                if j < 0 or j + 1 >= n:
+                    j = n
+                    break
+                folge = daten[j + 1]
+                if folge == 0x00 or 0xD0 <= folge <= 0xD7:
+                    j += 2
+                    continue
+                if folge == 0xFF:
+                    j += 1
+                    continue
+                break
+            i = j
+            continue
+        i += 2 + laenge
+    return aus
+
+
+def progressiv_unvollstaendig(daten: bytes) -> bool:
+    """Ist ein progressives JPEG unvollständig übertragen? Seine Scans müssen jeden Koeffizienten (0-63) jeder
+    Komponente bis zur vollen Genauigkeit (Al = 0) liefern; fehlen spätere Scans (Datei abgeschnitten), zeigt MuPDF das
+    Bild überall unscharf – ohne die einheitliche Füllfläche, an der ein abgebrochenes Baseline-JPEG zu erkennen ist.
+    Fehlt nur die Endmarke, ist das Bild vollständig (False)."""
+    struktur = jpeg_struktur(daten)
+    if not struktur or not struktur["progressiv"] or not struktur["komponenten"]:
+        return False
+    stand = {k: [None] * 64 for k in struktur["komponenten"]}
+    for komponenten, ss, se, _ah, al in struktur["scans"]:
+        for k in komponenten:
+            if k in stand:
+                for c in range(min(ss, 63), min(se, 63) + 1):
+                    stand[k][c] = al
+    return any(wert != 0 for werte in stand.values() for wert in werte)
+
+
+def _warnungen_zuruecksetzen():
+    """MuPDF unterdrückt eine Warnung, die genauso lautet wie die vorige („… repeated 2 times“) – nach einem anderen
+    beschädigten Bild käme „premature end of file in jpeg“ sonst nicht mehr an. Deshalb erst MuPDFs Gedächtnis leeren,
+    dann die gesammelten Warnungen."""
+    try:
+        fitz.mupdf.fz_flush_warnings()
+    except Exception:
+        pass
+    try:
+        fitz.TOOLS.reset_mupdf_warnings()
+    except Exception:
+        pass
+
+
+def _warnungen() -> str:
+    try:
+        return fitz.TOOLS.mupdf_warnings() or ""
+    except Exception:
+        return ""
+
+
+def kante_mit_tinte(pix, min_flach: int = FUELL_ZEILEN) -> bool:
+    """Bricht das Bild unten ab (MuPDF füllt fehlende Daten mit einer einheitlichen Fläche, z. B. Grau 128 oder der
+    letzten Farbe) und liegt direkt über der Kante Tinte – eine halb sichtbare Zeile, die die OCR nicht liest, ein Mensch
+    oder eine Bild-KI aber schon? Ein vollständiges Bild, dem nur die Endmarke fehlt, hat unten keine solche Fläche."""
+    try:
+        if pix.colorspace is not None and pix.colorspace.n != 1:
+            pix = fitz.Pixmap(fitz.csGRAY, pix)
+        elif pix.alpha:
+            pix = fitz.Pixmap(pix, 0)
+        breite, hoehe, n = pix.width, pix.height, pix.n
+        daten = pix.samples_mv if hasattr(pix, "samples_mv") else pix.samples
+    except Exception:
+        return False
+    zeile = breite * n
+    if hoehe < 16 or zeile <= 0:
+        return False
+    flach = 0
+    for y in range(hoehe - 1, -1, -1):
+        z = bytes(daten[y * zeile:(y + 1) * zeile])
+        if z.count(z[:1]) != len(z):
+            break
+        flach += 1
+    if flach < min_flach or flach >= hoehe:
+        return False                      # keine Füllfläche – oder gar nichts sichtbar
+    ende = hoehe - flach
+    band = bytes(daten[max(0, ende - KANTE_ZEILEN) * zeile:ende * zeile])
+    dunkel = len(band) - len(band.translate(None, bytes(range(128))))
+    return dunkel > 0.002 * len(band)
+
+
+def _verkleinert_dekodieren(roh: bytes, breite: int, hoehe: int):
+    """Ein (großes) JPEG über eine Hilfsseite verkleinert dekodieren: MuPDF liest dabei alle Daten (Warnungen wie beim
+    vollen Dekodieren), legt aber nur ein kleines Bild an. Graustufen-Pixmap."""
+    faktor = max(1.0, max(breite, hoehe) / VERKLEINERT_MAX_KANTE)
+    hilfe = fitz.open()
+    try:
+        s = hilfe.new_page(width=max(1.0, breite / faktor), height=max(1.0, hoehe / faktor))
+        s.insert_image(s.rect, stream=roh, keep_proportion=False)
+        return s.get_pixmap(colorspace=fitz.csGRAY, alpha=False, annots=False)
+    finally:
+        hilfe.close()
+
+
+def bild_beschaedigt(doc, xref: int, filter_name: str = ""):
+    """Beschreibung des Schadens eines Bild-XObjects oder None. Ein progressives JPEG, dem spätere Scans fehlen, ist
+    beschädigt (überall unscharf – was die OCR darin nicht liest, kann ein Mensch oder eine KI womöglich erahnen); ein
+    Bild, das mitten im Bild abbricht und über der Kante Tinte zeigt, ebenso; eines, das sich nicht dekodieren lässt,
+    auch. Große JPEGs werden verkleinert dekodiert, gespeicherte Dekodierungen danach freigegeben (Speicher)."""
+    filt = str(filter_name or "")
+    try:
+        if not filt:
+            filt = doc.xref_get_key(xref, "Filter")[1] or ""
+        breite = int(doc.xref_get_key(xref, "Width")[1] or 0)
+        hoehe = int(doc.xref_get_key(xref, "Height")[1] or 0)
+    except (ValueError, TypeError):
+        breite = hoehe = 0
+    nur_dct = "DCTDecode" in filt and "Flate" not in filt and "LZW" not in filt and "ASCII" not in filt
+    roh = None
+    if nur_dct:
+        try:
+            roh = doc.xref_stream_raw(xref)
+        except Exception:
+            roh = None
+        if roh is not None and progressiv_unvollstaendig(roh):
+            return SCHADEN_PROGRESSIV
+    _warnungen_zuruecksetzen()
+    pix = None
+    faktor = 1.0
+    try:
+        if roh is not None and breite * hoehe > VERKLEINERT_AB_PIXEL:
+            faktor = max(1.0, max(breite, hoehe) / VERKLEINERT_MAX_KANTE)
+            pix = _verkleinert_dekodieren(roh, breite, hoehe)
+        else:
+            pix = fitz.Pixmap(doc, xref)
+    except Exception:
+        return SCHADEN_DEKODIEREN
+    finally:
+        roh = None
+    try:
+        if not DEKODIER_WARNUNG_RE.search(_warnungen()):
+            return None
+        return SCHADEN_ABBRUCH if kante_mit_tinte(pix, max(3, int(round(FUELL_ZEILEN / faktor)))) else None
+    finally:
+        pix = None
+        speicher_freigeben()
+
+
+def speicher_freigeben() -> None:
+    """MuPDFs Zwischenspeicher dekodierter Bilder leeren (große Fotos belegen sonst bis zum Programmende Speicher)."""
+    try:
+        fitz.TOOLS.store_shrink(100)
+    except Exception:
+        pass
+
+
+# ----------------------------------------------------------------------
 # Rückfall: Seite als Bild schwärzen (Befund R-08)
 # ----------------------------------------------------------------------
 BILDSEITE_DPI = 200           # Auflösung der als Bild geschwärzten Seite (Text bleibt für Menschen und KI lesbar)
 BILDSEITE_MAX_PIXEL = 40_000_000
+BILDSEITE_MIN_DPI = 72        # Untergrenze, wenn die Seite selbst grob gerastert ist (nie hochrechnen, Speicher)
 BILDSEITE_GRAU_TOLERANZ = 12  # Farbabstand, bis zu dem ein Pixel als grau gilt (Seite ohne Farbe -> Graustufen-PNG)
+
+
+def _quell_aufloesung(seite) -> float | None:
+    """Auflösung (dpi) der Seite, wenn sie nur aus Bildern besteht (kein Text): die höchste effektive Auflösung ihrer
+    Bilder – feiner zu rendern zeigt nichts mehr, kostet aber Speicher. None bei Text oder ohne Bilder."""
+    try:
+        if seite.get_text("words"):
+            return None
+        hoechste = 0.0
+        for info in seite.get_image_info():
+            r = fitz.Rect(info["bbox"])
+            if r.width > 1 and r.height > 1:
+                hoechste = max(hoechste, 72.0 * info["width"] / r.width, 72.0 * info["height"] / r.height)
+        return hoechste or None
+    except Exception:
+        return None
 
 
 def _ohne_farbe(pix) -> bool:
@@ -267,6 +507,9 @@ def seite_als_bild_schwaerzen(doc, seite, fuellen, leeren=(), farbe=(0.92, 0.92,
     rect = fitz.Rect(seite.rect)
     flaeche = max(abs(rect), 1.0)
     dpi = min(dpi, int(72 * (BILDSEITE_MAX_PIXEL / flaeche) ** 0.5))
+    quelle = _quell_aufloesung(seite)
+    if quelle:                  # nie hochrechnen: eine Bildseite mit 100 dpi wird mit 100 dpi neu erzeugt (Speicher)
+        dpi = min(dpi, max(BILDSEITE_MIN_DPI, quelle))
     matrix = fitz.Matrix(dpi / 72.0, dpi / 72.0)
     try:   # Zyklen im Strukturbaum lassen MuPDF 1.28 beim Rendern hängen; die Ausgabe trägt ohnehin keinen Strukturbaum
         katalog = doc.pdf_catalog()
