@@ -7,7 +7,8 @@ das Nötigste:
   - seite_bild / vorschau_daten: Seitenbild per PyMuPDF (aus dem Speicher, ohne offenen Datei-Handle);
     Wörter und Fundstellen aus dem Seitenmodell der Analyse (ergebnis["modell"], Vertrag Abschnitt 1), wenn es
     eins gibt – sonst eigene PyMuPDF-Wörter (vorschau.py ersetzt sie)
-  - freigeben / verwerfen: _PRUEFEN entfernen bzw. Ausgabe löschen, _zuordnung.txt nachführen
+  - freigeben / verwerfen: _PRUEFEN entfernen bzw. Ausgabe löschen, die Zuordnungsdatei nachführen (neben dem
+    Ausgabeordner, _zuordnung_<Ausgabeordner>.txt, und eine ältere _zuordnung.txt im Ordner)
     (schwaerzung.freigeben/verwerfen ersetzen sie); als_pruefen_markieren emuliert freigabe_erforderlich
     für eine Engine ohne diesen Parameter
   - restrisiko_pruefen: liefert [] (restrisiko.py ersetzt sie); reste_als_verdacht macht die Reste der
@@ -495,25 +496,52 @@ def _umbenennen_ohne_ueberschreiben(alt: Path, neu: Path):
     alt.unlink()
 
 
-def _zuordnung_umschreiben(ordner: Path, alt_name: str, neu_name: str | None):
-    """Zeile „<alt_name>  <-  …“ in _zuordnung.txt umbenennen (neu_name) oder entfernen (None)."""
-    pfad = ordner / ZUORDNUNG_DATEI
+def zuordnung_dateien(ordner: Path) -> list[Path]:
+    """Mögliche Zuordnungsdateien eines Ausgabeordners: neben ihm (Engine schwaerzung.zuordnung_pfad, M-25) und – von
+    älteren Fassungen – _zuordnung.txt darin."""
+    ordner = Path(ordner)
+    dateien_ = [ordner / ZUORDNUNG_DATEI]
     try:
-        zeilen = pfad.read_text(encoding="utf-8").splitlines(keepends=True)
-    except OSError:
-        return
-    neu = []
-    for zeile in zeilen:
-        if zeile.startswith(f"{alt_name}  <-"):
-            if neu_name is None:
-                continue
-            zeile = neu_name + zeile[len(alt_name):]
-        neu.append(zeile)
-    pfad.write_text("".join(neu), encoding="utf-8")
+        from .schwaerzung import zuordnung_pfad
+        dateien_.insert(0, Path(zuordnung_pfad(ordner)))
+    except Exception:
+        if ordner.name and ordner.parent != ordner:
+            dateien_.insert(0, ordner.parent / f"_zuordnung_{ordner.name}.txt")
+    return list(dict.fromkeys(dateien_))
+
+
+def _zuordnung_lesen(pfad: Path) -> str:
+    """Inhalt einer Zuordnungsdatei in jeder Kodierung (wie schwaerzung.zuordnung_lesen): von Hand im Editor als ANSI
+    oder „Unicode“ gespeichert, darf sie Freigeben und Verwerfen nicht scheitern lassen."""
+    daten = pfad.read_bytes()
+    if daten.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return daten.decode("utf-16", errors="replace")
+    try:
+        return daten.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return daten.decode("cp1252", errors="replace")
+
+
+def _zuordnung_umschreiben(ordner: Path, alt_name: str, neu_name: str | None):
+    """Zeile „<alt_name>  <-  …“ in der Zuordnungsdatei umbenennen (neu_name) oder entfernen (None) – neben dem
+    Ausgabeordner und in einer älteren _zuordnung.txt darin. Gelesen wird jede Kodierung, geschrieben UTF-8."""
+    for pfad in zuordnung_dateien(ordner):
+        try:
+            zeilen = _zuordnung_lesen(pfad).splitlines(keepends=True)
+        except OSError:
+            continue
+        neu = []
+        for zeile in zeilen:
+            if zeile.startswith(f"{alt_name}  <-"):
+                if neu_name is None:
+                    continue
+                zeile = neu_name + zeile[len(alt_name):]
+            neu.append(zeile)
+        pfad.write_text("".join(neu), encoding="utf-8")
 
 
 def freigeben(ausgabe_pfad) -> Path:
-    """_PRUEFEN aus dem Namen entfernen (gleiche Nummer, sonst die nächste freie) und _zuordnung.txt
+    """_PRUEFEN aus dem Namen entfernen (gleiche Nummer, sonst die nächste freie) und die Zuordnungsdatei
     nachführen. Eine Ausgabe ohne _PRUEFEN bleibt, wie sie ist."""
     ausgabe = Path(ausgabe_pfad)
     if not ausgabe.exists():
@@ -541,7 +569,7 @@ def freigeben(ausgabe_pfad) -> Path:
 
 
 def verwerfen(ausgabe_pfad) -> None:
-    """Ausgabe löschen und aus _zuordnung.txt austragen."""
+    """Ausgabe löschen und aus der Zuordnungsdatei austragen."""
     ausgabe = Path(ausgabe_pfad)
     cache_leeren(ausgabe)
     if ausgabe.exists():

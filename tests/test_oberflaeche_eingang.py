@@ -1245,7 +1245,10 @@ def test_gui_analyse_ohne_funde_nennt_nicht_gepruefte_dateien(app, umgebung, mon
     letzte = app.protokoll_text().splitlines()[-1]
     assert letzte.startswith("⚠ NICHT geprüft: 3 Datei(en)") and "Ausweis_Mustermann.jpg" in letzte
     assert app.warnungen_anzahl == 0                          # Auswahlmeldungen zählen nicht (GR-07)
-    assert str(app.start_knopf.cget("state")) == "disabled"
+    # Runde 3 (Paket ausgabe-status): die geprüfte Datei bekommt eine bereinigte Ausgabe – der Knopf bleibt an; die
+    # nicht geprüften bekommen keine (der Dialog sagt es)
+    assert str(app.start_knopf.cget("state")) == "normal"
+    assert "für sie entsteht keine Ausgabe" in text
     # Gegenprobe: alles geprüft -> unverändert „Keine Funde“ mit „keine personenbezogenen Daten“ (Information)
     app.liste_leeren()
     analysiere(app, [d["avb"]])
@@ -1280,7 +1283,8 @@ def test_gui_nur_angeboten_nennt_nicht_gepruefte_dateien(app, umgebung, dialoge)
     app._pdfs_hinzufuegen([str(ordner)])
     starte_lauf(app, app.analysieren, timeout=120)
     art, titel, text = app.letzter_dialog
-    assert str(app.start_knopf.cget("state")) == "disabled"
+    # Runde 3 (Paket ausgabe-status): auch ohne Häkchen entsteht eine bereinigte Ausgabe – der Knopf bleibt an
+    assert str(app.start_knopf.cget("state")) == "normal" and "bereinigte Ausgabe" in text
     assert art == "warning" and titel == "Analyse abgeschlossen – 1 Datei(en) NICHT geprüft"
     assert text.startswith("In den geprüften Dateien wurden keine Personendaten zum Schwärzen erkannt"), text
     assert "  • Mail_vom_Kunden.msg: keine PDF, sondern eine Outlook-Nachricht" in text

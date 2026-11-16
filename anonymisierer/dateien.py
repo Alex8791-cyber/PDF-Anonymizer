@@ -22,6 +22,7 @@ from pathlib import Path
 PROGRAMM_NAME = "PDF-Anonymisierer"
 EINSTELLUNGEN_DATEI = "einstellungen.json"
 KUNDENLISTE_DATEI = "kundenliste.dat"
+ZUORDNUNGEN_ORDNER = "Zuordnungen"     # Zuordnungsdateien für Zielordner ohne Ordner darüber (Laufwerkswurzel)
 SPERR_DATEI = "instanz.lock"
 FEHLERLOG_DATEI = "fehler.log"
 FEHLERLOG_MAX_BYTES = 200_000          # danach wird nach fehler.log.1 rotiert
@@ -220,11 +221,18 @@ def endung_beschreibung(name) -> str | None:
     return _ENDUNG_BESCHREIBUNG.get(_endung(os.fspath(name)))
 
 
+# Zuordnungsdateien der Schwärzung: im Ausgabeordner (_zuordnung.txt, ältere Fassungen) und – seit Runde 3 – neben
+# ihm, also meist neben den Originalen (_zuordnung_anonymisiert.txt bzw. _zuordnung_<Zielordner>.txt)
+_ZUORDNUNG_NAME = re.compile(r"^_zuordnung(?:_.+)?\.txt$", re.IGNORECASE)
+
+
 def ist_systemdatei(name: str) -> bool:
     """Von Windows/macOS/Office angelegte Dateien, versteckte Dateien und Dateien dieses Programms
-    (_zuordnung.txt, Laufprotokolle) – im Ordner-Scan ohne Meldung übergangen."""
+    (Zuordnungsdateien _zuordnung.txt und _zuordnung_<Ausgabeordner>.txt, Laufprotokolle) – im Ordner-Scan ohne
+    Meldung übergangen."""
     klein = name.lower()
-    return (klein in _SYSTEM_DATEIEN or name.startswith(("~$", ".")) or klein.startswith(PROTOKOLL_PRAEFIX.lower()))
+    return (klein in _SYSTEM_DATEIEN or name.startswith(("~$", ".")) or klein.startswith(PROTOKOLL_PRAEFIX.lower())
+            or bool(_ZUORDNUNG_NAME.match(name)))
 
 
 # ----------------------------------------------------------------------
@@ -535,7 +543,7 @@ def _innerhalb_temp(pfad) -> bool:
 
 def arbeitskopie_ziel(name: str) -> Path:
     """Pfad für eine neue Arbeitskopie: eigener Unterordner der Sitzung (gleiche Namen aus verschiedenen
-    Kundenordnern stören sich nicht), der Dateiname bleibt erkennbar – er steht in _zuordnung.txt."""
+    Kundenordnern stören sich nicht), der Dateiname bleibt erkennbar – er steht in der Zuordnungsdatei."""
     ordner = Path(tempfile.mkdtemp(prefix="kopie_", dir=sitzungsordner()))
     sicher = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .") or "dokument"
     if not sicher.lower().endswith(".pdf"):
@@ -775,6 +783,14 @@ def einstellungen_pfad() -> Path:
 def kundenliste_pfad() -> Path:
     """Speicherort der Kundenliste (nur gesalzene Prüfwerte, kein Klartext) neben den Einstellungen."""
     return einstellungen_pfad().parent / KUNDENLISTE_DATEI
+
+
+def zuordnungen_ordner() -> Path:
+    """%APPDATA%\\PDF-Anonymisierer\\Zuordnungen bzw. ~/.config/PDF-Anonymisierer/Zuordnungen (neben den
+    Einstellungen, wie die Kundenliste): hier liegt die Zuordnungsdatei, wenn der Zielordner eine Laufwerks- oder
+    Freigabe-Wurzel ist (E:\\ auf einem USB-Stick, \\\\server\\freigabe\\) – neben ihm ist kein Platz, und in ihm würde
+    sie mit hochgeladen (M-25, Befund Runde 3)."""
+    return einstellungen_pfad().parent / ZUORDNUNGEN_ORDNER
 
 
 def einstellungen_laden(pfad: Path | None = None) -> dict:

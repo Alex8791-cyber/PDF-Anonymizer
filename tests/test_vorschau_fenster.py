@@ -311,9 +311,12 @@ def test_hauptliste_und_vorschau_bleiben_gleich(app, umgebung, monkeypatch):
     assert gestrichelt(fenster, markierungen(fenster, "fund_2")[0])
     app.alle_setzen("aus")
     assert all(gestrichelt(fenster, i) for i in markierungen(fenster, "stelle"))
-    assert str(app.start_knopf.cget("state")) == "disabled"
+    # Runde 3 (Paket ausgabe-status): auch ohne Häkchen entsteht eine bereinigte Ausgabe – der Knopf bleibt an; dass
+    # Hauptliste und Vorschau dieselben Häkchen zählen, prüft jetzt _angehakte_funde (früher über den Knopfzustand)
+    assert str(app.start_knopf.cget("state")) == "normal" and app._angehakte_funde() == 0
     klicke(fenster, mitte(stelle_von(fenster, "Max Mustermann")[0]))
     assert app._zustand(f"{pdf}::0") == "an" and str(app.start_knopf.cget("state")) == "normal"
+    assert app._angehakte_funde() == 1
     # Doppelklick auf eine Fundzeile öffnet die Vorschau mit hervorgehobenem Fund
     app._vorschau_fuer_zeile(f"{pdf}::1")
     assert app.vorschauen[pdf] is fenster and fenster.markiert_fund == 1
@@ -444,7 +447,8 @@ def test_freigabe_mit_echter_engine(app, umgebung, dialoge):
     assert "0171 2345678" in text and "DE89 3704" not in text   # abgewählt bleibt, angehakt ist weg
     fenster.freigeben()
     assert (tmp / "echt" / "anonymisiert" / "anonym_01.pdf").exists() and not ausgabe.exists()
-    assert (tmp / "echt" / "anonymisiert" / "_zuordnung.txt").read_text(encoding="utf-8").startswith(
+    from anonymisierer import schwaerzung
+    assert schwaerzung.zuordnung_pfad(tmp / "echt" / "anonymisiert").read_text(encoding="utf-8").startswith(
         "anonym_01.pdf  <-  Vertrag.pdf")
 
 

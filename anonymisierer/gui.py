@@ -199,7 +199,8 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
         "  • Unterschriften, Stempel, Handschrift\n"
         "  • Text in Bildern, Fotos und Logos wird per OCR nur unsicher gelesen (Handyfotos, geringe Auflösung)\n"
         "  • Freitext, aus dem eine Person erkennbar bleibt\n"
-        "  • Dateinamen (die Ausgabe heißt neutral anonym_01.pdf; der Originalname steht in _zuordnung.txt)\n\n"
+        "  • Dateinamen (die Ausgabe heißt neutral anonym_01.pdf; der Originalname steht in der Zuordnungsdatei "
+        "_zuordnung_anonymisiert.txt NEBEN dem Ausgabeordner – nicht mit hochladen)\n\n"
         "Deshalb: jede Ausgabe in der Vorschau prüfen (Doppelklick auf die Datei). Was dort noch zu sehen ist, "
         "per Klick oder Rahmen nachschwärzen.\n\n"
         "Pseudonymisierte Dokumente bleiben personenbezogene Daten. Für die Weitergabe an einen KI-Dienst "
@@ -2364,9 +2365,15 @@ class AnonymisiererApp:
                 and not self.analyse_ergebnisse[pdf].get("fehler")
                 and _nebenkanal_bezug(self.analyse_ergebnisse[pdf]) is not None]
 
+    def _bearbeitbare_dateien(self) -> list[Path]:
+        """Analysierte Dateien ohne Fehler: jede bekommt beim Schwärzen eine bereinigte Ausgabe (Runde 3: „nur aus dem
+        Ausgabeordner hochladen“) – auch ohne angehakten Fund."""
+        return [pdf for pdf in self.dateien if pdf in self.analyse_ergebnisse
+                and not self.analyse_ergebnisse[pdf].get("fehler")]
+
     def _start_knopf_aktualisieren(self):
-        aktiv = not self.laeuft and not self.analyse_veraltet and (self._angehakte_funde() > 0
-                                                                   or bool(self._nebenkanal_dateien()))
+        aktiv = not self.laeuft and not self.analyse_veraltet and (bool(self._bearbeitbare_dateien())
+                                                                   or self._angehakte_funde() > 0)
         self.start_knopf.config(state="normal" if aktiv else "disabled")
 
     # ------------------------------------------------------------------
@@ -3323,17 +3330,30 @@ class AnonymisiererApp:
         elif gesamt:
             was = "mögliche Gesundheitsangaben" if nur_gesundheit else "Funde"
             folge = ("Wegen der Personendaten in Metadaten/Anhängen erzeugt „Schwärzen starten“ trotzdem eine "
-                     "bereinigte Ausgabe." if nebenkanal else "Ohne Häkchen wird keine Ausgabedatei erzeugt.")
+                     "bereinigte Ausgabe." if nebenkanal else
+                     "„Schwärzen starten“ erzeugt eine bereinigte Ausgabe – nicht angehakte Stellen bleiben darin lesbar.")
             wo = f"{len(ergebnisse)} Datei(en)" if alles_geprueft else f"den {len(geprueft)} geprüften Datei(en)"
             self._log(f"Analyse fertig: keine Personendaten zum Schwärzen in {wo} – nur "
                       f"{gesamt} {was} angeboten (nicht angehakt). {folge}",
                       "ok" if alles_geprueft else "warnung", zaehlen=False)
             status = (f"Keine Personendaten zum Schwärzen – nur {was} angeboten (nicht angehakt). Bitte prüfen; "
                       f"zum Schwärzen anhaken.")
+        elif alles_geprueft and ohne_text:
+            # Befund Runde 3a: für eine Datei ohne lesbaren Text (heller oder unlesbarer Scan) gilt kein „nichts zu
+            # schwärzen“ – dort wurde nichts geprüft, ihre Ausgabe wird _PRUEFEN
+            self._log(f"Analyse fertig: 0 Funde in {len(ergebnisse)} Datei(en) – soweit Text lesbar war, gibt es auf "
+                      f"den Seiten nichts zu schwärzen; in {len(ohne_text)} Datei(en) war KEIN Text lesbar – dort wurde "
+                      f"nichts geprüft, ihre bereinigte Ausgabe wird „_PRUEFEN“. „Schwärzen starten“ erzeugt je Datei "
+                      f"eine bereinigte Ausgabe (ohne versteckte Teile) – nur diese weitergeben.", "warnung",
+                      zaehlen=False)
+            status = (f"Keine Funde – aber in {len(ohne_text)} Datei(en) war kein Text lesbar: dort wurde nichts "
+                      f"geprüft (Ausgabe als „_PRUEFEN“). Bitte Hinweise im Protokoll lesen.")
         elif alles_geprueft:
-            self._log(f"Analyse fertig: 0 Funde in {len(ergebnisse)} Datei(en) – es gibt nichts zu schwärzen, "
-                      f"es wird keine Ausgabedatei erzeugt.", "warnung" if ohne_text else "ok", zaehlen=False)
-            status = "Keine Funde – nichts zu schwärzen. Bitte Hinweise im Protokoll lesen."
+            self._log(f"Analyse fertig: 0 Funde in {len(ergebnisse)} Datei(en) – auf den Seiten gibt es nichts zu "
+                      f"schwärzen. „Schwärzen starten“ erzeugt trotzdem je Datei eine bereinigte Ausgabe (ohne "
+                      f"versteckte Teile) – nur diese weitergeben.", "ok", zaehlen=False)
+            status = ("Keine Funde – nichts zu schwärzen. „Schwärzen starten“ erzeugt eine bereinigte Ausgabe; bitte "
+                      "Hinweise im Protokoll lesen.")
         else:
             self._log(f"Analyse fertig: 0 Funde in den {len(geprueft)} geprüften Datei(en) – {nicht_zahl} Datei(en) "
                       f"der Auswahl wurden NICHT geprüft bzw. nicht analysiert (siehe unten).", "warnung",
@@ -3353,30 +3373,57 @@ class AnonymisiererApp:
         bloecke: list[list[str]] = []
         art = "info" if alles_geprueft else "warning"
         nicht_block = self._nicht_geprueft_block()
+        ohne_text_block = (["ACHTUNG – in diesen Dateien war kein Text lesbar (z. B. unlesbarer Scan). "
+                            "Dort konnte NICHTS geprüft werden; ihre bereinigte Ausgabe wird als „_PRUEFEN“ "
+                            "abgelegt – bitte selbst ansehen, diese Dateien nicht ungeprüft weitergeben:"]
+                           + [f"  • {self._anzeigename(p)}" for p in ohne_text[:10]])
         if gesamt == 0 and nebenkanal:
             art = "warning"
             bloecke.append(nebenkanal_block)
-            ohne = [p for p, e in ergebnisse.items() if not e["fehler"] and p not in dict(nebenkanal)]
+            ohne = [p for p, e in ergebnisse.items() if not e["fehler"] and p not in dict(nebenkanal)
+                    and p not in ohne_text]
             if ohne:
                 bloecke.append([f"In {len(ohne)} weiteren Datei(en) wurde nichts gefunden – bitte selbst durchsehen "
                                 f"(Doppelklick = Vorschau):"] + [f"  • {self._anzeigename(p)}" for p in ohne[:10]])
+            if ohne_text:                                  # auch hier: dort wurde nichts geprüft (Befund Runde 3a)
+                bloecke.append(ohne_text_block)
         elif gesamt == 0:
-            if alles_geprueft:
-                bloecke.append(["Es wurden keine personenbezogenen Daten erkannt. Es gibt nichts zu schwärzen, "
-                                "deshalb bleibt der Schwärzen-Knopf aus und es wird keine Ausgabedatei erzeugt."])
+            # Dateien ohne lesbaren Text (Befund Runde 3a, heller oder unlesbarer Scan): für sie gilt kein „keine
+            # personenbezogenen Daten erkannt – nichts zu schwärzen“ – dort wurde nichts geprüft (Block ACHTUNG unten)
+            lesbar = [p for p in geprueft if p not in ohne_text]
+            if alles_geprueft and not ohne_text:
+                bloecke.append(["Es wurden keine personenbezogenen Daten erkannt – auf den Seiten gibt es nichts zu "
+                                "schwärzen. „Schwärzen starten“ erzeugt trotzdem für jede Datei eine bereinigte Ausgabe "
+                                "(ohne Dateieigenschaften, Anhänge, Formulardaten und andere versteckte Teile). "
+                                "Hochladen bitte nur diese Ausgabe, nicht das Original."])
+            elif alles_geprueft and lesbar:
+                bloecke.append([f"In den {len(lesbar)} Datei(en) mit lesbarem Text wurden keine personenbezogenen "
+                                f"Daten erkannt – dort gibt es nichts zu schwärzen. „Schwärzen starten“ erzeugt trotzdem "
+                                f"für jede Datei eine bereinigte Ausgabe (ohne Dateieigenschaften, Anhänge, Formulardaten "
+                                f"und andere versteckte Teile). Hochladen bitte nur diese Ausgabe, nicht das Original."])
+            elif alles_geprueft:
+                bloecke.append(["In keiner Datei war Text lesbar – auf personenbezogene Daten konnte NICHTS geprüft "
+                                "werden. „Schwärzen starten“ erzeugt trotzdem für jede Datei eine bereinigte Ausgabe "
+                                "(ohne Dateieigenschaften, Anhänge, Formulardaten und andere versteckte Teile), abgelegt "
+                                "als „_PRUEFEN“: erst selbst ansehen, dann in der Vorschau freigeben."])
+            elif geprueft and ohne_text:
+                bloecke.append([(f"In den {len(lesbar)} geprüften Datei(en) mit lesbarem Text wurde nichts gefunden – "
+                                 f"dort gibt es nichts zu schwärzen. " if lesbar else
+                                 "In keiner geprüften Datei war Text lesbar (siehe unten). ")
+                                + f"„Schwärzen starten“ erzeugt für die geprüften Dateien trotzdem eine bereinigte "
+                                  f"Ausgabe (ohne versteckte Teile). Das gilt NICHT für die {nicht_zahl} Datei(en), die "
+                                  f"nicht geprüft werden konnten (siehe unten) – für sie entsteht keine Ausgabe."])
             elif geprueft:
-                bloecke.append(["In den geprüften Dateien wurde nichts gefunden – dort gibt es nichts zu schwärzen, "
-                                "deshalb bleibt der Schwärzen-Knopf aus und es wird keine Ausgabedatei erzeugt. Das "
-                                f"gilt NICHT für die {nicht_zahl} Datei(en), die nicht geprüft werden konnten "
-                                f"(siehe unten)."])
+                bloecke.append(["In den geprüften Dateien wurde nichts gefunden – dort gibt es nichts zu schwärzen. "
+                                "„Schwärzen starten“ erzeugt für sie trotzdem eine bereinigte Ausgabe (ohne versteckte "
+                                f"Teile). Das gilt NICHT für die {nicht_zahl} Datei(en), die nicht geprüft werden "
+                                f"konnten (siehe unten) – für sie entsteht keine Ausgabe."])
             else:
                 bloecke.append([f"Keine Datei der Auswahl konnte geprüft werden ({nicht_zahl} Datei(en), siehe "
                                 f"unten) – es wird keine Ausgabedatei erzeugt."])
             if ohne_text:
                 art = "warning"
-                bloecke.append(["ACHTUNG – in diesen Dateien war kein Text lesbar (z. B. unlesbarer Scan). "
-                                "Dort konnte NICHTS geprüft werden; diese Dateien nicht ungeprüft weitergeben:"]
-                               + [f"  • {self._anzeigename(p)}" for p in ohne_text[:10]])
+                bloecke.append(ohne_text_block)
             elif geprueft:
                 bloecke.append(["Mögliche Gründe: Das Dokument enthält keine Namen, IBANs, Adressen usw. "
                                 "(z. B. ein Bedingungswerk), oder die Daten stehen in Bildern oder Handschrift. "
@@ -3390,8 +3437,8 @@ class AnonymisiererApp:
             satz = ("Keine Personendaten zum Schwärzen erkannt" if alles_geprueft else
                     "In den geprüften Dateien wurden keine Personendaten zum Schwärzen erkannt")
             bloecke.append([f"{satz} (keine Namen, Anschriften, IBANs, Nummern …). In der Fundliste stehen nur "
-                            f"angebotene, NICHT angehakte Stellen. Ohne Häkchen bleibt der Schwärzen-Knopf aus, und es "
-                            f"wird keine Ausgabedatei erzeugt."])
+                            f"angebotene, NICHT angehakte Stellen – sie bleiben lesbar, wenn sie nicht angehakt werden. "
+                            f"„Schwärzen starten“ erzeugt trotzdem eine bereinigte Ausgabe (ohne versteckte Teile)."])
         elif nebenkanal:
             art = "warning"
             bloecke.append(nebenkanal_block)
@@ -3491,9 +3538,11 @@ class AnonymisiererApp:
         return True, ziel
 
     def _auftrag(self, pdf: Path) -> dict | None:
-        """Schwärz-Auftrag einer Datei aus den Häkchen: Funde (mit Stellen-Zuständen), manuelle Markierungen."""
+        """Schwärz-Auftrag einer Datei aus den Häkchen: Funde (mit Stellen-Zuständen), manuelle Markierungen. Jede
+        fehlerfrei analysierte Datei bekommt einen Auftrag – auch ohne angehakten Fund entsteht eine bereinigte Ausgabe
+        (Runde 3). None nur für Dateien, die nicht analysiert werden konnten (keine Ausgabe möglich)."""
         ergebnis = self.analyse_ergebnisse.get(pdf)
-        if not ergebnis:
+        if not ergebnis or ergebnis.get("fehler"):
             return None
         funde = []
         for index, fund in enumerate(ergebnis["funde"]):
@@ -3513,9 +3562,8 @@ class AnonymisiererApp:
             else:
                 stellen.setdefault(eintrag["seite"], []).append(
                     (int(eintrag["start"]), int(eintrag["ende"]), PLATZHALTER_MANUELL))
-        nebenkanal = None if ergebnis.get("fehler") else _nebenkanal_bezug(ergebnis)
-        if not funde and not bereiche and not stellen and nebenkanal is None:
-            return None
+        nebenkanal = _nebenkanal_bezug(ergebnis)
+        ohne_haken = not funde and not bereiche and not stellen
         kopie = self.arbeitskopien.get(pdf)
         return {"pdf": pdf, "funde": funde, "ocr_cache": ergebnis.get("ocr_cache"),
                 "modell": ergebnis.get("modell") if self.einzelstellen_moeglich(pdf) else None,
@@ -3523,8 +3571,11 @@ class AnonymisiererApp:
                 # die Engine liest die Arbeitskopie; die Ausgabe gehört neben das ORIGINAL (nie in den Temp-Ordner)
                 "datei": Path(kopie["pfad"]) if kopie else pdf,
                 "ziel_ordner": Path(pdf).parent / dateien.AUSGABE_ORDNER if kopie else None,
-                "nebenkanaele": ergebnis.get("nebenkanaele") if nebenkanal is not None else None,
-                "nur_nebenkanal": not funde and not bereiche and not stellen,
+                "nebenkanaele": ergebnis.get("nebenkanaele") if isinstance(ergebnis.get("nebenkanaele"), dict) else None,
+                "nur_nebenkanal": ohne_haken and nebenkanal is not None,
+                # nichts angehakt: die Ausgabe ist nur bereinigt; „gefunden“ unterscheidet „keine Personendaten
+                # gefunden“ von „Funde nicht angehakt“ (Status in der Liste)
+                "ohne_haken": ohne_haken, "gefunden": bool(ergebnis.get("funde")),
                 # Foto/Ausweiskopie: Gesicht, Unterschrift und Handschrift bleiben stehen – die Ausgabe braucht
                 # IMMER eine Freigabe in der Vorschau, auch wenn das Häkchen „Freigabe …“ aus ist (Befund Runde 2)
                 "foto": self._ist_foto(pdf)}
@@ -3552,8 +3603,14 @@ class AnonymisiererApp:
                          f"(z. B. {nicht_analysiert[0].name}). Bitte zuerst „Analysieren“ drücken.")
             return False
         auftraege = [a for a in (self._auftrag(p) for p in dateiliste) if a]
+        # Dateien, deren Analyse scheiterte (keine PDF, Kennwort, beschädigt …): für sie entsteht keine Ausgabe – der
+        # Abschlussdialog nennt sie unter „OHNE Ausgabedatei“
+        self._ohne_auftrag = [(p, self.analyse_ergebnisse[p].get("fehler")) for p in dateiliste
+                              if p in self.analyse_ergebnisse and self.analyse_ergebnisse[p].get("fehler")]
         if not auftraege:
-            self._dialog("warning", "Nichts ausgewählt", "Es ist kein Fund angehakt – es gibt nichts zu schwärzen.")
+            self._dialog("warning", "Nichts zu schwärzen",
+                         "Keine der Dateien konnte analysiert werden – es kann keine Ausgabe entstehen. Die Gründe "
+                         "stehen im Protokoll. Diese Dateien nicht ungeprüft weitergeben.")
             return False
         fehlt = []
         if any(a["bereiche"] for a in auftraege) and not self.kann_manuelle_bereiche():
@@ -3719,7 +3776,9 @@ class AnonymisiererApp:
             self._log(f"✖ {name}: {ergebnis['fehler']}", "fehler", zaehlen=not abgebrochen)
         elif ergebnis["ausgabe"] is not None:
             zusatz = " – zu prüfen, dann in der Vorschau freigeben" if ergebnis["_status"] == "pruefen" else ""
-            self._log(f"✔ {name}  →  {ergebnis['ausgabe']}  ({ergebnis['treffer']} Stelle(n) ersetzt){zusatz}", "ok")
+            stellen = (f"{ergebnis['treffer']} Stelle(n) ersetzt" if ergebnis["treffer"]
+                       else "nichts geschwärzt, versteckte Teile entfernt")
+            self._log(f"✔ {name}  →  {ergebnis['ausgabe']}  ({stellen}){zusatz}", "ok")
         else:
             self._log(f"⚠ {name}: keine Ausgabedatei erzeugt.", "warnung", zaehlen=False)
         for w in ergebnis["warnungen"]:
@@ -3740,34 +3799,59 @@ class AnonymisiererApp:
             self._log(f"✖ {name}: {nicht_lokalisiert} Fundstelle(n) konnten nicht lokalisiert werden – Ausgabe "
                       f"unbedingt prüfen!", "fehler", zaehlen="NICHT_LOKALISIERT" not in codes)
 
-    def _grund(self, ergebnis: dict, status: str, pdf: Path | None = None) -> str:
+    def _grund(self, ergebnis: dict, status: str, pdf: Path | None = None, auftrag: dict | None = None) -> str:
+        """Kurzer Grund zum Status einer Ausgabe (Spalte neben der Datei, Abschlussdialog): bei _PRUEFEN die Gründe der
+        Engine („pruefen_gruende“), bei „fertig“ ohne Schwärzung, ob nichts gefunden oder nichts angehakt war."""
         if status == "fehler":
             return ergebnis["fehler"] or ""
         if status == "keine":
             return ergebnis["warnungen"][0] if ergebnis["warnungen"] else "kein Treffer"
         teile = []
         verdacht = ergebnis.get("verdacht") or []
-        if verdacht:
-            teile.append(f"{len(verdacht)} Verdachtsstelle(n)")
-        if ergebnis["reste"]:
-            teile.append(f"{len(ergebnis['reste'])} Fundtext(e) noch auffindbar")
-        if int(ergebnis.get("stellen_nicht_lokalisiert") or 0):
-            teile.append("Stellen nicht lokalisiert")
+        if status == "pruefen" and ergebnis.get("pruefen_gruende"):
+            teile += [str(g) for g in ergebnis["pruefen_gruende"] if str(g) != "Freigabe ausstehend"]
+        else:
+            if verdacht:
+                teile.append(f"{len(verdacht)} Verdachtsstelle(n)")
+            if ergebnis["reste"]:
+                teile.append(f"{len(ergebnis['reste'])} Fundtext(e) noch auffindbar")
+            if int(ergebnis.get("stellen_nicht_lokalisiert") or 0):
+                teile.append("Stellen nicht lokalisiert")
         if status == "pruefen" and pdf is not None and self._ist_foto(pdf):
             teile.append("Foto: Gesicht, Unterschrift und Handschrift selbst prüfen")
+        # ohne Schwärzung (Runde 3): bereinigte Ausgabe – so klar wie möglich sagen, was das heißt; auch wenn sie nur
+        # wegen „Freigabe vor Weitergabe“ (Standard) noch _PRUEFEN heißt (Befund Runde 3: dort stand nur „Freigabe
+        # ausstehend“, und die Maklerin sah in der Vorschau keine einzige Schwärzung ohne Erklärung)
+        ohne_schwaerzung = None
+        if not teile and not int(ergebnis.get("treffer") or 0):
+            ohne_schwaerzung = ("nichts angehakt – nur versteckte Teile entfernt"
+                                if auftrag is not None and auftrag.get("gefunden") and auftrag.get("ohne_haken")
+                                else "keine personenbezogenen Daten gefunden")
         if status == "pruefen" and not teile:
-            teile.append("Freigabe ausstehend")
+            teile.append(f"{ohne_schwaerzung} – Freigabe ausstehend" if ohne_schwaerzung else "Freigabe ausstehend")
+        if status == "fertig" and not teile and ohne_schwaerzung:
+            teile.append(ohne_schwaerzung)
         return " · ".join(teile)
+
+    @staticmethod
+    def _nur_freigabe_offen(ergebnis: dict, status: str) -> bool:
+        """„fertig“, oder _PRUEFEN allein wegen „Freigabe vor Weitergabe“ – kein Grund der Engine, kein Verdacht."""
+        if status == "fertig":
+            return True
+        return (status == "pruefen" and not ergebnis.get("verdacht") and not ergebnis.get("reste")
+                and not int(ergebnis.get("stellen_nicht_lokalisiert") or 0)
+                and all(str(g) == "Freigabe ausstehend" for g in ergebnis.get("pruefen_gruende") or ()))
 
     def _schwaerzen_fertig(self, auftraege, ergebnisse, abgebrochen, fehler_intern, erster_fehler=None,
                            ersetzt=None):
+        auftrag_je_pdf = {a["pdf"]: a for a in auftraege}
         for pdf, e in ergebnisse:
             status = e.get("_status") or self._ausgabe_status(e)
             if status in ("fehler", "keine") and ersetzt is not None:
                 continue                                  # Nachschwärzen gescheitert: alte Ausgabe bleibt gültig
             verdacht = list(e.get("verdacht") or []) + list(e.get("_reste_verdacht") or [])
             self.ausgaben[pdf] = {"pfad": e["ausgabe"], "status": status, "verdacht": verdacht,
-                                  "ergebnis": e, "grund": self._grund(e, status, pdf)}
+                                  "ergebnis": e, "grund": self._grund(e, status, pdf, auftrag_je_pdf.get(pdf))}
             self._ausgabe_zeile_setzen(pdf)
         geschrieben = [(pdf, e) for pdf, e in ergebnisse
                        if e["ausgabe"] is not None and Path(e["ausgabe"]).exists()]
@@ -3797,11 +3881,21 @@ class AnonymisiererApp:
             self._nachschwaerzen_fertig(ergebnisse, ersetzt, abgebrochen)
             return
 
+        # Dateien, die gar nicht bearbeitet werden konnten (Analyse gescheitert): keine Ausgabe (Runde 3: nur sie und
+        # Dateien, an denen die Schwärzung scheiterte, stehen unter „OHNE Ausgabedatei“)
+        ohne_auftrag = [(p, f) for p, f in getattr(self, "_ohne_auftrag", None) or () if p not in verarbeitet]
+        # ohne Schwärzung und ohne Grund – „fertig“ oder nur noch freizugeben (Befund Runde 3: gezählt wurden nur
+        # „fertig“-Ausgaben, mit „Freigabe vor Weitergabe“ (Standard) stand die Zeile also nie da)
+        nur_bereinigt = [pdf for pdf, e in geschrieben if not int(e.get("treffer") or 0)
+                         and self._nur_freigabe_offen(e, self.ausgaben.get(pdf, {}).get("status"))]
+        noch_freizugeben = [pdf for pdf in nur_bereinigt if self.ausgaben.get(pdf, {}).get("status") == "pruefen"]
+        zuordnung_warnungen = [m.get("text", "") for _, e in geschrieben for m in e.get("meldungen") or ()
+                               if isinstance(m, dict) and m.get("code") == "ZUORDNUNG" and m.get("art") == "warnung"]
         alles_gut = (not ohne_ausgabe and not nicht_verarbeitet and not pruefen and not abgebrochen
-                     and not self.nicht_geprueft)
+                     and not self.nicht_geprueft and not ohne_auftrag and not zuordnung_warnungen)
         if abgebrochen:
             self._log("Schwärzung abgebrochen.", "fehler", zaehlen=False)
-        self._log(f"Fertig: {len(geschrieben)} von {len(auftraege)} Datei(en) geschrieben, "
+        self._log(f"Fertig: {len(geschrieben)} von {len(auftraege) + len(ohne_auftrag)} Datei(en) geschrieben, "
                   f"{stellen} Stelle(n) ersetzt.", "ok" if alles_gut else "warnung", zaehlen=False)
         for o in ordner:
             self._log(f"Ausgabeordner: {o}", "ok")
@@ -3813,23 +3907,41 @@ class AnonymisiererApp:
                       f"freigeben (Doppelklick auf die Datei).", "warnung", zaehlen=False)
         self._log("Bitte jede Ausgabedatei prüfen, bevor sie an einen KI-Dienst geht – "
                   "das Programm pseudonymisiert nur direkte Identifikatoren.", "hinweis")
-        self._status(f"Fertig: {len(geschrieben)} von {len(auftraege)} Datei(en) geschrieben, "
+        gesamt = len(auftraege) + len(ohne_auftrag)
+        self._status(f"Fertig: {len(geschrieben)} von {gesamt} Datei(en) geschrieben, "
                      f"{stellen} Stelle(n) ersetzt." + ("" if alles_gut else " Bitte Hinweise beachten."))
         for pdf, fenster in list(self.vorschauen.items()):
             if self.ausgabe_vorhanden(pdf):
                 fenster.modus_wechseln("nachher")
 
-        zeilen = [f"{len(geschrieben)} von {len(auftraege)} Datei(en) geschrieben, {stellen} Stelle(n) ersetzt."]
+        zeilen = [f"{len(geschrieben)} von {gesamt} Datei(en) geschrieben, {stellen} Stelle(n) ersetzt.",
+                  "Hochladen nur aus dem Ausgabeordner – nie das Original" +
+                  ("; „_PRUEFEN“-Dateien erst nach der Freigabe." if pruefen else ".")]
+        if nur_bereinigt and not noch_freizugeben:
+            zeilen.append(f"Davon {len(nur_bereinigt)} ohne Schwärzung („fertig“): auf den Seiten war nichts angehakt "
+                          f"bzw. nichts gefunden – versteckte Teile (Metadaten, Anhänge …) sind entfernt.")
+        elif nur_bereinigt:
+            # „Freigabe vor Weitergabe“ (Standard) oder ein Foto (immer mit Freigabe): ohne Fund heißen sie _PRUEFEN
+            zeilen.append(f"Davon {len(nur_bereinigt)} ohne Schwärzung: auf den Seiten war nichts angehakt bzw. nichts "
+                          f"gefunden – versteckte Teile (Metadaten, Anhänge …) sind entfernt. "
+                          f"{len(noch_freizugeben)} davon noch freizugeben („_PRUEFEN“): in der Vorschau ansehen und "
+                          f"„Freigeben“ drücken.")
         if abgebrochen:
             zeilen.append("Der Lauf wurde abgebrochen.")
-        if ohne_ausgabe or nicht_verarbeitet:
+        if ohne_ausgabe or nicht_verarbeitet or ohne_auftrag:
             zeilen.append("")
-            zeilen.append("OHNE Ausgabedatei (Original nicht weitergeben!):")
+            zeilen.append("OHNE Ausgabedatei – konnte nicht bearbeitet werden (Original nicht weitergeben!):")
             for pdf, e in ohne_ausgabe[:10]:
                 grund = e["fehler"] or (e["warnungen"][0] if e["warnungen"] else "kein Treffer")
                 zeilen.append(f"  • {self._anzeigename(pdf)}: {grund}")
             for pdf in nicht_verarbeitet[:10]:
                 zeilen.append(f"  • {self._anzeigename(pdf)}: nicht verarbeitet (abgebrochen)")
+            for pdf, grund in ohne_auftrag[:10]:
+                zeilen.append(f"  • {self._anzeigename(pdf)}: nicht analysierbar – {grund}")
+        if zuordnung_warnungen:
+            # M-25: die Zuordnungsdatei (Original-Dateinamen) liegt doch im Ausgabeordner – nicht mit hochladen
+            zeilen.append("")
+            zeilen.append("ACHTUNG Zuordnungsdatei: " + zuordnung_warnungen[0])
         if self.nicht_geprueft:
             zeilen.append("")
             zeilen += self._nicht_geprueft_block()

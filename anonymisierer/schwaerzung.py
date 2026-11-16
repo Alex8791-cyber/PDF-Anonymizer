@@ -3,7 +3,7 @@ benannte Ausgabe schreiben und das Ergebnis selbst kontrollieren.
 
 Öffentliche Schnittstelle (CONTRACT.md, CONTRACT_V2.md Abschnitt 5):
     schwaerze_pdf(...)     Funde/Stellen schwärzen, Selbstkontrolle, Ausgabe anonym_NN.pdf / _PRUEFEN.pdf
-    freigeben(pfad)        _PRUEFEN entfernen (Name exklusiv vergeben), _zuordnung.txt anpassen
+    freigeben(pfad)        _PRUEFEN entfernen (Name exklusiv vergeben), Zuordnungsdatei anpassen
     verwerfen(pfad)        Ausgabe löschen, Zuordnung austragen
 
 Arbeitsweise:
@@ -23,8 +23,9 @@ Arbeitsweise:
     Seitenzugriff abgewiesen (sonst Absturz im C-Code von PyMuPDF).
   * Status _PRUEFEN (Gutachten R-07/R-11) außer bei Resten, Verdacht, nicht lokalisierten Stellen und
     Modellabweichung auch, wenn die Ausgabe aus anderen Gründen nicht als geprüft gelten kann: Scan-Seite kaum
-    lesbar (wenige Wörter UND schlecht gelesen oder viel ungelesene Tinte), OCR unplausibel oder ohne Text (aber mit
-    Tinte), OCR-Fehler, XFA-Formular, beschädigte und von MuPDF reparierte Datei, beschädigtes Bild (abgebrochenes
+    lesbar (wenige Wörter UND schlecht gelesen oder viel ungelesene Tinte), OCR unplausibel oder ohne Text auf einer
+    Seite, die nicht nachweislich leer ist (analyse.seite_nachweislich_leer – sieht auch hell gedruckten Text), gar kein
+    Text, OCR-Fehler, XFA-Formular, beschädigte und von MuPDF reparierte Datei, beschädigtes Bild (abgebrochenes
     JPEG), Schlüsselwort mit ungeschwärztem Wert dahinter, Ausgabe nur wegen der Nebenkanäle. Die Gründe stehen in
     der Warnung AUSGABE_PRUEFEN und in „pruefen_gruende“; Seiten mit einem Seitenverdacht der Restrisiko-Prüfung
     werden nicht doppelt gemeldet.
@@ -33,14 +34,34 @@ Arbeitsweise:
     verwirft es alle Schwärzungen im Speicher), entsteht KEINE Ausgabe. Die Selbstkontrolle wertet Text in einem
     Schwärzungsrechteck nur als Platzhalter, wenn er wirklich in einem Platzhalter steht.
   * Nebenkanäle (Gutachten R-04): Stehen personenbezogene Daten nur in Dokumenteigenschaften, Lesezeichen,
-    Anhängen oder XFA-Daten, entsteht auch ohne Fund auf den Seiten eine bereinigte Ausgabe – immer als _PRUEFEN.
+    Anhängen oder XFA-Daten, ist die Ausgabe immer _PRUEFEN (Grund NUR_NEBENKANAL).
+  * Jede lesbare PDF bekommt eine bereinigte Ausgabe (Runde 3, Regel für die Nutzerin: „nur aus dem Ausgabeordner
+    hochladen“): auch ohne angehakten Fund – ohne Nebenkanäle, abgeschnittenen Text und Formularfelder, mit
+    Selbstkontrolle und Restrisiko-Prüfung. Status „fertig“ (Hinweis NICHTS_GESCHWAERZT) oder _PRUEFEN mit Gründen.
+    Angehakte Funde, die sich nicht finden lassen, stehen vermutlich noch in der Datei: Ausgabe _PRUEFEN, die Texte
+    werden im Grund genannt (eine bereinigte, als _PRUEFEN markierte Ausgabe ist sicherer als gar keine – dann ginge
+    das Original mit allen versteckten Teilen weiter). Keine Ausgabe entsteht nur, wenn die Datei nicht bearbeitet
+    werden kann (keine PDF, Kennwort, nicht lesbar, Abbruch, späte Reparatur, Seite weder schwärz- noch renderbar,
+    Ausgabe nicht schreibbar) – dann mit „fehler“ und einer Meldung der Art „fehler“.
+  * Eine Regel für den Status (analyse.ist_leckrelevant): Jede Meldung der Art „fehler“ und jede leckrelevante oder
+    unbekannte Warnung – aus Analyse, OCR, Seitenmodell, Schwärzung, Nebenkanälen und Restrisiko-Prüfung – macht die
+    Ausgabe _PRUEFEN und steht verständlich in „pruefen_gruende“; „fertig“ heißt: keine einzige solche Meldung. Die
+    einzige Ausnahme: „OCR hat (fehlerfrei) nichts gelesen“ auf einer nachweislich leeren Scan-Seite; ein Ausfall der
+    OCR zählt immer.
+  * Zuordnungsdatei (M-25): neben dem Ausgabeordner (_zuordnung_<Ausgabeordner>.txt), nicht darin – sie enthält die
+    Original-Dateinamen und wird so nicht mit hochgeladen; bei einer Laufwerks- oder Freigabe-Wurzel im Programmordner
+    (dateien.zuordnungen_ordner). Eine alte _zuordnung.txt im Ausgabeordner wird übernommen, in jeder Kodierung. Liegt
+    die Datei doch im Ausgabeordner (Rückfall), ist das immer eine Warnung. Nach dem Ablegen der Ausgabe bricht der
+    Eintrag in die Zuordnung nie mehr ab.
 """
 
 from __future__ import annotations
 
+import codecs
 import datetime
 import os
 import re
+import sys
 import unicodedata
 from collections import Counter
 from pathlib import Path
@@ -52,6 +73,7 @@ except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
     import fitz
 
 from . import analyse as _analyse
+from . import dateien as _dateien
 from . import ocr as _ocr
 from . import seitenmodell as sm
 from .ocr import OcrDienst, bild_bereiche, ocr_noetig  # noqa: F401  (Namen bleiben importierbar)
@@ -83,8 +105,13 @@ OCR_DPI = sm.OCR_DPI
 STAPEL_SCANSEITEN = 10        # nach so vielen geschwärzten Scan-Seiten Zwischenstand speichern
 SATZZEICHEN = ".,;:!?()[]{}\"'„“‚‘«»/\\|<>*"
 ABGEBROCHEN = "Abgebrochen"
+# Warnung älterer Programmversionen (dort entstand ohne Treffer keine Ausgabe); die Oberfläche ergänzt sie noch für
+# eine Engine, die ohne Fehler keine Ausgabe liefert. Diese Schwärzung schreibt immer eine Ausgabe.
 WARNUNG_KEIN_TREFFER = ("Kein angehakter Fund konnte im Dokument lokalisiert werden – "
                         "keine Ausgabedatei erzeugt.")
+HINWEIS_NICHTS_GESCHWAERZT = ("Auf den Seiten war nichts zu schwärzen (kein angehakter Fund). Die Ausgabe ist das "
+                              "Dokument ohne versteckte Teile (Dateieigenschaften, Lesezeichen, Anhänge, Formulardaten, "
+                              "Inhalte außerhalb des sichtbaren Bereichs) – nur sie weitergeben, nicht das Original.")
 
 # Schlüsselwörter, die auf OCR-Seiten einen Fund der Kategorie erwarten lassen (M-50)
 _SCHLUESSELWOERTER = [
@@ -98,12 +125,13 @@ _SCHLUESSELWOERTER = [
 ]
 _NAMENSMUSTER = re.compile(r"^anonym_(\d+)(?:_PRUEFEN)?\.pdf$", re.IGNORECASE)
 _ZUORDNUNG = "_zuordnung.txt"
-# Gutachten M-25: Die Zuordnungsdatei enthält die Original-Dateinamen (oft mit Kundennamen). Neben dem Ausgabeordner
-# statt darin („<Ordner>/_zuordnung_<Ausgabeordner>.txt“, im Standardfall neben den Originalen
-# „_zuordnung_anonymisiert.txt“) landet sie nicht mehr in dem Ordner, den die Nutzerin hochlädt. NOCH AUSGESCHALTET:
-# Tests der Schwärzung, der Oberfläche, der Vorschau und des Selbsttests schreiben „anonymisiert/_zuordnung.txt“ fest
-# (test_schwaerzung, test_gui, test_vorschau_fenster, test_selbsttest) – einschalten heißt, sie mit umzustellen.
-ZUORDNUNG_NEBEN_AUSGABEORDNER = False
+# Gutachten M-25 (eingeschaltet in Runde 3): Die Zuordnungsdatei enthält die Original-Dateinamen (oft mit
+# Kundennamen). Sie liegt NEBEN dem Ausgabeordner („<Ordner>/_zuordnung_<Ausgabeordner>.txt“, im Standardfall neben
+# den Originalen „_zuordnung_anonymisiert.txt“), nicht in dem Ordner, den die Nutzerin hochlädt. Ist der Ausgabeordner
+# eine Laufwerks- oder Freigabe-Wurzel (E:\ auf einem USB-Stick, \\server\freigabe\), gibt es kein „daneben“: dann liegt
+# sie im Programmordner (dateien.zuordnungen_ordner, %APPDATA%\PDF-Anonymisierer\Zuordnungen). Lässt sich dort nicht
+# schreiben (Ordner schreibgeschützt), landet sie im Ausgabeordner – dann IMMER mit deutlicher Warnung.
+ZUORDNUNG_NEBEN_AUSGABEORDNER = True
 
 _norm_fund = suchtext_normalisieren      # Kompatibilität (alter Name)
 
@@ -252,26 +280,60 @@ def _nebenkanal_hinweis(zaehler: dict) -> str:
     return "Entfernt bzw. eingebrannt: " + ", ".join(teile) + "."
 
 
+def _parameter_von(funktion) -> set | None:
+    """Parameternamen einer Funktion; None, wenn sie beliebige Schlüsselwörter annimmt oder nicht prüfbar ist."""
+    import inspect
+    try:
+        parameter = inspect.signature(funktion).parameters
+    except (TypeError, ValueError):
+        return None
+    if any(p.kind is p.VAR_KEYWORD for p in parameter.values()):
+        return None
+    return set(parameter)
+
+
+def _seiten_rueckfall(lauf, nr: int):
+    """rueckfall(seite, fehler) für nebenkanaele.beschnitt_entfernen/nebenkanaele_entfernen: eine Seite, an der MuPDF
+    scheitert (zyklisches Form-XObject, Befund R-08), wird mit der Schwärzung als Bild neu erzeugt – die Schwärzung
+    weiß dann davon (Kontroll-OCR, Hinweis SEITE_ALS_BILD); scheitert auch das Rendern, entsteht keine Ausgabe."""
+    def rueckfall(seite, fehler, _nr=nr):
+        m = lauf.modell.seiten[_nr] if lauf.modell is not None and _nr < len(lauf.modell.seiten) else None
+        _seite_als_bild(lauf, _nr, seite, m, [], [], fehler)
+    return rueckfall
+
+
 def _nebenkanaele_bereinigen(lauf, doc, zaehler: dict) -> str:
     """Nebenkanäle entfernen: anonymisierer/nebenkanaele.py, falls vorhanden (Gutachten S-05/S-06/S-11/S-14),
-    sonst die eingebaute Bereinigung. Liefert den Hinweistext."""
+    sonst die eingebaute Bereinigung. Liefert den Hinweistext. Bleibt etwas übrig (das Modul scheitert, Objekte
+    lassen sich nicht bereinigen), meldet sie NEBENKANAL_ENTFERNT als Warnung – leckrelevant (_PRUEFEN; als
+    Hinweis zählt derselbe Code nur auf, was entfernt wurde)."""
     if _nebenkanaele is not None and hasattr(_nebenkanaele, "nebenkanaele_entfernen"):
         try:
-            try:
-                neu = _nebenkanaele.nebenkanaele_entfernen(doc, dict(zaehler))
-            except TypeError:                       # ältere Signatur ohne Zähler
-                neu = _nebenkanaele.nebenkanaele_entfernen(doc)
+            entfernen = _nebenkanaele.nebenkanaele_entfernen
+            parameter = _parameter_von(entfernen)
+            if parameter is None or "rueckfall" in parameter:
+                neu = entfernen(doc, dict(zaehler), rueckfall=lambda s, f: _seiten_rueckfall(lauf, s.number)(s, f))
+            elif "zaehler" in parameter:            # ältere Signatur ohne Rückfall
+                neu = entfernen(doc, dict(zaehler))
+            else:                                   # ältere Signatur ohne Zähler
+                neu = entfernen(doc)
             for k, v in (neu or {}).items():
                 if isinstance(v, (int, float)) and not isinstance(v, bool):
                     zaehler[k] = max(int(zaehler.get(k, 0) or 0), int(v))
                 elif k not in zaehler or v:
                     zaehler[k] = v
+            if zaehler.get("fehler"):
+                lauf.melden("warnung", "NEBENKANAL_ENTFERNT",
+                            f"{len(zaehler['fehler'])} versteckte(s) Objekt(e) (z. B. Bild-Metadaten) ließen sich nicht "
+                            f"bereinigen – Ausgabe bitte prüfen.")
             hinweis_fn = getattr(_nebenkanaele, "nebenkanal_hinweis", None)
             return hinweis_fn(zaehler) if hinweis_fn else _nebenkanal_hinweis(zaehler)
+        except _NichtSchwaerzbar:
+            raise
         except Exception as e:
             lauf.melden("warnung", "NEBENKANAL_ENTFERNT",
-                        f"Nebenkanäle (Anmerkungen, Metadaten …) konnten nicht vollständig entfernt werden ({e}) – "
-                        f"Rückfall auf die einfache Bereinigung.")
+                        f"Versteckte Teile (Anmerkungen, Metadaten …) konnten nicht vollständig entfernt werden ({e}) – "
+                        f"Rückfall auf die einfache Bereinigung. Ausgabe bitte prüfen.")
             if not lauf.beschnitt_lokal:
                 _beschnitt_nachholen(lauf, doc)
     _nebenkanaele_entfernen(doc, zaehler)
@@ -391,45 +453,143 @@ def _ausgabe_reservieren(ziel: Path, pruefen: bool) -> Path:
     return _nummer_reservieren(ziel, pruefen)
 
 
+def ist_wurzel(ordner) -> bool:
+    """Ist `ordner` eine Laufwerks- oder Freigabe-Wurzel (E:\\, \\\\server\\freigabe\\, /) – ein Ordner ohne Ordner
+    darüber, neben den sich eine Datei legen ließe?"""
+    ordner = Path(ordner)
+    if ordner.name and ordner.parent != ordner:
+        return False
+    absolut = Path(os.path.abspath(ordner))            # „.“ ist der aktuelle Ordner, keine Wurzel
+    return not absolut.name or absolut.parent == absolut
+
+
+def _wurzel_kennung(ordner: Path) -> str:
+    """Lesbarer Name einer Wurzel für den Dateinamen: „Laufwerk_E“, „server_freigabe“, „Wurzel“."""
+    anker = Path(os.path.abspath(ordner)).anchor
+    m = re.search(r"([A-Za-z]):[\\/]*$", anker)          # auch „\\?\E:\“
+    if m:
+        return f"Laufwerk_{m.group(1).upper()}"
+    return re.sub(r"[^0-9A-Za-zÄÖÜäöüß]+", "_", anker).strip("_") or "Wurzel"
+
+
 def zuordnung_pfad(ziel) -> Path:
     """Zuordnungsdatei des Ausgabeordners `ziel`: darin (_zuordnung.txt) oder – mit ZUORDNUNG_NEBEN_AUSGABEORDNER –
-    daneben (_zuordnung_<Ausgabeordner>.txt), damit sie nicht mit hochgeladen wird."""
+    daneben (_zuordnung_<Ausgabeordner>.txt), damit sie nicht mit hochgeladen wird. Für eine Laufwerks- oder
+    Freigabe-Wurzel (kein „daneben“) im Programmordner: dateien.zuordnungen_ordner()/_zuordnung_<Wurzel>.txt."""
     ziel = Path(ziel)
-    if ZUORDNUNG_NEBEN_AUSGABEORDNER and ziel.name and ziel.parent != ziel:
-        return ziel.parent / f"_zuordnung_{ziel.name}.txt"
-    return ziel / _ZUORDNUNG
+    if not ZUORDNUNG_NEBEN_AUSGABEORDNER:
+        return ziel / _ZUORDNUNG
+    if ist_wurzel(ziel):
+        return _dateien.zuordnungen_ordner() / f"_zuordnung_{_wurzel_kennung(ziel)}.txt"
+    if not ziel.is_absolute():                           # „.“, „..\Upload“: erst den echten Ordner bestimmen
+        ziel = Path(os.path.abspath(ziel))
+    return ziel.parent / f"_zuordnung_{ziel.name}.txt"
+
+
+def zuordnung_im_ausgabeordner(datei, ziel) -> bool:
+    """Liegt die Zuordnungsdatei `datei` im Ausgabeordner `ziel` selbst – also in dem Ordner, der hochgeladen wird?"""
+    try:
+        return (os.path.normcase(os.path.abspath(Path(datei).parent))
+                == os.path.normcase(os.path.abspath(Path(ziel))))
+    except (OSError, ValueError):
+        return True
+
+
+def _atomar_schreiben(datei: Path, text: str):
+    """Datei über eine Hilfsdatei im selben Ordner ersetzen (nie halb geschrieben)."""
+    tmp = datei.parent / f".{datei.name}.{os.getpid()}.tmp"
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, datei)
+    except OSError:
+        _aufraeumen([tmp])
+        raise
+
+
+def _mit_zeilenende(text: str) -> str:
+    return text if not text or text.endswith("\n") else text + "\n"
+
+
+def zuordnung_lesen(datei) -> str:
+    """Inhalt einer Zuordnungsdatei, gleich in welcher Kodierung sie gespeichert ist. Das Programm schreibt UTF-8; im
+    Editor von Hand gespeichert kann sie aber ANSI (Windows-1252) oder „Unicode“ (UTF-16) sein. Ein Lesefehler darf das
+    Schwärzen nie abbrechen (Befund Runde 3): Zeichen, die sich nicht lesen lassen, werden ersetzt. OSError (Datei
+    fehlt, gesperrt) geht an den Aufrufer."""
+    daten = Path(datei).read_bytes()
+    if daten.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return daten.decode("utf-16", errors="replace")
+    try:
+        return daten.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return daten.decode("cp1252", errors="replace")
+
+
+def _ist_utf8(datei: Path) -> bool:
+    try:
+        datei.read_bytes().decode("utf-8")
+        return True
+    except UnicodeDecodeError:
+        return False
+
+
+def _zeile_anhaengen(datei: Path, zeile: str):
+    """Zeile in UTF-8 anhängen. Ist die vorhandene Datei in einer anderen Kodierung gespeichert (von Hand im Editor),
+    wird sie dabei einmal ganz nach UTF-8 umgeschrieben – sonst stünden zwei Kodierungen in einer Datei."""
+    datei.parent.mkdir(parents=True, exist_ok=True)
+    if datei.exists() and not _ist_utf8(datei):
+        _atomar_schreiben(datei, _mit_zeilenende(zuordnung_lesen(datei)) + zeile)
+        return
+    with open(datei, "a", encoding="utf-8") as f:
+        f.write(zeile)
+
+
+def _zuordnung_migrieren(ziel) -> Path:
+    """Liegt (von einer älteren Programmversion) noch eine _zuordnung.txt IM Ausgabeordner, wird ihr Inhalt der
+    Zuordnungsdatei neben dem Ausgabeordner vorangestellt und die alte Datei gelöscht – sie soll nicht mehr mit
+    hochgeladen werden. Liefert die Datei, in die geschrieben wird: neben dem Ordner, oder – ist dort nicht
+    beschreibbar – die im Ordner (Rückfall, siehe _zuordnung_anhaengen). Eine alte Datei in anderer Kodierung (ANSI,
+    UTF-16) wird gelesen und als UTF-8 übernommen."""
+    datei, alt = zuordnung_pfad(ziel), Path(ziel) / _ZUORDNUNG
+    if datei == alt:
+        return alt
+    try:
+        if alt.exists():
+            altbestand = _mit_zeilenende(zuordnung_lesen(alt))
+            neu = zuordnung_lesen(datei) if datei.exists() else ""
+            datei.parent.mkdir(parents=True, exist_ok=True)
+            _atomar_schreiben(datei, altbestand + neu)
+            _aufraeumen([alt])
+        return datei
+    except (OSError, ValueError):
+        return alt                              # z. B. Ordner darüber schreibgeschützt: es bleibt beim alten Ort
 
 
 def _zuordnung_anhaengen(ziel: Path, ausgabe: Path, original: Path) -> Path:
-    """Zeile „anonym_NN.pdf  <-  Original.pdf  (Zeit)“ anhängen; liefert die Datei. Liegt neben dem Ausgabeordner
-    abgelegt noch eine alte _zuordnung.txt IM Ausgabeordner, wird sie übernommen (angehängt) und dort gelöscht – sie
-    soll nicht mehr mit hochgeladen werden. Ist neben dem Ordner nicht beschreibbar, bleibt es beim alten Ort."""
+    """Zeile „anonym_NN.pdf  <-  Original.pdf  (Zeit)“ anhängen; liefert die Datei. Eine alte _zuordnung.txt IM
+    Ausgabeordner wird dabei übernommen (_zuordnung_migrieren). Ist neben dem Ordner nicht beschreibbar, bleibt es beim
+    alten Ort im Ausgabeordner – der Aufrufer warnt dann deutlich (zuordnung_im_ausgabeordner)."""
     zeit = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     zeile = f"{ausgabe.name}  <-  {original.name}  ({zeit})\n"
-    datei, alt = zuordnung_pfad(ziel), Path(ziel) / _ZUORDNUNG
+    datei, alt = _zuordnung_migrieren(ziel), Path(ziel) / _ZUORDNUNG
     if datei != alt:
         try:
-            with open(datei, "a", encoding="utf-8") as f:
-                if alt.exists():
-                    altbestand = alt.read_text(encoding="utf-8")
-                    f.write(altbestand if altbestand.endswith("\n") or not altbestand else altbestand + "\n")
-                f.write(zeile)
-            _aufraeumen([alt])
+            _zeile_anhaengen(datei, zeile)
             return datei
-        except OSError:
+        except (OSError, ValueError):
             pass                                      # z. B. Ordner darüber schreibgeschützt: alter Ort
-    with open(alt, "a", encoding="utf-8") as f:
-        f.write(zeile)
+    _zeile_anhaengen(alt, zeile)
     return alt
 
 
 def _zuordnung_umschreiben(ziel: Path, alt: str, neu: str | None):
     """Zeile der Ausgabe `alt` in der Zuordnungsdatei auf `neu` umbenennen (neu=None: Zeile entfernen) – am neuen
-    und am alten Ort, falls es beide gibt."""
+    und am alten Ort, falls es beide gibt. Übernommen wird eine alte Datei im Ausgabeordner beim nächsten Schwärzen
+    in diesen Ordner (_zuordnung_anhaengen) – Freigeben und Verwerfen ändern nur die vorhandenen Zeilen. Jede
+    Kodierung wird gelesen, geschrieben wird UTF-8."""
     for datei in dict.fromkeys((zuordnung_pfad(ziel), Path(ziel) / _ZUORDNUNG)):
         if not datei.exists():
             continue
-        zeilen = datei.read_text(encoding="utf-8").splitlines(keepends=True)
+        zeilen = zuordnung_lesen(datei).splitlines(keepends=True)
         aus = []
         for z in zeilen:
             if z.startswith(alt + "  <-  "):
@@ -437,9 +597,16 @@ def _zuordnung_umschreiben(ziel: Path, alt: str, neu: str | None):
                     continue
                 z = neu + z[len(alt):]
             aus.append(z)
-        tmp = datei.parent / f".{datei.name}.{os.getpid()}.tmp"
-        tmp.write_text("".join(aus), encoding="utf-8")
-        os.replace(tmp, datei)
+        _atomar_schreiben(datei, "".join(aus))
+
+
+def _zuordnung_nachfuehren(ziel: Path, alt: str, neu: str | None):
+    """Für Freigeben und Verwerfen: die Datei ist dann schon umbenannt bzw. gelöscht – ein Fehler beim Nachführen der
+    Zuordnung (Datei gesperrt, Ordner schreibgeschützt) darf das nicht als gescheitert melden. Er steht in fehler.log."""
+    try:
+        _zuordnung_umschreiben(ziel, alt, neu)
+    except (OSError, ValueError):
+        _dateien.fehler_protokollieren(*sys.exc_info())
 
 
 def _aufraeumen(pfade):
@@ -452,7 +619,7 @@ def _aufraeumen(pfade):
 
 def freigeben(ausgabe_pfad) -> Path:
     """Gibt eine _PRUEFEN-Ausgabe frei: neuer Name ohne _PRUEFEN (dieselbe Nummer, falls frei, sonst die
-    nächste freie – exklusiv vergeben), _zuordnung.txt wird angepasst. Rückgabe: neuer Pfad."""
+    nächste freie – exklusiv vergeben), die Zuordnungsdatei wird angepasst. Rückgabe: neuer Pfad."""
     pfad = Path(ausgabe_pfad)
     m = _NAMENSMUSTER.match(pfad.name)
     if not pfad.exists():
@@ -473,18 +640,18 @@ def freigeben(ausgabe_pfad) -> Path:
     except OSError:
         _aufraeumen([neu])
         raise
-    _zuordnung_umschreiben(ziel, pfad.name, neu.name)
+    _zuordnung_nachfuehren(ziel, pfad.name, neu.name)
     return neu
 
 
 def verwerfen(ausgabe_pfad) -> None:
-    """Löscht eine Ausgabe und trägt sie aus _zuordnung.txt aus."""
+    """Löscht eine Ausgabe und trägt sie aus der Zuordnungsdatei aus."""
     pfad = Path(ausgabe_pfad)
     try:
         pfad.unlink()
     except FileNotFoundError:
         pass
-    _zuordnung_umschreiben(pfad.parent, pfad.name, None)
+    _zuordnung_nachfuehren(pfad.parent, pfad.name, None)
 
 
 # ----------------------------------------------------------------------
@@ -500,7 +667,8 @@ class _Lauf:
         self.ocr = ocr
         self.ocr_cache = dict(ocr_cache) if ocr_cache else {}
         self.ziel = ziel
-        self.restrisiko_fehler = False
+        self.restrisiko_fehler = False       # Kontrolle der Ausgabe (Kontroll-OCR oder Restrisiko-Prüfung) ausgefallen
+        self.restrisiko_ausgefallen = False  # die Restrisiko-Prüfung selbst fehlt oder ist ausgefallen
         self.doc = None
         self.modell = None                   # frisch gebautes Seitenmodell
         self.analyse_modell = None           # Modell der Analyse (falls übergeben)
@@ -538,6 +706,8 @@ class _Lauf:
         self.leckrelevant: list = []         # Gründe, die Ausgabe nicht als geprüft gelten zu lassen (R-07)
         self.nebenkanal_bezug = None         # personenbezogene Daten in Nebenkanälen (R-04); None = ungeprüft
         self.manuelle_platzhalter: set = set()   # Platzhalter manueller Stellen (für die Selbstkontrolle)
+        self.abgeschnitten_seiten: set = set()   # Seiten, deren abgeschnittener Text entfernt wurde (Nachprüfung)
+        self.leere_scanseiten: set = set()   # nachweislich leere Scan-Seiten (Rückseiten): „nichts gelesen“ kein Grund
 
     def abbruch_pruefen(self):
         if self.abbruch is not None and self.abbruch.is_set():
@@ -611,6 +781,11 @@ class _Lauf:
 class _SpaeteReparatur(Exception):
     """MuPDF hat die Datei erst NACH Beginn der Änderungen repariert (Gutachten R-11): dabei verwirft es alle Änderungen
     im Speicher – die Schwärzungen wären weg, die Ausgabe enthielte wieder den Klartext."""
+
+
+class _NichtSchwaerzbar(RuntimeError):
+    """Eine Seite ließ sich weder schwärzen noch als Bild neu erzeugen (Befund R-08): KEINE Ausgabe, Meldung der Art
+    „fehler“ (SEITE_NICHT_SCHWAERZBAR) mit einem Text für die Nutzerin."""
 
 
 TEXT_SPAETE_REPARATUR = ("Die Datei ist beschädigt: Beim Schwärzen musste sie nachträglich repariert werden, dabei "
@@ -1254,9 +1429,22 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
     if not lauf.beschnitt_lokal and not als_bild and _nebenkanaele is not None:
         entfernen = getattr(_nebenkanaele, "beschnitt_entfernen", None)
         if entfernen is not None:
+            bild = getattr(_nebenkanaele, "SEITE_ALS_BILD", None)
+            parameter = _parameter_von(entfernen)
             try:
-                if entfernen(doc, seite):
+                if parameter is None or "rueckfall" in parameter:
+                    # das Modul erzeugt die Seite selbst als Bild, wenn MuPDF an ihr scheitert – über die Schwärzung
+                    ergebnis_beschnitt = entfernen(doc, seite, rueckfall=_seiten_rueckfall(lauf, nr))
+                else:
+                    ergebnis_beschnitt = entfernen(doc, seite)
+                if bild is not None and ergebnis_beschnitt == bild:
+                    als_bild = True
+                    seite = doc[nr]
+                    lauf.scan_seiten_seit_speichern += 1
+                elif ergebnis_beschnitt:
                     lauf.beschnitt_seiten.append(nr + 1)
+            except _NichtSchwaerzbar:
+                raise
             except Exception as fehler:
                 als_bild = True
                 _seite_als_bild(lauf, nr, seite, m, [], [], fehler)
@@ -1361,6 +1549,7 @@ def _abgeschnittenen_text_entfernen(lauf: _Lauf, nr: int, seite, m):
                 lauf.melden("hinweis", "NEBENKANAL_ENTFERNT",
                             f"Seite {nr + 1}: {len(abgeschnitten)} abgeschnittene, unsichtbare Zeichen entfernt (z. B. "
                             f"ein zu langer Formularwert).", nr)
+                lauf.abgeschnitten_seiten.add(nr)     # in der gespeicherten Ausgabe nachgeprüft (_selbstkontrolle)
                 return seite, False
         except Exception as e:
             fehler = e
@@ -1383,15 +1572,17 @@ def _seite_als_bild(lauf: _Lauf, nr: int, seite, m, einbrennen: list, leeren: li
     except Exception:
         pass
     if _bilder is None or not hasattr(_bilder, "seite_als_bild_schwaerzen"):
-        raise RuntimeError(f"Seite {nr + 1} ließ sich nicht schwärzen ({type(fehler).__name__}: {fehler})") from fehler
+        raise _NichtSchwaerzbar(f"Seite {nr + 1} ließ sich nicht schwärzen ({type(fehler).__name__}: {fehler}) – "
+                                f"sicherheitshalber wurde keine Ausgabe erzeugt.") from fehler
     try:
         for annot in list(seite.annots()):            # noch nicht angewendete Schwärzungs-Anmerkungen
             seite.delete_annot(annot)
         _bilder.seite_als_bild_schwaerzen(lauf.doc, seite, einbrennen, leeren, FUELLFARBE)
     except Exception as e:
-        raise RuntimeError(f"Seite {nr + 1} ist im PDF fehlerhaft aufgebaut und ließ sich weder schwärzen noch als "
-                           f"Bild schwärzen ({type(e).__name__}: {e}) – bitte die Datei neu als PDF speichern "
-                           f"(z. B. über „Drucken als PDF“) und erneut versuchen.") from e
+        raise _NichtSchwaerzbar(f"Seite {nr + 1} ist im PDF fehlerhaft aufgebaut und ließ sich weder schwärzen noch als "
+                                f"Bild schwärzen ({type(e).__name__}: {e}) – sicherheitshalber wurde keine Ausgabe "
+                                f"erzeugt. Bitte die Datei neu als PDF speichern (z. B. über „Drucken“ → „Microsoft "
+                                f"Print to PDF“) und diese verwenden.") from e
     lauf.ocr_modus[nr] = "seite"
     lauf.bildbereiche[nr] = []
     if m is not None and m.ocr_winkel is None:
@@ -1744,11 +1935,25 @@ def _selbstkontrolle(lauf: _Lauf, ausgabe: Path) -> list:
                 vorab(ausgabe, seiten, OCR_DPI, winkel={nr: lauf.winkel(nr) for nr in seiten})
             except Exception:
                 pass
+    # abgeschnittener Text (TEXT_ABGESCHNITTEN): die Schwärzung hat ihn entfernt – in der gespeicherten Ausgabe
+    # nachprüfen, auf den Seiten, wo sie ihn entfernt hat oder die Analyse ihn gemeldet hat
+    abgeschnitten_pruefen = set(lauf.abgeschnitten_seiten) | {
+        m.get("seite") for m in getattr(lauf.analyse_modell, "meldungen_analyse", None) or ()
+        if isinstance(m, dict) and m.get("code") == "TEXT_ABGESCHNITTEN" and isinstance(m.get("seite"), int)}
     kontrolle = fitz.open(ausgabe)
     try:
         for nr in range(len(kontrolle)):
             lauf.abbruch_pruefen()
             seite = kontrolle[nr]
+            if nr in abgeschnitten_pruefen:
+                try:
+                    uebrig = len(_abgeschnittene_glyphen(seite)[0])
+                except Exception:
+                    uebrig = -1
+                if uebrig:
+                    lauf.melden("warnung", "TEXT_ABGESCHNITTEN_REST",
+                                f"Seite {nr + 1}: abgeschnittener, unsichtbarer Text ist in der Ausgabe noch vorhanden "
+                                f"bzw. nicht prüfbar – Ausgabe bitte prüfen.", nr)
             rects = lauf.rects_je_seite.get(nr, [])
             woerter = _kontroll_woerter(lauf, ausgabe, nr, rects)
             quelle = "bild" if lauf.ocr_modus.get(nr) == "bilder" else "ocr"
@@ -1784,17 +1989,31 @@ def _selbstkontrolle(lauf: _Lauf, ausgabe: Path) -> list:
 # ----------------------------------------------------------------------
 KAUM_LESBAR_WOERTER = _analyse.KAUM_LESBAR_WOERTER   # weniger OCR-Wörter: Seite KANN kaum lesbar sein (siehe
 #                                                     analyse.scan_kaum_lesbar – dieselbe Regel wie die Analyse)
-TINTE_MIN = 0.0003              # Anteil dunkler Pixel (wie die Restrisiko-Prüfung): darunter ist eine Seite leer
-# Meldungen, deren Ursache bis in die Ausgabe wirkt: die Ausgabe kann dann nicht als geprüft gelten (_PRUEFEN)
-LECKRELEVANTE_CODES = frozenset({"OCR_UNPLAUSIBEL", "KAUM_LESBAR", "OCR_FEHLER", "XFA", "DATEI_REPARIERT",
-                                 "BILDER_UNGEPRUEFT", "SCHLUESSELWORT_OHNE_FUND", "BILD_BESCHAEDIGT"})
+# Anteil dunkler Pixel (Grau < 180), den eine leere Seite höchstens hat – nur noch ein Teil des Maßes „leer“
+# (analyse.seite_nachweislich_leer): allein hielt es hell gedruckten Text für „leer“ (Befund Runde 3)
+TINTE_MIN = _analyse.LEER_DUNKEL_MAX
+# Meldungen, deren Ursache bis in die Ausgabe wirkt: EINE Tabelle für Analyse und Schwärzung (analyse.WARNUNGS_CODES,
+# analyse.ist_leckrelevant); der Name bleibt für ältere Aufrufer
+LECKRELEVANTE_CODES = _analyse.LECKRELEVANTE_CODES
 _GRUND_TEXTE = {"KAUM_LESBAR": "Scan kaum lesbar", "OCR_UNPLAUSIBEL": "Texterkennung unsicher (Buchstabensalat)",
                 "OCR_FEHLER": "kein Text erkannt bzw. Texterkennung fehlgeschlagen",
                 "BILDER_UNGEPRUEFT": "Bilder nicht geprüft", "XFA": "XFA-Formular (Inhalt nicht prüfbar)",
                 "DATEI_REPARIERT": "Datei war beschädigt (repariert) – Inhalte können fehlen",
                 "SCHLUESSELWORT_OHNE_FUND": "Schlüsselwort ohne geschwärzten Wert (OCR-Verleser?)",
                 "NUR_NEBENKANAL": "Personendaten nur außerhalb der Seiten gefunden – Seiten bitte selbst ansehen",
-                "BILD_BESCHAEDIGT": "Bild beschädigt – Teile nicht lesbar"}
+                "BILD_BESCHAEDIGT": "Bild beschädigt – Teile nicht lesbar",
+                "DREHUNG": "Seite gedreht gespeichert – Lage der Schwärzungen unsicher",
+                "ERKENNUNG_FEHLER": "eine Erkennungsregel ist ausgefallen – ihre Angaben wurden nicht gesucht",
+                "KEIN_TEXT": "kein Text lesbar – nichts konnte geprüft werden",
+                "MODELL_ABWEICHUNG": "Dokument liest sich anders als bei der Analyse",
+                "NAMEN_INAKTIV": "Namenserkennung inaktiv (Sprachmodell fehlt) – Namen wurden nicht gesucht",
+                "NEBENKANAL_ENTFERNT": "versteckte Teile (Metadaten, Anhänge …) nur teilweise entfernt",
+                "NICHT_LOKALISIERT": "angehakter Fund nicht gefunden – steht vermutlich noch in der Datei",
+                "RESTE": "Fundtext in der Ausgabe noch auffindbar",
+                "TEXTEBENE_UNLESBAR": "Textebene unlesbar – nur per Texterkennung geprüft",
+                "TEXT_ABGESCHNITTEN_REST": "abgeschnittener, unsichtbarer Text nicht vollständig entfernt",
+                "VERDACHT": "Restrisiko-Prüfung meldet Verdacht",
+                "SEITE_NICHT_SCHWAERZBAR": "Seite ließ sich nicht schwärzen"}
 
 
 class _Grund(NamedTuple):
@@ -1808,7 +2027,24 @@ def _grund(code: str, seite=None, zusatz: str = "") -> _Grund:
     return _Grund(code, seite, f"Seite {seite + 1}: {text}" if seite is not None else text)
 
 
-_tintenanteil = _analyse.tintenanteil     # Anteil dunkler Pixel (eine Regel für Analyse und Schwärzung)
+GRUND_MAX_ZEICHEN = 110          # Grund einer unbekannten Meldung: ihr Text, gekürzt
+
+
+def _meldungs_grund(m: dict, seite) -> _Grund:
+    """Grund für eine leckrelevante Meldung: der kurze Text ihres Codes, für unbekannte Codes (neue Meldungen, auch
+    künftige der Art „fehler“) ihr eigener Text – nie still."""
+    code = str(m.get("code") or "UNBEKANNT")
+    if code in _GRUND_TEXTE:
+        return _grund(code, seite)
+    text = " ".join(str(m.get("text") or code).split())
+    text = re.sub(r"^Seite \d+:\s*", "", text)
+    if len(text) > GRUND_MAX_ZEICHEN:
+        text = text[:GRUND_MAX_ZEICHEN - 1].rstrip() + "…"
+    return _Grund(code, seite, f"Seite {seite + 1}: {text}" if seite is not None else text)
+
+
+_tintenanteil = _analyse.tintenanteil     # Anteil dunkler Pixel (eine Regel für Analyse und Schwärzung; „leer“ misst
+#                                           analyse.seite_nachweislich_leer)
 _kaum_lesbar = _analyse.scan_kaum_lesbar
 
 
@@ -1821,11 +2057,61 @@ def _lesung_unplausibel(woerter) -> bool:
         return False
 
 
+# Meldungen, die nur zusammenfassen und deshalb keinen eigenen Grund ergeben (AUSGABE_PRUEFEN). „Kaum lesbar“ der
+# Analyse zählt: sie hat es schon mit Lesung und Tinte nachgeprüft (analyse._kaum_lesbar_nachpruefen, dieselbe Regel wie
+# die Seitenprüfung in _leckrelevant_ermitteln – doppelte Gründe je Seite fallen zusammen)
+_EIGENS_GEPRUEFT = frozenset({"AUSGABE_PRUEFEN"})
+
+
+def _analyse_meldungen(lauf) -> list:
+    """Leckrelevante Meldungen der Analyse (am Modell, analyse.analysiere_pdf), falls ihr Modell übergeben wurde."""
+    return [m for m in getattr(lauf.analyse_modell, "leckrelevant", None) or () if isinstance(m, dict)]
+
+
+# Text der Meldung des Seitenmodells (seitenmodell.dokument_aufbauen, nur in der Analyse) für eine Scan-Seite, auf der
+# die OCR FEHLERFREI lief und kein einziges Wort las. Sie ist die einzige OCR_FEHLER-Meldung, die keinen Ausfall meldet
+# (die Oberfläche erkennt sie am selben Text, gui_attrappen._TEXT_CODES). Ändert sich der Text dort, entfällt nur die
+# Ausnahme unten – leere Rückseiten werden dann _PRUEFEN, nie still „fertig“ (tests/test_ausgabe_status_befunde.py
+# prüft den Text und beide Fälle).
+OCR_NICHTS_GELESEN = "OCR hat keinen Text gelesen"
+
+
+def _nichts_gelesen(m: dict) -> bool:
+    """Meldet `m` nur „die OCR lief fehlerfrei und las kein Wort“? Nie für eine Meldung der Art „fehler“ (zentrale
+    Regel: jede Meldung der Art „fehler“ zählt)."""
+    return (m.get("art") == "warnung" and m.get("code") == "OCR_FEHLER"
+            and OCR_NICHTS_GELESEN in str(m.get("text") or ""))
+
+
+def _meldungs_gruende(lauf, meldungen) -> list:
+    """Gründe aus Meldungen nach der zentralen Regel (analyse.ist_leckrelevant): jede Meldung der Art „fehler“ und
+    jede leckrelevante oder unbekannte Warnung. Eine einzige Ausnahme (Befund Runde 3): „die OCR hat (fehlerfrei)
+    nichts gelesen“ auf einer Scan-Seite, die nachweislich leer ist (leere Rückseite, analyse.seite_nachweislich_leer –
+    ein Maß, das auch hell gedruckten Text und Bleistift sieht). Ein Ausfall der OCR (Absturz, Zeitüberschreitung,
+    Speicher, fehlende Sprachdatei) zählt immer, auch auf einer leeren Seite. Eine Datei nur aus leeren Seiten meldet
+    die Analyse gar nicht erst als KEIN_TEXT (Hinweis LEERE_SEITEN); KEIN_TEXT gilt daher ohne Ausnahme."""
+    aus = []
+    for m in meldungen:
+        if not _analyse.ist_leckrelevant(m):
+            continue
+        code, seite = m.get("code"), m.get("seite")
+        seite = seite if isinstance(seite, int) and not isinstance(seite, bool) else None
+        if code in _EIGENS_GEPRUEFT:
+            continue
+        if seite in lauf.leere_scanseiten and _nichts_gelesen(m):
+            continue
+        aus.append(_meldungs_grund(m, seite))
+    return aus
+
+
 def _leckrelevant_ermitteln(lauf: _Lauf, dok, zaehler: dict) -> list:
-    """Gründe, die Ausgabe nicht als geprüft gelten zu lassen (R-07/R-11) – vor dem Schwärzen ermittelt, damit die
-    Tinte leerer Scan-Seiten am Original gemessen wird. Quellen: das Dokument (XFA, Reparatur), das frische Modell
-    mit der OCR der Analyse (kaum lesbar, unplausibel, ohne Text aber mit Tinte), die Meldungen der OCR beim
-    Aufbau des Modells (OCR-Fehler, Bilder nicht prüfbar) und – falls übergeben – die Meldungen der Analyse."""
+    """Gründe, die Ausgabe nicht als geprüft gelten zu lassen (R-07/R-11) – vor dem Schwärzen ermittelt, damit leere
+    Scan-Seiten am Original gemessen werden. Quellen: das Dokument (XFA, Reparatur), das frische Modell mit der OCR der
+    Analyse (kaum lesbar, unplausibel, ohne Text auf einer nicht nachweislich leeren Seite, gar kein Text), die
+    Meldungen der OCR beim Aufbau des Modells (OCR-Fehler, Bilder nicht prüfbar) und – falls übergeben – die Meldungen
+    der Analyse (alle leckrelevanten, analyse.ist_leckrelevant). Meldungen, die erst beim Schwärzen entstehen, nimmt
+    _status_gruende nach derselben Regel dazu. Ohne Modell der Analyse (Benchmark, alte Aufrufer) entstehen so
+    dieselben Gründe wie mit ihm."""
     gruende: dict = {}
 
     def dazu(code, seite=None):
@@ -1845,23 +2131,61 @@ def _leckrelevant_ermitteln(lauf: _Lauf, dok, zaehler: dict) -> list:
         elif anzahl and _lesung_unplausibel(lauf.ocr_cache.get(nr) or ()):
             dazu("OCR_UNPLAUSIBEL", nr)
         elif anzahl == 0:
-            if _tintenanteil(lauf.doc[nr]) > TINTE_MIN:
-                dazu("OCR_FEHLER", nr)
+            # Kein Wort gelesen: nur eine nachweislich leere Seite (Rückseite) ist kein Grund – ein hell gedruckter
+            # Scan, Bleistift oder Handschrift, die die OCR nicht liest, sind es (Befund Runde 3)
+            if _analyse.seite_nachweislich_leer(lauf.doc[nr]):
+                leer.add(nr)
             else:
-                leer.add(nr)                               # leere Scan-Seite (Rückseite): kein Grund
+                dazu("OCR_FEHLER", nr)
+    lauf.leere_scanseiten = leer
+    text = getattr(dok, "text", None)
+    if isinstance(text, str) and not text.strip() and not _analyse.nur_leere_seiten(lauf.doc):
+        # Gar kein Text, aber etwas auf den Seiten: nichts wurde geprüft (wie KEIN_TEXT der Analyse – auch ohne ihr
+        # Modell, z. B. im Benchmark)
+        dazu("KEIN_TEXT")
     if lauf.analyse_modell is None:
         # Beschädigte Bilder (R-07, scan_bild_defekt) – mit dem Modell der Analyse stehen sie in dessen Meldungen
         for nr in _analyse.bild_schaeden(lauf.pdf_pfad):
             dazu("BILD_BESCHAEDIGT", nr)
-    meldungen = list(lauf.meldungen) + list(getattr(lauf.analyse_modell, "leckrelevant", None) or [])
-    for m in meldungen:
-        code, seite = m.get("code"), m.get("seite")
-        if code not in LECKRELEVANTE_CODES or m.get("art") not in ("warnung", "fehler"):
-            continue
-        if code in ("SCHLUESSELWORT_OHNE_FUND", "KAUM_LESBAR") or (code == "OCR_FEHLER" and seite in leer):
-            continue                    # Schlüsselwörter prüft die Seitenschleife, kaum lesbar die Schleife oben
-            #                             (mit Lesung und Tinte, nicht nur nach Wortzahl); leere Seite: kein Grund
-        dazu(code, seite if isinstance(seite, int) else None)
+    meldungen = list(lauf.meldungen) + _analyse_meldungen(lauf)
+    for g in _meldungs_gruende(lauf, meldungen):
+        if g.code == "SCHLUESSELWORT_OHNE_FUND":
+            continue                                       # die Seitenschleife prüft die Schlüsselwörter selbst
+        gruende.setdefault((g.code, g.seite), g)
+    return list(gruende.values())
+
+
+def _status_gruende(lauf: _Lauf, reste: list, verdacht: list, unauffindbar: list) -> list:
+    """Alle Gründe, die Ausgabe _PRUEFEN abzulegen (Gutachten R-07/R-11, Runde 3: eine Regel für alle Meldungen) – in
+    dieser Reihenfolge: Reste der Selbstkontrolle, Verdacht der Restrisiko-Prüfung, nicht gefundene angehakte Funde
+    (mit ihren Texten), abweichendes Modell, ausgefallene Restrisiko-Prüfung, die Gründe aus Lesbarkeit und Zustand
+    der Datei und schließlich jede weitere leckrelevante Meldung aus Analyse und Schwärzung (analyse.ist_leckrelevant:
+    jede der Art „fehler“, jede leckrelevante oder unbekannte Warnung). Je (Code, Seite) ein Grund. Leer = die Ausgabe
+    darf „fertig“ heißen."""
+    gruende: dict = {}
+
+    def dazu(g: _Grund):
+        gruende.setdefault((g.code, g.seite), g)
+    if reste:
+        dazu(_Grund("RESTE", None, f"{len(reste)} Fundtext(e) noch auffindbar"))
+    if verdacht:
+        dazu(_Grund("VERDACHT", None, f"{len(verdacht)} Verdachtsstelle(n)"))
+    if unauffindbar:
+        eindeutig = list(dict.fromkeys(" ".join(str(t).split()) for t in unauffindbar if str(t).strip()))
+        beispiele = ", ".join(f"»{t}«" for t in eindeutig[:3]) + (f" (+{len(eindeutig) - 3} weitere)"
+                                                                     if len(eindeutig) > 3 else "")
+        dazu(_Grund("NICHT_LOKALISIERT", None, f"Fundstellen nicht lokalisiert – vermutlich noch lesbar: {beispiele}"
+                    if beispiele else "Fundstellen nicht lokalisiert"))
+    if lauf.modell_abweichung:
+        dazu(_grund("MODELL_ABWEICHUNG"))
+    if lauf.restrisiko_ausgefallen:
+        dazu(_Grund("VERDACHT", None, "Restrisiko-Prüfung ausgefallen"))
+    for g in lauf.leckrelevant:
+        dazu(g)
+    for g in _meldungs_gruende(lauf, list(lauf.meldungen) + _analyse_meldungen(lauf)):
+        dazu(g)
+    if lauf.restrisiko_fehler and not gruende:
+        dazu(_Grund("VERDACHT", None, "Kontrolle der Ausgabe ausgefallen"))
     return list(gruende.values())
 
 
@@ -1952,9 +2276,11 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
     ocr: OcrDienst (sonst eigener); ocr_cache: {Seitenindex: Wortliste} aus der Analyse;
     ziel_ordner: sonst <Ordner der PDF>/anonymisiert; nebenkanaele: „nebenkanaele“ aus dem Analyse-Ergebnis
     (sonst prüft die Schwärzung selbst, wenn auf den Seiten nichts zu schwärzen ist).
-    Ohne angehakten Fund entsteht nur dann eine Ausgabe, wenn Nebenkanäle personenbezogene Daten tragen (R-04) –
-    sie ist das Dokument ohne Dateieigenschaften, Lesezeichen, Anhänge und Formulardaten.
-    „pruefen_gruende“: kurze Gründe, warum die Ausgabe _PRUEFEN ist (für die Oberfläche)."""
+    Jede lesbare PDF bekommt eine Ausgabe – auch ohne angehakten Fund (Runde 3): das Dokument ohne
+    Dateieigenschaften, Lesezeichen, Anhänge, Formulardaten und abgeschnittenen Text, mit Selbstkontrolle und
+    Restrisiko-Prüfung. Ohne Ausgabe (und mit „fehler“ sowie einer Meldung der Art „fehler“) endet nur eine Datei,
+    die sich nicht bearbeiten lässt.
+    „pruefen_gruende“: kurze Gründe, warum die Ausgabe _PRUEFEN ist (für die Oberfläche); leer bei „fertig“."""
     pdf_pfad = Path(pdf_pfad)
     ergebnis = {"original": pdf_pfad, "ausgabe": None, "treffer": 0, "uebersprungen": 0,
                 "warnungen": [], "hinweise": [], "reste": [], "fehler": None, "verdacht": [], "status": None,
@@ -1966,14 +2292,7 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
     bereiche = {int(k): [fitz.Rect(r) for r in v] for k, v in (manuelle_bereiche or {}).items() if v}
     stellen_manuell = {int(k): list(v) for k, v in (manuelle_stellen or {}).items() if v}
     nebenkanal_bezug = None
-    if not funde and not bereiche and not stellen_manuell:
-        nebenkanal_bezug = _nebenkanal_bezug(pdf_pfad, nebenkanaele, modell, profil)
-        if not nebenkanal_bezug:
-            ergebnis["warnungen"].append(WARNUNG_KEIN_TREFFER)
-            ergebnis["meldungen"].append({"art": "warnung", "code": "KEIN_TREFFER", "text": WARNUNG_KEIN_TREFFER,
-                                          "seite": None})
-            return ergebnis
-    elif isinstance(nebenkanaele, dict) and "personenbezug" in nebenkanaele:
+    if isinstance(nebenkanaele, dict) and "personenbezug" in nebenkanaele:
         nebenkanal_bezug = bool(nebenkanaele["personenbezug"])
 
     ziel = Path(ziel_ordner) if ziel_ordner else pdf_pfad.parent / "anonymisiert"
@@ -1983,19 +2302,28 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
     lauf = _Lauf(pdf_pfad, funde, melde, fortschritt, abbruch, ocr, ocr_cache, ziel)
     lauf.analyse_modell = modell
     lauf.nebenkanal_bezug = nebenkanal_bezug
+
+    def ohne_ausgabe(code: str, text: str):
+        """Keine Ausgabe: „fehler“ mit einer Meldung der Art „fehler“ (zentrale Regel: nie „fertig“)."""
+        ergebnis["fehler"] = text
+        ergebnis["ausgabe"] = None
+        ergebnis["status"] = None
+        ergebnis["ausgabe_pruefen"] = False
+        lauf.melden("fehler", code, text)
+        ergebnis["warnungen"] = lauf.warnungen
+        ergebnis["hinweise"] = lauf.hinweise
     try:
         try:
             lauf.doc = fitz.open(pdf_pfad)
         except Exception as e:
-            ergebnis["fehler"] = f"Konnte nicht geöffnet werden: {e}"
+            ohne_ausgabe("NICHT_LESBAR", f"Konnte nicht geöffnet werden: {e}")
             return ergebnis
         keine_pdf = _analyse.keine_pdf_meldung(lauf.doc, pdf_pfad)      # vor jedem Seitenzugriff (R-01)
         if keine_pdf:
-            ergebnis["fehler"] = keine_pdf
-            lauf.meldungen.append({"art": "fehler", "code": "KEIN_PDF", "text": keine_pdf, "seite": None})
+            ohne_ausgabe("KEIN_PDF", keine_pdf)
             return ergebnis
         if lauf.doc.needs_pass:
-            ergebnis["fehler"] = "Passwortgeschützt – übersprungen."
+            ohne_ausgabe("KENNWORT", "Passwortgeschützt – übersprungen.")
             return ergebnis
         # vor jeder Änderung jedes Objekt einmal laden: eine nötige Reparatur geschieht jetzt, nicht erst nach dem
         # Schwärzen – dann verwürfe MuPDF alle Schwärzungen im Speicher (R-11, späte Reparatur)
@@ -2010,16 +2338,11 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
         ergebnis["status"] = None
         lauf.meldungen.append({"art": "fehler", "code": "ABGEBROCHEN", "text": ABGEBROCHEN, "seite": None})
     except _SpaeteReparatur:
-        ergebnis["fehler"] = TEXT_SPAETE_REPARATUR
-        ergebnis["ausgabe"] = None
-        ergebnis["status"] = None
-        lauf.melden("fehler", "DATEI_REPARIERT", TEXT_SPAETE_REPARATUR)
-        ergebnis["warnungen"] = lauf.warnungen
-        ergebnis["hinweise"] = lauf.hinweise
+        ohne_ausgabe("DATEI_REPARIERT", TEXT_SPAETE_REPARATUR)
+    except _NichtSchwaerzbar as e:
+        ohne_ausgabe("SEITE_NICHT_SCHWAERZBAR", str(e))
     except OSError as e:   # Zielordner/Zwischenstand nicht schreibbar
-        ergebnis["fehler"] = str(e)
-        ergebnis["warnungen"] = lauf.warnungen
-        ergebnis["hinweise"] = lauf.hinweise
+        ohne_ausgabe("AUSGABE_FEHLER", str(e))
     finally:
         if lauf.doc is not None:
             try:
@@ -2031,6 +2354,36 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
             eigener_dienst.schliessen()
         ergebnis["meldungen"] = lauf.meldungen
     return ergebnis
+
+
+def _zuordnung_eintragen(lauf: _Lauf, ausgabe: Path) -> None:
+    """Zeile für die gerade abgelegte Ausgabe in die Zuordnungsdatei schreiben und melden, wo sie steht. Die Ausgabe
+    existiert dann schon: hier bricht nichts mehr ab (Befund Runde 3: eine alte Zuordnungsdatei in ANSI-Kodierung ließ
+    sonst die Schwärzung als „ohne Ausgabe“ enden, obwohl anonym_NN.pdf längst im Ordner lag) – ein Fehler wird eine
+    Warnung ZUORDNUNG. Liegt die Datei im Ausgabeordner selbst (Rückfall, gleich aus welchem Grund), ist das immer eine
+    Warnung: dieser Ordner wird hochgeladen."""
+    try:
+        datei = _zuordnung_anhaengen(lauf.ziel, ausgabe, lauf.pdf_pfad)
+    except Exception as e:
+        lauf.melden("warnung", "ZUORDNUNG",
+                    f"Zuordnungsdatei konnte nicht geschrieben werden ({e}) – welche Ausgabe zu welchem Original gehört, "
+                    f"steht nur im Protokoll: {ausgabe.name} ← {lauf.pdf_pfad.name}.")
+        return
+    if zuordnung_im_ausgabeordner(datei, lauf.ziel):
+        # M-25: die Datei liegt doch im Ordner, der hochgeladen wird – keine Nebensache (Warnung statt Hinweis)
+        lauf.melden("warnung", "ZUORDNUNG",
+                    f"Zuordnung Original ↔ Ausgabe steht in {datei} – im Ordner der Ausgaben, weil sie nirgends daneben "
+                    f"geschrieben werden konnte. Diese Datei enthält die Original-Dateinamen (oft mit Kundennamen): "
+                    f"beim Hochladen NICHT mit auswählen, nur die anonym_….pdf-Dateien weitergeben.")
+    elif ist_wurzel(lauf.ziel):
+        lauf.melden("hinweis", "ZUORDNUNG",
+                    f"Zuordnung Original ↔ Ausgabe steht in {datei} (Programmordner – der Zielordner {lauf.ziel} ist ein "
+                    f"ganzes Laufwerk bzw. eine Freigabe, daneben ist kein Platz). Diese Datei enthält die "
+                    f"Original-Dateinamen (oft mit Kundennamen) – nicht weitergeben.")
+    else:
+        lauf.melden("hinweis", "ZUORDNUNG", f"Zuordnung Original ↔ Ausgabe steht in {datei}. Diese Datei enthält "
+                                            f"die Original-Dateinamen (oft mit Kundennamen) – nicht mit hochladen, "
+                                            f"nur die anonym_….pdf-Dateien weitergeben.")
 
 
 def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: dict,
@@ -2127,25 +2480,23 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
                     f"{len(nicht_lokalisiert)} Fundstelle(n) der Analyse sind im Dokument nicht mehr auffindbar "
                     f"(Datei geändert?) und bleiben ggf. sichtbar – bitte prüfen: {beispiele}{rest}")
     if lauf.treffer == 0:
-        # Auf den Seiten nichts zu schwärzen: eine Ausgabe nur, wenn Nebenkanäle personenbezogene Daten tragen –
-        # sonst ginge das Original samt Titel, Anhängen oder XFA-Daten weiter (R-04)
-        unklar = bool(nicht_lokalisiert or nicht_gefunden)
-        if lauf.nebenkanal_bezug is None and not unklar:
+        # Auf den Seiten nichts geschwärzt – trotzdem eine bereinigte Ausgabe (Runde 3: jede Datei bekommt eine; sonst
+        # ginge das Original samt Titel, Anhängen, abgeschnittenem Text oder XFA-Daten weiter, R-04). Nicht gefundene
+        # angehakte Funde machen sie _PRUEFEN (Grund nennt die Texte, _status_gruende).
+        if lauf.nebenkanal_bezug is None:
             lauf.nebenkanal_bezug = _nebenkanal_bezug(lauf.pdf_pfad, None, lauf.analyse_modell, profil)
-        if unklar or not lauf.nebenkanal_bezug:
-            lauf.melden("warnung", "KEIN_TREFFER", WARNUNG_KEIN_TREFFER)
-            ergebnis["warnungen"] = lauf.warnungen
-            ergebnis["hinweise"] = lauf.hinweise
-            return
-        lauf.melden("hinweis", "NEBENKANAL_ENTFERNT",
-                    "Auf den Seiten wurde nichts erkannt. Die Ausgabe ist das Dokument ohne Dateieigenschaften, "
-                    "Lesezeichen, Anhänge und Formulardaten – dort standen personenbezogene Daten (oder sie waren nicht "
-                    "auszuschließen).")
-        # Starkes Warnsignal: das Dokument nennt außerhalb der Seiten eine Person, auf den Seiten steht keine einzige
-        # Fundstelle – vielleicht kann die Erkennung die Seiten nicht lesen. Nie still „fertig“ (Gutachten R-04).
-        grund = _grund("NUR_NEBENKANAL")
-        if grund not in lauf.leckrelevant:
-            lauf.leckrelevant.append(grund)
+        if lauf.nebenkanal_bezug:
+            lauf.melden("hinweis", "NEBENKANAL_ENTFERNT",
+                        "Auf den Seiten wurde nichts erkannt. Die Ausgabe ist das Dokument ohne Dateieigenschaften, "
+                        "Lesezeichen, Anhänge und Formulardaten – dort standen personenbezogene Daten (oder sie waren "
+                        "nicht auszuschließen).")
+            # Starkes Warnsignal: das Dokument nennt außerhalb der Seiten eine Person, auf den Seiten steht keine
+            # einzige Fundstelle – vielleicht kann die Erkennung die Seiten nicht lesen. Nie still „fertig“ (R-04).
+            grund = _grund("NUR_NEBENKANAL")
+            if grund not in lauf.leckrelevant:
+                lauf.leckrelevant.append(grund)
+        elif not (nicht_lokalisiert or nicht_gefunden):
+            lauf.melden("hinweis", "NICHTS_GESCHWAERZT", HINWEIS_NICHTS_GESCHWAERZT)
     if ocr_seiten and lauf.treffer:
         lauf.melden("hinweis", "OCR_GELESEN", f"{ocr_seiten} Seite(n) als Scan per OCR geschwärzt (Bildpixel entfernt).")
     if lauf.anfangstreffer:
@@ -2189,11 +2540,8 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
     try:
         doc.save(tmp, garbage=4, deflate=True)
     except Exception as e:
-        ergebnis["fehler"] = (f"Ausgabe konnte nicht geschrieben werden ({e}) – ist der Ordner "
-                              f"»{lauf.ziel}« beschreibbar oder die Datei noch geöffnet?")
-        ergebnis["warnungen"] = lauf.warnungen
-        ergebnis["hinweise"] = lauf.hinweise
-        return
+        raise OSError(f"Ausgabe konnte nicht geschrieben werden ({e}) – ist der Ordner »{lauf.ziel}« beschreibbar "
+                      f"oder die Datei noch geöffnet?") from e
     _spaete_reparatur_pruefen(lauf, doc)          # auch eine Reparatur während des Speicherns zählt
     doc.close()
     lauf.doc = None
@@ -2209,7 +2557,12 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
                     f"Selbstkontrolle: {len(reste)} Fundtext(e) sind in der Ausgabe noch auffindbar ({beispiele}) – "
                     f"Datei als _PRUEFEN abgelegt, unbedingt manuell prüfen!")
     verdacht = []
-    if _restrisiko is not None and hasattr(_restrisiko, "restrisiko_pruefen"):
+    if _restrisiko is None or not hasattr(_restrisiko, "restrisiko_pruefen"):
+        # die zweite Verteidigungslinie fehlt (z. B. unvollständige Installation): nie still „fertig“
+        lauf.melden("warnung", "VERDACHT", "Restrisiko-Prüfung nicht verfügbar (Programmteil fehlt) – Ausgabe bitte "
+                                           "selbst prüfen.")
+        lauf.restrisiko_fehler = lauf.restrisiko_ausgefallen = True
+    else:
         lauf.abbruch_pruefen()
         import time as _zeit
         beginn = _zeit.perf_counter()
@@ -2239,46 +2592,39 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
         except Exception as e:
             lauf.melden("warnung", "VERDACHT", f"Restrisiko-Prüfung ist ausgefallen ({e}) – Ausgabe bitte prüfen.")
             verdacht = []
-            lauf.restrisiko_fehler = True
+            lauf.restrisiko_fehler = lauf.restrisiko_ausgefallen = True
         ergebnis["dauer_restrisiko_s"] = round(_zeit.perf_counter() - beginn, 3)
     ergebnis["verdacht"] = verdacht
     if verdacht:
         lauf.melden("warnung", "VERDACHT",
                     f"Restrisiko: {len(verdacht)} Stelle(n) sehen nach personenbezogenen Daten aus, wurden aber nicht "
                     f"geschwärzt – Datei als _PRUEFEN abgelegt, bitte prüfen.")
-    # Status (R-07/R-11): Gründe aus Lesbarkeit und Zustand der Datei machen die Ausgabe _PRUEFEN. Eine Seite, die
-    # die Restrisiko-Prüfung schon als ganze Seite verdächtigt (ungelesen, kaum lesbar, unplausibel), wird nicht
-    # noch einmal gemeldet.
+    # Status (R-07/R-11, Runde 3: EINE Regel): jede Meldung der Art „fehler“ und jede leckrelevante oder unbekannte
+    # Warnung – aus Analyse, OCR, Seitenmodell, Schwärzung, Nebenkanälen und Restrisiko-Prüfung – macht die Ausgabe
+    # _PRUEFEN, mit verständlichem Grund (_status_gruende). Eine Seite, die die Restrisiko-Prüfung schon als ganze
+    # Seite verdächtigt (ungelesen, kaum lesbar, unplausibel), steht in der Zusammenfassung nicht noch einmal.
     for m in lauf.meldungen:
         if m.get("code") == "SCHLUESSELWORT_OHNE_FUND" and isinstance(m.get("seite"), int):
             grund = _grund("SCHLUESSELWORT_OHNE_FUND", m["seite"])
             if grund not in lauf.leckrelevant:
                 lauf.leckrelevant.append(grund)
+    unauffindbar = list(nicht_lokalisiert) + list(nicht_gefunden) + list(lauf.anfangstreffer)
+    gruende = _status_gruende(lauf, reste, verdacht, unauffindbar)
+    pruefen = bool(gruende or freigabe_erforderlich)
     seitenverdacht = {_verdacht_feld(v, "seite") for v in verdacht if _verdacht_feld(v, "start", 0) == -1}
-    gruende = [g for g in lauf.leckrelevant if g.seite is None or g.seite not in seitenverdacht]
-    unsicher = bool(nicht_lokalisiert or lauf.modell_abweichung or lauf.restrisiko_fehler or lauf.leckrelevant)
-    pruefen = bool(reste or verdacht or freigabe_erforderlich or unsicher)
-    if freigabe_erforderlich and not (reste or verdacht or unsicher):
+    eigene_meldung = {"RESTE", "VERDACHT", "NICHT_LOKALISIERT", "MODELL_ABWEICHUNG"}   # stehen schon in Warnungen
+    zusammenfassung = [g for g in gruende if g.code not in eigene_meldung
+                       and (g.seite is None or g.seite not in seitenverdacht)]
+    if freigabe_erforderlich and not gruende:
         lauf.melden("hinweis", "AUSGABE_PRUEFEN", "Freigabe vor Weitergabe ist eingeschaltet – die Ausgabe bleibt "
                                                   "_PRUEFEN, bis sie in der Vorschau freigegeben wird.")
-    elif gruende:
+    elif zusammenfassung:
         lauf.melden("warnung", "AUSGABE_PRUEFEN",
-                    f"Ausgabe als _PRUEFEN abgelegt – {'; '.join(g.text for g in gruende)}. Bitte die Ausgabe vor der "
-                    f"Weitergabe ansehen.")
-    elif pruefen and not (reste or verdacht):
+                    f"Ausgabe als _PRUEFEN abgelegt – {'; '.join(g.text for g in zusammenfassung)}. Bitte die Ausgabe "
+                    f"vor der Weitergabe ansehen.")
+    elif gruende and not (reste or verdacht):
         lauf.melden("warnung", "AUSGABE_PRUEFEN", "Ausgabe als _PRUEFEN abgelegt – bitte die Warnungen oben prüfen.")
-    pruefen_gruende = []
-    if reste:
-        pruefen_gruende.append(f"{len(reste)} Fundtext(e) noch auffindbar")
-    if verdacht:
-        pruefen_gruende.append(f"{len(verdacht)} Verdachtsstelle(n)")
-    if nicht_lokalisiert:
-        pruefen_gruende.append("Fundstellen nicht lokalisiert")
-    if lauf.modell_abweichung:
-        pruefen_gruende.append("Dokument liest sich anders als bei der Analyse")
-    if lauf.restrisiko_fehler:
-        pruefen_gruende.append("Restrisiko-Prüfung ausgefallen")
-    pruefen_gruende += [g.text for g in lauf.leckrelevant]
+    pruefen_gruende = [g.text for g in gruende]
     if pruefen and not pruefen_gruende:
         pruefen_gruende.append("Freigabe ausstehend")
     ergebnis["pruefen_gruende"] = pruefen_gruende if pruefen else []
@@ -2287,28 +2633,11 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
         ausgabe = _ausgabe_reservieren(lauf.ziel, pruefen=pruefen)
         os.replace(tmp, ausgabe)
     except OSError as e:
-        ergebnis["fehler"] = f"Ausgabe konnte nicht abgelegt werden ({e}) – Ordner »{lauf.ziel}« beschreibbar?"
-        ergebnis["warnungen"] = lauf.warnungen
-        ergebnis["hinweise"] = lauf.hinweise
-        return
+        raise OSError(f"Ausgabe konnte nicht abgelegt werden ({e}) – Ordner »{lauf.ziel}« beschreibbar?") from e
     lauf.tmp_pfade.remove(tmp)
     ergebnis["ausgabe"] = ausgabe
     ergebnis["status"] = "pruefen" if pruefen else "fertig"
     ergebnis["ausgabe_pruefen"] = pruefen
-    try:
-        datei = _zuordnung_anhaengen(lauf.ziel, ausgabe, lauf.pdf_pfad)
-        if datei != zuordnung_pfad(lauf.ziel):
-            # M-25: neben dem Ausgabeordner ließ sich nicht schreiben – die Datei liegt doch im Ordner, der hochgeladen
-            # wird. Das ist dann keine Nebensache mehr (Warnung statt Hinweis).
-            lauf.melden("warnung", "ZUORDNUNG",
-                        f"Zuordnung Original ↔ Ausgabe steht in {datei} – im Ordner der Ausgaben, weil daneben nicht "
-                        f"geschrieben werden konnte. Diese Datei enthält die Original-Dateinamen (oft mit Kundennamen): "
-                        f"beim Hochladen NICHT mit auswählen, nur die anonym_….pdf-Dateien weitergeben.")
-        else:
-            lauf.melden("hinweis", "ZUORDNUNG", f"Zuordnung Original ↔ Ausgabe steht in {datei}. Diese Datei enthält "
-                                                f"die Original-Dateinamen (oft mit Kundennamen) – nicht mit hochladen, "
-                                                f"nur die anonym_….pdf-Dateien weitergeben.")
-    except OSError as e:
-        lauf.melden("warnung", "ZUORDNUNG", f"Zuordnungsdatei konnte nicht geschrieben werden: {e}")
+    _zuordnung_eintragen(lauf, ausgabe)
     ergebnis["warnungen"] = lauf.warnungen
     ergebnis["hinweise"] = lauf.hinweise

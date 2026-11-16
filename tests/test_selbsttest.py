@@ -59,8 +59,10 @@ def test_selbsttest_gibt_keine_inhalte_aus_und_raeumt_auf(tmp_path, capsys, monk
     assert "Ausgaben:" in text and "Fehler: keine" in text and "Laufzeit:" in text
     # Nicht erkannte Werte (keine Namen-Erkennung) melden sich als Verdacht -> _PRUEFEN
     assert "_PRUEFEN" in text
-    # temporäre Ausgaben gelöscht, im Eingabeordner nichts entstanden
+    # temporäre Ausgaben gelöscht – auch die Zuordnungsdatei, die NEBEN dem Ausgabeordner liegt (M-25: sie enthält die
+    # Original-Dateinamen) –, im Eingabeordner nichts entstanden
     assert erzeugt and not any(p.exists() for p in erzeugt)
+    assert list(arbeits.iterdir()) == []
     assert sorted(p.name for p in ordner.rglob("*")) == sorted(
         ["Mustermann_Erika_Police_47.897.336.2.pdf", "Kowalczyk", "Bergisch Gladbach 2520868691.pdf"])
 
@@ -72,8 +74,23 @@ def test_selbsttest_behalten_legt_ausgaben_ab(tmp_path, capsys):
                                   ausgabe=lambda zeile: None)
     assert werte["dokumente"] == 2 and werte["seiten"] == 2 and not werte["fehler"]
     assert werte["funde"]["iban"] == 1 and werte["pruefen"] + werte["fertig"] == 2
-    assert len(list(ziel.glob("anonym_*.pdf"))) == 2 and (ziel / "_zuordnung.txt").exists()
+    from anonymisierer import schwaerzung
+    assert len(list(ziel.glob("anonym_*.pdf"))) == 2 and schwaerzung.zuordnung_pfad(ziel).exists()
     assert capsys.readouterr().out == ""
+
+
+def test_selbsttest_schwaerzt_auch_dateien_ohne_fund(tmp_path):
+    """Runde 3: jede lesbare PDF bekommt eine bereinigte Ausgabe – der Selbsttest zählt sie wie die Oberfläche (früher:
+    „keine Ausgabe (kein Fund)“, die Datei wurde gar nicht geschwärzt und ihr Status nicht gemessen)."""
+    ordner = tmp_path / "Ordner"
+    ordner.mkdir()
+    _pdf(ordner / "Bedingungen.pdf", ["Allgemeine Versicherungsbedingungen", "Es gelten die gesetzlichen Bestimmungen."])
+    ziel = tmp_path / "ausgaben"
+    werte = selbsttest.selbsttest(ordner, behalten=ziel, kategorien="iban,telefon,email,vertrag",
+                                  ausgabe=lambda zeile: None)
+    assert werte["dokumente"] == 1 and werte["ohne_ausgabe"] == 0 and not werte["fehler"]
+    assert werte["fertig"] + werte["pruefen"] == 1 and len(list(ziel.glob("anonym_*.pdf"))) == 1
+    assert werte["meldungen"]["NICHTS_GESCHWAERZT"] == 1
 
 
 def test_regelnamen_ohne_dokumentinhalt():

@@ -693,7 +693,8 @@ def test_neutrale_ausgabenamen_zuordnung_nie_ueberschreiben(tmp_path):
     e2 = schwaerze_pdf(pdf, [fund("LV-2024-887766", "[VERTRAGS-NR]", "vertrag")])
     assert e2["ausgabe"].name == "anonym_02.pdf"
     assert md5(e1["ausgabe"]) == pruef1, "anonym_01.pdf darf nicht überschrieben werden"
-    zuordnung = (tmp_path / "anonymisiert" / "_zuordnung.txt").read_text(encoding="utf-8").splitlines()
+    zuordnung = schwaerzung.zuordnung_pfad(tmp_path / "anonymisiert").read_text(encoding="utf-8").splitlines()
+    assert not (tmp_path / "anonymisiert" / "_zuordnung.txt").exists(), "M-25: nicht im Ordner, der hochgeladen wird"
     assert len(zuordnung) == 2
     assert zuordnung[0].startswith("anonym_01.pdf  <-  Mustermann_Max_Police_LV-2024-887766.pdf  (")
     assert zuordnung[1].startswith("anonym_02.pdf  <-  ")
@@ -720,14 +721,25 @@ def test_pruefen_suffix_bei_resten(tmp_path, monkeypatch):
 
 
 def test_treffer_null_keine_ausgabe(tmp_path):
+    """Name historisch – das Verhalten hat sich in Runde 3 bewusst geändert: Ohne Treffer entstand früher KEINE
+    Ausgabe (die Nutzerin hätte dann das Original mit seinen versteckten Teilen hochgeladen). Jetzt bekommt jede
+    lesbare PDF eine bereinigte Ausgabe: angehakte Funde, die sich nicht finden lassen, machen sie _PRUEFEN und stehen
+    im Grund; ohne jeden Fund ist sie „fertig“."""
     pdf = textseite(tmp_path / "leer.pdf", ["Nur harmloser Text ohne Funde."])
     e = schwaerze_pdf(pdf, [fund("Mustermann"), fund("Musterfirma GmbH", "[BEGRIFF]", "begriff")])
-    assert e["ausgabe"] is None and e["treffer"] == 0 and e["fehler"] is None
-    assert WARNUNG_KEIN_TREFFER in e["warnungen"]
+    assert e["ausgabe"] is not None and e["treffer"] == 0 and e["fehler"] is None
+    assert e["ausgabe"].name == "anonym_01_PRUEFEN.pdf" and e["status"] == "pruefen"
     assert e["uebersprungen"] == 2
-    assert not (tmp_path / "anonymisiert").exists(), "kein leerer Ausgabeordner"
+    assert any("Mustermann" in g and "Musterfirma GmbH" in g for g in e["pruefen_gruende"]), e["pruefen_gruende"]
+    assert "KEIN_TREFFER" not in {m["code"] for m in e["meldungen"]} and WARNUNG_KEIN_TREFFER not in e["warnungen"]
+    assert any(m["code"] == "NICHT_LOKALISIERT" for m in e["meldungen"])
+    assert "Nur harmloser Text ohne Funde." in volltext(e["ausgabe"])
     e_leer = schwaerze_pdf(pdf, [])
-    assert e_leer["ausgabe"] is None and WARNUNG_KEIN_TREFFER in e_leer["warnungen"]
+    assert e_leer["ausgabe"] is not None and e_leer["ausgabe"].name == "anonym_02.pdf" and e_leer["fehler"] is None
+    assert e_leer["status"] == "fertig" and e_leer["pruefen_gruende"] == [] and e_leer["treffer"] == 0
+    assert any(m["code"] == "NICHTS_GESCHWAERZT" and m["art"] == "hinweis" for m in e_leer["meldungen"])
+    assert WARNUNG_KEIN_TREFFER not in e_leer["warnungen"]
+    assert not list((tmp_path / "anonymisiert").glob(".anonym_tmp_*")), "keine Hilfsdateien übrig"
 
 
 def test_nicht_lokalisierte_funde_werden_gemeldet(tmp_path):
@@ -764,6 +776,10 @@ def test_passwortgeschuetzt_und_fehlende_datei(tmp_path):
     assert e["ausgabe"] is None and "Passwort" in e["fehler"]
     e2 = schwaerze_pdf(tmp_path / "gibt_es_nicht.pdf", [fund(NAME)])
     assert e2["ausgabe"] is None and e2["fehler"]
+    # nicht bearbeitbar: keine Ausgabe, eine Meldung der Art „fehler“ (zentrale Regel) und kein leerer Ausgabeordner
+    assert [m["code"] for m in e["meldungen"] if m["art"] == "fehler"] == ["KENNWORT"]
+    assert [m["code"] for m in e2["meldungen"] if m["art"] == "fehler"] == ["NICHT_LESBAR"]
+    assert not (tmp_path / "anonymisiert").exists(), "kein leerer Ausgabeordner"
 
 
 # ----------------------------------------------------------------------
@@ -1040,13 +1056,14 @@ def test_freigabe_erforderlich_freigeben_und_verwerfen(tmp_path):
     ziel = e["ausgabe"].parent
     neu = schwaerzung.freigeben(e["ausgabe"])
     assert neu.name == "anonym_01.pdf" and neu.exists() and not e["ausgabe"].exists()
-    zeilen = (ziel / "_zuordnung.txt").read_text(encoding="utf-8").splitlines()
+    zeilen = schwaerzung.zuordnung_pfad(ziel).read_text(encoding="utf-8").splitlines()
     assert len(zeilen) == 1 and zeilen[0].startswith("anonym_01.pdf  <-  f.pdf")
     e2 = schwaerze_pdf(pdf, [fund(NAME)], freigabe_erforderlich=True, ocr=FakeDienst())
     assert e2["ausgabe"].name == "anonym_02_PRUEFEN.pdf"
     schwaerzung.verwerfen(e2["ausgabe"])
     assert not e2["ausgabe"].exists()
-    assert [z.split()[0] for z in (ziel / "_zuordnung.txt").read_text(encoding="utf-8").splitlines()] == ["anonym_01.pdf"]
+    assert [z.split()[0] for z in schwaerzung.zuordnung_pfad(ziel).read_text(encoding="utf-8").splitlines()] == [
+        "anonym_01.pdf"]
 
 
 def test_ausgabename_wird_exklusiv_reserviert(tmp_path, monkeypatch):
