@@ -90,6 +90,11 @@ KATEGORIE_SPALTEN = 3               # Häkchen-Gitter (4 Spalten schneiden bei 9
 KONTEXT_VORLAUF = 14                # Zeichen vor dem Fund in der Kontextspalte, damit der Fund sichtbar ist
 UNTERTITEL_MINDESTHOEHE = 700       # bei 100 %; darunter wird der Untertitel ausgeblendet
 OBEN_MINDESTHOEHE = 60              # bei 100 %, Mindesthöhe des scrollbaren Einstellbereichs (Titel + Drop-Zone)
+# Ränder (Pixel) im normalen und im kleinen Fenster (Laptop 1366x768 bei 100-150 %, 1024x768): im kleinen Fenster
+# fehlen sonst gut 60 Pixel – die Fundliste zeigte bei 150 % nur eine Zeile. Schrift und Inhalte bleiben gleich.
+RAENDER = {"haupt": (10, 4), "karte": (8, 4), "karte_abstand": (8, 4), "drop_innen": (6, 2), "drop_unten": (6, 4),
+           "leiste": (6, 3), "leiste_abstand": (6, 4), "protokoll": (4, 2), "protokoll_abstand": (6, 4),
+           "kasten": (3, 1), "hauptknopf": (6, 4), "fortschritt_abstand": (4, 2)}
 PROTOKOLL_ZEILEN = 5
 PROTOKOLL_ZEILEN_KLEIN = 3
 PROTOKOLL_MAX_ZEILEN = 5000
@@ -106,10 +111,14 @@ MARKE_HINWEIS = "⚑ "
 MARKE_GESUNDHEIT = "⚕ "
 GESUNDHEIT_KATEGORIEN = frozenset(getattr(_muster_modul, "GESUNDHEIT", ("diagnose", "medikament")))
 SPALTEN = ("kategorie", "text", "seiten", "anzahl", "kontext", "ersatz")
-# Spalte -> (Breite, Mindestbreite, dehnbar) bei 100 %
-SPALTEN_MASSE = {"#0": (185, 150, False), "kategorie": (130, 105, False), "text": (160, 130, True),
-                 "seiten": (60, 52, False), "anzahl": (55, 48, False), "kontext": (210, 160, True),
+# Spalte -> (Breite, Mindestbreite, dehnbar) bei 100 %. Die erste Spalte (Häkchen / Datei) wächst mit dem längsten
+# Dateinamen samt Zusatz „(Bild → PDF)“ / „(Kennwort entfernt)“ bis SPALTE0_MAX_ANTEIL der Breite; dafür geben
+# „Gefundener Text“ und „Kontext“ (vollständig in der Statuszeile) bis zu ihrer Mindestbreite nach.
+SPALTEN_MASSE = {"#0": (185, 150, False), "kategorie": (130, 105, False), "text": (160, 110, True),
+                 "seiten": (60, 52, False), "anzahl": (55, 48, False), "kontext": (210, 100, True),
                  "ersatz": (95, 85, False)}
+SPALTE0_MAX_ANTEIL = 0.4
+SPALTE0_EINZUG = 30                 # bei 100 %: Aufklapp-Zeichen und Rand links vom Text der Dateizeile
 ANALYSE_TEXT = "  Analysieren – Funde anzeigen  "
 START_TEXT = "  Schwärzen starten  "
 VORSCHAU_TEXT = "Vorschau …"
@@ -362,6 +371,35 @@ def _kontext_anzeige(kontext: str) -> str:
     if pos > KONTEXT_VORLAUF:
         return "…" + kontext[pos - KONTEXT_VORLAUF:].lstrip()
     return kontext
+
+
+def name_einpassen(name: str, zusatz: str, platz: float, messen) -> str:
+    """name + zusatz, so gekürzt, dass messen(text) <= platz: zuerst die Mitte des Namens (Anfang, Ende und Endung
+    bleiben: „Kontoauszug_Spa…Juni.pdf (Kennwort entfernt)“), der Zusatz bleibt immer stehen; reicht der Platz nicht
+    einmal für ihn, steht nur „…“ + Zusatz da. messen: Breite eines Texts in Pixeln (tkfont.Font.measure)."""
+    if messen(name + zusatz) <= platz:
+        return name + zusatz
+    stamm, punkt, endung = name.rpartition(".")
+    if not punkt or not stamm or len(endung) > 5 or "/" in endung:
+        stamm, endung = name, ""
+    else:
+        endung = "." + endung
+
+    def gekuerzt(behalten: int) -> str:
+        vorne = (behalten + 1) * 3 // 5
+        hinten = behalten - vorne
+        return stamm[:vorne] + "…" + (stamm[len(stamm) - hinten:] if hinten else "") + endung + zusatz
+
+    unten, oben = 0, len(stamm) - 1             # binäre Suche: längste Kürzung, die passt
+    while unten < oben:
+        mitte = (unten + oben + 1) // 2
+        if messen(gekuerzt(mitte)) <= platz:
+            unten = mitte
+        else:
+            oben = mitte - 1
+    if unten > 0 or messen(gekuerzt(0)) <= platz:
+        return gekuerzt(unten)
+    return "…" + zusatz
 
 
 def _seitenzahl(pdf: Path) -> int:
@@ -943,8 +981,10 @@ class AnonymisiererApp:
 
         self.kopf = tk.Frame(haupt, bg=FARBE_HINTERGRUND)
         self.kopf.pack(fill="x")
-        tk.Label(self.kopf, text="PDF-Anonymisierer", font=self.f_titel,
-                 bg=FARBE_HINTERGRUND, fg=FARBE_TEXT).pack(anchor="w")
+        # im kleinen Fenster ausgeblendet (_oben_anpassen): der Programmname steht ohnehin in der Titelleiste
+        self.titel = tk.Label(self.kopf, text="PDF-Anonymisierer", font=self.f_titel,
+                              bg=FARBE_HINTERGRUND, fg=FARBE_TEXT)
+        self.titel.pack(anchor="w")
         self.untertitel = tk.Label(self.kopf, text=UNTERTITEL, font=self.f_normal, bg=FARBE_HINTERGRUND,
                                    fg=FARBE_TEXT_GRAU, wraplength=self._px(840), justify="left")
         self.untertitel.pack(anchor="w", pady=(0, 6))
@@ -1006,6 +1046,7 @@ class AnonymisiererApp:
         # Systemschriften (z. B. DejaVu Sans, 150 % Skalierung) keinen Platz mehr und verschwand.
         fortschritt_zeile = tk.Frame(leiste, bg=FARBE_KARTE)
         fortschritt_zeile.pack(side="top", fill="x", pady=(4, 0))
+        self.fortschritt_zeile = fortschritt_zeile
         self.warn_label = tk.Label(fortschritt_zeile, text="", font=self.f_fett, bg=FARBE_KARTE,
                                    fg=FARBE_WARNUNG)
         self.warn_label.pack(side="right", padx=(8, 0))
@@ -1057,8 +1098,11 @@ class AnonymisiererApp:
         k3 = self._knopf(zeile, "Liste leeren", self.liste_leeren, True)
         k3.pack(side="right")
         self._sperrbar += [k1, k2, k3]
+        self.datei_knoepfe = zeile
         # Bericht zum Hinzufügen in eigener Zeile unter den Knöpfen, mit Umbruch (Breite folgt dem Fenster): in der
-        # Knopfzeile wurde er abgeschnitten – genau „(nicht geprüft)“ war nicht mehr zu sehen (Befund Runde 2)
+        # Knopfzeile wurde er abgeschnitten – genau „(nicht geprüft)“ war nicht mehr zu sehen (Befund Runde 2). Der
+        # Einstellbereich zeigt immer mindestens bis unter diese Zeile (_oben_untergrenze): auf kleinen Laptops lag
+        # sie sonst unter dem sichtbaren Rand – genau die Zeile, die NICHT geprüfte Dateien nennt (Befund Runde 3)
         self.datei_hinweis = tk.Label(karte1, text="Noch keine Dateien. Die Liste erscheint unten in Schritt 3.",
                                       font=self.f_normal, bg=FARBE_KARTE, fg=FARBE_TEXT_GRAU, anchor="w",
                                       justify="left", wraplength=self._px(840))
@@ -1189,12 +1233,14 @@ class AnonymisiererApp:
                                      fg=FARBE_TEXT_GRAU, anchor="w", justify="left", wraplength=self._px(840))
         self.baum_hinweis.pack(anchor="w", fill="x")
 
-        # Hinweiskasten zuerst unten verankern: wird das Fenster knapp, schrumpft die Fundliste, nicht der Hinweis
+        # Hinweiskasten zuerst unten verankern: wird das Fenster knapp, schrumpft die Fundliste, nicht der Hinweis.
+        # Ein Klick zeigt alle Grenzen (wie Hilfe → „Was wird nicht erkannt?“).
         self.hinweis_kasten = tk.Label(karte3, text=HINWEISKASTEN, font=self.f_normal, justify="left",
                                        anchor="w", bg=FARBE_HINWEIS_HINTERGRUND, fg="#7c4a03", padx=8, pady=3,
                                        highlightthickness=1, highlightbackground=FARBE_HINWEIS_RAND,
-                                       wraplength=self._px(840))
+                                       wraplength=self._px(840), cursor="hand2")
         self.hinweis_kasten.pack(side="bottom", fill="x", pady=(2, 0))
+        self.hinweis_kasten.bind("<Button-1>", lambda e: self.hilfe_grenzen())
 
         baum_rahmen = tk.Frame(karte3, bg=FARBE_KARTE)
         baum_rahmen.pack(fill="both", expand=True, pady=(2, 2))
@@ -1219,6 +1265,7 @@ class AnonymisiererApp:
         self.baum.grid(row=0, column=0, sticky="nsew")
         roll_y.grid(row=0, column=1, sticky="ns")
         roll_x.grid(row=1, column=0, sticky="ew")
+        self.baum_roll_x = roll_x            # nur sichtbar, wenn die Spalten breiter sind als die Liste
         self.baum.tag_configure("aus", foreground=FARBE_TEXT_GRAU)
         self.baum.tag_configure("teil", foreground=FARBE_WARNUNG)
         self.baum.tag_configure("datei", font=self.f_fett)
@@ -1232,22 +1279,75 @@ class AnonymisiererApp:
         self.baum.bind("<Configure>", self._spalten_anpassen)
 
     def _spalten_anpassen(self, ereignis=None):
-        """Dehnbare Spalten füllen die verfügbare Breite; reicht sie nicht, bleibt die Mindestbreite
-        (dann hilft die horizontale Bildlaufleiste)."""
+        """Die erste Spalte bekommt den Platz für die Dateinamen samt Zusatz (höchstens SPALTE0_MAX_ANTEIL), dehnbare
+        Spalten füllen den Rest; reicht er nicht, bleibt die Mindestbreite (dann – und nur dann – erscheint die
+        horizontale Bildlaufleiste). Zu lange Dateinamen werden in der Mitte gekürzt, der Zusatz „(Bild → PDF)“ /
+        „(Kennwort entfernt)“ bleibt sichtbar (der volle Pfad steht in der Statuszeile, sobald die Datei gewählt ist)."""
         try:
             verfuegbar = self.baum.winfo_width() - 4
         except tk.TclError:
             return
         if verfuegbar < 50:
             return
+        breite0 = self._erste_spalte_breite(verfuegbar)
+        if self.baum.column("#0", "width") != breite0:
+            self.baum.column("#0", width=breite0)
         fest = sum(self.baum.column(sp, "width") for sp, (_, _, dehnbar) in SPALTEN_MASSE.items() if not dehnbar)
         dehnbare = [sp for sp, (_, _, dehnbar) in SPALTEN_MASSE.items() if dehnbar]
-        rest = verfuegbar - fest
-        gesamt_entwurf = sum(SPALTEN_MASSE[sp][0] for sp in dehnbare)
+        # Rest im Verhältnis der Entwurfsbreiten verteilen; wer dabei unter seine Mindestbreite fiele, bekommt sie,
+        # und die übrigen teilen sich, was dann noch bleibt (sonst ragte die Summe über die Liste hinaus)
+        frei, offen, breiten = verfuegbar - fest, list(dehnbare), {}
+        while offen:
+            gesamt = sum(SPALTEN_MASSE[sp][0] for sp in offen)
+            zu_schmal = [sp for sp in offen
+                         if frei * SPALTEN_MASSE[sp][0] / gesamt < self._px(SPALTEN_MASSE[sp][1])]
+            if not zu_schmal:
+                breiten.update({sp: int(frei * SPALTEN_MASSE[sp][0] / gesamt) for sp in offen})
+                break
+            for sp in zu_schmal:
+                breiten[sp] = self._px(SPALTEN_MASSE[sp][1])
+                frei -= breiten[sp]
+                offen.remove(sp)
+        summe = fest
         for sp in dehnbare:
-            anteil = SPALTEN_MASSE[sp][0] / gesamt_entwurf
-            breite = max(self._px(SPALTEN_MASSE[sp][1]), int(rest * anteil))
-            self.baum.column(sp, width=breite)
+            self.baum.column(sp, width=breiten[sp])
+            summe += breiten[sp]
+        roll_x = getattr(self, "baum_roll_x", None)
+        if roll_x is not None:                     # jede Zeile zählt: die Bildlaufleiste nur, wenn sie etwas bewirkt
+            if summe > verfuegbar + 2:
+                if not roll_x.winfo_manager():
+                    roll_x.grid()
+            elif roll_x.winfo_manager():
+                roll_x.grid_remove()
+                self.baum.xview_moveto(0)
+        for iid in self.zeilen:
+            if self.baum.exists(iid):
+                self._zeilentext_setzen(iid)
+
+    def _erste_spalte_breite(self, verfuegbar: int) -> int:
+        """Breite der ersten Spalte: Entwurfsbreite oder mehr, wenn ein Dateiname samt Zusatz sie braucht – aber
+        höchstens SPALTE0_MAX_ANTEIL der Liste, und die übrigen Spalten behalten ihre Mindestbreite."""
+        entwurf, mindest = self._px(SPALTEN_MASSE["#0"][0]), self._px(SPALTEN_MASSE["#0"][1])
+        andere = sum(self._px(m if dehnbar else b) for sp, (b, m, dehnbar) in SPALTEN_MASSE.items() if sp != "#0")
+        obergrenze = min(int(verfuegbar * SPALTE0_MAX_ANTEIL), verfuegbar - andere)
+        bedarf = max([entwurf] + [self._px(SPALTE0_EINZUG) + self.f_fett.measure(f"{HAKEN['an']}  {name}")
+                                  for name in self.beschriftungen.values()])
+        return max(mindest, min(bedarf, max(obergrenze, entwurf)))
+
+    def _beschriftung_passend(self, iid) -> str:
+        """Anzeigename der Datei-Zeile, passend zur ersten Spalte: zu lange Namen in der Mitte gekürzt – Anfang,
+        Endung und der Zusatz „(Bild → PDF)“ / „(Kennwort entfernt)“ bleiben sichtbar."""
+        voll = self.beschriftungen.get(iid, "")
+        try:
+            platz = (self.baum.column("#0", "width") - self._px(SPALTE0_EINZUG)
+                     - self.f_fett.measure(f"{HAKEN['an']}  "))
+        except tk.TclError:
+            return voll
+        pdf = self.zeilen.get(iid)
+        zusatz = ANZEIGE_ART.get((self.arbeitskopien.get(pdf) or {}).get("art"), "") if pdf is not None else ""
+        if not zusatz or not voll.endswith(zusatz):
+            zusatz = ""
+        return name_einpassen(voll[:len(voll) - len(zusatz)], zusatz, platz, self.f_fett.measure)
 
     def _menue_anlegen(self):
         menue = tk.Menu(self.root)
@@ -1311,7 +1411,9 @@ class AnonymisiererApp:
                 self._anpassung_geplant = False
 
     def _oben_anpassen(self):
-        """Höhe des scrollbaren Einstellbereichs so wählen, dass Fundliste, Protokoll und Leiste sichtbar bleiben."""
+        """Höhe des scrollbaren Einstellbereichs so wählen, dass Fundliste, Protokoll und Leiste sichtbar bleiben –
+        und der Einstellbereich mindestens bis unter die Hinweiszeile zur Dateiauswahl reicht (Drop-Zone, Knöpfe und
+        die Zeile, die NICHT geprüfte Dateien nennt, sind immer ohne Scrollen zu sehen)."""
         self._anpassung_geplant = False
         if self.beendet:
             return
@@ -1325,18 +1427,15 @@ class AnonymisiererApp:
         try:
             if not self.oben.winfo_exists():
                 return
-            benoetigt = self.oben.winfo_reqheight()
             fenster_h = self.root.winfo_height()
             if fenster_h <= 1:                               # noch nicht dargestellt: Startgeometrie nehmen
                 fenster_h = self._start_hoehe
             klein = fenster_h < self._px(FENSTER_KLEIN_HOEHE)
-            if fenster_h < self._px(UNTERTITEL_MINDESTHOEHE):
-                if self.untertitel.winfo_ismapped():
-                    self.untertitel.pack_forget()
-                    self.kopf.update_idletasks()
-            elif not self.untertitel.winfo_ismapped():
-                self.untertitel.pack(anchor="w", pady=(0, 6))
-                self.kopf.update_idletasks()
+            # kleines Fenster (Laptop 1366x768 bei 100-150 %, 1024x768): großer Titel und Untertitel aus – der
+            # Programmname steht in der Titelleiste, der Untertitel im Hinweis beim ersten Start – und engere Ränder
+            self._kopf_zeigen(titel=not klein,
+                              untertitel=not klein and fenster_h >= self._px(UNTERTITEL_MINDESTHOEHE))
+            self._raender_setzen(klein)
             # kleines Fenster: Bedienhinweis über der Fundliste ausblenden (der Knopf „Vorschau …“ und die
             # Statuszeile nennen die Vorschau weiterhin) – jede Zeile zählt für die Fundliste
             if klein and self.baum_hinweis.winfo_manager():
@@ -1346,16 +1445,28 @@ class AnonymisiererApp:
             zeilen = PROTOKOLL_ZEILEN_KLEIN if klein else PROTOKOLL_ZEILEN
             if int(self.protokoll.cget("height")) != zeilen:
                 self.protokoll.config(height=zeilen)
-                self.protokoll_rahmen.update_idletasks()
+            self.haupt.update_idletasks()                    # angeforderte Höhen nach den Änderungen
+            benoetigt = self.oben.winfo_reqheight()
             karte3_rand = max(0, self.karte3.winfo_reqheight() - self.baum_rahmen.winfo_reqheight())
-            fest = (self.kopf.winfo_reqheight() + self.aktionsleiste.winfo_reqheight()
-                    + self.protokoll_rahmen.winfo_reqheight() + karte3_rand + self._px(44))
+            kopf_h = self.kopf.winfo_reqheight() if self.kopf.winfo_manager() else 0
+            i = 1 if klein else 0
+            raender = (2 * RAENDER["haupt"][i] + RAENDER["leiste_abstand"][i] + RAENDER["protokoll_abstand"][i]
+                       + RAENDER["karte_abstand"][i] + 4)       # Ränder in Pixeln (skalieren nicht mit)
+            fest = (kopf_h + self.aktionsleiste.winfo_reqheight() + self.protokoll_rahmen.winfo_reqheight()
+                    + karte3_rand + raender)
             rest = fenster_h - fest
             # Die Fundliste ist der Arbeitsbereich (GR-02): fester Anteil des freien Platzes (mindestens
-            # BAUM_MINDESTHOEHE); der Einstellbereich bekommt den Rest und scrollt bei Bedarf.
+            # BAUM_MINDESTHOEHE); der Einstellbereich bekommt den Rest und scrollt bei Bedarf – aber nie weniger als
+            # bis unter die Hinweiszeile zur Dateiauswahl, und sein sichtbarer Teil endet unter einer ganzen Zeile
+            # (keine halb abgeschnittenen Knöpfe oder Häkchen).
             baum_soll = max(self._px(BAUM_MINDESTHOEHE), int(rest * BAUM_ANTEIL))
             verfuegbar = rest - baum_soll
-            hoehe = max(self._px(OBEN_MINDESTHOEHE), min(benoetigt, verfuegbar))
+            untergrenze = self._oben_untergrenze()
+            hoehe = max(untergrenze, min(benoetigt, verfuegbar))
+            if hoehe < benoetigt:
+                grenzen = [g for g in self._oben_zeilengrenzen() if untergrenze <= g <= hoehe]
+                if grenzen:
+                    hoehe = max(grenzen)
             self.oben_canvas.configure(height=hoehe,
                                        scrollregion=(0, 0, self.oben.winfo_reqwidth(), benoetigt))
             if benoetigt > hoehe + 2:
@@ -1368,6 +1479,106 @@ class AnonymisiererApp:
             pass
         finally:
             self._anpassung_laeuft = False
+
+    def _kopf_zeigen(self, titel: bool, untertitel: bool):
+        """Titel und Untertitel ein-/ausblenden (in dieser Reihenfolge gepackt). Ohne beide verschwindet der ganze
+        Kopf – ein leerer Rahmen behielte sonst seine alte Höhe."""
+        if (bool(self.titel.winfo_manager()), bool(self.untertitel.winfo_manager())) == (titel, untertitel) \
+                and bool(self.kopf.winfo_manager()) == (titel or untertitel):
+            return
+        self.titel.pack_forget()
+        self.untertitel.pack_forget()
+        if titel:
+            self.titel.pack(anchor="w")
+        if untertitel:
+            self.untertitel.pack(anchor="w", pady=(0, 6))
+        if titel or untertitel:
+            if not self.kopf.winfo_manager():
+                self.kopf.pack(fill="x", before=self.aktionsleiste)
+        elif self.kopf.winfo_manager():
+            self.kopf.pack_forget()
+
+    def _raender_setzen(self, klein: bool):
+        """Ränder (RAENDER) für das normale bzw. kleine Fenster setzen – nur bei einem Wechsel. Schrift, Inhalte und
+        Reihenfolge bleiben; im kleinen Fenster gewinnt die Fundliste so gut 60 Pixel (1366x768 bei 150 %)."""
+        if getattr(self, "_raender_klein", None) is klein:
+            return
+        self._raender_klein = klein
+        r = {name: werte[1 if klein else 0] for name, werte in RAENDER.items()}
+        self.haupt.config(pady=r["haupt"])
+        for karte in (self.datei_hinweis.master, self.karte2, self.karte3):
+            karte.config(pady=r["karte"])
+            karte.pack_configure(pady=(0, r["karte_abstand"]))
+        self.drop_zone.config(pady=r["drop_innen"])
+        self.drop_zone.pack_configure(pady=(2, r["drop_unten"]))
+        self.aktionsleiste.config(pady=r["leiste"])
+        self.aktionsleiste.pack_configure(pady=(r["leiste_abstand"], 0))
+        self.fortschritt_zeile.pack_configure(pady=(r["fortschritt_abstand"], 0))
+        self.protokoll_rahmen.config(pady=r["protokoll"])
+        self.protokoll_rahmen.pack_configure(pady=(r["protokoll_abstand"], 0))
+        self.hinweis_kasten.config(pady=r["kasten"])
+        for knopf in (self.analyse_knopf, self.start_knopf):
+            knopf.config(pady=r["hauptknopf"])
+
+    @staticmethod
+    def _abstand(wert) -> tuple[int, int]:
+        """pady aus pack_info (Zahl, Text oder Paar) als (oben, unten)."""
+        if isinstance(wert, (tuple, list)):
+            teile = [int(float(w)) for w in wert] or [0]
+        else:
+            teile = [int(float(w)) for w in str(wert).split()] or [0]
+        return teile[0], teile[-1]
+
+    def _oben_untergrenze(self) -> int:
+        """Mindesthöhe des Einstellbereichs: bis unter die Hinweiszeile zur Dateiauswahl (aus den angeforderten
+        Höhen – gilt auch, bevor das Fenster gezeichnet ist und gleich nachdem sich der Text der Zeile geändert hat)."""
+        karte = self.datei_hinweis.master
+        try:
+            hoehe = int(karte.cget("pady")) + int(karte.cget("highlightthickness")) + int(karte.cget("bd"))
+            for kind in karte.pack_slaves():
+                oben, unten = self._abstand(kind.pack_info().get("pady", 0))
+                hoehe += oben + kind.winfo_reqheight()
+                if kind is self.datei_hinweis:
+                    break
+                hoehe += unten
+            oben_karte, _ = self._abstand(karte.pack_info().get("pady", 0))
+            return max(self._px(OBEN_MINDESTHOEHE), oben_karte + hoehe + self._px(4))
+        except (tk.TclError, ValueError):
+            return self._px(OBEN_MINDESTHOEHE)
+
+    def _oben_zeilengrenzen(self) -> list[int]:
+        """Untere Kanten der Zeilen des Einstellbereichs (Koordinaten im Bereich, mit kleinem Rand): dort darf der
+        sichtbare Teil enden, ohne eine Zeile mit Knöpfen oder Häkchen mittendurch zu schneiden. Leer, solange die
+        Lage noch nicht feststeht."""
+        grenzen = set()
+        rand = self._px(4)
+
+        def zeilen_eintragen(zeilen):
+            """zeilen: [(oben, unten)] einer Spalte; Grenze = unten + Rand, aber nie in die nächste Zeile hinein."""
+            zeilen = sorted(zeilen)
+            for nr, (_, unten) in enumerate(zeilen):
+                naechste = min((o for o, _ in zeilen[nr + 1:] if o >= unten), default=None)
+                grenzen.add(unten + rand if naechste is None else min(unten + rand, naechste))
+
+        try:
+            for karte in self.oben.pack_slaves():
+                ky = karte.winfo_y()
+                if karte.winfo_height() <= 1:
+                    return []
+                grenzen.add(ky + karte.winfo_height())
+                kinder = karte.pack_slaves()
+                zeilen_eintragen([(ky + k.winfo_y(), ky + k.winfo_y() + k.winfo_height()) for k in kinder])
+                for kind in kinder:                              # Zeilen des Häkchen-Gitters
+                    gitter: dict = {}
+                    for enkel in kind.grid_slaves():
+                        oben = ky + kind.winfo_y() + enkel.winfo_y()
+                        alt = gitter.get(int(enkel.grid_info().get("row", 0)), (oben, oben))
+                        gitter[int(enkel.grid_info().get("row", 0))] = (min(alt[0], oben),
+                                                                         max(alt[1], oben + enkel.winfo_height()))
+                    zeilen_eintragen(list(gitter.values()))
+        except (tk.TclError, ValueError):
+            return []
+        return sorted(grenzen)
 
     def _fenster_geaendert(self, ereignis):
         if ereignis.widget is not self.root:
@@ -1918,6 +2129,7 @@ class AnonymisiererApp:
             art = (self.arbeitskopien.get(pdf) or {}).get("art")
             self.beschriftungen[iid] = name + ANZEIGE_ART.get(art, "")
             self._zeilentext_setzen(iid)
+        self._spalten_anpassen()                   # erste Spalte folgt dem längsten Namen samt Zusatz
         for fenster in self.vorschauen.values():
             fenster.titel_setzen()
 
@@ -1940,7 +2152,7 @@ class AnonymisiererApp:
     def _zeilentext_setzen(self, iid):
         zustand = self._zustand(iid)
         if iid in self.zeilen:
-            self.baum.item(iid, text=f"{HAKEN[zustand]}  {self.beschriftungen.get(iid, '')}")
+            self.baum.item(iid, text=f"{HAKEN[zustand]}  {self._beschriftung_passend(iid)}")
         else:
             self.baum.item(iid, text=HAKEN[zustand])
 

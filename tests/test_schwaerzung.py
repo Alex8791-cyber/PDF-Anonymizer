@@ -878,28 +878,45 @@ def test_selbstkontrolle_findet_echte_reste(tmp_path, monkeypatch):
 # M-35: Laufzeit
 # ----------------------------------------------------------------------
 def test_laufzeit_50_seiten_300_funde(tmp_path):
-    pdf = tmp_path / "gross.pdf"
-    doc = fitz.open()
-    funde = []
-    for p in range(50):
-        seite = doc.new_page()
-        y = 40
-        for i in range(45):
-            seite.insert_text((40, y), f"Kunde{p:02d}{i:02d} Nummer{p}{i} Vertrags-Nr. V{p:02d}{i:03d}X Tel 0171 {p:03d}{i:04d}",
-                              fontsize=8, fontname="helv")
-            y += 15
-            if len(funde) < 300 and i % 8 == 0:
-                funde.append(fund(f"Kunde{p:02d}{i:02d}", f"[PERSON {len(funde)}]"))
-    doc.save(pdf)
-    doc.close()
-    assert len(funde) == 300
-    start = time.perf_counter()
-    e = schwaerze_pdf(pdf, funde)
-    dauer = time.perf_counter() - start
+    """M-35 / Gutachten KQ-09, lastunabhängig (Runde 3): gemessen wird die CPU-Zeit des eigenen Prozesses statt
+    der Wanduhr – auch die großzügige 20-s-Schranke riss, sobald parallele Benchmarks die Kerne belegten. Zwei
+    Prüfungen: (1) Skalierung: gut 4-mal so viele Seiten und Funde kosten bei linearer Schwärzung etwa 4-mal so
+    viel (gemessen 3,4), das alte Verhalten Funde x Seiten (Audit: 8 Minuten) etwa 17-mal – Schranke 8; (2) die
+    bisherige Schranke 20 s für 50 Seiten und 300 Funde, jetzt als CPU-Zeit (gemessen gut 10 s)."""
+    import zeitmessung
+
+    def pdf_mit(seiten: int, max_funde: int):
+        pdf = tmp_path / f"gross_{seiten}.pdf"
+        doc = fitz.open()
+        funde = []
+        for p in range(seiten):
+            seite = doc.new_page()
+            y = 40
+            for i in range(45):
+                seite.insert_text((40, y), f"Kunde{p:02d}{i:02d} Nummer{p}{i} Vertrags-Nr. V{p:02d}{i:03d}X Tel 0171 "
+                                           f"{p:03d}{i:04d}", fontsize=8, fontname="helv")
+                y += 15
+                if len(funde) < max_funde and i % 8 == 0:
+                    funde.append(fund(f"Kunde{p:02d}{i:02d}", f"[PERSON {len(funde)}]"))
+        doc.save(pdf)
+        doc.close()
+        return pdf, funde
+
+    klein_pdf, klein_funde = pdf_mit(12, 72)
+    pdf, funde = pdf_mit(50, 300)
+    assert (len(klein_funde), len(funde)) == (72, 300)
+    ek, klein = zeitmessung.cpu_sekunden(lambda: schwaerze_pdf(klein_pdf, klein_funde,
+                                                               ziel_ordner=tmp_path / "aus_klein"))
+    wanduhr = time.perf_counter()
+    e, gross = zeitmessung.cpu_sekunden(lambda: schwaerze_pdf(pdf, funde, ziel_ordner=tmp_path / "aus_gross"))
+    wanduhr = time.perf_counter() - wanduhr          # nur zur Anzeige: unter Last weit über der CPU-Zeit
+    assert ek["treffer"] == 72 and ek["reste"] == [], ek
     assert e["treffer"] == 300 and e["reste"] == [], e
-    # Gutachten KQ-09: keine knappe Wanduhr-Schranke (CI-Runner unter Last) – 20 s fangen jede
-    # Rückkehr zum alten quadratischen Verhalten (Audit: 8 Minuten) zuverlässig ab
-    assert dauer < 20.0, f"Schwärzung dauerte {dauer:.1f} s"
+    verhaeltnis = gross / max(klein, 0.05)
+    print(f"Schwärzung CPU: 12 Seiten/72 Funde {klein:.2f} s, 50 Seiten/300 Funde {gross:.2f} s, "
+          f"Verhältnis {verhaeltnis:.1f} (Wanduhr der großen Messung: {wanduhr:.1f} s)")
+    assert verhaeltnis < 8, f"Schwärzung wächst nicht linear: {klein:.2f} s -> {gross:.2f} s (x{verhaeltnis:.1f})"
+    assert gross < 20.0, f"Schwärzung 50 Seiten/300 Funde brauchte {gross:.1f} s CPU-Zeit"
 
 
 # ----------------------------------------------------------------------

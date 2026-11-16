@@ -818,8 +818,11 @@ def test_lauf_wissen_sammelt_personen(tmp_path):
 def test_analyse_laufzeit_skaliert_linear(monkeypatch):
     """Gutachten PERF-01: keine O(Funde x Text)- oder O(Funde²)-Nachbearbeitung (Weitergabe, Zusammenführen,
     Kontext, Seitenzuordnung). Gemessen mit linearen Ersatz-Mustern, damit nur der Kern zählt: vierfache
-    Menge darf höchstens etwa vierfache Zeit kosten (großzügig: Faktor 7)."""
-    import time
+    Menge darf höchstens etwa vierfache Zeit kosten (großzügig: Faktor 7).
+    Lastunabhängig (Runde 3): CPU-Zeit des eigenen Prozesses statt Wanduhr (parallele Benchmarks dehnten die
+    Wanduhr der großen Messung, das Verhältnis riss); beide Größen werden abwechselnd je zweimal gemessen, es
+    zählt jeweils das Minimum – so sehen beide dieselbe Last."""
+    import zeitmessung
     from anonymisierer import muster
 
     linear = [("iban", "IBANs", "[IBAN]", lambda t: re.findall(r"DE\d\d(?: \d{4}){4} \d\d", t), True),
@@ -832,14 +835,15 @@ def test_analyse_laufzeit_skaliert_linear(monkeypatch):
                          f"IBAN DE89 3704 0044 {i:04d} 0130 00 Betrag {i},00 EUR" for i in range(n))
     aktive = {"iban", "telefon", "vertrag"}
     analysiere_text(text(50), aktive, [], [])                         # Aufwärmen
-    t0 = time.perf_counter()
-    klein = analysiere_text(text(500), aktive, [], [])
-    t1 = time.perf_counter()
-    gross = analysiere_text(text(2000), aktive, [], [])
-    t2 = time.perf_counter()
+    text_klein, text_gross = text(500), text(2000)
+    gemessen = zeitmessung.cpu_sekunden_abwechselnd({"klein": lambda: analysiere_text(text_klein, aktive, [], []),
+                                                     "gross": lambda: analysiere_text(text_gross, aktive, [], [])})
+    (klein, zeit_klein), (gross, zeit_gross) = gemessen["klein"], gemessen["gross"]
+    print(f"analysiere_text CPU: 500 Zeilen {zeit_klein:.3f} s, 2000 Zeilen {zeit_gross:.3f} s, "
+          f"Verhältnis {zeit_gross / max(zeit_klein, 0.05):.1f}")
     assert len(gross) == 4 * len(klein) == 6000
-    assert (t2 - t1) < 7 * max(t1 - t0, 0.05), (t1 - t0, t2 - t1)
-    assert t2 - t1 < 30
+    assert zeit_gross < 7 * max(zeit_klein, 0.05), (zeit_klein, zeit_gross)
+    assert zeit_gross < 30
 
 
 # ----------------------------------------------------------------------

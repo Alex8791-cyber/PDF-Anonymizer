@@ -1618,9 +1618,14 @@ TINTE_SOCKEL = 0.004            # Linien, Logo, Stempel, Unterschrift einer sons
 
 
 def tintenanteil(seite) -> float:
-    """Anteil dunkler Pixel (grob gerendert): eine leere Scan-Rückseite hat fast keine, eine unlesbare Seite viele."""
+    """Anteil dunkler Pixel (grob gerendert): eine leere Scan-Rückseite hat fast keine, eine unlesbare Seite viele.
+    Gerendert wird ohne Strukturbaum (nur für diesen Aufruf ausgeblendet): an einem Zyklus darin hängt MuPDF 1.28
+    beim Rendern über zehn Minuten – hier im Dokument der Analyse bzw. der Schwärzung."""
+    from contextlib import nullcontext
+    ausgeblendet = getattr(_ocr, "strukturbaum_ausgeblendet", None)
     try:
-        daten = seite.get_pixmap(dpi=50, colorspace=fitz.csGRAY, alpha=False).samples
+        with ausgeblendet(seite.parent) if ausgeblendet is not None else nullcontext():
+            daten = seite.get_pixmap(dpi=50, colorspace=fitz.csGRAY, alpha=False).samples
     except Exception:
         return 1.0
     return (len(daten) - len(bytes(daten).translate(None, bytes(range(180))))) / max(1, len(daten))
