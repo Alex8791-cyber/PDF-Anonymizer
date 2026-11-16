@@ -399,6 +399,82 @@ def test_hoch_abgewaehltes_lichtbild_braucht_freigabe(tmp_path):
     assert not _ohne_platzhalter_gleichmaessig(s["ausgabe"], foto)
 
 
+ANSCHREIBEN = ["Erika Musterfrau · Lindenallee 7 · 50667 Köln", "", "Muster-Makler GmbH", "Marktplatz 1", "50667 Köln", "",
+               "Köln, 03.03.2025", "", "Sehr geehrte Damen und Herren,",
+               "wie telefonisch besprochen sende ich Ihnen die gewünschte Kopie für meinen",
+               "Antrag auf die neue Kfz-Versicherung. Bitte melden Sie sich bei Rückfragen.",
+               "Mit freundlichen Grüßen", "Erika Musterfrau"]
+
+
+def _karte_auf_scan(pfad, rng, art="personalausweis", grad=0, text=None, oben=330.0):
+    """Scan-Seite mit (optional) Anschreiben oben und einer Ausweiskarte darunter, die Karte um grad gedreht auf dem
+    Scanner. Rückgabe: Lichtbild-Rechteck auf der Seite (pt)."""
+    karte, licht = fv.karte_rendern(rng, art, "vorn", dpi=300)
+    k = (grad // 90) % 4
+    gedreht = np.ascontiguousarray(np.rot90(karte, k=k))
+    h, w = gedreht.shape[:2]
+    f = 72 / 300
+    rect = fitz.Rect(150, oben, 150 + w * f, oben + h * f)
+    # Lichtbild im gedrehten Bild (np.rot90 dreht gegen den Uhrzeigersinn)
+    x0, y0, x1, y1 = licht
+    kh, kw = karte.shape[:2]
+    for _ in range(k):
+        x0, y0, x1, y1 = y0, kw - x1, y1, kw - x0
+        kh, kw = kw, kh
+    seite, _ = fv.seite_komponieren(rng, [(gedreht, rect)], dpi=200, text=text)
+    seite = fv.scan_effekte(rng, seite, rauschen=5.0, unschaerfe=0.5)
+    fv.scan_pdf(pfad, [seite], qualitaet=60)
+    return fitz.Rect(rect.x0 + x0 * f, rect.y0 + y0 * f, rect.x0 + x1 * f, rect.y0 + y1 * f)
+
+
+@pytest.mark.parametrize("art", ["personalausweis", "fuehrerschein", "aufenthaltstitel"])
+def test_hoch_anschreiben_ueber_ausweiskarte_lichtbild_abgedeckt(tmp_path, art):
+    """Befund 2a der Runde 3a: ein gut lesbares Anschreiben ohne Ausweiswort (mehr als 40 OCR-Wörter) über einer
+    Ausweiskarte, deren kleine Schrift die OCR nicht liest – „hoch“ suchte dort gar nicht nach dem Foto, das Gesicht
+    ging als „fertig“ hinaus. Jetzt wird jede Scan-Seite durchsucht; das Foto auf der Karte ist ein Lichtbild."""
+    rng = np.random.default_rng(zlib.crc32(art.encode()))
+    pdf = tmp_path / f"{art}.pdf"
+    foto = _karte_auf_scan(pdf, rng, art, text=ANSCHREIBEN)
+    ocr = Attrappe({0: zeilenwoerter([z for z in ANSCHREIBEN if z], x0=60, y0=60, abstand=15.5)})
+    e, s = _analyse_und_schwaerzung(pdf, ocr)
+    assert e["modell"].seiten[0].ocr_woerter >= 40 and fotos.ausweis_kontext(e["modell"].text) == fotos.KONTEXT_KEINER
+    (licht,) = [f for f in e["funde"] if f["kategorie"] == fotos.KAT_LICHTBILD]
+    assert abdeckung(foto, [st["bereich"] for st in licht["stellen"]]) >= 0.85
+    assert s["lichtbilder_abgedeckt"] == 1 and _ohne_platzhalter_gleichmaessig(s["ausgabe"], foto)
+    assert not any("Lichtbild" in g or "Ausweiskopie" in g for g in s["pruefen_gruende"])
+    assert _pixel(pdf, foto + (3, 3, -3, -3)).std() > 20             # Kontrolle: im Original ist dort ein Gesicht
+
+
+@pytest.mark.parametrize("grad", [90, 270])
+def test_hoch_quer_aufgelegte_ausweiskarte_lichtbild_abgedeckt(tmp_path, grad):
+    """Befund 2b: Karte quer auf dem Scanner, kein lesbarer Text – das Lichtbild ist dann querformatig und wurde ohne
+    Ausweis-Kontext nicht als Lichtbild gewertet (nur Hochformat). Jetzt zählt das Foto auf der Karte in jeder Lage."""
+    rng = np.random.default_rng(40 + grad)
+    pdf = tmp_path / f"karte_{grad}.pdf"
+    foto = _karte_auf_scan(pdf, rng, grad=grad, oben=150.0)
+    ocr = Attrappe({0: zeilenwoerter(["Kontakt: erika.musterfrau@example.org"], x0=60, y0=760)})
+    e, s = _analyse_und_schwaerzung(pdf, ocr)
+    (licht,) = [f for f in e["funde"] if f["kategorie"] == fotos.KAT_LICHTBILD]
+    assert abdeckung(foto, [st["bereich"] for st in licht["stellen"]]) >= 0.85
+    assert _ohne_platzhalter_gleichmaessig(s["ausgabe"], foto)
+
+
+def test_lichtbild_auf_karte_unabhaengig_von_lage_und_seitenverhaeltnis():
+    """Ohne Text: ein Foto auf einer ausweisgroßen Karte ist ein Lichtbild – auch wenn die Erkennung es mit
+    Höhe/Breite 1,07 (statt Passbildformat) oder querformatig trifft; ein Foto auf weißem Papier nicht, ebenso wenig
+    ein Foto, das seinen hellen Rahmen fast füllt (gerahmtes Foto), oder eine Fläche, die für eine Karte zu groß ist."""
+    karte = fitz.Rect(100, 100, 100 + 85.6 * MM, 100 + 54 * MM)
+    fast_quadratisch = fitz.Rect(105, 115, 105 + 28 * MM, 115 + 30 * MM)
+    quer = fitz.Rect(105, 115, 105 + 40 * MM, 115 + 30 * MM)
+    for rect in (fast_quadratisch, quer):
+        assert fotos.ist_lichtbild(fotos.Fotobereich(rect, karte, False), fotos.KONTEXT_KEINER)
+    assert not fotos.ist_lichtbild(fotos.Fotobereich(quer, None, False), fotos.KONTEXT_KEINER)
+    rahmen = fitz.Rect(100, 100, 100 + 80 * MM, 100 + 54 * MM)
+    assert not fotos.ist_lichtbild(fotos.Fotobereich(rahmen + (4, 4, -4, -4), rahmen, False), fotos.KONTEXT_KEINER)
+    gross = fitz.Rect(0, 0, 250 * MM, 160 * MM)
+    assert not fotos.ist_lichtbild(fotos.Fotobereich(quer, gross, False), fotos.KONTEXT_KEINER)
+
+
 def test_ausweiskopie_ohne_gefundenes_lichtbild_braucht_freigabe(tmp_path):
     """Ausweistext auf dem Bild (hier: maschinenlesbare Zone der Rückseite), aber kein Lichtbild erkannt: das Gesicht
     kann trotzdem da sein – Warnung in der Analyse, Freigabe in der Vorschau nötig."""

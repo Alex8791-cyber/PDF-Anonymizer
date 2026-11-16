@@ -548,9 +548,11 @@ QUELLE = "fotos"
 # winzig dargestelltes Bild lässt sich in voller Auflösung aus der PDF ziehen.
 BILD_WINZIG_PIXEL = 24 * 24
 BILD_WINZIG_KANTE = 6
-WENIG_WOERTER = 40            # Scan-Seite mit weniger OCR-Wörtern: Ausweisbild auch ohne lesbaren Ausweistext suchen
 MM_PT = 72 / 25.4             # pt je mm
 KARTE_SEITENVERHAELTNIS = (1.30, 1.80)   # ID-1 (Personalausweis, Führerschein) 1,59; ID-3 (Pass) 1,42
+KARTE_LANGE_KANTE_MM = (40.0, 180.0)     # ID-1 85,6 mm, ID-3 125 mm – verkleinert (0,5) bis vergrößert (1,4) kopiert
+KARTE_FOTO_MAX_ANTEIL = 0.6   # ein Lichtbild nimmt rund ein Viertel der Karte ein (mit Rand ein Drittel); ein Foto,
+                              # das seinen hellen Rahmen fast füllt, ist ein gerahmtes Foto
 PASSBILD_MAX_MM = (50.0, 65.0)  # Passbild 35 x 45 mm – mit Sicherheitsrand und etwas vergrößert kopiert
 # Ein Bild ist „die Seite selbst“ (Scan, Foto als PDF), wenn es mindestens die Hälfte der Seite bedeckt – oder auf einer
 # Scan-Seite als Streifen fast die ganze Breite bzw. Höhe einnimmt (Streifen-Scans). Dort werden in „maximal“ die
@@ -683,11 +685,27 @@ def passbildgross(bereich: Fotobereich) -> bool:
     return kurz <= PASSBILD_MAX_MM[0] and lang <= PASSBILD_MAX_MM[1]
 
 
+def auf_karte(bereich: Fotobereich) -> bool:
+    """Liegt das Foto auf einer ausweisartigen Karte (Befund 2 der Runde 3a)? Die Karte (heller, gleichmäßiger Grund) hat
+    das Seitenverhältnis einer ID-1- bzw. ID-3-Karte und eine plausible Größe (auch verkleinert oder vergrößert
+    kopiert), das Foto nimmt höchstens KARTE_FOTO_MAX_ANTEIL davon ein. Die Lage des Fotos zählt nicht: auf einer quer
+    aufgelegten Karte ist das Lichtbild querformatig, und die Erkennung trifft nicht immer das Passbildformat
+    (Höhe/Breite 1,07)."""
+    if not _kartenartig(bereich.karte):
+        return False
+    karte = fitz.Rect(bereich.karte)
+    lang = max(karte.width, karte.height) / MM_PT
+    if not KARTE_LANGE_KANTE_MM[0] <= lang <= KARTE_LANGE_KANTE_MM[1]:
+        return False
+    return abs(fitz.Rect(bereich.rect) & karte) <= KARTE_FOTO_MAX_ANTEIL * abs(karte)
+
+
 def ist_lichtbild(bereich: Fotobereich, kontext: int) -> bool:
     """Ist ein Fotobereich ein Lichtbild? Mit starkem Ausweis-Kontext (Ausweistext auf dem Bild) jedes Foto der Seite;
-    mit schwachem ein Foto in Passbildgröße oder auf einer kartenartigen Fläche – nicht jedes Hochformat-Foto, nicht ein
-    Schadenfoto, nur weil irgendwo „Führerschein“ steht; ohne Text nur ein Passbild auf einer ausweisgroßen Karte."""
-    if kontext >= KONTEXT_STARK:
+    sonst jedes Foto auf einer ausweisartigen Karte – gleich in welcher Lage, auch ohne lesbaren Text (Befund 2) –;
+    mit schwachem Kontext zusätzlich ein Foto in Passbildgröße oder auf einer kartenartigen Fläche – nicht jedes
+    Hochformat-Foto, nicht ein Schadenfoto, nur weil irgendwo „Führerschein“ steht (Befund 4)."""
+    if kontext >= KONTEXT_STARK or auf_karte(bereich):
         return True
     if kontext == KONTEXT_SCHWACH:
         return passbildgross(bereich) or _kartenartig(bereich.karte)
@@ -747,9 +765,9 @@ def seite_pruefen(seite, m, profil: str = "hoch", woerter=None) -> dict:
     seitenbilder = [b[0] for b in bilder if ist_seitenbild(b[0])]
     if modus in ("seite", "bilder") or seitenbilder:
         bereiche = []
-        # gesucht wird mit Ausweis-Kontext, in „maximal“ und auf Bildern mit wenig lesbarem Text (eine Ausweiskarte,
-        # deren Schrift die OCR nicht liest) – nicht auf jedem gut lesbaren Scan
-        if verfuegbar() and (maximal or kontext or int(getattr(m, "ocr_woerter", 0) or 0) < WENIG_WOERTER):
+        # gesucht wird auf JEDER Scan- und Bildseite (Befund 2 der Runde 3a): ein gut lesbares Anschreiben über einer
+        # Ausweiskarte, deren kleine Schrift die OCR nicht liest, ist der häufigste Fall einer Ausweiskopie
+        if verfuegbar():
             if modus == "seite":
                 bereiche = fotobereiche(seite, woerter=woerter)
             else:
