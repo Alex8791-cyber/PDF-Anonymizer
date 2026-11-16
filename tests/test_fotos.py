@@ -712,6 +712,50 @@ def test_maximal_musterbild_bleibt_auf_seite_mit_abwahl(tmp_path):
     assert not _ohne_platzhalter_gleichmaessig(s["ausgabe"], rects["xobject"])
 
 
+@pytest.mark.parametrize("hoehe_anteil", [0.40, 0.25])
+def test_maximal_hintergrundbild_hinter_text_text_bleibt(tmp_path, hoehe_anteil):
+    """Befund 5 der Runde 3a: ein blasses Hintergrundbild (Wasserzeichen, Formularhintergrund) unter dem Brieftext –
+    „maximal“ entfernt das Bild, der Text darüber bleibt (vorher wurde der Bildbereich wie ein Rahmen geschwärzt und
+    der halbe Brief verschwand). Ein Bild ohne Text darüber wird weiter mit [BILD] abgedeckt."""
+    doc = fitz.open()
+    s = doc.new_page(width=595, height=842)
+    h = int(842 * hoehe_anteil)
+    bild = np.full((h, 595, 3), 245, np.uint8)
+    yy, xx = np.mgrid[:h, :595]
+    bild[((yy - h / 2) ** 2 + (xx - 297) ** 2) < (min(h, 595) * 0.4) ** 2] = (225, 232, 240)
+    r = fitz.Rect(0, 250, 595, 250 + h)
+    s.insert_image(r, stream=fv.png(bild), keep_proportion=False)
+    rng = np.random.default_rng(39)
+    r_foto = fitz.Rect(400, 700, 400 + 40 * MM, 700 + 30 * MM)
+    s.insert_image(r_foto, stream=fv.jpeg(fv.objektfoto(rng, 320, 240), 80), keep_proportion=False)
+    y = 70.0
+    for z in fv.BRIEFTEXT:
+        if z:
+            s.insert_text((60, y), z, fontsize=10.5, fontname="helv")
+        y += 15.5
+    pdf = tmp_path / "wasserzeichen.pdf"
+    doc.save(pdf)
+    doc.close()
+    with fitz.open(pdf) as d:
+        woerter_vorher = [w[4] for w in d[0].get_text("words")]
+        ueber_bild = [w[4] for w in d[0].get_text("words") if r.contains(fitz.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2))]
+    assert len(ueber_bild) >= 10                          # Kontrolle des Aufbaus: Text liegt über dem Bild
+    e, s = _analyse_und_schwaerzung(pdf, Attrappe(), profil="maximal")
+    (bildfund,) = [f for f in e["funde"] if f["kategorie"] == fotos.KAT_BILD]
+    assert len(bildfund["stellen"]) == 2 and s["bilder_abgedeckt"] == 2
+    ersetzt = {f["text"]: f["ersatz"] for f in e["funde"] if f.get("text")}
+    with fitz.open(s["ausgabe"]) as aus:
+        woerter = [w[4] for w in aus[0].get_text("words")]
+        # jedes Wort über dem Bild ist noch da – oder durch seinen Platzhalter ersetzt (Telefon, E-Mail, Name)
+        fehlend = [w for w in ueber_bild if w not in woerter and not any(w in t or t in w for t in ersetzt)]
+        assert fehlend == [], fehlend
+        assert len(woerter) >= len(woerter_vorher) - 3 * len(ersetzt)
+        assert not [i for i in aus[0].get_image_info() if not fotos.bild_winzig(i["width"], i["height"])]
+        assert "[BILD]" in aus[0].get_text("text", clip=r_foto)            # das Foto ohne Text: wie bisher
+    hinweise = [m["text"] for m in s["meldungen"] if m["code"] == "BILDER_ABGEDECKT"]
+    assert any("hinter Text" in t for t in hinweise), hinweise
+
+
 def test_maximal_ohne_bilder_keine_bildfunde(tmp_path):
     doc = fitz.open()
     fv.textseite(doc)

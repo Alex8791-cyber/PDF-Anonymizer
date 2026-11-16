@@ -526,8 +526,10 @@ def fotobereiche(seite, clip=None, woerter=None, dpi: float | None = None, proto
 # ======================================================================
 # Ein Bildfund ist ein Fund wie jeder andere (Fundliste, Vorschau, an/aus je Stelle), nur dass seine Stellen keine
 # Textstellen sind, sondern Rechtecke: {"seite", "start": 0, "ende": 0, "an", "text": "", "bereich": [x0, y0, x1, y1]}
-# (start = ende = 0: Text-Werkzeuge sehen eine leere Stelle). Die Schwärzung deckt angehakte Bereiche ab wie einen in
-# der Vorschau gezogenen Rahmen (Text UND Bildpixel, Platzhalter darin).
+# (start = ende = 0: Text-Werkzeuge sehen eine leere Stelle). Die Schwärzung deckt ein angehaktes Lichtbild ab wie einen
+# in der Vorschau gezogenen Rahmen (Text UND Bildpixel, Platzhalter darin) – ebenso Bilder und Fotos („maximal“) auf
+# Scans. Auf Textseiten verlieren Bilder und Fotos nur ihre Bildpixel: Text darüber bleibt (Hintergrund, Wasserzeichen),
+# gefüllt und beschriftet wird nur ein Bereich ohne Text (Befund 5 der Runde 3a).
 KAT_LICHTBILD = "lichtbild"   # Foto mit Ausweis-Kontext (Personalausweis, Pass, Führerschein …)
 KAT_FOTO = "foto"             # sonstiger Fotobereich einer Scan-Seite (nur „maximal“)
 KAT_BILD = "bild"             # eingebettetes Rasterbild einer Textseite (nur „maximal“)
@@ -804,7 +806,8 @@ def dokument_pruefen(doc, dok, profil: str = "hoch", ocr_cache=None) -> dict:
     if anzahl[KAT_BILD] or anzahl[KAT_FOTO]:
         meldungen.append(("hinweis", "BILDER_ABGEDECKT",
                           f"Schutzstufe „Maximal“: {anzahl[KAT_BILD]} Bild(er) und {anzahl[KAT_FOTO]} Fotobereich(e) "
-                          f"werden abgedeckt (in der Fundliste bzw. Vorschau abwählbar).", None))
+                          f"werden abgedeckt (in der Fundliste bzw. Vorschau abwählbar). Text über einem Bild bleibt "
+                          f"lesbar.", None))
     for nr, b in sorted(befunde.items()):
         if b.get("seitenbild_bleibt"):
             meldungen.append(("hinweis", "BILDER_ABGEDECKT",
@@ -821,8 +824,24 @@ def ist_bildfund(fund: dict) -> bool:
     return fund.get("kategorie") in BILD_KATEGORIEN and any("bereich" in st for st in fund.get("stellen") or ())
 
 
+class Bildbereich(tuple):
+    """(Rechteck, Platzhalter) eines Bildfunds – die Schwärzung verarbeitet ihn wie einen manuellen Bereich (zwei Werte
+    entpacken). nur_bild: auf einer Textseite nur die Bildpixel entfernen, Text und Linien darüber bleiben (Bilder und
+    Fotos in „maximal“, Befund 5 der Runde 3a); ein Lichtbild wird immer ganz abgedeckt."""
+
+    def __new__(cls, rect, ersatz, kategorie=KAT_BILD):
+        obj = super().__new__(cls, (rect, ersatz))
+        obj.kategorie = kategorie
+        obj.nur_bild = kategorie in (KAT_BILD, KAT_FOTO)
+        return obj
+
+    def __reduce__(self):
+        return (Bildbereich, (self[0], self[1], self.kategorie))
+
+
 def bildfunde_trennen(funde: list) -> tuple:
-    """(Textfunde, Auftrag): Bildfunde werden zu Bereichen {Seite: [(Rect, Platzhalter)]} (nur angehakte Stellen);
+    """(Textfunde, Auftrag): Bildfunde werden zu Bereichen {Seite: [Bildbereich(Rect, Platzhalter)]} (nur angehakte
+    Stellen);
     der Auftrag merkt sich je Art die abgedeckten und die abgewählten Bereiche, die Bilder (xrefs) abgewählter
     Bildbereiche und die Seiten mit abgewählten Bild- oder Fotobereichen – beides lässt auch die Nachkontrolle in
     „maximal“ stehen."""
@@ -843,13 +862,26 @@ def bildfunde_trennen(funde: list) -> tuple:
             if r.is_empty:
                 continue
             if st.get("an", True):
-                auftrag["bereiche"].setdefault(nr, []).append((r, ersatz))
+                auftrag["bereiche"].setdefault(nr, []).append(Bildbereich(r, ersatz, kategorie))
                 auftrag["abgedeckt"][kategorie].append((nr, r))
             else:
                 auftrag["abgewaehlt"][kategorie].append((nr, r))
                 auftrag["behalten_xrefs"].update(int(x) for x in st.get("bildxrefs") or ())
                 auftrag["abgewaehlt_seiten"].add(nr)
     return text, auftrag
+
+
+def text_ueber_bereich(rect, woerter) -> bool:
+    """Liegt Text der Textebene über dem Bereich – mindestens ein Wort mit seiner Mitte darin? Dann ist das Bild dort
+    ein Hintergrund (Wasserzeichen, Formular- oder Briefhintergrund): es verschwindet, der Bereich wird aber nicht
+    gefüllt. woerter: get_text("words") der Seite."""
+    r = fitz.Rect(rect) + (1, 1, -1, -1)
+    if r.is_empty:
+        return False
+    for w in woerter or ():
+        if len(w) >= 5 and str(w[4]).strip() and r.contains(fitz.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2)):
+            return True
+    return False
 
 
 def freigabe_gruende(auftrag: dict, dok) -> list:

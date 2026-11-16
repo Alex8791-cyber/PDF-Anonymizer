@@ -13,6 +13,8 @@ Stempelmasken). Die Schwärzung selbst bleibt erhalten: kodiert wird das bereits
         xrefs: Menge von xrefs oder dict aus geaenderte_bilder (dann zählt der Filter des Originals);
         Rückgabe: Anzahl neu kodierter Bilder.
     nach_schwaerzung(doc, seite, vorher, qualitaet=85) -> int   (geaenderte_bilder + bilder_neu_kodieren)
+    nur_bildpixel_schwaerzen(doc, seite, rechtecke) -> int
+        Bildpixel in den Rechtecken entfernen, ohne Text und Linien darüber anzutasten („Maximal“: Hintergrundbild).
     seite_als_bild_schwaerzen(doc, seite, fuellen, leeren=(), farbe=…, dpi=200) -> xref
         Rückfall, wenn apply_redactions an einer Seite scheitert (Befund R-08): Seite durch ein Bild mit
         eingebrannten Schwärzungen ersetzen.
@@ -253,6 +255,23 @@ def nach_schwaerzung(doc, seite, vorher: dict, qualitaet: int = JPEG_QUALITAET) 
     """Nach apply_redactions einer Seite: geänderte Bilder finden und neu kodieren."""
     geaendert = geaenderte_bilder(seite, vorher)
     return bilder_neu_kodieren(doc, geaendert, qualitaet) if geaendert else 0
+
+
+def nur_bildpixel_schwaerzen(doc, seite, rechtecke, qualitaet: int = JPEG_QUALITAET) -> int:
+    """Bildpixel in den Rechtecken entfernen – OHNE Text und Linien anzutasten (Schutzstufe „Maximal“, Befund 5 der
+    Runde 3a): ein Hintergrundbild, ein Wasserzeichen oder ein Formularhintergrund verschwindet, der Text darüber
+    bleibt. Ein Bild, das ganz in einem Rechteck liegt, entfernt MuPDF vollständig, sonst nur die Pixel darin.
+    Rückgabe: Anzahl neu kodierter Bilder. Ausnahmen (MuPDF scheitert an der Seite) gehen an den Aufrufer."""
+    rechtecke = [fitz.Rect(r) & seite.rect for r in rechtecke]
+    rechtecke = [r for r in rechtecke if not r.is_empty]
+    if not rechtecke:
+        return 0
+    vorher = bildzustand(seite)
+    for r in rechtecke:
+        seite.add_redact_annot(r, fill=False)
+    seite.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS, graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+                           text=fitz.PDF_REDACT_TEXT_NONE)
+    return nach_schwaerzung(doc, seite, vorher, qualitaet)
 
 
 def bild_leeren(doc, xref: int) -> bool:

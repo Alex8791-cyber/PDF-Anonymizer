@@ -1086,6 +1086,7 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
     # 2) Redaktionen und Platzhalter planen (nur ENTHALTENE Rechtecke verwerfen). Treffer werden OHNE Füllung
     #    angewendet; die grauen Kästen zeichnet _platzhalter_kaesten_zeichnen danach an der gemessenen Lage
     #    (MuPDF verschiebt den Rest einer Zeile, Befund M-31).
+    bereiche = _nur_bildbereiche(lauf, nr, seite, m, bereiche)    # „maximal“: Bilder hinter Text ohne den Text
     bereits: list = []
     kaesten: list = []          # graue Kästen der Treffer (werden nach dem Anwenden gezeichnet)
     verschiebbar: list = []     # je Kasten: darf er der verschobenen Zeile folgen (sichtbarer Text, kein Bild)?
@@ -1937,7 +1938,8 @@ def _verdacht_feld(v, name, standard=None):
 # ----------------------------------------------------------------------
 def _bildfunde_trennen(funde: list, bereiche: dict) -> tuple:
     """Bildfunde aus den Funden lösen: ihre angehakten Bereiche werden wie Rahmen aus der Vorschau geschwärzt (Text
-    UND Bildpixel, Platzhalter „[LICHTBILD]“, „[FOTO]“, „[BILD]“). Rückgabe: (Textfunde, Auftrag der Bildfunde)."""
+    UND Bildpixel, Platzhalter „[LICHTBILD]“, „[FOTO]“, „[BILD]“) – auf Textseiten verlieren Bilder und Fotos unter Text
+    nur ihre Bildpixel (_nur_bildbereiche). Rückgabe: (Textfunde, Auftrag der Bildfunde)."""
     try:
         from . import fotos as _fotos
     except ImportError:
@@ -1961,6 +1963,29 @@ def _bilder_gruende(lauf: _Lauf, dok) -> None:
         grund = _Grund(code, seite, text)
         if grund not in lauf.leckrelevant:
             lauf.leckrelevant.append(grund)
+
+
+def _nur_bildbereiche(lauf: _Lauf, nr: int, seite, m, bereiche: list) -> list:
+    """„Maximal“, Textseite (Befund 5 der Runde 3a): Bild- und Fotobereiche (fotos.Bildbereich mit nur_bild) verlieren
+    zuerst nur ihre Bildpixel – Text und Linien darüber bleiben (Hintergrundbild, Wasserzeichen, Formularhintergrund).
+    Liegt kein Text darüber, wird der Bereich danach wie bisher als Rahmen mit Platzhalter gefüllt. Rückgabe: die
+    Bereiche für den Rahmen-Durchgang; scheitert MuPDF, bleiben alle dabei (Rahmen, notfalls Seite als Bild)."""
+    nur_bild = [e for e in bereiche if getattr(e, "nur_bild", False)]
+    if not nur_bild or m.ocr_modus == "seite" or _bilder is None or not hasattr(_bilder, "nur_bildpixel_schwaerzen"):
+        return bereiche
+    try:
+        from . import fotos as _fotos
+        woerter = seite.get_text("words", flags=sm.TEXT_FLAGS)
+        hinter_text = [e for e in nur_bild if _fotos.text_ueber_bereich(e[0], woerter)]
+        if not hinter_text:
+            return bereiche
+        lauf.bilder_neu_kodiert += int(_bilder.nur_bildpixel_schwaerzen(lauf.doc, seite, [e[0] for e in nur_bild])
+                                       or 0)
+    except Exception:
+        return bereiche
+    lauf.treffer += len(hinter_text)
+    lauf.bilder_hinter_text = getattr(lauf, "bilder_hinter_text", 0) + len(hinter_text)
+    return [e for e in bereiche if not any(e is h for h in hinter_text)]
 
 
 def _bilder_nachkontrolle(lauf: _Lauf, dok, ergebnis: dict, profil: str) -> None:
@@ -1994,6 +2019,10 @@ def _bilder_nachkontrolle(lauf: _Lauf, dok, ergebnis: dict, profil: str) -> None
                                             (zahl.get(_fotos.KAT_FOTO, 0), "Fotobereich(e)")) if n]
     if teile:
         lauf.melden("hinweis", "BILDER_ABGEDECKT", "Abgedeckt: " + ", ".join(teile) + ".")
+    hinter_text = getattr(lauf, "bilder_hinter_text", 0)
+    if hinter_text:
+        lauf.melden("hinweis", "BILDER_ABGEDECKT", f"Davon {hinter_text} Bild(er) hinter Text (Hintergrund, Wasserzeichen) "
+                                                   f"entfernt – der Text darüber bleibt lesbar.")
     if geleert:
         lauf.melden("hinweis", "BILDER_ABGEDECKT", f"{geleert} weitere(s) Bild(er) geleert, die als Füllmuster oder in "
                                                    f"Schriftzeichen gezeichnet werden (Schutzstufe „Maximal“).")
