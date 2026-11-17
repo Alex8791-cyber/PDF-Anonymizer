@@ -616,9 +616,11 @@ def test_gui_kennwort_abfragen_entschluesseln_und_nirgends_speichern(app, umgebu
     assert app.ausgaben[a]["pfad"].parent == tmp / "Kunde" / "anonymisiert"
     with fitz.open(app.ausgaben[a]["pfad"]) as doc:
         assert not doc.needs_pass                                   # Ausgabe ohne Kennwort, wie angekündigt
-    # Schließen löscht die entschlüsselten Kopien
+    # Schließen löscht die entschlüsselten Kopien (die Ausgaben sind noch nicht freigegeben: „Trotzdem beenden?“ – Ja)
     kopien = [app._arbeitsdatei(a), app._arbeitsdatei(b)]
+    dialoge.antwort = True
     app.schliessen()
+    assert dialoge.liste[-1][1] == gui.FREIGABE_OFFEN_TITEL
     assert not any(k.exists() for k in kopien)
 
 
@@ -1538,6 +1540,112 @@ def test_schliessen_waehrend_der_fotofrage(app, umgebung, monkeypatch, dialoge):
     assert app.dateien == []
     assert _ereignisse_bis_geschlossen(app.root)
     assert app.beendet and _temp_dateien() == []
+
+
+@gui_test
+def test_schliessen_waehrend_der_fotofrage_mit_offener_freigabe(app, umgebung, monkeypatch, dialoge):
+    """Wie oben, aber eine Ausgabe wartet noch auf die Freigabe (Inventar C-10): Erst wird die Auswahl abgebrochen
+    (nichts umgewandelt), dann kommt die Rückfrage „Freigabe noch offen“. „Nein“ lässt das Fenster offen – dann muss
+    zu sehen sein, dass die Auswahl abgebrochen ist (Befund: die Statuszeile blieb auf „Dateien werden geprüft …“
+    stehen, und Antrag.pdf stand weder in der Liste noch unter „NICHT geprüft“). Zur Auswahl gehört auch eine schon
+    anonymisierte Datei, die nach Rückfrage (M-63) „trotzdem hinzugefügt“ werden sollte: Das darf erst im Protokoll
+    stehen, wenn sie wirklich in der Liste steht."""
+    police = pdf_schreiben(umgebung["tmp"] / "Kunde" / "Police.pdf")
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse({"Police.pdf": [FUND_TEL]}))
+    monkeypatch.setattr(gui, "schwaerze_pdf", fake_schwaerzung([]))
+    analysiere(app, [police])
+    starte_lauf(app, app.schwaerzen)
+    assert app.offene_freigaben() == [police]
+    ordner = umgebung["tmp"] / "Neu"
+    antrag = pdf_schreiben(ordner / "Antrag.pdf")
+    ausweis = schreibe(ordner / "Ausweis.jpg", jpeg_bytes())
+    alt = pdf_schreiben(umgebung["tmp"] / "Alt" / "anonymisiert" / "anonym_03.pdf")
+    fragen = []
+
+    def frage(titel=None, nachricht=None, **kw):
+        fragen.append(titel)
+        if titel == gui.FREIGABE_OFFEN_TITEL:
+            return dialoge.antwort
+        if titel == "Fotos als PDF übernehmen?" and fragen.count(titel) == 1:
+            _schliessen_wie_fenstermanager(app)          # während die erste Fotofrage offen ist …
+        return True                                      # … danach „Ja“ (auch „Bereits anonymisierte Datei“)
+    monkeypatch.setattr(gui.messagebox, "askyesno", frage)
+    dialoge.antwort = False
+    zeilen_vorher = len(app.protokoll_text().splitlines())
+    app._pdfs_hinzufuegen([str(ordner), str(alt)])
+    pumpe(app.root, lambda: gui.FREIGABE_OFFEN_TITEL in fragen, timeout=5)
+    pumpe(app.root, timeout=0.05)
+    assert fragen == ["Bereits anonymisierte Datei", "Fotos als PDF übernehmen?", gui.FREIGABE_OFFEN_TITEL]
+    assert fenster_existiert(app.root) and not app.beendet
+    assert app.dateien == [police] and _temp_dateien() == []
+    # „Nein“: Das Programm bleibt offen; Statuszeile, Hinweiszeile, Protokoll und „NICHT geprüft“ nennen den Abbruch
+    assert app.status_label.cget("text") == ("⚠ Hinzufügen abgebrochen – 3 Datei(en) NICHT in der Liste (siehe "
+                                             "Protokoll). Bitte erneut hinzufügen.")
+    assert app.datei_hinweis.cget("text") == ("Hinzufügen abgebrochen · insgesamt 1 Datei(en). ⚠ 3 Datei(en) der "
+                                              "letzten Auswahl stehen NICHT in der Liste und werden NICHT geprüft – "
+                                              "bitte erneut hinzufügen.")
+    assert app.protokoll_text().splitlines()[zeilen_vorher:] == [
+        "⚠ Hinzufügen abgebrochen: 3 Datei(en) der letzten Auswahl stehen NICHT in der Liste und werden NICHT geprüft "
+        "– Antrag.pdf, anonym_03.pdf, Ausweis.jpg. Bitte erneut hinzufügen."]
+    assert app.nicht_geprueft == {p: "Hinzufügen abgebrochen" for p in (antrag, alt, ausweis)}
+    assert "Antrag.pdf: Hinzufügen abgebrochen" in "\n".join(app._nicht_geprueft_block())   # Abschlussdialoge
+    # erneut hinzufügen (beide Fragen „Ja“): alle stehen in der Liste und gelten nicht mehr als „NICHT geprüft“
+    app._pdfs_hinzufuegen([str(ordner), str(alt)])
+    assert fragen[-2:] == ["Bereits anonymisierte Datei", "Fotos als PDF übernehmen?"]
+    assert app.dateien == [police, antrag, alt, ausweis] and app.nicht_geprueft == {}
+    assert ("„anonym_03.pdf“: bereits Ausgabe(n) des Programms – auf Wunsch trotzdem hinzugefügt."
+            in app.protokoll_text())
+    dialoge.antwort = True
+    app.schliessen()
+    assert fragen[-1] == gui.FREIGABE_OFFEN_TITEL and _ereignisse_bis_geschlossen(app.root)
+    assert app.beendet and _temp_dateien() == []
+
+
+@gui_test
+def test_schliessen_bei_offenem_kennwortdialog_mit_offener_freigabe(app, umgebung, monkeypatch, dialoge):
+    """Schließen bei offenem Kennwortdialog, während eine Ausgabe noch auf die Freigabe wartet; „Freigabe noch offen“
+    → „Nein“. Die Auswahl ist abgebrochen (keine Arbeitskopie bleibt liegen), das Programm bleibt offen. Keine Datei
+    der Auswahl fällt still weg – auch die PDF ohne Kennwort nicht –, und das Protokoll behauptet nicht mehr, die
+    schon entschlüsselte PDF werde geprüft (früher: „mit Kennwort geöffnet – geprüft wird eine Kopie …“)."""
+    police = pdf_schreiben(umgebung["tmp"] / "Kunde" / "Police.pdf")
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse({"Police.pdf": [FUND_TEL]}))
+    monkeypatch.setattr(gui, "schwaerze_pdf", fake_schwaerzung([]))
+    analysiere(app, [police])
+    starte_lauf(app, app.schwaerzen)
+    ordner = umgebung["tmp"] / "Neu"
+    antrag = pdf_schreiben(ordner / "a_Antrag.pdf")
+    abrechnung = geschuetzte_pdf(ordner / "b_Abrechnung.pdf")
+    beitrag = geschuetzte_pdf(ordner / "c_Beitrag.pdf", kennwort="anders")
+    ablauf = []
+
+    def bedienen():
+        if app.kennwort_dialog is None:
+            app.root.after(20, bedienen)
+            return
+        ablauf.append(_dialog_name(app))
+        if len(ablauf) == 1:
+            app.kennwort_dialog.var.set("geheim")                     # b_Abrechnung.pdf wird entschlüsselt …
+            app.kennwort_dialog.ok()
+            app.root.after(20, bedienen)
+        else:
+            _schliessen_wie_fenstermanager(app)                       # … bei c_Beitrag.pdf wird geschlossen
+    app.root.after(50, bedienen)
+    dialoge.antwort = False                                           # „Freigabe noch offen“ → „Nein“
+    zeilen_vorher = len(app.protokoll_text().splitlines())
+    app._pdfs_hinzufuegen([str(ordner)])
+    assert pumpe(app.root, lambda: dialoge.liste and dialoge.liste[-1][1] == gui.FREIGABE_OFFEN_TITEL, timeout=5)
+    pumpe(app.root, timeout=0.05)
+    assert len(ablauf) == 2 and "b_Abrechnung" in ablauf[0] and "c_Beitrag" in ablauf[1]
+    assert fenster_existiert(app.root) and not app.beendet
+    assert app.dateien == [police] and _temp_dateien() == []
+    assert app.nicht_geprueft == {p: "Hinzufügen abgebrochen" for p in (antrag, abrechnung, beitrag)}
+    assert app.protokoll_text().splitlines()[zeilen_vorher:] == [
+        "⚠ Hinzufügen abgebrochen: 3 Datei(en) der letzten Auswahl stehen NICHT in der Liste und werden NICHT geprüft "
+        "– a_Antrag.pdf, b_Abrechnung.pdf, c_Beitrag.pdf. Bitte erneut hinzufügen."]
+    assert app.status_label.cget("text").startswith("⚠ Hinzufügen abgebrochen – 3 Datei(en) NICHT in der Liste")
+    dialoge.antwort = True
+    app.schliessen()
+    assert not fenster_existiert(app.root) and app.beendet and _temp_dateien() == []
 
 
 @gui_test
