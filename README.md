@@ -166,9 +166,11 @@ Weitere Regeln:
   Firmenanschrift – nicht geschwärzt, bitte prüfen“ in der Liste. Die Anschrift einer Person
   im eigenen Briefkopf wird geschwärzt – wirkt der Briefkopf aber wie der einer Firma (z. B. mit
   Webadresse, Bankverbindung oder USt-IdNr., wie oft bei Selbständigen), nur dann, wenn davor
-  ein Name steht, den die Namenslisten des Programms als Vor- oder Nachnamen kennen. Sonst
-  steht auch sie nicht angehakt als „vermutlich Firmenanschrift“ in der Liste: bei
-  Selbständigen also bitte prüfen und anhaken.
+  ein Name steht, den die Namenslisten des Programms als Vor- oder Nachnamen kennen, und auch
+  dann nicht immer (z. B. nicht, wenn eine Zeile wie „Mitglied der Handwerkskammer …“ zwischen
+  Name und Anschrift steht). Sonst steht auch sie nicht angehakt als „vermutlich
+  Firmenanschrift“ in der Liste. Bei Selbständigen deshalb jeden solchen Fund prüfen und
+  anhaken, wenn es ihre Anschrift ist – auch wenn ihr Name davorsteht.
 - **Versteckte Teile** der Datei – Dateieigenschaften, Lesezeichen, Anhänge, Formulardaten,
   Skripte – prüft die Analyse mit denselben Regeln. Die Ausgabe enthält sie nicht mehr.
 - **Scans und Fotos** liest die eingebaute Texterkennung (OCR); schräge Scans werden gerade
@@ -624,7 +626,7 @@ Tesseract** – nur den entpackten Ordner.
 - **Zwei Kontrollen nach dem Schwärzen:** Die Selbstkontrolle sucht die geschwärzten Texte in
   der Ausgabe (bei Scans per erneuter OCR). Die Restrisiko-Prüfung (`restrisiko.py`) liest die
   Ausgabe als unabhängige zweite Linie mit eigenen Regeln – ohne die Erkennungsregeln und ohne
-  das Sprachmodell – und meldet alles, was nach Personendaten aussieht. Eine zentrale
+  das Sprachmodell – und meldet, was nach Personendaten aussieht. Eine zentrale
   Statusregel (`analyse.WARNUNGS_CODES`, `analyse.ist_leckrelevant`) entscheidet für jede
   Meldung, ob die Ausgabe `_PRUEFEN` heißt.
 - **Bilder:** `fotos.py` (Fotobereiche und Lichtbilder), `bilder.py` (Neukodierung,
@@ -672,10 +674,15 @@ Werkzeuge in `werkzeuge/`:
 
 - `pruefe_installation.py` – zeigt für Rückfragen Python, Pakete, Sprachdatei und Log-Pfad.
 - `selbsttest.py` – Selbsttest mit eigenen, echten Dokumenten: analysiert und schwärzt einen
-  Ordner wie die Oberfläche und gibt **nur Zählwerte** aus (keine Namen, Nummern, Datei- oder
-  Ordnernamen). Die Ausgaben liegen in einem temporären Ordner und werden danach gelöscht,
-  außer mit `--behalten <ordner>`. Aufruf (Schutzstufe wahlweise `ausgewogen`, `hoch` oder
-  `maximal`): `python werkzeuge/selbsttest.py <ordner> --profil hoch`.
+  Ordner und gibt **nur Zählwerte** aus (keine Namen, Nummern, Datei- oder Ordnernamen).
+  Geschwärzt wird, was die Fundliste nach der Analyse angehakt hat – aber nicht ganz wie in der
+  Oberfläche: jedes Dokument für sich (ohne Weitergabe im Lauf und ohne Kundenliste, NIE- und
+  IMMER-Liste nur mit `--einstellungen`), ohne „Freigabe vor Weitergabe“ (`_PRUEFEN` zählt nur
+  Ausgaben mit einem Grund), und ganz abgewählte Funde (z. B. „vermutlich Firmenanschrift“)
+  gehen mit an die Schwärzung, sodass die Restrisiko-Prüfung sie nicht meldet. Die Ausgaben
+  liegen in einem temporären Ordner und werden danach gelöscht, außer mit `--behalten <ordner>`.
+  Aufruf (Schutzstufe wahlweise `ausgewogen`, `hoch` oder `maximal`):
+  `python werkzeuge/selbsttest.py <ordner> --profil hoch`.
 - `readme_tabelle.py` – erzeugt die Erkennungstabelle dieser README
   (`python werkzeuge/readme_tabelle.py --schreiben`); Beispiele und Hinweise stehen im
   Werkzeug, `tests/test_auslieferung.py` vergleicht die Tabelle mit seiner Ausgabe.

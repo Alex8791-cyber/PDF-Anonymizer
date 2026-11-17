@@ -1371,6 +1371,9 @@ KUENDIGUNG = ["", "", "Muster Versicherung AG", "Kundenservice", "Postfach 10 11
               "hiermit kündige ich meine Versicherung zum 31.12.2024.", "", "Mit freundlichen Grüßen"]
 KOPF_UNBEKANNT_WEB = ["Tjorven Quaasdorf · Fotografie", "Hauptstraße 12 · 10115 Berlin",
                       "Tel. 030 1234567 · www.quaasdorf-foto.de"]
+# Bekannter Name, darunter eine eigene Zeile mit einem Organisationswort („…kammer“) – dann die Anschrift
+KOPF_KAMMERZEILE = ["Max Mustermann · Malermeister", "Mitglied der Handwerkskammer Berlin",
+                    "Hauptstraße 12 · 10115 Berlin", "www.mustermann-maler.de"]
 
 
 @pytest.mark.parametrize("kopf, geschwaerzt", [
@@ -1380,15 +1383,23 @@ KOPF_UNBEKANNT_WEB = ["Tjorven Quaasdorf · Fotografie", "Hauptstraße 12 · 101
     (["Tjorven Quaasdorf · Fotografie", "Hauptstraße 12 · 10115 Berlin", "Bankverbindung: Sparkasse Berlin"], False),
     (["Tjorven Quaasdorf · Fotografie", "Hauptstraße 12 · 10115 Berlin", "USt-IdNr. DE123456789"], False),
     (["Tjorven Quaasdorf", "Hauptstraße 12", "10115 Berlin"], True),
+    (["Max Mustermann Fotografie", "Hauptstraße 12 · 10115 Berlin", "Tel. 030 1234567 · www.mustermann-foto.de"],
+     False),
+    (KOPF_KAMMERZEILE, False),
 ], ids=["bekannter_name_webadresse", "unbekannter_name_webadresse", "unbekannter_name_bankverbindung",
-        "unbekannter_name_ust_idnr", "ohne_firmenbeleg"])
+        "unbekannter_name_ust_idnr", "ohne_firmenbeleg", "bekannter_name_ohne_trenner",
+        "bekannter_name_kammerzeile_dazwischen"])
 def test_briefkopf_wie_eine_firma_nur_mit_bekanntem_namen_geschwaerzt(tmp_path, kopf, geschwaerzt):
     """Durchsicht der Doku, Befund 1 (README „Firmenanschriften“, CHANGELOG): Die Anschrift im eigenen Briefkopf wird
     geschwärzt – wirkt er aber wie der einer Firma (Webadresse, Bankverbindung, USt-IdNr.), nur mit einem Namen davor,
     den die Wortlisten als Vor- oder Nachnamen kennen („Max“, analyse._person_vorn); sonst steht sie nicht angehakt als
     „vermutlich Firmenanschrift“ in der Liste. Ohne Firmenbeleg geht sie wie jede Kundenanschrift weg, auch mit einem
     unbekannten Namen. Als PDF mit dem Briefkopf oben auf der Seite: erst dort zählen Webadresse, Bankverbindung und
-    USt-IdNr. im selben Block als Firmenbeleg."""
+    USt-IdNr. im selben Block als Firmenbeleg.
+    Nachprüfung: Der bekannte Name ist nötig, reicht aber nicht immer – ohne Trenner hinter dem Namen („Max Mustermann
+    Fotografie“: das erste Segment endet nicht mit dem Namen) oder mit einer Firmenzeile zwischen Name und Anschrift
+    („Mitglied der Handwerkskammer Berlin“: _absender_einer_person bricht dort ab) bleibt die Anschrift auch dann nicht
+    angehakt. Deshalb hängt der Rat „prüfen und anhaken“ in README und CHANGELOG nicht am unbekannten Namen."""
     wissen = analyse._wissen_modul()
     assert analyse._bekannter_name("Max", wissen)
     assert not any(analyse._bekannter_name(w, wissen) for w in ("Tjorven", "Quaasdorf")), "Beispielname ist bekannt"
@@ -1410,7 +1421,8 @@ def test_ganz_abgewaehlter_fund_bleibt_verdacht_abgewaehlte_einzelstelle_nicht(t
     """Durchsicht der Doku, Befund 2 (CHANGELOG „Restrisiko-Prüfung“, analyse._firmenanschriften): Die Oberfläche gibt
     einen ganz abgewählten Text-Fund nicht an die Schwärzung (auftrag.auftrag_funde). Sieht er nach Personendaten aus,
     meldet die Restrisiko-Prüfung ihn deshalb weiter als Verdacht – gewollt: so fällt bei Selbständigen die
-    Privatanschrift auf, die als „vermutlich Firmenanschrift“ nicht angehakt in der Liste steht. Eine abgewählte
+    Privatanschrift auf, die als „vermutlich Firmenanschrift“ nicht angehakt in der Liste steht (meist, nicht unter
+    einer Organisationszeile: test_abgewaehlte_privatanschrift_unter_kammerzeile_ohne_verdacht). Eine abgewählte
     EINZELNE Stelle eines angehakten Funds meldet sie nicht (Entscheidung der Nutzerin)."""
     anschrift = {"Hauptstraße 12", "10115 Berlin"}
     pdf = textseiten(tmp_path / "kuendigung.pdf", KOPF_UNBEKANNT_WEB + KUENDIGUNG)
@@ -1441,6 +1453,29 @@ def test_ganz_abgewaehlter_fund_bleibt_verdacht_abgewaehlte_einzelstelle_nicht(t
         auftrag = auftrag_modul.auftrag_bauen(dict(e, funde=funde), zustaende, einzelstellen)
         s = _schwaerzen_wie_die_oberflaeche(pdf, auftrag, tmp_path / zustand)
         assert any("0171 2345678" in v.text for v in s["verdacht"]) is gemeldet, (zustand, s["verdacht"])
+
+
+def test_abgewaehlte_privatanschrift_unter_kammerzeile_ohne_verdacht(tmp_path):
+    """Durchsicht der Doku, Nachprüfung Befund 2 (CHANGELOG „Restrisiko-Prüfung“, analyse._firmenanschriften): Auf den
+    Verdacht für eine ganz abgewählte Privatanschrift ist kein Verlass. Steht über ihr eine eigene Zeile, die die
+    Restrisiko-Prüfung als Namen einer Organisation liest („Mitglied der Handwerkskammer Berlin“: Organisationswort
+    „…kammer“, restrisiko._org_name), gelten die Zeilen darunter als Block dieser Organisation (org_kontext): Die
+    Anschrift bleibt lesbar und ohne Verdacht, die Ausgabe heißt nur wegen „Freigabe vor Weitergabe“ _PRUEFEN. So steht
+    es im CHANGELOG – meldet die Prüfung die Anschrift hier einmal, CHANGELOG und Docstring mit anpassen. Ohne diese
+    Zeile ist sie ein Verdacht (test_ganz_abgewaehlter_fund_bleibt_verdacht_abgewaehlte_einzelstelle_nicht)."""
+    anschrift = {"Hauptstraße 12", "10115 Berlin"}
+    pdf = textseiten(tmp_path / "kuendigung.pdf", KOPF_KAMMERZEILE + KUENDIGUNG)
+    e = analysiere_pdf(pdf, STANDARD, [], [], profil="hoch")
+    assert anschrift <= {f["text"] for f in e["funde"] if f["hinweis"] == analyse.HINWEIS_FIRMENANSCHRIFT}
+    auftrag, _ = auftrag_modul.standard_auftrag(e, schwaerze_pdf)      # ohne Eingriff der Nutzerin
+    assert anschrift.isdisjoint(f["text"] for f in auftrag["funde"])
+    s = _schwaerzen_wie_die_oberflaeche(pdf, auftrag, tmp_path / "kuendigung")
+    with fitz.open(s["ausgabe"]) as ausgabe:
+        lesbar = ausgabe[0].get_text()
+    assert all(teil in lesbar for teil in anschrift), lesbar
+    assert not [v.text for v in s["verdacht"] if any(teil in v.text for teil in anschrift)], s["verdacht"]
+    status = auftrag_modul.ausgabe_status(s)
+    assert status == "pruefen" and auftrag_modul.nur_freigabe_offen(s, status), s["pruefen_gruende"]
 
 
 def test_kundenanschrift_aus_anderem_dokument_des_laufs(tmp_path):

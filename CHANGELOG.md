@@ -39,8 +39,10 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Anschriften von Firmen, Versicherern und Behörden bleiben dagegen jetzt stehen; unbekannte
   Firmenanschriften erscheinen als abgewählter Fund „vermutlich Firmenanschrift“. Wirkt ein Briefkopf wie der
   einer Firma (z. B. mit Webadresse oder Bankverbindung, wie oft bei Selbständigen), wird die Anschrift darin
-  nur geschwärzt, wenn davor ein Name steht, den das Programm als Vor- oder Nachnamen kennt; sonst steht sie
-  abgewählt als „vermutlich Firmenanschrift“ in der Fundliste – bitte prüfen und anhaken.
+  nur geschwärzt, wenn davor ein Name steht, den das Programm als Vor- oder Nachnamen kennt, und auch dann nicht
+  immer (z. B. nicht mit einer Zeile wie „Mitglied der Handwerkskammer …“ zwischen Name und Anschrift); sonst
+  steht sie abgewählt als „vermutlich Firmenanschrift“ in der Fundliste. Bei Selbständigen jeden solchen Fund
+  prüfen und anhaken, wenn es ihre Anschrift ist – auch wenn ihr Name davorsteht.
 - **Lichtbilder und Freigabe:** Bleibt ein gefundenes Lichtbild sichtbar (abgewählt oder als unsicherer
   Treffer nicht angehakt) oder ist auf einer erkannten Ausweiskopie (Ausweistext wie „PERSONALAUSWEIS“ im Bild
   lesbar) kein Lichtbild abgedeckt, heißt die Ausgabe `_PRUEFEN` – auch bei abgeschalteter
@@ -96,10 +98,12 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   (bei Scans per Texterkennung) und meldet, was noch nach Personendaten aussieht – Nummern, Namen,
   Anschriften, Geburtsdaten, auf Scans ungelesene Tinte in Unterschriftsblöcken sowie Scan-Seiten, die sich
   nicht verlässlich lesen lassen. Jeder Verdacht macht die Ausgabe `_PRUEFEN`. Einzelne abgewählte Stellen
-  eines angehakten Funds meldet sie nicht. Einen ganz abgewählten Fund (z. B. „vermutlich Firmenanschrift“) gibt
-  die Oberfläche dagegen gar nicht an die Schwärzung; sieht er nach Personendaten aus, meldet die Prüfung ihn
-  deshalb weiter als Verdacht – so fällt bei Selbständigen eine lesbare Privatanschrift im Briefkopf noch in der
-  Ausgabe auf. Nach Gesundheitsdaten, Beruf und Arbeitgeber sucht sie nicht.
+  eines angehakten Funds meldet sie nicht. Einen ganz abgewählten Fund im Text (z. B. „vermutlich
+  Firmenanschrift“) gibt die Oberfläche dagegen gar nicht an die Schwärzung; sieht er nach Personendaten aus,
+  meldet die Prüfung ihn deshalb meist weiter als Verdacht. Darauf ist aber kein Verlass: Hält die Prüfung einen
+  Briefkopf für den einer Organisation (z. B. mit einer eigenen Zeile „Mitglied der Handwerkskammer …“ über der
+  Anschrift), bleibt die lesbare Privatanschrift einer Selbständigen ohne Verdacht. Nach Gesundheitsdaten, Beruf
+  und Arbeitgeber sucht sie nicht.
 - **Kundenliste** (Menü „Kundenliste“): Import einer CSV-Datei mit Kundendaten. Gespeichert werden nur nicht
   umkehrbare Prüfwerte, kein Klartext. Passt ein starkes Merkmal (voller Name, Kunden- oder Vertragsnummer,
   IBAN, E-Mail), sucht das Programm alle Angaben dieses Kunden.
