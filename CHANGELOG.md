@@ -124,15 +124,25 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Nutzung …“) und ein Programmsymbol.
 - **`werkzeuge/selbsttest.py`** (Kommandozeile, nur mit Python-Installation): prüft einen Ordner eigener
   Dokumente und gibt nur Zählwerte aus, nie Inhalte.
-- **Erkennung: Kennungen aus dem Makler-Alltag.** eVB-Nummer (elektronische Versicherungsbestätigung, 7 Zeichen
-  hinter „eVB“, „eVB-Nr.“, „VB-Nummer“, „Versicherungsbestätigung …“) und Transferticket der Kfz-Versicherung
-  werden als `[VERTRAGS-NR]` geschwärzt, die Kartenprüfnummer einer Zahlungskarte (CVC/CVV, „Kartenprüfnummer“)
-  als `[KREDITKARTE]` – „Prüfnummer“ oder „Sicherheitscode“ allein nur neben einer Kartenangabe, nie die Prüfnummer
-  einer TÜV-Plakette, Zulassung oder eines Gutachtens. Der Geburtsname hinter „geb.“, „geborene“ oder
-  „Geburtsname“ bekommt den Platzhalter seiner Person („[PERSON A] geb. [PERSON A]“; trägt ihn auch eine andere
-  Person, `[FAMILIE A]`); Datum und Ort hinter „geb.“, „Gebr.“ und „Geb.“ für Gebäude oder Gebühr bleiben wie
-  bisher. Erkannt in derselben Zeile, in der nächsten Zeile, in der Tabellenzelle bzw. -spalte und auf Scans; die
-  Restrisiko-Prüfung meldet einen lesbar gebliebenen Wert hinter diesen Etiketten (Ausgabe `_PRUEFEN`).
+- **Erkennung: Kennungen aus dem Makler-Alltag.** eVB-Nummer (elektronische Versicherungsbestätigung, 7 Zeichen hinter
+  „eVB“, „eVB-Nr.“, „VB-Nummer“, „Versicherungsbestätigung …“) und Transferticket der Kfz-Versicherung werden als
+  `[VERTRAGS-NR]` geschwärzt, die Kartenprüfnummer einer Zahlungskarte (CVC/CVV, „CVC-Code“, „Kartenprüfnummer“) als
+  `[KREDITKARTE]` – „Prüfnummer“ oder „Sicherheitscode“ allein nur neben einer Kartenangabe; die Prüfnummer einer
+  TÜV-Plakette, Zulassung oder eines Gutachtens wird nie zur Kartenprüfnummer. Auch mit Zwischenwörtern („Ihre
+  eVB-Nummer für die Zulassung lautet: …“, „eVB-Nummer vom 12.03.2025: …“, „Die eVB-Nummer, die Sie für die Zulassung
+  brauchen, lautet …“, „Sicherheitscode auf der Kartenrückseite: …“) und auf Scans, wenn die Texterkennung Zeichen
+  einfügt („K7/H3MY9P“) oder das Etikett verliest („eV8-Nummer“). Ein Wort in Versalien hinter dem Etikett ist keine
+  Kennung („eVB: ERTEILT“, „Transferticket: ANGEFORDERT“, „Versicherungsbestätigung ALLIANZ“), eine Zahl der
+  Folgezeile im Fließtext keine Kartenprüfnummer („… die CVC“ ⏎ „1500 EUR …“). Eine Kartenprüfnummer wird nur hinter
+  ihrem Etikett geschwärzt, nie dieselben drei oder vier Ziffern an anderer Stelle oder in anderen Dokumenten des
+  Laufs (Beträge, Seitenzahlen). Der Geburtsname hinter „geb.“, „geborene“ oder „Geburtsname“ bekommt den Platzhalter
+  seiner Person („[PERSON A] geb. [PERSON A]“, auch „Frau Weber geb. …“, „Weber, Anna geb. …“, mehrteilig „geb. Garcia
+  Lopez“; trägt ihn auch eine andere Person, `[FAMILIE A]`); Datum, Ort, Füllwörter und Feldkürzel hinter „geb.“
+  („geb. Hamburg“, „geb. Ledig“, „Geburtsname: siehe oben“, „GEB.DAT.“), „Gebr.“ und „Geb.“ für Gebäude oder Gebühr
+  bleiben wie bisher. Erkannt in derselben Zeile, in der nächsten Zeile, in der Tabellenzelle bzw. -spalte und auf
+  Scans; die Restrisiko-Prüfung meldet einen lesbar gebliebenen Wert hinter diesen Etiketten (Ausgabe `_PRUEFEN`),
+  auch mit Lesefehlern der Texterkennung („Kartenprufnummer“). Auf Scans ist „geb.“ vor einem geschwärzten
+  Geburtsnamen kein Grund mehr für die Warnung „Schlüsselwort ohne Fund“.
 
 ### Geändert
 - **Prüfziffern sind nur noch ein Indiz:** Eine IBAN mit falscher Prüfziffer wird trotzdem geschwärzt, wenn

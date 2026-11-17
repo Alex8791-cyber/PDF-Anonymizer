@@ -15,6 +15,8 @@ und hält sie danach zwischengespeichert (unveränderliche Tupel, Mengen und Suc
   ganze Wortfolge in der Phrase vorkommt, sonst ``None`` (als Wahrheitswert verwendbar).
 - ``ist_allowlist(phrase)``: True, wenn die Phrase vollständig aus Einträgen der Liste
   ``versicherer_und_organisationen`` besteht (Versicherer, Behörden, Banken, Produkte).
+- ``ist_wortgestalt(wort)``: Wort statt Code ("ERTEILT", nicht "KXHPMTQ") – aus den Listen
+  abgeleitet (Buchstabenpaare); ``ist_grossstadt(wort)``: deutsche Großstadt.
 - ``etiketten(art)``: Feldbezeichner einer Art, nach Länge absteigend (für Alternationen).
 - ``finde(text, liste)``: alle Vorkommen einer Liste im Text – wortgenau, längster
   Treffer zuerst, ohne Überlappung. ``Phrasenindex`` bietet dasselbe für eigene Listen
@@ -526,6 +528,98 @@ def ist_allerweltswort(wort: str) -> bool:
     return any(klein.endswith(endung) and len(wort) - len(endung) >= 5
                and _im_index("allerweltswoerter_gross", wort[:-len(endung)])
                for endung in _ENDUNGEN)
+
+
+# ----------------------------------------------------------------------
+# Wortgestalt: Wort oder Code?
+# ----------------------------------------------------------------------
+# Wortlisten mit gewöhnlichen deutschen Wörtern, aus denen die Häufigkeit der Buchstabenpaare stammt (keine Namen: die
+# sind oft fremdsprachig, keine Diagnosen: Latein)
+_WORTGESTALT_LISTEN = ("allerweltswoerter_gross", "berufe", "etiketten_kennung", "etiketten_person",
+                       "etiketten_adresse", "etiketten_vertragsdaten")
+# mittlere Log-Häufigkeit der Buchstabenpaare, ab der eine Buchstabenfolge die Gestalt eines Worts hat (kalibriert an
+# Zufallscodes aus 7 Buchstaben: etwa 4 % gelten als Wort; an Status-, Monats-, Orts- und Versichererwörtern in
+# Versalien: fast alle)
+WORTGESTALT_SCHWELLE = -0.25
+_WORTGESTALT_UMSCHRIFT = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+
+
+def _nur_buchstaben(wort: str) -> str:
+    """Kleinbuchstaben a-z (Umlaute umschrieben, Diakritika entfernt), alles andere entfällt."""
+    return re.sub(r"[^a-z]", "", normalisieren_umschrift(wort.lower().translate(_WORTGESTALT_UMSCHRIFT)))
+
+
+@functools.lru_cache(maxsize=1)
+def _paar_gewichte() -> tuple[dict, float]:
+    """(Logarithmus der Häufigkeit je Buchstabenpaar gegenüber gleichverteilten Paaren, Wert für ein nie gesehenes
+    Paar) aus den Wörtern der Listen _WORTGESTALT_LISTEN (jedes Wort einmal)."""
+    import math
+    zaehler: dict = {}
+    gesehen = set()
+    for name in _WORTGESTALT_LISTEN:
+        for eintrag in _liste(name):
+            for w in re.findall(r"[^\W\d_]{3,}", eintrag):
+                k = _nur_buchstaben(w)
+                if len(k) < 3 or k in gesehen:
+                    continue
+                gesehen.add(k)
+                for i in range(len(k) - 1):
+                    zaehler[k[i:i + 2]] = zaehler.get(k[i:i + 2], 0) + 1
+    gesamt = sum(zaehler.values()) + 0.5 * 26 * 26
+    gewichte = {p: math.log((n + 0.5) / gesamt * 26 * 26) for p, n in zaehler.items()}
+    return gewichte, math.log(0.5 / gesamt * 26 * 26)
+
+
+def wortgestalt(wort: str) -> float:
+    """Mittlere Log-Häufigkeit der Buchstabenpaare von `wort` in deutschen Wörtern (über 0: häufiger als bei
+    gleichverteilten Buchstaben). Teile aus höchstens drei Buchstaben ("KFZ", "SF") zählen nicht, wenn es längere
+    gibt."""
+    gewichte, unbekannt = _paar_gewichte()
+    teile = [t for t in (_nur_buchstaben(x) for x in re.split(r"[\s\-/.]+", wort)) if len(t) >= 2]
+    lang = [t for t in teile if len(t) >= 4] or teile
+    werte = [gewichte.get(t[i:i + 2], unbekannt) for t in lang for i in range(len(t) - 1)]
+    return sum(werte) / len(werte) if werte else unbekannt
+
+
+def ist_wortgestalt(wort: str) -> bool:
+    """Ist die Buchstabenfolge (ohne Ziffern) ein Wort ("ERTEILT", "ANGEFORDERT", "BERLIN-TEGEL", "ALLIANZ") statt eines
+    Codes ("KXHPMTQ", "QWPZXRT")? Ja für Wörter der Wissensbasis (Allerweltswort, Versicherer oder Organisation, Vor-
+    oder Nachname, Partikel) und für Buchstabenfolgen, deren längere Teile Vokale haben (ab sechs Buchstaben zwei) und
+    deren Buchstabenpaare im Mittel so häufig sind wie in deutschen Wörtern (wortgestalt über WORTGESTALT_SCHWELLE). Für
+    Regeln, die einen Code ohne Ziffer von einem Wort in Versalien unterscheiden (eVB-Nummer, Transferticket)."""
+    teile = [t for t in re.split(r"[\s\-/.]+", wort or "") if t]
+    if not teile or any(c.isdigit() for c in wort):
+        return False
+    lang = [t for t in teile if len(t) >= 4] or teile
+    if all(ist_allerweltswort(t.title()) or ist_allowlist(t) or ist_vorname(t) or ist_nachname(t)
+           or ist_partikel(t) for t in lang):
+        return True
+    if not all(len(re.findall(r"[aeiouyäöü]", t, re.IGNORECASE)) >= (2 if len(t) >= 6 else 1) for t in lang):
+        return False                                  # ohne Vokale ("KXHPMTQ") bzw. mit nur einem in einem langen Teil
+    return wortgestalt(wort) > WORTGESTALT_SCHWELLE
+
+
+# Deutsche Großstädte (über 100 000 Einwohner) als einzelnes Wort: hinter "geb." ohne "in" ist so ein Wort der
+# Geburtsort, kein Geburtsname ("Anna Weber geb. Hamburg") – außer es ist zugleich ein Nachname (Prüfung beim Aufrufer)
+_GROSSSTAEDTE_LISTE = (
+    "Aachen", "Augsburg", "Bergisch Gladbach", "Berlin", "Bielefeld", "Bochum", "Bonn", "Bottrop", "Braunschweig",
+    "Bremen", "Bremerhaven", "Chemnitz", "Cottbus", "Darmstadt", "Dortmund", "Dresden", "Duisburg", "Düsseldorf",
+    "Erfurt", "Erlangen", "Essen", "Frankfurt", "Freiburg", "Fürth", "Gelsenkirchen", "Gera", "Göttingen", "Gütersloh",
+    "Hagen", "Halle", "Hamburg", "Hamm", "Hanau", "Hannover", "Heidelberg", "Heilbronn", "Herne", "Hildesheim",
+    "Ingolstadt", "Jena", "Kaiserslautern", "Karlsruhe", "Kassel", "Kiel", "Koblenz", "Köln", "Krefeld", "Leipzig",
+    "Leverkusen", "Ludwigshafen", "Lübeck", "Magdeburg", "Mainz", "Mannheim", "Moers", "Mönchengladbach", "Mülheim",
+    "München", "Münster", "Neuss", "Nürnberg", "Oberhausen", "Offenbach", "Oldenburg", "Osnabrück", "Paderborn",
+    "Pforzheim", "Potsdam", "Recklinghausen", "Regensburg", "Remscheid", "Reutlingen", "Rostock", "Saarbrücken",
+    "Salzgitter", "Schwerin", "Siegen", "Solingen", "Stuttgart", "Trier", "Ulm", "Wiesbaden", "Witten", "Wolfsburg",
+    "Wuppertal", "Würzburg")
+_GROSSSTAEDTE = frozenset({normalisieren(s) for s in _GROSSSTAEDTE_LISTE}
+                          | {normalisieren_umschrift(s) for s in _GROSSSTAEDTE_LISTE})
+
+
+def ist_grossstadt(wort: str) -> bool:
+    """Deutsche Großstadt (über 100 000 Einwohner, ein Wort oder "Bergisch Gladbach")? Viele sind zugleich Nachnamen
+    (Hagen, Essen): Regeln prüfen ist_nachname zusätzlich."""
+    return normalisieren(wort or "") in _GROSSSTAEDTE or normalisieren_umschrift(wort or "") in _GROSSSTAEDTE
 
 
 # ----------------------------------------------------------------------

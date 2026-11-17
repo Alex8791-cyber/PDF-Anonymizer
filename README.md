@@ -121,7 +121,7 @@ steht unter [Was NICHT erkannt wird](#was-nicht-erkannt-wird).
 | Ausweis-/Pass-/Führerscheinnummern | Ausweisnummer: L01X00T47 | `[AUSWEIS-NR]` | Ausgewogen | mit Etikett; Ausweis- und Passnummern auch ohne Etikett, wenn die Prüfziffer stimmt; auf Ausweiskopien auch die maschinenlesbare Zone |
 | SEPA-Mandatsreferenzen | Mandatsreferenz MR-2024-0815 | `[MANDATSREFERENZ]` | Ausgewogen | nur hinter einem Etikett |
 | BIC (bei IBAN oder Etikett) | COBADEFFXXX | `[BIC]` | Ausgewogen | hinter „BIC“, neben einer IBAN oder in eindeutiger Form (11 Zeichen auf „XXX“ oder mit Ziffer im Ortscode) |
-| Kreditkartennummern | 4111 1111 1111 1111 | `[KREDITKARTE]` | Ausgewogen | auch die Kartenprüfnummer (CVC/CVV) hinter ihrem Etikett; „Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder Gutachten-Prüfnummer) |
+| Kreditkartennummern | 4111 1111 1111 1111 | `[KREDITKARTE]` | Ausgewogen | auch die Kartenprüfnummer (CVC/CVV, „CVC-Code“) hinter ihrem Etikett – nur dort, nicht dieselben Ziffern an anderer Stelle; „Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder Gutachten-Prüfnummer) |
 | Ausländische Anschriften und Kennzeichen | Kerkstraat 12, 1017 GC Amsterdam | `[AUSLAND]` | Hoch |  |
 | Orte ohne PLZ (Ort-Datum-Zeile, Geburtsort) | Musterstadt, 03.04.2025 | `[ORT]` | Hoch | Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“ |
 | Beruf (bei Personen) | Beruf: Elektriker | `[BERUF]` | Hoch | hinter „Beruf:“ oder im Satz („arbeitet als …“) |

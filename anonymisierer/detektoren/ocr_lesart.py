@@ -29,8 +29,10 @@ Reparaturen (nur innerhalb von OCR-Zeilen):
     der Zeile darüber): Doppelpunkt hinter einer PLZ vor dem Ort -> Leerzeichen ("27568: Bremerhaven"),
     kleingeschriebener Ort direkt hinter einer PLZ -> Großbuchstabe ("Wohnort: 97070 würzburg"). Ohne Anschrift
     bleiben Positionen, Beträge und Mengen stehen ("20231: Zahnbehandlung", "15000 jährlich").
-Dazu eine Form, die sich nicht durch Ersetzen darstellen lässt: Kennzeichen hinter dem Etikett mit Rauschen
-zwischen den Teilen ("Kennzeichen: B-]JY 743").
+Dazu Formen, die sich nicht durch Ersetzen darstellen lassen: Kennzeichen hinter dem Etikett mit Rauschen
+zwischen den Teilen ("Kennzeichen: B-]JY 743") und eVB-Nummern mit eingefügten Zeichen ("eVB-Nummer lautet: K7/H3MY9P",
+"/RT4ZU9", "BIJC8D7E" – Tesseract liest die "7" und die "9" mancher Schriften als "7/", "/", "J9", "IJ") oder hinter
+einem verlesenen Etikett ("eV8-Nummer: K7H3M9P"; muster.evb_mit_rauschen).
 
 PLZ + Ort, die erst die Lesart liefert, zählt nur im Anschrift-Kontext ("Z1000 Sport" ist ein Modellname).
 Außerdem verwirft das Modul verlesene Feldbezeichner, die die KI für Namen hält ("Name, Vomame:"), aus den Treffern
@@ -336,6 +338,18 @@ def _kennzeichen_mit_rauschen(text: str, bereiche: list) -> list:
     return aus
 
 
+def _evb_mit_rauschen(text: str, bereiche: list) -> list:
+    """eVB-Nummern hinter ihrem Etikett, die die OCR mit eingefügten Zeichen gelesen hat (muster.evb_mit_rauschen) –
+    nur in OCR-Zeilen; die Stelle deckt das ganze gelesene Wort ("K7/H3MY9P")."""
+    if _muster is None or not hasattr(_muster, "evb_mit_rauschen"):
+        return []
+    aus = []
+    for s, e in bereiche:
+        for a, b in _muster.evb_mit_rauschen(text, s, e):
+            aus.append(Treffer(a, b, "vertrag", "ocr.evb", 0.6))
+    return aus
+
+
 # ----------------------------------------------------------------------
 # Detektor
 # ----------------------------------------------------------------------
@@ -362,6 +376,8 @@ def ocr_lesart(dok, kontext):
     if not bereiche:
         return []
     treffer = _kennzeichen_mit_rauschen(dok.text, bereiche)
+    if "vertrag" in set(kontext.aktive):
+        treffer += _evb_mit_rauschen(dok.text, bereiche)
     neu = lesart(dok)
     if neu is None:
         return treffer

@@ -452,10 +452,15 @@ def test_kennungen_auf_einer_echten_scan_seite(tmp_path):
         e = analysiere_pdf(pdf, ALLE, [], [], ocr=dienst)
     assert e["fehler"] is None and e["ocr_seiten"] == 1
     paare = _paare(e["funde"])
-    assert ("vertrag", "K7H3M9P") in paare and ("vertrag", "TT0815AB4711") in paare, paare
+    # die genaue Lesart der eVB hängt vom Tesseract-Build ab ("K7H3M9P", "K7/H3MY9P", "K7H3MJ9P"): gefunden werden muss
+    # sie in jeder dieser Lesarten (ocr_lesart: eVB mit eingefügten Zeichen)
+    assert any(k == "vertrag" and _aehnlich(t, "K7H3M9P") for k, t in paare), paare
+    assert ("vertrag", "TT0815AB4711") in paare, paare
     ersatz = _ersatz(e["funde"])
     assert ersatz.get("Schulz") == ersatz.get("Anna Weber") is not None, ersatz
     assert ("kreditkarte", "789") in paare, paare
+    # nie eine Kartenprüfnummer; die Wissensbasis führt "TÜV-Prüfnummer" selbst als Kennungs-Etikett, auf Scans schwärzt
+    # die Rohwert-Regel (struktur.ocr_rohwert) den Wert dahinter deshalb weiter vorsichtig als [VERTRAGS-NR]
     assert not any(k == "kreditkarte" and "123" in t for k, t in paare), paare
 
 
@@ -556,3 +561,318 @@ def test_alle_vier_werden_geschwaerzt(tmp_path):
     for wert in werte:
         assert wert not in ausgabe, ausgabe
         assert not any(wert in v.text for v in e["verdacht"]), e["verdacht"]
+
+
+# ======================================================================
+# Gegenprüfung der Runde 4: Befunde des Prüfers (Etikett-Varianten, Wörter statt Kennungen, Weitergabe kurzer
+# Kartenprüfnummern, OCR-Einfügungen auf Scans, Geburtsname)
+# ======================================================================
+def _aehnlich(text: str, wert: str, mindestens: float = 0.75) -> bool:
+    """Gleicht `text` ohne Trennzeichen dem Wert (OCR-Lesart mit eingefügten oder verwechselten Zeichen)?"""
+    from difflib import SequenceMatcher
+    kern = "".join(c for c in text if c.isalnum())
+    return SequenceMatcher(None, kern, wert).ratio() >= mindestens
+
+
+def _scan_pdf(pfad, zeilen, dpi=200):
+    """Gedruckte Zeilen (Helvetica 12 pt) als Bild-Seite: ein echter Scan für Tesseract."""
+    vorlage = fitz.open()
+    s = vorlage.new_page()
+    for i, z in enumerate(zeilen):
+        s.insert_text((60, 90 + 24 * i), z, fontsize=12, fontname="helv")
+    pix = s.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY)
+    doc = fitz.open()
+    p = doc.new_page(width=s.rect.width, height=s.rect.height)
+    p.insert_image(p.rect, stream=pix.tobytes("png"))
+    doc.save(pfad)
+    doc.close()
+    vorlage.close()
+    return Path(pfad)
+
+
+# --- Befund 1: naheliegende Etikett-Varianten – bisher weder Fund noch Verdacht (stilles Leck)
+@pytest.mark.parametrize("text, wert", [
+    ("CVC-Code: 987", "987"),
+    ("CVV-Code: 987", "987"),
+    ("CVC/CVV-Code: 987", "987"),
+    ("CVC-Prüfnummer: 123", "123"),
+    ("CVC Code 123", "123"),
+    ("Mastercard 5555 5555 5555 4444, CVC-Code: 987", "987"),
+    ("Kartensicherheitscode: 456", "456"),
+    ("Kreditkarte: 4111 1111 1111 1111\nSicherheitscode auf der Kartenrückseite: 123", "123"),
+    ("Die Prüfnummer, die Sie auf der Rückseite Ihrer Kreditkarte finden, lautet 123.", "123"),
+])
+def test_cvc_etikett_varianten(text, wert):
+    funde = analysiere_text(text, ALLE, [], [])
+    assert ("kreditkarte", wert) in _paare(funde), _paare(funde)
+    assert _gemeldet(text, wert), _verdacht(text)
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Ihre eVB-Nummer für die Zulassung lautet: K7H3M9P", "K7H3M9P"),
+    ("Die eVB-Nummer für Ihr neues Fahrzeug lautet K7H3M9P.", "K7H3M9P"),
+    ("eVB-Nummer zur Vorlage bei der Zulassungsstelle: K7H3M9P", "K7H3M9P"),
+    ("Ihre eVB-Nr. lautend auf K7H3M9P", "K7H3M9P"),
+    ("Die Versicherungsbestätigung für Ihr Fahrzeug lautet B9C8D7E.", "B9C8D7E"),
+    ("Das Transferticket für den Wechsel lautet TT0815AB4711.", "TT0815AB4711"),
+    ("Ihr Transferticket zur Übertragung des Schadenfreiheitsrabatts: TT0815AB4711", "TT0815AB4711"),
+    ("eVB-Nummer vom 12.03.2025: K7H3M9P", "K7H3M9P"),
+    ("Ihre Versicherungsbestätigung vom 01.02.2024: K7H3M9P", "K7H3M9P"),
+    ("Die eVB-Nummer, die Sie für die Zulassung brauchen, lautet K7H3M9P.", "K7H3M9P"),
+    ("Transferticket vom 01.02.2024: TT0815AB4711", "TT0815AB4711"),
+])
+def test_kennung_hinter_zwischenwoertern(text, wert):
+    """Zwischen Etikett und Wert stehen Wörter, auch ein Datum oder ein Relativsatz mit Kommas, die mit einer
+    Ankündigung enden ("… lautet", "…:")."""
+    funde = analysiere_text(text, ALLE, [], [])
+    assert ("vertrag", wert) in _paare(funde), _paare(funde)
+    assert _gemeldet(text, wert), _verdacht(text)
+
+
+@pytest.mark.parametrize("text", [
+    "eVB-Nummer erhalten Sie unter: 0800 1234567",
+    "Die eVB ist für 7 Tage gültig.",
+    "Die eVB-Nummer ist bei Ihrer Zulassungsstelle hinterlegt. Bitte bringen Sie mit: Ausweis",
+    "Zahlungsart: Kreditkarte\nPrüfnummer der HU: 123",
+    "Zahlungsart: Kreditkarte\nSicherheitscode für Ihr Online-Postfach: 123",
+    "Die eVB, das Transferticket und die Vollmacht: per Post",
+    "Zahlungsart: Kreditkarte\nPrüfnummer, die Sie im Gutachten finden: 4711",
+])
+def test_zwischenwoerter_gegenproben(text):
+    funde = analysiere_text(text, ALLE, [], [])
+    kurz = [t for k, t in _paare(funde) if k in ("vertrag", "kreditkarte") and len(t) <= 12]
+    assert not kurz, _paare(funde)
+    assert not [v for v in pruefe_text(text) if "eVB" in v.grund or "Kartenprüf" in v.grund], _verdacht(text)
+
+
+# --- Befund 2: Wörter in Versalien und Zahlen der Folgezeile sind keine eVB/Transferticket/Kartenprüfnummer
+@pytest.mark.parametrize("text", [
+    "eVB: ERTEILT",
+    "eVB-Nummer: ANFRAGE",
+    "Status eVB: ERFOLGT",
+    "Die eVB ist ERTEILT.",
+    "eVB DEUTSCH",
+    "Versicherungsbestätigung ALLIANZ Versicherungs-AG",
+    "Ihre Versicherungsbestätigung GOTHAER Allgemeine Versicherung AG",
+    "Versicherungsbestätigung\nGOTHAER Allgemeine Versicherung AG",
+    "Wir senden Ihnen die Versicherungsbestätigung\nANLAGEN: Antrag, Vollmacht",
+    "Transferticket: ANGEFORDERT",
+    "Transferticket: VORHANDEN",
+    "Transfer-Ticket: ERHALTEN",
+    "Transferticket BERLIN-TEGEL",
+    "Transferticket: SF-KLASSE",
+    "Für die Zulassung benötigen Sie die eVB.\nWICHTIG: Die Zulassungsstelle prüft die Unterlagen.",
+    "Bitte fordern Sie bei uns die eVB\nACHTUNG: Die Frist beträgt 14 Tage.",
+    "Ihr bisheriger Versicherer erstellt das Transferticket\nBEITRAGSRECHNUNG für das Jahr 2025",
+    "Wir benötigen noch das Transferticket\nKFZ-HAFTPFLICHT und Vollkasko",
+])
+def test_kein_wort_als_kennung(text):
+    funde = analysiere_text(text, ALLE, [], [])
+    assert not [f["text"] for f in funde if f["kategorie"] == "vertrag"], _paare(funde)
+    assert _verdacht(text) == []
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("eVB-Nummer: QWPZXRT", "QWPZXRT"),
+    ("Ihre eVB lautet BXKTMWQ.", "BXKTMWQ"),
+    ("eVB: KXHAPMQ", "KXHAPMQ"),
+])
+def test_evb_ohne_ziffer_bleibt_ein_code(text, wert):
+    """Gegenstück: ein Code ohne Ziffer, der kein Wort ist, bleibt eine eVB (Fund und Verdacht)."""
+    funde = analysiere_text(text, ALLE, [], [])
+    assert ("vertrag", wert) in _paare(funde), _paare(funde)
+    assert _gemeldet(text, wert), _verdacht(text)
+
+
+@pytest.mark.parametrize("text, zahl", [
+    ("Bitte geben Sie im Online-Portal die CVC\n1500 EUR Selbstbeteiligung gelten weiter.", "1500"),
+    ("Die Zahlung erfolgt per Kreditkarte, bitte nennen Sie keine CVC\n2024 wurde der Vertrag umgestellt.", "2024"),
+    ("CVC:\n2024 wurde der Vertrag geschlossen.", "2024"),
+    ("Kartenprüfnummer:\n8001 Zürich", "8001"),
+    ("Kreditkarte: Visa\nPrüfnummer\n2024 erneuert", "2024"),
+])
+def test_keine_zahl_der_folgezeile_als_kartenpruefnummer(text, zahl):
+    funde = analysiere_text(text, ALLE, [], [])
+    assert ("kreditkarte", zahl) not in _paare(funde), _paare(funde)
+    assert not [v for v in pruefe_text(text) if "Kartenprüf" in v.grund], _verdacht(text)
+
+
+@pytest.mark.parametrize("text, zahl", [
+    ("Zahlungsart: Kreditkarte\nPrüfnummer (TÜV): 123", "123"),
+    ("Kreditkarte 4111 1111 1111 1111\nZulassung, Prüfnummer 1234", "1234"),
+])
+def test_pruefnummer_mit_fremdem_bezug(text, zahl):
+    """Das Bezugswort steht in Klammern hinter "Prüfnummer" oder mit Komma davor: keine Kartenprüfnummer."""
+    funde = analysiere_text(text, ALLE, [], [])
+    assert ("kreditkarte", zahl) not in _paare(funde), _paare(funde)
+    assert not [v for v in pruefe_text(text, platzhalter=["[KREDITKARTE]"]) if v.text == zahl], _verdacht(text)
+
+
+def test_status_woerter_unter_kennungs_koepfen(tmp_path):
+    """Tabelle mit eVB-Nummer und Transferticket im Kopf: Statuswörter in den Zellen darunter sind keine Kennung."""
+    pdf = _tabellen_pdf(tmp_path / "status.pdf", ["Kennzeichen", "eVB-Nummer", "Transferticket"],
+                        [["M-AB 123", "ERTEILT", "ANGEFORDERT"], ["M-CD 456", "OFFEN", "VORHANDEN"]])
+    e = analysiere_pdf(pdf, ALLE, [], [])
+    woerter = {"ERTEILT", "ANGEFORDERT", "OFFEN", "VORHANDEN"}
+    assert not [t for _, t in _paare(e["funde"]) if t in woerter], _paare(e["funde"])
+    assert not [v.text for v in restrisiko_pruefen(pdf) if v.text in woerter]
+
+
+# --- Befund 3: eine kurze Kartenprüfnummer wandert nicht auf Beträge, Seitenzahlen und in andere Dokumente
+def test_kartenpruefnummer_nicht_auf_andere_zahlen_weitergegeben():
+    text = "CVC: 250\nBeitrag 1.250,00 EUR\nBetrag 250,00 EUR\nSeite 2 von 250\nTarif 250 Plus"
+    funde = [f for f in analysiere_text(text, ALLE, [], []) if f["kategorie"] == "kreditkarte"]
+    assert len(funde) == 1, funde
+    an = [st for st in funde[0]["stellen"] if st.get("an", True)]
+    assert [(st["start"], st["text"]) for st in an] == [(5, "250")], funde
+    # die übrigen Vorkommen sind als abgewählte Stellen mit Grund bekannt: die Selbstkontrolle meldet sie nicht als Rest
+    ab = [st for st in funde[0]["stellen"] if not st.get("an", True)]
+    assert len(ab) == 4 and all(st.get("grund") for st in ab), ab
+
+
+def test_kartenpruefnummer_im_lauf(tmp_path):
+    """Lauf mit zwei Dokumenten: die Kartenprüfnummer aus A wird weder in A (Selbstbeteiligung) noch in B (Hausrat-
+    Police ohne Karte) auf gleiche Zahlen übertragen, und die Selbstkontrolle meldet sie dort nicht als Rest."""
+    a = _text_pdf(tmp_path / "a.pdf", ["Zahlung per Kreditkarte 4111 1111 1111 1111", "Kartenprüfnummer: 250",
+                                       "Selbstbeteiligung 250 EUR je Schadenfall"])
+    b = _text_pdf(tmp_path / "b.pdf", ["Versicherungsschein Hausrat", "Selbstbeteiligung: 250 EUR",
+                                       "Versicherungssumme 65.000 EUR, Wohnfläche 250 qm"])
+    ea, eb = analysiere_pdf(a, ALLE, [], [], ocr=OcrAttrappe()), analysiere_pdf(b, ALLE, [], [], ocr=OcrAttrappe())
+    analyse.weitergabe_anwenden([ea, eb])
+    assert not [f for f in eb["funde"] if f["kategorie"] == "kreditkarte"], eb["funde"]
+    ra = schwaerze_pdf(a, ea["funde"], modell=ea["modell"], ocr=OcrAttrappe(), ziel_ordner=tmp_path / "aus_a")
+    rb = schwaerze_pdf(b, eb["funde"], modell=eb["modell"], ocr=OcrAttrappe(), ziel_ordner=tmp_path / "aus_b")
+    with fitz.open(ra["ausgabe"]) as d:
+        text_a = d[0].get_text()
+    with fitz.open(rb["ausgabe"]) as d:
+        text_b = d[0].get_text()
+    assert "Selbstbeteiligung 250 EUR" in text_a and "Kartenprüfnummer: 250" not in text_a, text_a
+    assert "250 EUR" in text_b and "250 qm" in text_b, text_b
+    assert ra["reste"] == [] and rb["reste"] == [], (ra["reste"], rb["reste"])
+
+
+# --- Befund 4: eVB auf Scans mit eingefügten Zeichen (Tesseract liest die Helvetica-„7“/„9“ gern als "7/", "/",
+# "J9", "IJ"); Selbstkontrolle mit Umlautverlust
+@pytest.mark.parametrize("zeile, wert", [
+    ("Ihre eVB-Nummer lautet: K7/H3MY9P", "K7/H3MY9P"),
+    ("eVB-Nummer: /RT4ZU9", "/RT4ZU9"),
+    ("Ihre eVB-Nummer lautet: K7H3MJ9P", "K7H3MJ9P"),
+    ("Versicherungsbestätigungsnummer: BIJC8D7E", "BIJC8D7E"),
+    ("eVB: M3NA4P5Q", "M3NA4P5Q"),
+    ("eV8-Nummer: K7H3M9P", "K7H3M9P"),                     # "B" im Etikett als "8" gelesen
+])
+def test_evb_mit_ocr_einfuegung(zeile, wert):
+    funde = analyse._analysiere_dokument(_ocr_dok([zeile]), ALLE, [], [])
+    assert ("vertrag", wert) in _paare(funde), _paare(funde)
+
+
+@pytest.mark.parametrize("zeile", [
+    "eVB gültig bis 12/2025",
+    "eVB-Nummer: siehe Anlage",
+    "Ihre eVB-Nummer lautet: ANFRAGE/OFFEN",
+    "eVB-Nummer: 12/2025",
+])
+def test_evb_ocr_gegenproben(zeile):
+    funde = analyse._analysiere_dokument(_ocr_dok([zeile]), ALLE, [], [])
+    assert not [t for k, t in _paare(funde) if k == "vertrag"], _paare(funde)
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Ihre eVB-Nummer lautet: K7/H3MY9P", "K7/H3MY9P"),
+    ("Ihre eVB-Nummer lautet: /RT4ZU9", "RT4ZU9"),
+    ("Ihre eVB-Nummer lautet: K7H3MJ9P", "K7H3MJ9P"),
+    ("Kartenprufnummer: 789", "789"),
+    ("Versicherungsbestatigung: K7H3M9P", "K7H3M9P"),
+    ("Versicherungsbestaetigungsnummer: K7H3M9P", "K7H3M9P"),
+    ("eV8-Nummer: K7H3M9P", "K7H3M9P"),
+])
+def test_selbstkontrolle_ocr_tolerant(text, wert):
+    assert _gemeldet(text, wert), _verdacht(text)
+
+
+@braucht_ocr
+@pytest.mark.parametrize("wert", ["K7H3M9P", "7RT4ZU9"])
+def test_evb_im_scan_brief_kein_stilles_leck(tmp_path, wert):
+    """Echter Scan (Tesseract, 200 dpi), Briefanfang mit eVB-Zeile: die eVB wird geschwärzt; und ohne Erkennung (nur
+    IBAN aktiv) meldet die Selbstkontrolle sie, die Ausgabe heißt _PRUEFEN – nie „fertig“ mit lesbarer eVB."""
+    from anonymisierer.ocr import OcrDienst
+    pdf = _scan_pdf(tmp_path / "brief.pdf", ["Sehr geehrte Damen und Herren,", f"Ihre eVB-Nummer lautet: {wert}",
+                                             "Mit freundlichen Grüßen"])
+    with OcrDienst(prozesse=1) as dienst:
+        a = analysiere_pdf(pdf, ALLE, [], [], ocr=dienst)
+        a2 = analysiere_pdf(pdf, {"iban"}, [], [], ocr=dienst)
+        e2 = schwaerze_pdf(pdf, a2["funde"], modell=a2["modell"], ocr=dienst, ziel_ordner=tmp_path / "aus2")
+    assert a["fehler"] is None and e2["fehler"] is None
+    assert [f["text"] for f in a["funde"] if f["kategorie"] == "vertrag" and _aehnlich(f["text"], wert)], \
+        _paare(a["funde"])
+    assert e2["status"] == "pruefen" and [v for v in e2["verdacht"] if _aehnlich(v.text, wert)], e2["verdacht"]
+
+
+# --- Geburtsname (Befunde niedrig): dieselbe Person bekommt denselben Platzhalter; Sachwörter sind kein Geburtsname
+@pytest.mark.parametrize("text, person, geburtsname", [
+    ("Weber, Anna geb. Schulz", "Weber, Anna", "Schulz"),
+    ("Frau Weber geb. Schulz hat angerufen.", "Weber", "Schulz"),
+    ("Anna Weber\ngeb. Schulz", "Anna Weber", "Schulz"),
+    ("Anna Weber geb.Schulz", "Anna Weber", "Schulz"),
+    ("Anna Weber geb.: Schulz", "Anna Weber", "Schulz"),
+    ("Versicherungsnehmerin: Anna Weber geb. Garcia Lopez, Hauptstraße 5", "Anna Weber", "Garcia Lopez"),
+    ("Maria Schmidt geb. da Silva Santos wohnt in Köln.", "Maria Schmidt", "da Silva Santos"),
+    ("Kontoinhaberin: Fatma Yilmaz geb. Öztürk Demir", "Fatma Yilmaz", "Öztürk Demir"),
+    ("Anna Weber geb. Mac Allister hat angerufen.", "Anna Weber", "Mac Allister"),
+    ("WEBER, ANNA GEB. GARCIA LOPEZ", "WEBER, ANNA", "GARCIA LOPEZ"),
+])
+def test_geburtsname_gleicher_platzhalter(text, person, geburtsname):
+    ersatz = _ersatz(analysiere_text(text, {"namen"}, [], []))
+    assert ersatz.get(geburtsname) == ersatz.get(person) is not None, ersatz
+
+
+@pytest.mark.parametrize("text, wort", [
+    ("Anna Weber geb. Hamburg", "Hamburg"),
+    ("Weber geb. Unbekannt", "Unbekannt"),
+    ("Geburtsname: Siehe oben", "Siehe"),
+])
+def test_geburtsname_kein_sachwort(text, wort):
+    funde = analysiere_text(text, {"namen"}, [], [])
+    assert not any(wort in t.split() for t in _stellen(funde, "namen")), _paare(funde)
+
+
+@pytest.mark.parametrize("text, wort", [
+    ("# NACHNAME\t\tVORN.\t\tGEB.DAT.\t\tSTRASSE\t\tVN_PLZ", "DAT"),     # Spaltenkopf einer Bestandsliste
+    ("NAME\t\tVORNAME\t\tGEB. DAT.\t\tGEB. ORT", "DAT"),
+    ("Anna Weber, geb. Datum unbekannt", "Datum"),
+    ("Frau Weber geb.Tag", "Tag"),
+])
+def test_geburtsdatum_kuerzel_ist_kein_geburtsname(text, wort):
+    """Kürzel eines Geburtsdatums (auch direkt an "geb." geschrieben: "GEB.DAT.", "geb.Tag") sind kein Geburtsname –
+    aus der Messung der Runde 4 (s3x, Bestandsliste): "GEB.DAT." im Spaltenkopf wurde zum Namen "DAT"."""
+    funde = analysiere_text(text, {"namen"}, [], [])
+    assert not any(wort in t.split() for t in _stellen(funde, "namen")), _paare(funde)
+
+
+@pytest.mark.parametrize("text", ["geb. Ledig", "Familienstand: geb. Ledig", "Weber geb. Unbekannt",
+                                  "[PERSON A] geb. Hamburg", "# NACHNAME\t\tVORN.\t\tGEB.DAT.\t\tSTRASSE",
+                                  "[PERSON A] geb.Tag"])
+def test_restrisiko_kein_geburtsname_aus_sachwort(text):
+    assert not [v for v in pruefe_text(text, platzhalter=["[PERSON A]"]) if "Geburtsname" in v.grund]
+
+
+def _codes(ergebnis) -> list:
+    return [m["code"] for m in ergebnis.get("meldungen") or []]
+
+
+def test_geburtsname_auf_scan_ist_kein_schluesselwort_ohne_fund(tmp_path):
+    """Auf einem Scan steht "geb." vor einem geschwärzten Geburtsnamen: kein Etikett eines Geburtsdatums, also keine
+    Warnung SCHLUESSELWORT_OHNE_FUND. Gegenprobe: ein ungeschwärztes Geburtsdatum hinter "geb. am" bleibt ein Grund."""
+    pdf, woerter = _ocr_seite(tmp_path / "geb.pdf", ["Sehr geehrte Damen und Herren,",
+                                                     "Versicherungsnehmerin: Anna Weber geb. Quarnstedt",
+                                                     "Wir bestätigen den Eingang Ihres Antrags."])
+    dienst = OcrAttrappe({0: woerter})
+    a = analysiere_pdf(pdf, ALLE, [], [], ocr=dienst)
+    assert "Quarnstedt" in _stellen(a["funde"], "namen"), _paare(a["funde"])
+    e = schwaerze_pdf(pdf, a["funde"], modell=a["modell"], ocr=dienst, ziel_ordner=tmp_path / "aus")
+    assert e["fehler"] is None and "SCHLUESSELWORT_OHNE_FUND" not in _codes(e), e["warnungen"]
+    pdf2, woerter2 = _ocr_seite(tmp_path / "geb2.pdf", ["Versicherungsnehmerin: Anna Weber geb. am 12.03.1980"])
+    dienst2 = OcrAttrappe({0: woerter2})
+    a2 = analysiere_pdf(pdf2, {"namen"}, [], [], ocr=dienst2)
+    e2 = schwaerze_pdf(pdf2, a2["funde"], modell=a2["modell"], ocr=dienst2, ziel_ordner=tmp_path / "aus2")
+    assert "SCHLUESSELWORT_OHNE_FUND" in _codes(e2) and e2["status"] == "pruefen", e2["warnungen"]

@@ -69,6 +69,17 @@ ersten Aufbau nach festen Regeln erzeugt und stehen ausgeschrieben in den Dateie
   slowakische und griechische Namen stehen von Hand in beiden Formen, unveränderliche
   ukrainische Namen nur einmal.
 
+### Abgeleitetes Wissen in `wissen.py`
+
+- **Wortgestalt** (`ist_wortgestalt`): Ob eine Buchstabenfolge ohne Ziffer ein Wort ist
+  („ERTEILT“, „ANGEFORDERT“) oder ein Code („KXHPMTQ“), entscheidet die mittlere
+  Häufigkeit ihrer Buchstabenpaare. Die Häufigkeiten werden beim ersten Gebrauch aus den
+  Wörtern von `allerweltswoerter_gross.txt`, `berufe.txt` und den Etikett-Listen gezählt –
+  es gibt keine eigene Datei. Die Schwelle ist so gewählt, dass zufällige Codes aus sieben
+  Buchstaben zu etwa 4 % als Wort gelten.
+- **Großstädte** (`ist_grossstadt`): die deutschen Städte mit über 100 000 Einwohnern,
+  als kurze Liste im Code (allgemein bekannte Ortsnamen).
+
 ## Inhalt
 
 | Datei | Einträge | Inhalt | Belegt¹ |

@@ -956,12 +956,21 @@ def _regel_kandidaten(text: str) -> list:
 # direkt hinter einem Namen), klein geschriebene Wörter, "geborene" als Eigenschaftswort ("eine geborene
 # Berlinerin") und Spaltenköpfe ("geb. ⇥⇥ Ort": hinter "geb." zählt nur dieselbe Zelle).
 _GEB_ETIKETT_RE = re.compile(
-    r"(?<![\wäöüß.\-])(?:(?P<geb>geb|GEB|Geb)[.:,]?|(?P<geborene>geborene[rn]?|GEBORENE[RN]?|Geborene[rn]?)"
-    r"|(?P<feld>Geburtsname|GEBURTSNAME)(?:[ \t]*\([^()\n]{1,25}\))?[ \t]*:?)(?![\wäöüß\-])")
-_GEB_PARTIKEL = r"(?:(?:von|van|de|der|den|zu|zur|vom|ten|ter|VON|VAN|DE|DER|DEN|ZU|ZUR|VOM)[ ]+){0,2}"
+    r"(?<![\wäöüß.\-])(?:(?P<geb>geb|GEB|Geb)(?:\.:?|:|,)?|(?P<geborene>geborene[rn]?|GEBORENE[RN]?|Geborene[rn]?)"
+    r"|(?P<feld>Geburtsname|GEBURTSNAME)(?:[ \t]*\([^()\n]{1,25}\))?[ \t]*:?)"
+    # dahinter kein Wortzeichen – außer direkt hinter "geb." / "geb:" ein großer Anfangsbuchstabe ("geb.Schulz")
+    r"(?:(?![\wäöüß\-])|(?<=[.:])(?=[" + _GROSS + r"]))")
+_GEB_PARTIKEL_WORT = (r"(?:von|van|de|der|den|zu|zur|vom|ten|ter|da|di|dos|das|del|della|du|la|le|al|el|"
+                      r"VON|VAN|DE|DER|DEN|ZU|ZUR|VOM|DA|DI|DOS|DEL|DU|LA|LE|AL|EL)")
+_GEB_PARTIKEL = r"(?:" + _GEB_PARTIKEL_WORT + r"[ ]+){0,2}"
 _GEB_NAME_RE = re.compile(_GEB_PARTIKEL + r"[" + _GROSS + r"][\wäöüß'’]+(?:-[" + _GROSS + r"][\wäöüß'’]+)*"
                           r"(?![\wäöüß'’\-])")
-_GEB_LUECKE_RE = re.compile(r"[ ]{1,3}")
+# weiterer Teil eines mehrteiligen Geburtsnamens ("Garcia Lopez", "da Silva Santos", "Öztürk Demir", "Mac Allister")
+_GEB_WEITER_RE = re.compile(r"[ ]+((?:" + _GEB_PARTIKEL_WORT + r"[ ]+)?[" + _GROSS + r"][\wäöüß'’]+(?:-["
+                            + _GROSS + r"][\wäöüß'’]+)*)(?![\wäöüß'’\-])")
+# Vorsilben, hinter denen ein Geburtsname immer weitergeht ("Mac Allister", "O' Brien", "San Martín")
+_GEB_VORSILBE = frozenset({"mac", "mc", "o'", "o’", "fitz", "san", "santa", "st.", "abu", "ben", "bin", "ibn"})
+_GEB_LUECKE_RE = re.compile(r"[ ]{0,3}")
 _GEB_UMBRUCH_RE = re.compile(r"[ ]*\n[ ]*")
 _FELD_LUECKE_RE = re.compile(r"[ \t]{1,12}|[ \t]*\n[ \t]*")
 # hinter dem Wort geht ein Datum weiter: eine Ziffer (auch hinter einem Punkt: "Od.12.1973") oder ein Monatsname
@@ -987,10 +996,22 @@ def geburtsname_teilen(name: str) -> tuple:
     return name[:m.start()].rstrip(" \t\n,("), rest or None
 
 
+# Füllwörter eines Formulars hinter "geb."/"Geburtsname:" ("Geburtsname: Siehe oben", "Weber geb. Unbekannt",
+# "Familienstand: geb. Ledig") und das Kürzel des Geburtsdatums ("GEB. DAT.") sind kein Geburtsname
+_GEB_KEIN_NAME = frozenset({"siehe", "wie", "keiner", "keine", "kein", "unbekannt", "entfällt", "entfaellt", "ledig",
+                            "verheiratet", "geschieden", "verwitwet", "gleich", "identisch", "dito", "nein", "ja",
+                            "ohne", "nicht", "oben", "unten", "vorstehend", "derselbe", "dieselbe", "dasselbe",
+                            "dat", "datum"})
+# direkt an "geb." geschrieben ist es der zweite Teil eines Feldkürzels ("GEB.DAT.", "Geb.Ort", "geb.Tag",
+# "Geb.Name", "GEB.NR."), kein Geburtsname wie in "geb.Schulz"
+_GEB_KUERZEL_TEIL = frozenset({"dat", "datum", "ort", "tag", "jahr", "land", "name", "nr", "nummer", "no"})
+
+
 def _geburtsname_wort(text: str, s: int, e: int) -> bool:
     """Kann text[s:e] hinter einem Geburtsnamen-Etikett ein Nachname sein? Keine Ziffer darin, kein Datum dahinter
-    ("Mai 1980", "Od. Dez. 1973"), kein Feldbezeichner oder Sachwort ("Ort", "Ost", "Hauptgebäude"), keine Straße,
-    kein Versicherer, keine Firma ("Schulz GmbH"). Lange Versalien gelten hier als Name ("GEB. QUARNSTEDT"): das
+    ("Mai 1980", "Od. Dez. 1973"), kein Feldbezeichner, Füllwort oder Sachwort ("Ort", "Ost", "Siehe", "Unbekannt",
+    "Hauptgebäude"), keine Straße, kein Versicherer, keine Firma ("Schulz GmbH"), keine Großstadt, die kein Nachname
+    ist ("Anna Weber geb. Hamburg": der Geburtsort). Lange Versalien gelten hier als Name ("GEB. QUARNSTEDT"): das
     Etikett davor ist Beleg genug."""
     if _DATUM_DAHINTER_RE.match(text, e) or any(c.isdigit() for c in text[s:e]):
         return False                                  # "geb. Mai 1980", "geb. Od. Dez. 1973" (OCR): ein Datum
@@ -999,7 +1020,11 @@ def _geburtsname_wort(text: str, s: int, e: int) -> bool:
         return False
     kern = teile[-1]
     k = kern.casefold()
+    if any(t.casefold().strip(".") in _GEB_KEIN_NAME for t in teile):
+        return False
     if (k in NAMEN_STOPPLISTE and k not in _KALENDERWOERTER) or k in _NAMENSENDE or k in _FIRMENWOERTER:
+        return False
+    if len(teile) == 1 and _wissen_wort("ist_grossstadt", kern) and not _wissen_wort("ist_nachname", kern):
         return False
     if k in _VERSICHERER_EINZELWORT or _STRASSENSUFFIX_RE.search(k) or _FIRMA_DANACH_RE.match(text, e):
         return False
@@ -1010,15 +1035,29 @@ def _geburtsname_wort(text: str, s: int, e: int) -> bool:
 
 def _name_vor(text: str, pos: int, starts_je_ende: dict) -> tuple | None:
     """(start, ende) des Namens direkt vor einem Geburtsnamen-Etikett an `pos`: ein Kandidat, der dort endet (nur
-    Leerraum, Komma oder öffnende Klammer dazwischen; starts_je_ende: Ende -> Anfänge der Kandidaten), sonst Vor- und
-    Nachname direkt davor in derselben Zeile."""
+    Leerraum, Komma oder öffnende Klammer dazwischen; starts_je_ende: Ende -> Anfänge der Kandidaten), oder Vor- und
+    Nachname direkt davor in derselben Zeile – der längere von beiden ("Weber, Anna" statt nur "Anna"). Beginnt das
+    Etikett seine Zeile ("Anna Weber" ⏎ "geb. Schulz"), zählt der Name am Ende der Zeile darüber."""
     zeilenanfang = text.rfind("\n", 0, pos) + 1
     davor = text[zeilenanfang:pos]
+    if not davor.strip(" \t(") and zeilenanfang > 0:
+        pos = zeilenanfang - 1
+        while pos > 0 and text[pos - 1] in " \t":
+            pos -= 1
+        zeilenanfang = text.rfind("\n", 0, pos) + 1
+        davor = text[zeilenanfang:pos]
     luecke = _VOR_GEB_RE.search(davor)
     ende = zeilenanfang + luecke.start()
-    if starts_je_ende.get(ende):
-        return min(starts_je_ende[ende]), ende        # der längste Kandidat
-    # Vor- und Nachname ohne Kandidaten ("Sabine Krüger geb. …", "WEBER, ANNA GEB. …"): Namenswörter von rechts
+    kandidat = (min(starts_je_ende[ende]), ende) if starts_je_ende.get(ende) else None   # der längste Kandidat
+    woerter = _name_aus_woertern(text, zeilenanfang, ende)
+    if woerter is not None and (kandidat is None or woerter[0] < kandidat[0]) and woerter[1] >= ende - 1:
+        return woerter
+    return kandidat
+
+
+def _name_aus_woertern(text: str, zeilenanfang: int, ende: int) -> tuple | None:
+    """Vor- und Nachname direkt vor `ende` ohne Kandidaten ("Sabine Krüger geb. …", "WEBER, ANNA GEB. …")."""
+    # Namenswörter von rechts
     woerter = list(re.finditer(r"[^\s,()]+,?", text[zeilenanfang:ende]))
     start, anzahl, komma = None, 0, False
     for w in reversed(woerter):
@@ -1043,6 +1082,30 @@ def _name_vor(text: str, pos: int, starts_je_ende: dict) -> tuple | None:
     return bereich
 
 
+def _geburtsname_ende(text: str, s: int, e: int) -> int:
+    """Ende eines mehrteiligen Geburtsnamens, der bei s:e beginnt: weitere Teile hinter einer Vorsilbe ("Mac Allister")
+    oder bekannte Nachnamen ("Garcia Lopez", "da Silva Santos", "Öztürk Demir") – höchstens zwei, keiner ein Sachwort
+    oder Kalenderwort und kein Datum dahinter."""
+    for _ in range(2):
+        w = _GEB_WEITER_RE.match(text, e)
+        if w is None or "\n" in w.group(0):
+            break
+        teil = w.group(1).split()[-1]
+        letztes = text[s:e].split()[-1].casefold()
+        vorsilbe = letztes in _GEB_VORSILBE
+        if not vorsilbe and not (_wissen_wort("ist_nachname", teil) and not _wissen_wort("ist_grossstadt", teil)):
+            break
+        if teil.casefold() in _KALENDERWOERTER or _DATUM_DAHINTER_RE.match(text, w.end()) or (
+                not vorsilbe and _ist_sachwort(teil) and not _wissen_wort("ist_nachname", teil)):
+            break
+        danach = _GEB_WEITER_RE.match(text, w.end())
+        if (not vorsilbe and _wissen_wort("ist_vorname", teil) and danach is not None
+                and _wissen_wort("ist_nachname", danach.group(1).split()[-1])):
+            break                                     # "geb. Schulz Peter Müller": dahinter beginnt eine Person
+        e = w.end()
+    return e
+
+
 def geburtsnamen(text: str, kandidaten=()) -> list:
     """Geburtsnamen hinter "geb.", "geb:", "geborene" und "Geburtsname" als Kandidaten {text, start, ende, gruppe,
     quelle}. Steht direkt davor ein Name (ein Kandidat aus `kandidaten` oder Vor- und Nachname derselben Zeile), ist
@@ -1065,13 +1128,16 @@ def geburtsnamen(text: str, kandidaten=()) -> list:
             wort_davor = re.search(r"([^\W\d_]+)[ \t]*$", davor)
             if wort_davor and wort_davor.group(1)[:1].islower():
                 continue                              # "eine geborene Berlinerin": Eigenschaftswort
-        luecke = (_FELD_LUECKE_RE if art == "feld" else _GEB_LUECKE_RE).match(text, m.end())
-        if luecke is None and art != "feld":
-            luecke = _GEB_UMBRUCH_RE.match(text, m.end())        # "Anna Weber geb." ⏎ "Schulz" (nur mit Name davor)
+        if art == "feld":
+            luecke = _FELD_LUECKE_RE.match(text, m.end())
+        else:                                         # "Anna Weber geb." ⏎ "Schulz" (nur mit Name davor)
+            luecke = _GEB_UMBRUCH_RE.match(text, m.end()) or _GEB_LUECKE_RE.match(text, m.end())
         n = _GEB_NAME_RE.match(text, luecke.end()) if luecke else None
         if n is None or not _geburtsname_wort(text, n.start(), n.end()):
             continue                                  # Datum, Ort, klein geschriebenes Wort, Feldbezeichner …
-        s, e = n.start(), n.end()
+        if n.start() == m.end() and n.group(0).casefold() in _GEB_KUERZEL_TEIL:
+            continue                                  # "GEB.DAT.", "geb.Tag": Feldkürzel
+        s, e = n.start(), _geburtsname_ende(text, n.start(), n.end())
         person = None if art == "feld" else _name_vor(text, m.start(), starts_je_ende)
         if "\n" in luecke.group(0) and art != "feld" and person is None:
             continue

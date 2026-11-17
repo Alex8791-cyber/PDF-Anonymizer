@@ -458,7 +458,8 @@ def _kennung(text: str, s: int, e: int, kategorie: str | None, eintrag: str = ""
         i = m.end()                                   # "Nr. KH 0815 4471 2" unter "Versicherungsschein-"
     art = eigene_wertform(eintrag)                    # eVB, Transferticket, Kartenprüfnummer: eigene Wertform,
     if art is not None:                               # in einer Spalte ohne Ziffer nie (Status wie "ERTEILT")
-        return [(w.start, w.ende, w.kategorie, None) for w in eigener_wert(text, i, e, art, kategorie, True)]
+        return [(w.start, w.ende, w.kategorie, None)
+                for w in eigener_wert(text, i, e, art, kategorie, True, darunter=True)]
     sp = kennung_spanne(text, i, e, 3)
     if sp is None:
         return []
