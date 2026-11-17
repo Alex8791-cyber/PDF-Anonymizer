@@ -4,7 +4,8 @@ Plausibilitätsfilter gegen Fehlalarme und Stopplisten.
 Öffentliche Namen: lade_ner, finde_personen_ner (Menge von Namenstexten, wie bisher),
 finde_personen (Kandidaten mit Position und Zusammengehörigkeit), personen_teilen (mehrere Personen ohne
 Komma an Vornamen trennen – "Jörg Ziegler Ursula Frank"), verlesenes_etikett_statt_name (von der OCR
-verlesener Feldbezeichner statt Name – nur für OCR-Text), NAMEN_STOPPLISTE, ner_fehler.
+verlesener Feldbezeichner statt Name – nur für OCR-Text), geburtsnamen (Geburtsname hinter "geb."/"geborene"/
+"Geburtsname", mit der Person davor verbunden), geburtsname_teilen, NAMEN_STOPPLISTE, ner_fehler.
 
 Die Filter dieses Moduls kennen die Herkunft der Zeichen nicht und gelten deshalb für jeden Text gleich; eine
 Toleranz für OCR-Lesefehler gehört nicht hierher (detektoren/ocr_lesart.py prüft die Quelle).
@@ -70,6 +71,7 @@ NAMEN_STOPPLISTE = {
     "patientin", "kontoinhaber", "kontoinhaberin", "vollmachtgeber", "bevollmächtigter",
     "geschädigter", "geschädigte", "mitversichert", "mitversicherte", "name", "vorname", "nachname",
     "geburtsname", "geburtsdatum", "geschlecht", "beruf", "staatsangehörigkeit", "familienstand",
+    "geb", "geborene", "geborener", "geborenen",
     "anschrift", "adresse", "telefon", "mobil", "fax", "e-mail", "email", "iban", "bic", "blz",
     "konto", "kontonummer", "kennzeichen", "fahrzeug", "typ", "marke", "modell", "tel", "tel.",
     "telefax", "handy", "mitbehandler", "behandler", "hausarzt", "hausärztin", "ansprechpartner",
@@ -815,6 +817,11 @@ def _kandidat(kandidaten, text, start, ende, gruppe=None, regel=False):
     luecke = _LUECKE_RE.search(text, start, ende)
     if luecke:
         ende = luecke.start()
+    geb = _GEB_IM_NAMEN_RE.search(text, start, ende)
+    if geb and geb.start() > start:
+        # "Anna Weber geb. Schulz" als eine Stelle (KI): Name und Geburtsname getrennt, das Etikett bleibt stehen
+        links = _kandidat(kandidaten, text, start, geb.start(), gruppe, regel)
+        return _kandidat(kandidaten, text, geb.end(), ende, gruppe, regel) or links
     # mehrere Personen ohne Komma ("Jörg Ziegler Ursula Frank") werden getrennte Kandidaten
     teile = personen_teilen(text, start, ende) if gruppe is None else [(start, ende)]
     gefunden = False
@@ -940,13 +947,152 @@ def _regel_kandidaten(text: str) -> list:
 
 
 # ----------------------------------------------------------------------
+# Geburtsname
+# ----------------------------------------------------------------------
+# Geburtsname hinter "geb." / "geb:" / "geborene(r)" / "Geburtsname" ("Anna Weber geb. Schulz", "WEBER, ANNA GEB.
+# SCHULZ", "(geb. Schulz-Meyer)", "Geburtsname: Schulz"): der Nachname dahinter ist ein Personenname, auch in Versalien
+# und mit Bindestrich. Nicht: ein Datum oder Ort dahinter ("geb. 12.03.1980", "geb. am …", "geb. in Köln"), "Gebr."
+# (Gebrüder), "Geb." für Gebäude oder Gebühr ("Geb. 3", "Geb.-Nr.", "Geb. Ost" – großgeschrieben zählt "Geb." nur
+# direkt hinter einem Namen), klein geschriebene Wörter, "geborene" als Eigenschaftswort ("eine geborene
+# Berlinerin") und Spaltenköpfe ("geb. ⇥⇥ Ort": hinter "geb." zählt nur dieselbe Zelle).
+_GEB_ETIKETT_RE = re.compile(
+    r"(?<![\wäöüß.\-])(?:(?P<geb>geb|GEB|Geb)[.:,]?|(?P<geborene>geborene[rn]?|GEBORENE[RN]?|Geborene[rn]?)"
+    r"|(?P<feld>Geburtsname|GEBURTSNAME)(?:[ \t]*\([^()\n]{1,25}\))?[ \t]*:?)(?![\wäöüß\-])")
+_GEB_PARTIKEL = r"(?:(?:von|van|de|der|den|zu|zur|vom|ten|ter|VON|VAN|DE|DER|DEN|ZU|ZUR|VOM)[ ]+){0,2}"
+_GEB_NAME_RE = re.compile(_GEB_PARTIKEL + r"[" + _GROSS + r"][\wäöüß'’]+(?:-[" + _GROSS + r"][\wäöüß'’]+)*"
+                          r"(?![\wäöüß'’\-])")
+_GEB_LUECKE_RE = re.compile(r"[ ]{1,3}")
+_GEB_UMBRUCH_RE = re.compile(r"[ ]*\n[ ]*")
+_FELD_LUECKE_RE = re.compile(r"[ \t]{1,12}|[ \t]*\n[ \t]*")
+# hinter dem Wort geht ein Datum weiter: eine Ziffer (auch hinter einem Punkt: "Od.12.1973") oder ein Monatsname
+# hinter einem Punkt ("geb. Od. Dez. 1973" – so liest die OCR "geb. 04. Dez. 1973"; das Wort ist der Tag)
+_DATUM_DAHINTER_RE = re.compile(
+    r"[ \t]*(?:\d|\.[ \t]*(?:\d|(?i:jan(?:uar)?|jän(?:ner)?|feb(?:ruar)?|mär(?:z)?|maerz|mrz|apr(?:il)?|mai|jun(?:i)?"
+    r"|jul(?:i)?|aug(?:ust)?|sep(?:t(?:ember)?)?|okt(?:ober)?|nov(?:ember)?|dez(?:ember)?)(?![\wäöüß])))")
+# Name (eines Kandidaten) direkt vor dem Etikett: nur Leerraum, Komma oder öffnende Klammer dazwischen
+_VOR_GEB_RE = re.compile(r"[ \t]*,?[ \t]*\(?[ \t]*$")
+_NAME_DAVOR_RE = re.compile(r"[" + _GROSS + r"][\wäöüß'’\-]+,?[ \t]*\(?$")
+# Trenner Name/Geburtsname in einem Vollnamen ("Anna Weber geb. Schulz", "WEBER, ANNA (GEB. SCHULZ)")
+_GEB_IM_NAMEN_RE = re.compile(r"[ \t]*[,(]?[ \t]*(?<![\wäöüß.\-])(?:(?:geb|GEB|Geb)[.:,]?|geborene[rn]?|GEBORENE[RN]?)"
+                              r"(?=[ \t\n])[ \t]*\n?[ \t]*")
+GEBURTSNAME_QUELLE = "ner.geburtsname"
+
+
+def geburtsname_teilen(name: str) -> tuple:
+    """(Name ohne Geburtsnamen, Geburtsname oder None): "Anna Weber geb. Schulz" -> ("Anna Weber", "Schulz")."""
+    m = _GEB_IM_NAMEN_RE.search(name or "")
+    if m is None or m.start() == 0:
+        return name, None
+    rest = name[m.end():].strip(" \t\n,;:()")
+    return name[:m.start()].rstrip(" \t\n,("), rest or None
+
+
+def _geburtsname_wort(text: str, s: int, e: int) -> bool:
+    """Kann text[s:e] hinter einem Geburtsnamen-Etikett ein Nachname sein? Keine Ziffer darin, kein Datum dahinter
+    ("Mai 1980", "Od. Dez. 1973"), kein Feldbezeichner oder Sachwort ("Ort", "Ost", "Hauptgebäude"), keine Straße,
+    kein Versicherer, keine Firma ("Schulz GmbH"). Lange Versalien gelten hier als Name ("GEB. QUARNSTEDT"): das
+    Etikett davor ist Beleg genug."""
+    if _DATUM_DAHINTER_RE.match(text, e) or any(c.isdigit() for c in text[s:e]):
+        return False                                  # "geb. Mai 1980", "geb. Od. Dez. 1973" (OCR): ein Datum
+    teile = [t for t in text[s:e].split() if t.casefold() not in PARTIKEL]
+    if not teile:
+        return False
+    kern = teile[-1]
+    k = kern.casefold()
+    if (k in NAMEN_STOPPLISTE and k not in _KALENDERWOERTER) or k in _NAMENSENDE or k in _FIRMENWOERTER:
+        return False
+    if k in _VERSICHERER_EINZELWORT or _STRASSENSUFFIX_RE.search(k) or _FIRMA_DANACH_RE.match(text, e):
+        return False
+    if re.search(r"-(?:ID|Nr|No|Id)\.?$", kern, re.IGNORECASE) or sum(c.isalpha() for c in kern) < 2:
+        return False
+    return not _ist_sachwort(kern) or _wissen_wort("ist_nachname", kern)
+
+
+def _name_vor(text: str, pos: int, starts_je_ende: dict) -> tuple | None:
+    """(start, ende) des Namens direkt vor einem Geburtsnamen-Etikett an `pos`: ein Kandidat, der dort endet (nur
+    Leerraum, Komma oder öffnende Klammer dazwischen; starts_je_ende: Ende -> Anfänge der Kandidaten), sonst Vor- und
+    Nachname direkt davor in derselben Zeile."""
+    zeilenanfang = text.rfind("\n", 0, pos) + 1
+    davor = text[zeilenanfang:pos]
+    luecke = _VOR_GEB_RE.search(davor)
+    ende = zeilenanfang + luecke.start()
+    if starts_je_ende.get(ende):
+        return min(starts_je_ende[ende]), ende        # der längste Kandidat
+    # Vor- und Nachname ohne Kandidaten ("Sabine Krüger geb. …", "WEBER, ANNA GEB. …"): Namenswörter von rechts
+    woerter = list(re.finditer(r"[^\s,()]+,?", text[zeilenanfang:ende]))
+    start, anzahl, komma = None, 0, False
+    for w in reversed(woerter):
+        roh = w.group(0)
+        kern = roh.rstrip(",")
+        if roh.endswith(","):
+            if komma or anzahl == 0:
+                break
+            komma = True                              # "WEBER, ANNA": Nachname, Vorname
+        if (not re.fullmatch(r"[" + _GROSS + r"][\wäöüß'’\-]+", kern) or kern.casefold() in ANREDEN
+                or kern.casefold() in TITEL or _ist_sachwort(kern) or anzahl >= 3):
+            break
+        if zeilenanfang + w.end() != ende and text[zeilenanfang + w.end():ende].strip(" \t") and anzahl == 0:
+            break
+        start = zeilenanfang + w.start()
+        anzahl += 1
+    if start is None or anzahl < 2:
+        return None
+    bereich = _bereinigen(text, start, ende)
+    if not bereich or len(_namensteile(text[bereich[0]:bereich[1]])) < 2 or not _plausibel(text, *bereich, regel=True):
+        return None
+    return bereich
+
+
+def geburtsnamen(text: str, kandidaten=()) -> list:
+    """Geburtsnamen hinter "geb.", "geb:", "geborene" und "Geburtsname" als Kandidaten {text, start, ende, gruppe,
+    quelle}. Steht direkt davor ein Name (ein Kandidat aus `kandidaten` oder Vor- und Nachname derselben Zeile), ist
+    gruppe "<Name> geb. <Geburtsname>" – dieselbe Person (analyse._Personen: gleicher Platzhalter, der Geburtsname
+    zählt als weiterer Nachname dieser Person); ein Name davor, der noch kein Kandidat ist, kommt als Regel-Treffer
+    dazu. Hinter "geb."/"geborene" steht der Geburtsname in derselben Zelle (bei einem Namen davor auch am Anfang der
+    nächsten Zeile), hinter "Geburtsname" auch in der Nachbarzelle oder der nächsten Zeile."""
+    aus = []
+    starts_je_ende: dict = {}
+    for k in kandidaten:
+        if k.get("quelle") != GEBURTSNAME_QUELLE and 0 <= k.get("start", -1) < k.get("ende", -1):
+            starts_je_ende.setdefault(k["ende"], []).append(k["start"])
+    for m in _GEB_ETIKETT_RE.finditer(text):
+        art = m.lastgroup
+        zeilenanfang = text.rfind("\n", 0, m.start()) + 1
+        davor = text[zeilenanfang:m.start()]
+        if art == "geb" and m.group("geb") == "Geb" and not _NAME_DAVOR_RE.search(davor.rstrip(" \t")):
+            continue                                  # "Geb. 3", "Geb. Ost": Gebäude/Gebühr am Zeilen-/Satzanfang
+        if art == "geborene":
+            wort_davor = re.search(r"([^\W\d_]+)[ \t]*$", davor)
+            if wort_davor and wort_davor.group(1)[:1].islower():
+                continue                              # "eine geborene Berlinerin": Eigenschaftswort
+        luecke = (_FELD_LUECKE_RE if art == "feld" else _GEB_LUECKE_RE).match(text, m.end())
+        if luecke is None and art != "feld":
+            luecke = _GEB_UMBRUCH_RE.match(text, m.end())        # "Anna Weber geb." ⏎ "Schulz" (nur mit Name davor)
+        n = _GEB_NAME_RE.match(text, luecke.end()) if luecke else None
+        if n is None or not _geburtsname_wort(text, n.start(), n.end()):
+            continue                                  # Datum, Ort, klein geschriebenes Wort, Feldbezeichner …
+        s, e = n.start(), n.end()
+        person = None if art == "feld" else _name_vor(text, m.start(), starts_je_ende)
+        if "\n" in luecke.group(0) and art != "feld" and person is None:
+            continue
+        gruppe = None
+        if person is not None:
+            name = text[person[0]:person[1]]
+            gruppe = f"{name} geb. {text[s:e]}"
+            if person[0] not in starts_je_ende.get(person[1], ()):
+                aus.append({"text": name, "start": person[0], "ende": person[1], "gruppe": gruppe})
+        aus.append({"text": text[s:e], "start": s, "ende": e, "gruppe": gruppe, "quelle": GEBURTSNAME_QUELLE})
+    return aus
+
+
+# ----------------------------------------------------------------------
 # Öffentliche Schnittstelle
 # ----------------------------------------------------------------------
 def finde_personen(text: str) -> list:
     """Personennamen per KI-Modell und Regeln.
     Liefert Kandidaten {text, start, ende, gruppe}; gruppe ist ein zusammengesetzter Vollname,
     wenn Bestandteile zusammengehören (Tabellenzeile Name/Vorname, Adressfenster über zwei
-    Zeilen), sonst None. Ohne Modell greifen nur die Regeln."""
+    Zeilen, Geburtsname "Anna Weber geb. Schulz"), sonst None. Ohne Modell greifen nur die Regeln."""
     kandidaten = _regel_kandidaten(text)
     # Werte hinter Sach-Etiketten (Beruf: Polier) sind nirgends ein Name — außer hinter Herr/Frau
     sachwerte = _sachwerte(text)
@@ -978,6 +1124,9 @@ def finde_personen(text: str) -> list:
                 kandidaten.append({"text": voll, "start": k["start"], "ende": m.end(1), "gruppe": voll})
                 kandidaten.append({"text": m.group(1), "start": m.start(1), "ende": m.end(1), "gruppe": voll})
                 k["gruppe"] = voll
+    # Geburtsnamen hinter "geb."/"geborene"/"Geburtsname" – vorn, damit ihre Gruppe (Name davor) beim Zusammenfassen
+    # gleicher Texte erhalten bleibt
+    kandidaten = geburtsnamen(text, kandidaten) + kandidaten
     # gleiche Texte zusammenfassen (erste Position, erste Gruppe)
     gesehen, aus = {}, []
     for k in sorted(kandidaten, key=lambda k: k["start"]):

@@ -16,7 +16,8 @@ werden auf den Eingabetext zurückgerechnet.
 
 Die Muster laufen bewusst nicht über Zeilenumbrüche (Ausnahmen: IBAN und PLZ+Ort mit genau einem Umbruch,
 Telefonnummern hinter einem Etikett, Daten mit ausgeschriebenem Monat und Aktenzeichen, die am Zeilenende
-umbrechen), und alle Wiederholungen sind nach oben begrenzt, damit lange Zeilen nicht zu quadratischer Laufzeit
+umbrechen; eVB-Nummer, Transferticket und Kartenprüfnummer stehen auch am Anfang der Zeile bzw. in der Zelle hinter
+ihrem Etikett), und alle Wiederholungen sind nach oben begrenzt, damit lange Zeilen nicht zu quadratischer Laufzeit
 führen. Über den Spaltentrenner "\\t\\t" des Seitenmodells läuft kein Muster in eine Nachbarzelle (einzige Stelle
 mit Trenner: eine PLZ-Zelle – allein oder hinter Straße/Anschrift-Etikett – mit der Ort-Zelle daneben, siehe
 plz_ort_zellenpaar). Lesefehler-Toleranz für
@@ -1063,8 +1064,98 @@ def _nummer_am_folgezeilenanfang(text: str, zeilenende: int):
     return None
 
 
+# ----------------------------------------------------------------------
+# Kfz-Versicherung: eVB-Nummer und Transferticket (Etikett + Wert mit eigener Form, Kategorie "vertrag")
+# ----------------------------------------------------------------------
+# eVB-Nummer (elektronische Versicherungsbestätigung für die Zulassung): 7 Zeichen aus Großbuchstaben und Ziffern hinter
+# "eVB", "eVB-Nr.", "eVB-Nummer", "VB-Nummer", "Versicherungsbestätigung(s-Nr./snummer)", "elektronische
+# Versicherungsbestätigung", "Ihre eVB lautet …". O/0 und I/1 gehören beide zur Zeichenmenge: eine von der OCR
+# verwechselte eVB ("LOO117Q" für "L0O1I7Q") hat dieselbe Form. "VB" allein (Verhandlungsbasis) ist kein Etikett.
+_EVB_ETIKETT_RE = re.compile(
+    r"(?<![\wäöüß\-])(?:(?i:evb)|VB(?=[ \t]*[-.]?[ \t]*(?i:nr\b|nummer|no\b))|(?i:versicherungsbest(?:ä|ae)tigung)s?)"
+    r"(?:[ \t]*[-.]?[ \t]*(?i:nr\.?|nummer|no\.?|code))?(?![\wäöüß])")
+_EVB_WERT_RE = re.compile(r"(?<![\w\-/.])[A-Z0-9]{7}(?![\w]|[-/.][A-Za-z0-9])")
+# Transferticket (Wechsel des Kfz-Versicherers, Übertragung des Schadenfreiheitsrabatts): alphanumerisch, 8 bis 20
+# Zeichen, auch in Gruppen mit Bindestrich ("TT-2024-081547")
+_TICKET_ETIKETT_RE = re.compile(
+    r"(?<![\wäöüß\-])(?i:transfer[ \t]?-?[ \t]?ticket)(?:[ \t]*[-.]?[ \t]*(?i:nr\.?|nummer|no\.?|code|id))?"
+    r"(?![\wäöüß])")
+_TICKET_WERT_RE = re.compile(r"(?<![\w\-/.])[A-Za-z0-9](?:[A-Za-z0-9]|[-/.](?=[A-Za-z0-9])){7,25}"
+                             r"(?![\w]|[-/.][A-Za-z0-9])")
+# zwischen Etikett und Wert: Trennzeichen, eine kurze Klammer ("(eVB)", "(CVC)"), Füllwörter ("lautet", "ist", "Nr.")
+# und höchstens EIN Zeilenumbruch (Wert in der nächsten Zeile bzw. – zeilenweise gelesen – in der Nachbarzelle)
+_ETIKETT_FUELLE_RE = re.compile(r"\([^()\n]{1,30}\)|(?i:lautet|lauten|lautend|ist|nr\.?|nummer|no\.?)(?![\wäöüß])")
+_ETIKETT_TRENNER = frozenset(" \t:.=#-–)")
+
+
+def wert_hinter_etikett(text: str, pos: int, wert_re: re.Pattern):
+    """Treffer der Wertform `wert_re` hinter einem Etikett, das bei `pos` endet: Trennzeichen (":", ".", "-", "="),
+    eine kurze Klammer, Füllwörter ("lautet", "ist", "Nr.") und höchstens ein Zeilenumbruch dürfen dazwischen stehen.
+    Liefert das Match-Objekt oder None (auch für Detektoren, die dieselben Etiketten lesen)."""
+    i, grenze, umbruch = pos, min(len(text), pos + 80), False
+    while i < grenze:
+        c = text[i]
+        if c in _ETIKETT_TRENNER:
+            i += 1
+        elif c == "\n":
+            if umbruch:
+                return None
+            umbruch = True
+            i += 1
+        else:
+            m = _ETIKETT_FUELLE_RE.match(text, i)
+            if m is None:
+                break
+            i = m.end()
+    return wert_re.match(text, i) if i < len(text) else None
+
+
+def _versalien(text: str) -> bool:
+    """Überwiegend Großbuchstaben (oder gar keine Buchstaben)?"""
+    buchstaben = [c for c in text if c.isalpha()]
+    return not buchstaben or sum(c.isupper() for c in buchstaben) > 0.7 * len(buchstaben)
+
+
+def _versalien_kontext(text: str, s: int, e: int, etikett_start: int) -> bool:
+    """Steht die Stelle s:e in Versalien geschriebenem Text (Zeile des Etiketts und des Werts ohne den Wert)? Dort
+    ist ein Wort aus Großbuchstaben ohne Ziffer kein Code ("EVB-NUMMER ANFRAGE"); in gemischt geschriebenem Text
+    hebt es sich als Kennung ab ("Ihre eVB-Nummer: KXHPMTQ")."""
+    a = text.rfind("\n", 0, etikett_start) + 1
+    b = text.find("\n", e)
+    return _versalien(text[a:s] + " " + text[e:b if b >= 0 else len(text)])
+
+
+def _evb_gueltig(wert: str, versalien: bool) -> bool:
+    """eVB: mit Ziffer – ohne Ziffer nur in gemischt geschriebenem Text."""
+    return any(c.isdigit() for c in wert) or not versalien
+
+
+def _ticket_gueltig(wert: str, versalien: bool) -> bool:
+    """Transferticket: 8 bis 20 Buchstaben/Ziffern, kein Datum, kein Betrag; in gemischter Schreibung mit mindestens
+    zwei Ziffern (sonst ein Wort: "beantragen"), in Großbuchstaben mit Ziffer oder in gemischt geschriebenem Text."""
+    zeichen = [c for c in wert if c.isalnum()]
+    ziffern = sum(c.isdigit() for c in zeichen)
+    if not 8 <= len(zeichen) <= 20 or _NR_DATUM_RE.fullmatch(wert) or _NR_BETRAG_RE.fullmatch(wert):
+        return False
+    if any(c.islower() for c in wert):
+        return ziffern >= 2
+    return ziffern >= 1 or not versalien
+
+
+def _kfz_kennungen(text: str) -> list:
+    """(anfang, ende) der eVB-Nummern und Transfertickets hinter ihrem Etikett."""
+    aus = []
+    for etikett_re, wert_re, pruefen in ((_EVB_ETIKETT_RE, _EVB_WERT_RE, _evb_gueltig),
+                                         (_TICKET_ETIKETT_RE, _TICKET_WERT_RE, _ticket_gueltig)):
+        for m in etikett_re.finditer(text):
+            w = wert_hinter_etikett(text, m.end(), wert_re)
+            if w and pruefen(w.group(0), _versalien_kontext(text, w.start(), w.end(), m.start())):
+                aus.append((w.start(), w.end()))
+    return aus
+
+
 def _vertrag_spannen(text: str) -> list:
-    treffer = []       # (anfang, ende)
+    treffer = _kfz_kennungen(text)       # (anfang, ende)
     for m in _NR_ETIKETT_RE.finditer(text):
         # nur der Zeilenanfang hinter dem Etikett zählt (begrenztes Fenster: eine sehr lange Zeile mit vielen
         # Etiketten würde sonst quadratische Laufzeit kosten, Gutachten EQ-17/PERF-07)
@@ -1550,6 +1641,99 @@ _KARTE_KONTEXT_RE = re.compile(r"(?i:kreditkart|karten-?(?:nr|nummer)|kartennumm
 _IBAN_KOPF_DAVOR_RE = re.compile(r"[A-Za-z]{2}\d{2}[ \t]?$")
 
 
+# Kartenprüfnummer einer Zahlungskarte (CVC/CVV, 3 oder 4 Ziffern): hinter einem eindeutigen Karten-Etikett ("CVC",
+# "CVV2", "CAV", "Kartenprüfnummer", "Prüfnummer der Karte", "Sicherheitscode der Kreditkarte") – hinter "Prüfnummer"
+# oder "Sicherheitscode" allein nur in der Nähe einer Kartennummer oder Kartenangabe. Die Prüfnummer einer TÜV-Plakette,
+# einer Zulassung oder eines Gutachtens ist keine ("TÜV-Prüfnummer 123", "Prüfnummer der Zulassung: 456").
+_CVC_ETIKETT_RE = re.compile(
+    r"(?<![\wäöüß\-])(?:(?i:cvc|cvv)2?|CAV2?|(?i:karten-?prüf(?:nummer|ziffer|code))"
+    r"|(?i:prüfnummer|prüfziffer|prüfcode|sicherheits-?code)[ \t]*\(?[ \t]*(?i:der|ihrer)[ \t]+"
+    r"(?i:(?:kredit|debit|bank|zahlungs|giro|ec)-?)?(?i:karte)[ \t]*\)?)"
+    r"(?:[ \t]*/[ \t]*(?i:cvc|cvv)2?)?(?![\wäöüß])")
+_PRUEFNUMMER_ETIKETT_RE = re.compile(r"(?<![\wäöüß\-])(?i:prüfnummer|prüfziffer|prüfcode|sicherheits-?code)"
+                                     r"(?![\wäöüß\-])")
+_CVC_WERT_RE = re.compile(r"(?<![\d.,/])\d{3,4}(?![\d]|[.,:/]\d)")
+# Kartenangabe in der Nähe einer "Prüfnummer"/eines "Sicherheitscodes" (Kartennummer: Luhn-Prüfung)
+_KARTENANGABE_RE = re.compile(
+    r"(?i:kredit-?kart|karten-?n(?:umme)?r|karteninhaber|zahlungskart|debit-?kart|bankkart|girocard|ec-karte)"
+    r"|(?<![\wäöüß])(?i:visa|master-?card|maestro|american[ \t]+express|amex|diners(?:[ \t]+club)?|jcb)(?![\wäöüß])")
+
+
+def _kartenbezug(text: str, s: int, e: int) -> bool:
+    """Kartenangabe oder Kartennummer in der Zeile der Stelle, den zwei Zeilen darüber oder der Zeile darunter?"""
+    a = s
+    for _ in range(3):
+        a = text.rfind("\n", 0, a)
+        if a < 0:
+            break
+    a = max(0, a + 1)
+    b = text.find("\n", e)
+    if b >= 0:
+        b = text.find("\n", b + 1)
+    fenster = text[a:b if b >= 0 else len(text)]
+    if _KARTENANGABE_RE.search(fenster):
+        return True
+    return any(13 <= len(re.sub(r"\D", "", m.group(0))) <= 19 and _luhn_gueltig(m.group(0))
+               for m in _KARTE_RE.finditer(fenster))
+
+
+# Ein Bezugswort direkt vor "Prüfnummer"/"Sicherheitscode" ordnet die Nummer etwas anderem zu ("TÜV Prüfnummer 123",
+# "Gutachten Prüfnummer 456") – außer einem Funktionswort ("Ihre Prüfnummer") oder einer Kartenangabe ("Visa …")
+_BEZUGSWORT_DAVOR_RE = re.compile(r"(?<![\wäöüß])([A-ZÄÖÜ][\wäöüß]*)[ \t]+$")
+_FUNKTIONSWORT_GROSS = frozenset({"ihre", "ihr", "ihrer", "die", "der", "das", "den", "dem", "eine", "ein", "neue",
+                                  "bitte", "mit", "und", "oder", "zur", "zum", "für", "als", "unter"})
+
+
+def _fremdes_bezugswort(text: str, s: int) -> bool:
+    m = _BEZUGSWORT_DAVOR_RE.search(text, max(0, s - 40), s)
+    return (m is not None and m.group(1).casefold() not in _FUNKTIONSWORT_GROSS
+            and not _KARTENANGABE_RE.search(m.group(1)))
+
+
+def _kartenpruefnummer_spannen(text: str) -> list:
+    aus = []
+    for m in _CVC_ETIKETT_RE.finditer(text):
+        w = wert_hinter_etikett(text, m.end(), _CVC_WERT_RE)
+        if w:
+            aus.append(Stelle(w.start(), w.end(), 0.9))
+    belegt = {(s.start, s.ende) for s in aus}
+    for m in _PRUEFNUMMER_ETIKETT_RE.finditer(text):
+        w = wert_hinter_etikett(text, m.end(), _CVC_WERT_RE)
+        if (w and (w.start(), w.end()) not in belegt and not _fremdes_bezugswort(text, m.start())
+                and _kartenbezug(text, m.start(), w.end())):
+            aus.append(Stelle(w.start(), w.end(), 0.75))
+    return aus
+
+
+# Etiketten mit eigener Wertform (eVB-Nummer, Transferticket, Kartenprüfnummer) für Strukturregeln, die das Etikett in
+# einer anderen Zelle oder als Spaltenkopf finden: (Etikett, Wert, Prüfung des Werts mit "in Versalien geschrieben?")
+_EIGENE_FORMEN = {
+    "evb": (_EVB_ETIKETT_RE, _EVB_WERT_RE, _evb_gueltig),
+    "ticket": (_TICKET_ETIKETT_RE, _TICKET_WERT_RE, _ticket_gueltig),
+    "cvc": (_CVC_ETIKETT_RE, _CVC_WERT_RE, None),
+}
+
+
+def eigene_wertform(etikett: str) -> str | None:
+    """Art der eigenen Wertform eines Etiketts – "evb" (eVB-Nummer), "ticket" (Transferticket), "cvc"
+    (Kartenprüfnummer) – oder None ("Prüfnummer" allein hat keine eigene Form: sie braucht den Kartenbezug)."""
+    e = (etikett or "").strip().rstrip(":").strip()
+    for art, (etikett_re, _, _) in _EIGENE_FORMEN.items():
+        if etikett_re.fullmatch(e):
+            return art
+    return None
+
+
+def eigener_wert(art: str, text: str, s: int, e: int, versalien: bool = True):
+    """(start, ende) des Werts der Art `art` (eigene_wertform) am Anfang von text[s:e] oder None. versalien: ist die
+    Umgebung in Großbuchstaben geschrieben (dann zählen eVB und Transferticket nur mit Ziffer)?"""
+    _, wert_re, pruefen = _EIGENE_FORMEN[art]
+    m = wert_re.match(text, s, e)
+    if m is None or (pruefen is not None and not pruefen(m.group(0), versalien)):
+        return None
+    return m.start(), m.end()
+
+
 def _kreditkarte_spannen(text: str) -> list:
     aus = []
     for m in _KARTE_RE.finditer(text):
@@ -1562,6 +1746,9 @@ def _kreditkarte_spannen(text: str) -> list:
             aus.append(Stelle(m.start(), m.end()))
         elif _KARTE_KONTEXT_RE.search(text[max(0, m.start() - 60):m.start()]):
             aus.append(Stelle(m.start(), m.end(), 0.6, False, HINWEIS_PRUEFZIFFER))
+    if re.search(r"(?i)cv[cv]|cav|prüf|sicherheits", text):
+        aus.extend(_kartenpruefnummer_spannen(text))
+        aus.sort()
     return aus
 
 

@@ -124,6 +124,15 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Nutzung …“) und ein Programmsymbol.
 - **`werkzeuge/selbsttest.py`** (Kommandozeile, nur mit Python-Installation): prüft einen Ordner eigener
   Dokumente und gibt nur Zählwerte aus, nie Inhalte.
+- **Erkennung: Kennungen aus dem Makler-Alltag.** eVB-Nummer (elektronische Versicherungsbestätigung, 7 Zeichen
+  hinter „eVB“, „eVB-Nr.“, „VB-Nummer“, „Versicherungsbestätigung …“) und Transferticket der Kfz-Versicherung
+  werden als `[VERTRAGS-NR]` geschwärzt, die Kartenprüfnummer einer Zahlungskarte (CVC/CVV, „Kartenprüfnummer“)
+  als `[KREDITKARTE]` – „Prüfnummer“ oder „Sicherheitscode“ allein nur neben einer Kartenangabe, nie die Prüfnummer
+  einer TÜV-Plakette, Zulassung oder eines Gutachtens. Der Geburtsname hinter „geb.“, „geborene“ oder
+  „Geburtsname“ bekommt den Platzhalter seiner Person („[PERSON A] geb. [PERSON A]“; trägt ihn auch eine andere
+  Person, `[FAMILIE A]`); Datum und Ort hinter „geb.“, „Gebr.“ und „Geb.“ für Gebäude oder Gebühr bleiben wie
+  bisher. Erkannt in derselben Zeile, in der nächsten Zeile, in der Tabellenzelle bzw. -spalte und auf Scans; die
+  Restrisiko-Prüfung meldet einen lesbar gebliebenen Wert hinter diesen Etiketten (Ausgabe `_PRUEFEN`).
 
 ### Geändert
 - **Prüfziffern sind nur noch ein Indiz:** Eine IBAN mit falscher Prüfziffer wird trotzdem geschwärzt, wenn
@@ -176,6 +185,8 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - Texterkennung: Stürzt sie bei einer Seite ab, reißt sie das Programm nicht mehr mit; nach dem Beenden – auch
   nach einem Absturz des Programms – läuft sie nicht im Hintergrund weiter; mehrseitige Scans werden schneller
   gelesen (10-seitiger Scan auf dem Entwicklungsrechner: 18 statt 46 Sekunden).
+- In „NACHNAME, VORNAME GEB. …“ wurde „GEB“ als Teil des Namens geschwärzt; der Geburtsname dahinter galt als
+  eigene Person.
 - Statuszeile: Nach dem Hinzufügen von Dateien zu einer schon analysierten Liste blieb dort „Dateien werden
   geprüft …“ stehen. Jetzt steht dort, wie viele Dateien noch nicht analysiert sind; kam keine neue Datei
   hinzu, bleibt die Meldung der Analyse stehen.

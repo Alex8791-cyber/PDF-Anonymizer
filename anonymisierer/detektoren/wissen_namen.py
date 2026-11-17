@@ -234,7 +234,10 @@ def _komma_namen(text: str) -> list:
             continue                                       # "Frau Krüger, Max Mustermann …" (Gutachten EQ-10)
         if any(w.casefold() in _KEIN_NAME or _art(w)[4] and not _art(w)[2] for w in nach_woerter):
             continue
-        vor_gekuerzt = len(vor_woerter) == 2 and not (_art(vor_woerter[1])[0] or _versal(vor_woerter[1]))
+        # zweites Wort hinter dem Vornamen nur, wenn es ein Vorname sein kann – nie ein Wort wie "GEB" ("WEBER, ANNA
+        # GEB. SCHULZ": dahinter steht der Geburtsname, namen.geburtsnamen)
+        vor_gekuerzt = len(vor_woerter) == 2 and (vor_woerter[1].casefold() in _KEIN_NAME
+                                                   or not (_art(vor_woerter[1])[0] or _versal(vor_woerter[1])))
         if vor_gekuerzt:
             vor_ende = m.start("vor") + len(vor_woerter[0])
         else:

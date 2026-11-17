@@ -75,7 +75,7 @@ from . import ocr as _ocr
 from .detektoren import Kontext
 from .muster import KATEGORIE_PRIORITAET, KATEGORIEN
 from .namen import (ANREDEN, NAMEN_STOPPLISTE, PARTIKEL, TITEL, finde_personen,  # noqa: F401
-                    lade_ner, ner_fehler)
+                    geburtsname_teilen, lade_ner, ner_fehler)
 from .seitenmodell import (Abgebrochen, dokument_aufbauen, dokument_aus_text, dokument_vorbereiten,
                            fund_schluessel, ganzwort_stellen, ganzwort_stellen_viele, hat_xfa, modus_fuer,
                            woerter_zu_zeilen)
@@ -438,7 +438,9 @@ def _titelwort_ist_name(roh: str, pos: int, anzahl: int) -> bool:
 
 def _name_zerlegen(name: str) -> tuple:
     """(vornamen, nachname) aus einem Namen: Titel/Anreden/Partikel/Suffixe entfernt, 'Nachname, Vorname'
-    erkannt. Bei einem einzelnen Wort ist nachname None und das Wort steht in vornamen (Rolle offen)."""
+    erkannt, ein Geburtsname dahinter abgetrennt ("Anna Weber geb. Schulz" -> Anna, Weber). Bei einem einzelnen
+    Wort ist nachname None und das Wort steht in vornamen (Rolle offen)."""
+    name = geburtsname_teilen(name)[0]
     def tokens(teil):
         aus = []
         liste = teil.split()
@@ -500,6 +502,11 @@ def _bestandteile(name: str) -> list:
     return aus
 
 
+def _neue_person(pos: int) -> dict:
+    """Eintrag einer Person in _Personen: Varianten (Schlüssel -> erste Position), Vornamen, Geburtsnamen."""
+    return {"varianten": {}, "vor": set(), "pos": pos, "texte": {}, "geburt": set()}
+
+
 def _pseudonym(nummer: int) -> str:
     return f"[PERSON {chr(65 + nummer)}]" if nummer < 26 else f"[PERSON {nummer + 1}]"
 
@@ -517,7 +524,9 @@ class _Personen:
     - Buchstaben in der Reihenfolge des ersten Auftretens.
     - Einzelne Wörter: eindeutiger Nachname (auch als Teil genau eines Doppelnamens) -> diese Person;
       Nachname mehrerer Personen (Familie) -> [FAMILIE A]; Vorname -> erste Person damit; sonst eigene Person.
-    - Bestandteile erben das Pseudonym ihrer Person (Nachname einer Familie -> [FAMILIE X])."""
+    - Bestandteile erben das Pseudonym ihrer Person (Nachname einer Familie -> [FAMILIE X]).
+    - Geburtsname (Gruppe "Anna Weber geb. Schulz"): weiterer Nachname dieser Person – allein stehend ihr Pseudonym,
+      trägt ihn auch eine andere Person (als Nach- oder Geburtsnamen), ist er ein Familienname ([FAMILIE X])."""
 
     def __init__(self, varianten: list):
         # varianten: [(schluessel, text, pos, gruppe)] nach Position sortiert
@@ -528,18 +537,22 @@ class _Personen:
         einzel: list = []
         for key, text, pos, gruppe in varianten:
             basis = gruppe or text
+            geburtsname = geburtsname_teilen(basis)[1]
             vor, nach = _name_zerlegen(basis)
             if nach is None and gruppe:
                 vor, nach = _name_zerlegen(text)
+                geburtsname = None
             if nach is None:
                 einzel.append((key, text, pos))
                 continue
             schl = (_schluessel(vor[0]) if vor else "", _schluessel(nach))
-            p = personen.setdefault(schl, {"varianten": {}, "vor": set(), "pos": pos, "texte": {}})
+            p = personen.setdefault(schl, _neue_person(pos))
             p["varianten"][key] = min(p["varianten"].get(key, pos), pos)
             p["texte"].setdefault(key, text)
             p["vor"].update(_schluessel(v) for v in vor)
             p["pos"] = min(p["pos"], pos)
+            if geburtsname:
+                p["geburt"].update(_schluessel(g) for g in geburtsname.split() if g.casefold() not in PARTIKEL)
         # Genitiv-Varianten ("Max Mustermanns Vertrag") mit der Grundform zusammenführen
         for schl in list(personen):
             vor, nach = schl
@@ -550,11 +563,14 @@ class _Personen:
                     ziel["varianten"][k] = min(ziel["varianten"].get(k, pos), pos)
                     ziel["texte"].setdefault(k, quelle["texte"][k])
                 ziel["vor"] |= quelle["vor"]
+                ziel["geburt"] |= quelle["geburt"]
                 ziel["pos"] = min(ziel["pos"], quelle["pos"])
         nach_index: dict = {}
         vor_index: dict = {}
         for schl, p in personen.items():
             nach_index.setdefault(schl[1], set()).add(schl)
+            for g in p["geburt"]:
+                nach_index.setdefault(g, set()).add(schl)     # Geburtsname: weiterer Nachname der Person
             for v in p["vor"]:
                 vor_index.setdefault(v, set()).add(schl)
         einzel_zuordnung: dict = {}          # key -> ("person", schl) | ("familie", nachname)
@@ -584,14 +600,14 @@ class _Personen:
                 einzel_zuordnung[key] = ("person", schl)
             else:
                 schl = ("", s)
-                p = personen.setdefault(schl, {"varianten": {}, "vor": set(), "pos": pos, "texte": {}})
+                p = personen.setdefault(schl, _neue_person(pos))
                 p["varianten"].setdefault(key, pos)
                 p["texte"].setdefault(key, text)
                 p["pos"] = min(p["pos"], pos)
                 nach_index.setdefault(s, set()).add(schl)
                 einzel_zuordnung[key] = ("person", schl)
         reihenfolge = sorted(personen, key=lambda schl: personen[schl]["pos"])
-        familien_namen = {schl[1] for schl in reihenfolge if schl[1] and len(nach_index.get(schl[1], ())) > 1}
+        familien_namen = {n for n, traeger in nach_index.items() if n and len(traeger) > 1}
         # Zuordnung Namensschlüssel -> ("person", schl) | ("familie", nachname)
         self.zuordnung: dict = {}
         for key, (art, wert) in einzel_zuordnung.items():
@@ -608,7 +624,7 @@ class _Personen:
                 else:
                     self.zuordnung[key] = ("person", schl)
             self.namensteile.add(schl[1])
-            self.namensteile |= p["vor"]
+            self.namensteile |= p["vor"] | p["geburt"]
         # Bestandteile (Personen in Reihenfolge des Auftretens; erster Träger gewinnt)
         for schl in reihenfolge:
             p = personen[schl]
@@ -626,8 +642,9 @@ class _Personen:
         self._pos = {schl: personen[schl]["pos"] for schl in personen}
         self._familie_pos = {}
         for schl in reihenfolge:
-            if schl[1] in familien_namen:
-                self._familie_pos.setdefault(schl[1], personen[schl]["pos"])
+            for n in (schl[1], *sorted(personen[schl]["geburt"])):
+                if n in familien_namen:
+                    self._familie_pos.setdefault(n, personen[schl]["pos"])
 
     def pseudonyme(self, schluessel: list) -> dict:
         """Pseudonyme für die tatsächlich verwendeten Namensschlüssel: Buchstaben nur für Personen, die

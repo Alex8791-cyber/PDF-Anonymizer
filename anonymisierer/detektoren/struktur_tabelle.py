@@ -27,8 +27,8 @@ from typing import NamedTuple
 from . import Treffer, detektor
 from .struktur import (_ORG_ROLLEN_RE, _ROH_FUNKTIONSWORT, _ROH_KEIN_WOHNORT, _ROH_ORTSZUSATZ, ABKUERZUNG_RE,
                        ALLE_KATEGORIEN, PARTIKEL, PII_ARTEN, SICHERHEIT_SPALTE, Lage,
-                       _wissen, NR_VORSATZ_RE, datums_spannen, etikett_fuer_text, etiketten,
-                       geburtsdatum_plausibel, ist_kennungsform, kennung_spanne, lage, muster_spannen,
+                       _wissen, NR_VORSATZ_RE, datums_spannen, eigene_wertform, eigener_wert, etikett_fuer_text,
+                       etiketten, geburtsdatum_plausibel, ist_kennungsform, kennung_spanne, lage, muster_spannen,
                        namen_spanne, ort_spanne, plz_ort_spannen, strasse_spanne, ueberlappung, _muster,
                        _vergleichsform)
 
@@ -342,7 +342,7 @@ def _wert_fuer_spalte(text: str, s: int, e: int, sp: Spalte) -> list:
     """Werte eines Zellteils nach der Art der Spalte (leer, wenn nichts Passendes darin steht)."""
     arten = sp.arten
     if "kennung" in arten:
-        return _kennung(text, s, e, sp.kategorie)
+        return _kennung(text, s, e, sp.kategorie, sp.eintrag)
     if "datum_geburt" in arten:
         v = _vergleichsform(sp.eintrag)
         if re.search(r"(?:ort|\bin)$", v) and not re.search(r"dat|tag", v):
@@ -449,13 +449,16 @@ def _namensbeleg(name: str) -> bool:
     return False
 
 
-def _kennung(text: str, s: int, e: int, kategorie: str | None) -> list:
+def _kennung(text: str, s: int, e: int, kategorie: str | None, eintrag: str = "") -> list:
     i = s
     while i < e and text[i] in " \t":
         i += 1
     m = NR_VORSATZ_RE.match(text, i, e)
     if m and m.end() < e:
         i = m.end()                                   # "Nr. KH 0815 4471 2" unter "Versicherungsschein-"
+    art = eigene_wertform(eintrag)                    # eVB, Transferticket, Kartenprüfnummer: eigene Wertform,
+    if art is not None:                               # in einer Spalte ohne Ziffer nie (Status wie "ERTEILT")
+        return [(w.start, w.ende, w.kategorie, None) for w in eigener_wert(text, i, e, art, kategorie, True)]
     sp = kennung_spanne(text, i, e, 3)
     if sp is None:
         return []

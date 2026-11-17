@@ -103,14 +103,14 @@ steht unter [Was NICHT erkannt wird](#was-nicht-erkannt-wird).
 <!-- TABELLE-ANFANG -->
 | Kategorie | Beispiel | Wird ersetzt durch | Angehakt ab Stufe | Hinweis |
 |---|---|---|---|---|
-| Personennamen (KI-Erkennung) | Max Mustermann | `[PERSON A], [PERSON B] …` | Ausgewogen | KI-Modell (spaCy), Namenslisten und Regeln; gleiche Person = gleicher Platzhalter im Dokument |
+| Personennamen (KI-Erkennung) | Max Mustermann | `[PERSON A], [PERSON B] …` | Ausgewogen | KI-Modell (spaCy), Namenslisten und Regeln; gleiche Person = gleicher Platzhalter im Dokument – auch für den Geburtsnamen hinter „geb.“/„geborene“ („Anna Weber geb. Schulz“) |
 | IBANs | DE89 3704 0044 0532 0130 00 | `[IBAN]` | Ausgewogen | auch mit falscher Prüfziffer, wenn sie eindeutig wie eine IBAN aussieht (Hinweis „Lesefehler?“) |
 | E-Mail-Adressen | max.mustermann@example.de | `[E-MAIL]` | Ausgewogen |  |
 | Telefonnummern | 0171 2345678 | `[TELEFON]` | Ausgewogen |  |
 | Geburtsdaten | geb. am 02.09.1983 | `[GEB-DATUM]` | Ausgewogen | hinter „geb.“, „Geburtsdatum“ … oder hinter einem Namen mit Komma, Stern oder Klammer („Max Mustermann, 02.09.1983“); in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“ |
 | Straße + Hausnummer, Postfach | Hauptstraße 12a | `[ADRESSE]` | Ausgewogen |  |
 | PLZ + Ort | 90402 Nürnberg | `[PLZ ORT]` | Ausgewogen |  |
-| Vertrags-/Kunden-/Schein-/Aktenzeichen | Versicherungsschein-Nr. LV-2024-887766 | `[VERTRAGS-NR]` | Ausgewogen | Nummer hinter einem Etikett wie „Vertrags-Nr.“ |
+| Vertrags-/Kunden-/Schein-/Aktenzeichen | Versicherungsschein-Nr. LV-2024-887766 | `[VERTRAGS-NR]` | Ausgewogen | Nummer hinter einem Etikett wie „Vertrags-Nr.“; auch eVB-Nummer (elektronische Versicherungsbestätigung) und Transferticket der Kfz-Versicherung |
 | Sozialversicherungsnummern | 12 345678 A 123 | `[SV-NR]` | Ausgewogen |  |
 | Steuer-IDs | 91064389278 | `[STEUER-ID]` | Ausgewogen | ohne Beschriftung nur mit gültiger Prüfziffer |
 | Steuernummern / USt-IdNr. | Steuernummer: 181/815/08155 | `[STEUER-NR]` | Ausgewogen | ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma |
@@ -121,7 +121,7 @@ steht unter [Was NICHT erkannt wird](#was-nicht-erkannt-wird).
 | Ausweis-/Pass-/Führerscheinnummern | Ausweisnummer: L01X00T47 | `[AUSWEIS-NR]` | Ausgewogen | mit Etikett; Ausweis- und Passnummern auch ohne Etikett, wenn die Prüfziffer stimmt; auf Ausweiskopien auch die maschinenlesbare Zone |
 | SEPA-Mandatsreferenzen | Mandatsreferenz MR-2024-0815 | `[MANDATSREFERENZ]` | Ausgewogen | nur hinter einem Etikett |
 | BIC (bei IBAN oder Etikett) | COBADEFFXXX | `[BIC]` | Ausgewogen | hinter „BIC“, neben einer IBAN oder in eindeutiger Form (11 Zeichen auf „XXX“ oder mit Ziffer im Ortscode) |
-| Kreditkartennummern | 4111 1111 1111 1111 | `[KREDITKARTE]` | Ausgewogen |  |
+| Kreditkartennummern | 4111 1111 1111 1111 | `[KREDITKARTE]` | Ausgewogen | auch die Kartenprüfnummer (CVC/CVV) hinter ihrem Etikett; „Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder Gutachten-Prüfnummer) |
 | Ausländische Anschriften und Kennzeichen | Kerkstraat 12, 1017 GC Amsterdam | `[AUSLAND]` | Hoch |  |
 | Orte ohne PLZ (Ort-Datum-Zeile, Geburtsort) | Musterstadt, 03.04.2025 | `[ORT]` | Hoch | Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“ |
 | Beruf (bei Personen) | Beruf: Elektriker | `[BERUF]` | Hoch | hinter „Beruf:“ oder im Satz („arbeitet als …“) |
