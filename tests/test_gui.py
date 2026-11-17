@@ -1310,8 +1310,10 @@ def test_beenden_fragt_bei_ausgaben_ohne_freigabe(app, umgebung, monkeypatch, di
     assert art == "askyesno" and titel == gui.FREIGABE_OFFEN_TITEL == "Freigabe noch offen"
     assert text.startswith("2 Ausgaben warten noch auf Ihre Freigabe:\n")
     assert "  • KundeA/Police.pdf → anonym_01_PRUEFEN.pdf\n  • KundeB/Police.pdf → anonym_01_PRUEFEN.pdf" in text
-    assert ("Nach dem Beenden lassen sie sich nicht mehr freigeben – dafür müssten Sie die Originale erneut "
-            "analysieren und schwärzen.") in text
+    # nach dem Beenden nicht mehr freizugeben; erneutes Analysieren und Schwärzen ergibt NEUE Ausgaben (die alten
+    # _PRUEFEN-Dateien bleiben unfreigegeben liegen) – der Satz darf nicht wie „so lassen sie sich freigeben“ klingen
+    assert ("Nach dem Beenden lassen sie sich nicht mehr freigeben. Dann bleibt nur, die Originale erneut zu "
+            "analysieren und zu schwärzen – das ergibt neue Ausgaben.") in text
     assert "Trotzdem beenden?" in text and "„Nein“: Das Programm bleibt offen." in text
     assert optionen[-1].get("default") == gui.messagebox.NO and optionen[-1].get("icon") == "warning"
     # „Nein“ (auch Enter): das Fenster bleibt offen, nichts ist aufgeräumt, Freigeben geht weiter
@@ -1340,7 +1342,8 @@ def test_beenden_freigegebene_ausgaben_zaehlen_nicht(app, umgebung, monkeypatch,
     assert titel == gui.FREIGABE_OFFEN_TITEL and fenster_existiert(app.root)
     assert text.startswith("Eine Ausgabe wartet noch auf Ihre Freigabe:\n  • KundeB/Police.pdf → anonym_01_PRUEFEN.pdf")
     assert "KundeA" not in text
-    assert "Nach dem Beenden lässt sie sich nicht mehr freigeben – dafür müssten Sie das Original erneut" in text
+    assert ("Nach dem Beenden lässt sie sich nicht mehr freigeben. Dann bleibt nur, das Original erneut zu "
+            "analysieren und zu schwärzen – das ergibt eine neue Ausgabe.") in text
     # auch die zweite freigegeben: nichts mehr offen – keine Rückfrage, das Fenster schließt
     assert app.ausgabe_freigeben(b) is not None and app.offene_freigaben() == []
     vorher = len(dialoge.liste)
@@ -1417,6 +1420,80 @@ def test_beenden_fragt_nicht_doppelt_bei_zweitem_klick(app, umgebung, monkeypatc
     assert fragen == [gui.FREIGABE_OFFEN_TITEL] * 2 and not fenster_existiert(app.root) and app.beendet
     fehlerlog = umgebung["fehlerlog"]
     assert not fehlerlog.exists() or "TclError" not in fehlerlog.read_text(encoding="utf-8")
+
+
+def test_beenden_nicht_erreichbare_ausgabe_blockiert_nicht(app, umgebung, monkeypatch, dialoge):
+    """Befund: Path.exists() übergeht nur wenige Fehler (Python 3.12: ENOENT, ENOTDIR, EBADF, ELOOP) und reicht unter
+    Windows z. B. „Der angegebene Netzwerkname ist nicht mehr verfügbar“ (WinError 64, als errno 22) und „Zugriff
+    verweigert“ (errno 13) weiter. Dann kam bei jedem Klick auf das X „Unerwarteter Fehler“, und das Programm ließ
+    sich nicht mehr beenden. Eine nicht erreichbare Ausgabe zählt jetzt nicht als offene Freigabe (wie bei
+    os.path.exists). Nachgestellt wird Path.exists() selbst – unabhängig davon, wie es intern prüft."""
+    a, b = _ausgaben_zu_pruefen(app, umgebung, monkeypatch, "KundeA", "KundeB")
+    fehler = {app.ausgaben[a]["pfad"]: OSError(22, "Der angegebene Netzwerkname ist nicht mehr verfügbar")}
+    echt = Path.exists
+
+    def exists(self, *args, **kw):
+        if self in fehler:
+            raise fehler[self]
+        return echt(self, *args, **kw)
+    monkeypatch.setattr(Path, "exists", exists)
+    vorher = len(dialoge.liste)
+    dialoge.antwort = False
+    app.root.tk.call(app.root.protocol("WM_DELETE_WINDOW"))             # Klick auf das X
+    assert [d[:2] for d in dialoge.liste[vorher:]] == [("askyesno", gui.FREIGABE_OFFEN_TITEL)]
+    assert dialoge.liste[-1][2].startswith("Eine Ausgabe wartet noch auf Ihre Freigabe:\n  • KundeB/Police.pdf")
+    assert "KundeA" not in dialoge.liste[-1][2] and fenster_existiert(app.root)
+    assert app.offene_freigaben() == [b]
+    # auch die zweite Ausgabe ist nicht mehr erreichbar: keine Rückfrage, das Fenster schließt beim ersten Klick
+    fehler[app.ausgaben[b]["pfad"]] = PermissionError(13, "Zugriff verweigert")
+    app.root.tk.call(app.root.protocol("WM_DELETE_WINDOW"))
+    assert len(dialoge.liste) == vorher + 1 and not fenster_existiert(app.root) and app.beendet
+    assert "Unerwarteter Fehler" not in [d[1] for d in dialoge.liste]
+
+
+def test_beenden_fehler_in_der_freigabe_pruefung_blockiert_nicht(app, umgebung, monkeypatch, dialoge):
+    """Die Rückfrage ist nur ein Hinweis: Scheitert schon die Prüfung (hier nachgestellt), steht der Fehler in
+    fehler.log, und das Programm wird wie früher beendet – ohne Rückfrage und ohne „Unerwarteter Fehler“."""
+    _ausgaben_zu_pruefen(app, umgebung, monkeypatch, "Kunde")
+
+    def kaputt():
+        raise RuntimeError("Prüfung gescheitert")
+    monkeypatch.setattr(app, "offene_freigaben", kaputt)
+    vorher = len(dialoge.liste)
+    app.root.tk.call(app.root.protocol("WM_DELETE_WINDOW"))
+    assert len(dialoge.liste) == vorher and not fenster_existiert(app.root) and app.beendet
+    assert "RuntimeError: Prüfung gescheitert" in umgebung["fehlerlog"].read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("beenden", [False, True], ids=["lauf_nein", "lauf_ja"])
+def test_beenden_lauf_beginnt_waehrend_der_freigabe_frage(app, umgebung, monkeypatch, dialoge, beenden):
+    """Unter Windows bleibt ein Vorschau-Fenster bedienbar, solange „Freigabe noch offen“ gefragt wird – dort kann ein
+    Lauf beginnen („Markierte nachschwärzen“). „Ja“ heißt dann nicht, diesen Lauf ungefragt abzubrechen: Es folgt
+    „Lauf läuft noch“. Früher schloss das Fenster sofort, und der Lauf wurde nicht abgebrochen."""
+    _ausgaben_zu_pruefen(app, umgebung, monkeypatch, "Kunde")
+    weiter = threading.Event()
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse({}, warten=weiter))
+    fragen, abbruch = [], []
+
+    def askyesno(titel=None, nachricht=None, **kw):
+        fragen.append(titel)
+        if titel != gui.FREIGABE_OFFEN_TITEL:
+            return beenden                                              # „Lauf läuft noch“
+        app.analysieren()                                               # der Lauf beginnt, während die Frage offen ist
+        assert pumpe(app.root, lambda: app.ocr is not None, timeout=5)
+        abbruch.append(app.abbruch)
+        return True                                                     # „Trotzdem beenden?“ – Ja
+    monkeypatch.setattr(gui.messagebox, "askyesno", askyesno)
+    app.schliessen()
+    assert fragen == [gui.FREIGABE_OFFEN_TITEL, "Lauf läuft noch"]
+    if beenden:                                                         # wie jedes Beenden während eines Laufs
+        assert not fenster_existiert(app.root) and app.beendet
+        assert abbruch[0].is_set() and FakeOcr.instanzen[-1].abgebrochen
+        weiter.set()
+    else:                                                               # Fenster bleibt offen, Lauf läuft weiter
+        assert fenster_existiert(app.root) and not app.beendet and app.laeuft and not abbruch[0].is_set()
+        weiter.set()
+        assert pumpe(app.root, lambda: not app.laeuft, timeout=30)
 
 
 # ----------------------------------------------------------------------

@@ -963,6 +963,7 @@ class AnonymisiererApp:
         self.arbeitskopien: dict[Path, dict] = {}
         self.nicht_geprueft: dict[Path, str] = {}        # Datei -> Grund (keine PDF, unlesbar, ohne Kennwort …)
         self._auswahl_ungeprueft: dict[Path, str] | None = None   # davon aus der gerade laufenden Auswahl
+        self._auswahl_dateien: list[Path] = []           # alle Dateien der gerade laufenden Auswahl (für einen Abbruch)
         self._hinzufuegen_laeuft = False
         # Schließen, während eine Auswahl auf eine Rückfrage wartet (Kennwort, Fotos …): erst die Auswahl sauber
         # abbrechen (keine weitere Arbeitskopie), dann schließen (Befund Runde 2)
@@ -1969,9 +1970,14 @@ class AnonymisiererApp:
                 teile.append(self._kurzname(p))
         return ", ".join(teile) + (f" und {len(pfade) - anzahl} weitere" if len(pfade) > anzahl else "")
 
+    def _ausgaben_namen(self, ausgaben: list) -> str:
+        return ", ".join(f"„{self._kurzname(p)}“" for p in ausgaben[:3]) + (" …" if len(ausgaben) > 3 else "")
+
     def _ausgaben_bestaetigen(self, ausgaben: list) -> bool:
-        """M-63: Datei ist schon eine Ausgabe des Programms – warnen und fragen."""
-        namen = ", ".join(f"„{self._kurzname(p)}“" for p in ausgaben[:3]) + (" …" if len(ausgaben) > 3 else "")
+        """M-63: Datei ist schon eine Ausgabe des Programms – warnen und fragen. „Trotzdem hinzugefügt“ meldet
+        _pdfs_hinzufuegen_ausfuehren erst, wenn die Dateien wirklich in der Liste stehen (die Auswahl kann danach
+        noch abgebrochen werden)."""
+        namen = self._ausgaben_namen(ausgaben)
         einzahl = len(ausgaben) == 1
         text = (f"{namen} {'ist' if einzahl else 'sind'} bereits {'eine Ausgabe' if einzahl else 'Ausgaben'} "
                 f"dieses Programms (Name „anonym_…“ oder Ordner „{dateien.AUSGABE_ORDNER}“).\n\n"
@@ -1979,9 +1985,7 @@ class AnonymisiererApp:
                 f"erneut zu bearbeiten, legt eine weitere Ausgabe in „{dateien.AUSGABE_ORDNER}\\"
                 f"{dateien.AUSGABE_ORDNER}“ an.\n\nTrotzdem hinzufügen?")
         ja = self._frage("Bereits anonymisierte Datei", text, warnung=True, standard_nein=True)
-        if ja:
-            self._log(f"ℹ {namen}: bereits Ausgabe(n) des Programms – auf Wunsch trotzdem hinzugefügt.", "hinweis")
-        else:
+        if not ja:
             self._log(f"ℹ {namen}: bereits Ausgabe(n) des Programms – nicht hinzugefügt.", "hinweis")
         return ja
 
@@ -2073,24 +2077,48 @@ class AnonymisiererApp:
             return
         self._hinzufuegen_laeuft = True
         self._auswahl_ungeprueft = {}
+        self._auswahl_dateien = []
         try:
             self._pdfs_hinzufuegen_ausfuehren(pfade)
         finally:
+            abgebrochen = self._schliessen_angefordert and not self.beendet
+            verworfen = [p for p in self._auswahl_dateien if p not in self.dateien] if abgebrochen else []
             self._hinzufuegen_laeuft = False
             self._auswahl_ungeprueft = None
+            self._auswahl_dateien = []
             self._beschaeftigt(False)
-            if self._schliessen_angefordert and not self.beendet:
+            if abgebrochen:
                 # Das Fenster wurde während einer Rückfrage geschlossen: jetzt, da die Auswahl abgebrochen und ihre
-                # Arbeitskopien gelöscht sind, wirklich schließen (nach dem laufenden Tk-Ereignis)
+                # Arbeitskopien gelöscht sind, wirklich schließen (nach dem laufenden Tk-Ereignis). Bleibt das
+                # Programm doch offen („Freigabe noch offen“ → „Nein“), nennt _schliessen_nachholen die Dateien.
                 try:
-                    self.root.after_idle(self._schliessen_nachholen)
+                    self.root.after_idle(self._schliessen_nachholen, verworfen)
                 except tk.TclError:
-                    self._schliessen_nachholen()
+                    self._schliessen_nachholen(verworfen)
 
-    def _schliessen_nachholen(self):
+    def _schliessen_nachholen(self, verworfen=()):
         self._schliessen_angefordert = False
         if not self.beendet:
             self.schliessen()
+        if not self.beendet:
+            # „Freigabe noch offen“ → „Nein“: Das Programm bleibt offen, die Auswahl aber ist abgebrochen
+            self._auswahl_abgebrochen_melden(list(verworfen))
+
+    def _auswahl_abgebrochen_melden(self, verworfen: list):
+        """Die Auswahl wurde abgebrochen, weil das Fenster während einer Rückfrage geschlossen wurde (Kennwort, Fotos
+        …), das Programm blieb dann aber offen: Keine Datei der Auswahl steht in der Liste. Das muss sichtbar sein –
+        in Statuszeile, Hinweiszeile und Protokoll und als „NICHT geprüft“ in den Abschlussdialogen (R-10)."""
+        for pfad in verworfen:
+            self._nicht_geprueft_merken(pfad, "Hinzufügen abgebrochen")
+        anzahl = f"{len(verworfen)} Datei(en)"
+        namen = f" – {self._namen_liste(verworfen)}" if verworfen else ""
+        self._status(f"⚠ Hinzufügen abgebrochen – {anzahl} NICHT in der Liste (siehe Protokoll). Bitte erneut "
+                     f"hinzufügen.")
+        self.datei_hinweis.config(text=f"Hinzufügen abgebrochen · insgesamt {len(self.dateien)} Datei(en). ⚠ {anzahl} "
+                                       f"der letzten Auswahl stehen NICHT in der Liste und werden NICHT geprüft – "
+                                       f"bitte erneut hinzufügen.", fg=FARBE_WARNUNG)
+        self._log(f"⚠ Hinzufügen abgebrochen: {anzahl} der letzten Auswahl stehen NICHT in der Liste und werden NICHT "
+                  f"geprüft{namen}. Bitte erneut hinzufügen.", "warnung", zaehlen=False)
 
     def _auswahl_abgebrochen(self) -> bool:
         """Wurde das Fenster während der Auswahl geschlossen? Dann keine weitere Datei und keine Arbeitskopie mehr."""
@@ -2113,12 +2141,17 @@ class AnonymisiererApp:
         gruende = bericht.get("gruende", {})
         teile = []
         kopien: dict[Path, dict] = {}
+        # Wird die Auswahl abgebrochen (Fenster während einer Rückfrage geschlossen), fehlen alle diese Dateien in der
+        # Liste – _auswahl_abgebrochen_melden nennt sie, falls das Programm dann doch offen bleibt
+        self._auswahl_dateien = [p for art in ("pdfs", "pdf_ohne_endung", "bilder", "uebersprungen", "keine_pdf",
+                                               "nicht_lesbar") for p in bericht.get(art, []) if p not in self.dateien]
 
         # M-63: einzeln gewählte Ausgaben nur nach Rückfrage
         pdf_kandidaten = [p for p in bericht["pdfs"] if p not in self.dateien]
         ausgaben = [p for p in bericht.get("ausgaben_einzeln", []) if p in pdf_kandidaten]
         if ausgaben and not self._ausgaben_bestaetigen(ausgaben):
             pdf_kandidaten = [p for p in pdf_kandidaten if p not in ausgaben]
+            self._auswahl_dateien = [p for p in self._auswahl_dateien if p not in ausgaben]
             teile.append(f"{len(ausgaben)} Ausgabe(n) nicht hinzugefügt")
         if self._auswahl_abgebrochen():
             return
@@ -2166,8 +2199,6 @@ class AnonymisiererApp:
                                                     else "nicht entschlüsselbar")
                         continue
                     kopien[pdf] = eintrag
-                    self._log(f"ℹ {self._kurzname(pdf)}: mit Kennwort geöffnet – geprüft wird eine Kopie ohne "
-                              f"Kennwort; auch die Ausgabedatei hat KEIN Kennwort.", "hinweis")
                 elif pdf in ohne_endung:
                     ziel = None
                     try:
@@ -2196,6 +2227,10 @@ class AnonymisiererApp:
                 continue
             if pdf in kopien:
                 self.arbeitskopien[pdf] = kopien[pdf]
+                if kopien[pdf].get("art") == "entschluesselt":
+                    # erst hier melden, nicht schon beim Entschlüsseln: eine abgebrochene Auswahl kommt nie hierher
+                    self._log(f"ℹ {self._kurzname(pdf)}: mit Kennwort geöffnet – geprüft wird eine Kopie ohne "
+                              f"Kennwort; auch die Ausgabedatei hat KEIN Kennwort.", "hinweis")
             self.nicht_geprueft.pop(pdf, None)          # z. B. jetzt mit Kennwort: doch geprüft
             self.dateien.append(pdf)
             self._datei_zeile_einfuegen(pdf)
@@ -2206,6 +2241,10 @@ class AnonymisiererApp:
         self._beschriftungen_aktualisieren()
 
         # Meldungen zur Auswahl zählen nicht als Warnung eines Laufs (GR-07)
+        uebernommen = [p for p in ausgaben if p in self.dateien]
+        if uebernommen:                                 # M-63 „Ja“ – erst jetzt: die Dateien stehen in der Liste
+            self._log(f"ℹ {self._ausgaben_namen(uebernommen)}: bereits Ausgabe(n) des Programms – auf Wunsch "
+                      f"trotzdem hinzugefügt.", "hinweis")
         teile.insert(0, f"{neu} PDF-Datei(en) hinzugefügt" if neu else "Keine neue PDF-Datei")
         if bilder_neu:
             teile.insert(1, f"{bilder_neu} Bild(er) als PDF übernommen")
@@ -2886,9 +2925,16 @@ class AnonymisiererApp:
         self.vorschau_oeffnen(kandidaten[0])
 
     def ausgabe_vorhanden(self, pdf: Path) -> bool:
+        """Liegt die Ausgabe dieser Sitzung („fertig“ oder „pruefen“) noch da? Eine nicht erreichbare Ausgabe
+        (Netzlaufwerk getrennt, Zugriff verweigert …) gilt wie bei os.path.exists als nicht vorhanden: Path.exists()
+        reicht solche Fehler weiter – beim Schließen ließe sich das Programm dann nicht mehr beenden."""
         eintrag = self.ausgaben.get(pdf)
-        return bool(eintrag) and eintrag.get("pfad") is not None and eintrag["status"] in ("fertig", "pruefen") \
-            and Path(eintrag["pfad"]).exists()
+        if not eintrag or eintrag.get("pfad") is None or eintrag["status"] not in ("fertig", "pruefen"):
+            return False
+        try:
+            return Path(eintrag["pfad"]).exists()
+        except OSError:
+            return False
 
     def vorschau_oeffnen(self, pdf: Path, seite: int | None = None, modus: str | None = None, markieren=None):
         """Öffnet (oder holt nach vorn) das Vorschau-Fenster einer Datei. modus: "vorher" (geplante Schwärzung)
@@ -3448,34 +3494,48 @@ class AnonymisiererApp:
 
     def _beenden_trotz_offener_freigaben(self) -> bool:
         """Warten Ausgaben dieser Sitzung noch auf die Freigabe, einmal nachfragen (Enter = „Nein“, das Fenster bleibt
-        offen). Freigeben geht nur in dieser Sitzung (offene_freigaben). True: beenden."""
-        offen = self.offene_freigaben()
-        if not offen:
-            return True
+        offen). Freigeben geht nur in dieser Sitzung (offene_freigaben). True: beenden. Die Rückfrage ist nur ein
+        Hinweis: Scheitert schon die Prüfung, steht das in fehler.log, und das Programm wird trotzdem beendet."""
         if self._beenden_frage_offen:
             # erneut geschlossen, während die Frage noch offen ist (unter Linux erreicht das X der Titelleiste das
             # Fenster trotz modaler Meldung): nicht ein zweites Mal fragen – es gilt die Antwort auf die offene Frage
             return False
-        einzahl = len(offen) == 1
-        zeilen = [f"  • {self._anzeigename(p)} → {Path(self.ausgaben[p]['pfad']).name}" for p in offen[:5]]
-        if len(offen) > 5:
-            zeilen.append(f"  … und {len(offen) - 5} weitere")
-        wartet = "Eine Ausgabe wartet" if einzahl else f"{len(offen)} Ausgaben warten"
-        lassen, originale = ("lässt", "das Original") if einzahl else ("lassen", "die Originale")
-        text = (f"{wartet} noch auf Ihre Freigabe:\n" + "\n".join(zeilen) + "\n\n"
-                f"Nach dem Beenden {lassen} sie sich nicht mehr freigeben – dafür müssten Sie {originale} erneut "
-                "analysieren und schwärzen.\n\nTrotzdem beenden?\n\n"
-                "„Nein“: Das Programm bleibt offen. Prüfen und freigeben können Sie in der Vorschau (Doppelklick "
-                "auf die Datei).")
+        try:
+            offen = self.offene_freigaben()
+            text = self._freigabe_offen_text(offen) if offen else ""
+        except Exception:
+            try:
+                dateien.fehler_protokollieren(*sys.exc_info())
+            except Exception:
+                pass
+            return True
+        if not offen:
+            return True
         self._beenden_frage_offen = True
         try:
             return self._frage(FREIGABE_OFFEN_TITEL, text, warnung=True, standard_nein=True)
         finally:
             self._beenden_frage_offen = False
 
+    def _freigabe_offen_text(self, offen: list) -> str:
+        """Text der Rückfrage „Freigabe noch offen“: die betroffenen Dateien und was nach dem Beenden noch geht."""
+        einzahl = len(offen) == 1
+        zeilen = [f"  • {self._anzeigename(p)} → {Path(self.ausgaben[p]['pfad']).name}" for p in offen[:5]]
+        if len(offen) > 5:
+            zeilen.append(f"  … und {len(offen) - 5} weitere")
+        wartet = "Eine Ausgabe wartet" if einzahl else f"{len(offen)} Ausgaben warten"
+        danach = ("Nach dem Beenden lässt sie sich nicht mehr freigeben. Dann bleibt nur, das Original erneut zu "
+                  "analysieren und zu schwärzen – das ergibt eine neue Ausgabe." if einzahl else
+                  "Nach dem Beenden lassen sie sich nicht mehr freigeben. Dann bleibt nur, die Originale erneut zu "
+                  "analysieren und zu schwärzen – das ergibt neue Ausgaben.")
+        return (f"{wartet} noch auf Ihre Freigabe:\n" + "\n".join(zeilen) + f"\n\n{danach}\n\nTrotzdem beenden?\n\n"
+                "„Nein“: Das Programm bleibt offen. Prüfen und freigeben können Sie in der Vorschau (Doppelklick "
+                "auf die Datei).")
+
     def schliessen(self):
-        """Fenster schließen (Rückfrage, solange ein Lauf aktiv ist, sonst, solange Ausgaben noch auf die Freigabe
-        warten); Einstellungen sichern, Sperre freigeben.
+        """Fenster schließen; Einstellungen sichern, Sperre freigeben. Vorher fragt es nach: ohne laufenden Lauf,
+        solange Ausgaben dieser Sitzung noch auf die Freigabe warten („Freigabe noch offen“), und solange ein Lauf
+        aktiv ist („Lauf läuft noch“ – auch für einen Lauf, der erst während der ersten Frage begonnen hat).
         Wartet gerade eine Auswahl auf eine Rückfrage (Kennwort, Fotos …), wird sie zuerst abgebrochen – erst danach
         schließt das Fenster, damit keine (entschlüsselte) Arbeitskopie mehr entsteht oder liegen bleibt."""
         if self.beendet:
@@ -3486,7 +3546,11 @@ class AnonymisiererApp:
             if dialog is not None:
                 dialog.abbrechen()                      # wie „Überspringen“; _pdfs_hinzufuegen schließt danach
             return
+        if not self.laeuft and not self._beenden_trotz_offener_freigaben():
+            return
         if self.laeuft:
+            # auch ein Lauf, der erst während der Rückfrage „Freigabe noch offen“ begonnen hat (unter Windows bleibt ein
+            # Vorschau-Fenster dabei bedienbar: „Markierte nachschwärzen“) – „Ja“ dort bricht ihn nicht ungefragt ab
             antwort = messagebox.askyesno(
                 "Lauf läuft noch",
                 "Es läuft noch eine Analyse oder Schwärzung. Wirklich beenden?\n\n"
@@ -3496,8 +3560,6 @@ class AnonymisiererApp:
             if not antwort:
                 return
             self.abbrechen()
-        elif not self._beenden_trotz_offener_freigaben():
-            return
         try:
             self.einstellungen_speichern()
         except Exception:
