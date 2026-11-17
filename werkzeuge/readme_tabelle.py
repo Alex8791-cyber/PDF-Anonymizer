@@ -69,9 +69,9 @@ ERLAEUTERUNG = {
                "Ausweiskopien auch die maschinenlesbare Zone",
     "mandat": "nur hinter einem Etikett",
     "bic": "hinter „BIC“, neben einer IBAN oder in eindeutiger Form (11 Zeichen auf „XXX“ oder mit Ziffer im Ortscode)",
-    "kreditkarte": "auch die Kartenprüfnummer (CVC/CVV, „CVC-Code“) hinter ihrem Etikett – nur dort, nicht dieselben "
-                   "Ziffern an anderer Stelle; „Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder "
-                   "Gutachten-Prüfnummer)",
+    "kreditkarte": "auch die Kartenprüfnummer (CVC/CVV, „Kartenprüfnr.“, „CID“) hinter ihrem Etikett und in "
+                   "Kartendaten („…, gültig bis 12/27, 739“) – nur dort, nicht dieselben Ziffern an anderer Stelle; "
+                   "„Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder Gutachten-Prüfnummer)",
     "ort": "Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“",
     "beruf": "hinter „Beruf:“ oder im Satz („arbeitet als …“)",
     "arbeitgeber": "hinter „Arbeitgeber:“ oder im Satz; bekannte Versicherer, Banken und Behörden bleiben stehen",

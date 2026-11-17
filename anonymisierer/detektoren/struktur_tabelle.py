@@ -27,10 +27,10 @@ from typing import NamedTuple
 from . import Treffer, detektor
 from .struktur import (_ORG_ROLLEN_RE, _ROH_FUNKTIONSWORT, _ROH_KEIN_WOHNORT, _ROH_ORTSZUSATZ, ABKUERZUNG_RE,
                        ALLE_KATEGORIEN, PARTIKEL, PII_ARTEN, SICHERHEIT_SPALTE, Lage,
-                       _wissen, NR_VORSATZ_RE, datums_spannen, eigene_wertform, eigener_wert, etikett_fuer_text,
-                       etiketten, geburtsdatum_plausibel, ist_kennungsform, kennung_spanne, lage, muster_spannen,
-                       namen_spanne, ort_spanne, plz_ort_spannen, strasse_spanne, ueberlappung, _muster,
-                       _vergleichsform)
+                       _wissen, NR_VORSATZ_RE, allgemein_hinter, allgemeiner_wert_passt, datums_spannen,
+                       eigene_wertform, eigener_wert, etikett_fuer_text, etiketten, geburtsdatum_plausibel,
+                       ist_kennungsform, kennung_spanne, lage, muster_spannen, namen_spanne, ort_spanne,
+                       plz_ort_spannen, strasse_spanne, ueberlappung, _muster, _vergleichsform)
 
 QUELLE = "struktur.tabelle"
 _EINHEITEN = frozenset({"eur", "euro", "€", "%", "p.a.", "chf", "usd", "gbp", "mtl.", "monatlich", "jährlich",
@@ -338,11 +338,12 @@ def _datenreihen(text: str, reihen: list, i_kopf: int, tab: _Tabelle, h: float, 
 _ETIKETT_DOPPELPUNKT_RE = re.compile(r"[A-Za-zÄÖÜäöüß)][ ]?:(?:[ \t]|$)")
 
 
-def _wert_fuer_spalte(text: str, s: int, e: int, sp: Spalte) -> list:
-    """Werte eines Zellteils nach der Art der Spalte (leer, wenn nichts Passendes darin steht)."""
+def _wert_fuer_spalte(text: str, s: int, e: int, sp: Spalte, karten_tabelle: bool = False) -> list:
+    """Werte eines Zellteils nach der Art der Spalte (leer, wenn nichts Passendes darin steht). karten_tabelle: die
+    Tabelle hat eine Spalte für Kartennummern (dann ist "Prüfnr." die Kartenprüfnummer)."""
     arten = sp.arten
     if "kennung" in arten:
-        return _kennung(text, s, e, sp.kategorie, sp.eintrag)
+        return _kennung(text, s, e, sp.kategorie, sp.eintrag, karten_tabelle)
     if "datum_geburt" in arten:
         v = _vergleichsform(sp.eintrag)
         if re.search(r"(?:ort|\bin)$", v) and not re.search(r"dat|tag", v):
@@ -449,19 +450,27 @@ def _namensbeleg(name: str) -> bool:
     return False
 
 
-def _kennung(text: str, s: int, e: int, kategorie: str | None, eintrag: str = "") -> list:
+def _kennung(text: str, s: int, e: int, kategorie: str | None, eintrag: str = "", karten_tabelle: bool = False) -> list:
     i = s
     while i < e and text[i] in " \t":
         i += 1
     m = NR_VORSATZ_RE.match(text, i, e)
     if m and m.end() < e:
         i = m.end()                                   # "Nr. KH 0815 4471 2" unter "Versicherungsschein-"
-    art = eigene_wertform(eintrag)                    # eVB, Transferticket, Kartenprüfnummer: eigene Wertform,
-    if art is not None:                               # in einer Spalte ohne Ziffer nie (Status wie "ERTEILT")
-        return [(w.start, w.ende, w.kategorie, None)
-                for w in eigener_wert(text, i, e, art, kategorie, True, darunter=True)]
+    art = "cvc" if karten_tabelle and _muster is not None and _muster.pruefnummer_etikett(eintrag) \
+        else eigene_wertform(eintrag)
+    if art is not None:
+        # eVB, Transferticket, Kartenprüfnummer ("Prüfnr." nur in einer Tabelle mit Kartennummer): eigene Wertform, in
+        # einer Spalte ohne Ziffer nie (Status wie "ERTEILT"); unter einem Nummer-Etikett zusätzlich der allgemeine
+        # Kennungsweg ("TT-123" unter "Transferticket-Nr.")
+        eigen = [(w.start, w.ende, "kreditkarte" if art == "cvc" else w.kategorie, None)
+                 for w in eigener_wert(text, i, e, art, kategorie, True, darunter=True, etikett=eintrag)]
+        if eigen or not allgemein_hinter(eintrag):
+            return eigen
+        if art == "cvc":
+            kategorie = "vertrag"
     sp = kennung_spanne(text, i, e, 3)
-    if sp is None:
+    if sp is None or (art is not None and not allgemeiner_wert_passt(text[sp[0]:sp[1]])):
         return []
     kat = kategorie or "vertrag"
     if kat == "iban" and _muster is not None and not _muster.finde_iban(text[sp[0]:sp[1]]):
@@ -545,6 +554,8 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
     namensspalte = {i for i, sp in enumerate(tab.spalten) if "person" in sp.arten
                     and _NAMEN_KOPF_RE.match(_vergleichsform(sp.eintrag))}
     ganze_zellen = []     # Zellen einer Namensspalte ohne lesbare Namensform ("FREITAG", "NUR", "Kaplan")
+    karten_tabelle = any(sp.kategorie == "kreditkarte" and not (_muster is not None and (
+        _muster.pruefnummer_etikett(sp.eintrag) or _muster.eigene_wertform(sp.eintrag))) for sp in tab.spalten)
     for idx, sp in enumerate(tab.spalten):
         werte = tab.werte[idx]
         if not werte:
@@ -553,7 +564,7 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
         roh = []          # (seite, start, ende, kategorie, gruppe, reihe)
         for nr, s, e, reihe in werte:
             text = dok.seiten[nr].text
-            gefunden = _wert_fuer_spalte(text, s, e, sp)
+            gefunden = _wert_fuer_spalte(text, s, e, sp, karten_tabelle)
             for a, b, kat, gruppe in gefunden:
                 roh.append((nr, a, b, kat, gruppe, reihe))
             if not gefunden and idx in namensspalte:
@@ -672,9 +683,22 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
     while i < len(reihen):
         spalten = _kopf_spalten(text, reihen[i], ets, starts, breite)
         kopf_ende = i
-        if spalten is None and i + 1 < len(reihen):
-            spalten = _kopf_zweizeilig(text, reihen[i], reihen[i + 1], h, breite)
-            kopf_ende = i + 1
+        if i + 1 < len(reihen) and (spalten is None or any(not sp.arten and sp.eintrag.rstrip().endswith("-")
+                                                           for sp in spalten)):
+            # Kopf über zwei Zeilen – auch, wenn die erste Zeile schon ein Kopf ist, aber eine ihrer Zellen umbricht
+            # ("Kennzeichen ⇥⇥ Versicherungs- ⇥⇥ Vertrag" ⏎ "bestätigung"): dann zählt der zweizeilige Kopf, wenn er
+            # mehr Spalten mit Etikett kennt
+            zwei = _kopf_zweizeilig(text, reihen[i], reihen[i + 1], h, breite)
+            if zwei is not None and (spalten is None or sum(1 for sp in zwei if sp.arten)
+                                     > sum(1 for sp in spalten if sp.arten)):
+                spalten, kopf_ende = zwei, i + 1
+        if spalten is not None and kopf_ende == i + 1 and i + 2 < len(reihen):
+            # Titelzeile über einem zweizeiligen Kopf ("Bestandsliste Kfz" ⏎ "Kennzeichen ⇥⇥ Versicherungs- ⇥⇥
+            # Vertrag" ⏎ "bestätigung"): kennt der Kopf eine Zeile tiefer mehr Spalten mit Etikett, beginnt er dort
+            tiefer = _kopf_zweizeilig(text, reihen[i + 1], reihen[i + 2], h, breite)
+            if tiefer is not None and sum(1 for sp in tiefer if sp.arten) > sum(1 for sp in spalten if sp.arten):
+                i += 1
+                continue
         if spalten is None:
             i += 1
             continue

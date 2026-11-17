@@ -8,10 +8,12 @@ Verdacht macht die Ausgabe zu _PRUEFEN, die Vorschau zeigt ihn orange, „Nachsc
 
 Unabhängigkeit: Bewusst NICHT benutzt werden das Detektor-Register, namen.py, muster.py und das Sprachmodell –
 eine zweite Verteidigungslinie darf nicht dieselben blinden Flecken haben wie die erste. Benutzt werden nur die
-Listen der Wissensbasis (anonymisierer.wissen), das Seitenmodell (dieselbe Lesart der Seite) und eigene, einfache
-Formregeln mit eigenen Prüfziffer-Rechnungen – dazu für den Seitenverdacht das Pixelmaß „Seite nachweislich leer“
-(analyse.seite_nachweislich_leer, keine Erkennung: dieselbe Entscheidung „leere Rückseite“ wie beim Status der
-Schwärzung).
+Listen der Wissensbasis (anonymisierer.wissen), das Seitenmodell (dieselbe Lesart der Seite), die gemeinsame Regel
+„Etikett + Wert“ für eVB-Nummer, Transferticket, Kartenprüfnummer und Geburtsname (anonymisierer.kennungsformen –
+mit der Erkennung geteilt, damit beide dieselben Schreibweisen kennen: getrennt gebaut, hatten beide dieselben
+Lücken, Gegenprüfung Runde 4c) und eigene, einfache Formregeln mit eigenen Prüfziffer-Rechnungen – dazu für den
+Seitenverdacht das Pixelmaß „Seite nachweislich leer“ (analyse.seite_nachweislich_leer, keine Erkennung: dieselbe
+Entscheidung „leere Rückseite“ wie beim Status der Schwärzung).
 
 Was gemeldet wird (jede Regel liefert Stelle + Grund):
   * Kennungen: Ziffernfolgen ab 5 Ziffern – auch in Gruppen ("6 259 674 059", "0170 318 40 11") und mit
@@ -40,7 +42,11 @@ Was gemeldet wird (jede Regel liefert Stelle + Grund):
     Bank-Etikett derselben Zelle: "Kreditinstitut (Name und BIC): Postbank Ndl. Mitte PBNKDEFF") und Werte hinter
     Kennungs-Etiketten ("Az. 123 C 45/24"); hinter den Etiketten einer eVB-Nummer, eines Transfertickets und einer
     Kartenprüfnummer ("CVC 123"; "Prüfnummer" allein nur mit einer Kartenangabe daneben) zählt deren eigene Form,
-    auch kurz und mit nur einer Ziffer – in derselben Zeile, am Anfang der nächsten und in einer Tabellenspalte.
+    auch kurz und mit nur einer Ziffer – in derselben Zeile, hinter Zwischenwörtern desselben Satzes bis zu einer
+    Ankündigung ("Die eVB-Nummer Ihres neuen Fahrzeugs lautet: …") oder hinter wenigen Wörtern am Zeilenende
+    ("Prüfziffer hinten 739"), am Anfang der nächsten Zeile, in der Zelle daneben und in einer Tabellenspalte (auch
+    unter einem Kopf über zwei Zeilen); dazu Kartendaten ohne Etikett (Kartennummer bzw. ihr Platzhalter,
+    Ablaufdatum, drei oder vier Ziffern).
   * Kontakt: "@" (außer Funktionspostfächern wie info@ oder schaden@), "+Ländervorwahl", Namen in
     Internetadressen.
   * Datum mit plausiblem Geburtsjahr (Alter 14-110), außer hinter Vertragsdaten-Etiketten (Beginn, Ablauf,
@@ -52,7 +58,9 @@ Was gemeldet wird (jede Regel liefert Stelle + Grund):
   * Namen: Vor- und Nachnamen der Wissensbasis (eindeutige immer, mehrdeutige mit Personenkontext; nicht als
     Modellname hinter einer Marke: "Seat Leon"), unbekannte Eigennamen in Personenkontext (Herr/Frau/Titel,
     Etiketten wie "Name:", "Vorstand:", direkt hinter einem Vornamen, neben einem Personen-Platzhalter, im
-    Unterschriftsblock unter einer Grußformel, als Geburtsname hinter "geb."/"geborene"), Monats-/Wochentagsnamen
+    Unterschriftsblock unter einer Grußformel, als Geburtsname hinter "geb."/"geborene" (auch "gab." zwischen zwei
+    Namen: so liest die OCR "geb.") oder hinter dem Feld "Geburtsname" ("Familienname (Geburtsname): [PERSON A]
+    (Quarnstedt)") – nicht ein Ort, ein Funktionswort oder das nächste Feld-Etikett), Monats-/Wochentagsnamen
     direkt hinter einem Vornamen, Namen der Wissensbasis hinter einer Geschäftsbezeichnung ("Werkstatt Weiß" – auf
     Scans auch klein gelesen). OCR-Wörter, die mit l + Konsonant beginnen, werden mit großem I gelesen ("llir" ->
     "Ilir").
@@ -107,6 +115,7 @@ import datetime
 import difflib
 import re
 import unicodedata
+from bisect import bisect_left
 from pathlib import Path
 from typing import NamedTuple
 
@@ -115,6 +124,7 @@ try:
 except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
     import fitz
 
+from . import kennungsformen
 from . import ocr as _ocr
 from . import seitenmodell as sm
 
@@ -429,80 +439,19 @@ _AUSWEIS_ETIKETT_RE = re.compile(
     r"(?:(?i:Personalausweis|Ausweis|Reisepass|Pass|Führerschein|Fuehrerschein|Aufenthaltstitel|"
     r"Dokumenten|Ausweisdokument|Identitätskarte)[\w\-.]*|(?<![\w-])ID)(?:[\s-]?(?i:Nr\.?|Nummer|No\.?))?"
     r"[\s.:(]*$")
-# Kennungen mit eigener Wertform hinter ihrem Etikett (eigene Regeln, nicht die der Erkennung): eVB-Nummer der Kfz-
-# Versicherung (7 Zeichen aus Großbuchstaben und Ziffern), Transferticket (8 bis 20 Zeichen), Kartenprüfnummer einer
-# Zahlungskarte (3 oder 4 Ziffern hinter "CVC", "CVV2", "CVC-Code", "CAV", "Kartenprüfnummer", "Prüfnummer der Karte" …;
-# hinter "Prüfnummer"/"Sicherheitscode" allein nur mit einer Kartenangabe in der Nähe – keine Prüfnummer einer
-# TÜV-Plakette). Umlaute dürfen fehlen und "B" darf "8" sein: die OCR liest "Kartenprufnummer",
-# "Versicherungsbestatigung", "eV8-Nummer".
-_UE = r"(?:ü|ue|u)"
-_FORM_ETIKETT_RE = re.compile(
-    r"(?<![\wäöüß\-])(?:"
-    r"(?P<evb>(?:(?i:ev[b8])|VB(?=[ \t]*[-.]?[ \t]*(?i:nr\b|nummer|no\b))|(?i:versicherungsbest(?:ä|ae|a)tigung)s?)"
-    r"(?:[ \t]*[-.]?[ \t]*(?i:nr\.?|nummer|no\.?|code))?)"
-    r"|(?P<ticket>(?i:transfer[ \t]?-?[ \t]?ticket)(?:[ \t]*[-.]?[ \t]*(?i:nr\.?|nummer|no\.?|code|id))?)"
-    r"|(?P<cvc>(?:(?i:cvc|cvv)2?|CAV2?|(?i:karten-?pr" + _UE + r"f(?:nummer|ziffer|code))"
-    r"|(?i:karten-?sicherheits-?(?:code|nummer))"
-    r"|(?i:pr" + _UE + r"fnummer|pr" + _UE + r"fziffer|pr" + _UE + r"fcode|sicherheits-?code)[ \t]*\(?[ \t]*"
-    r"(?i:der|ihrer)[ \t]+(?i:(?:kredit|debit|bank|zahlungs|giro|ec)-?)?(?i:karte)[ \t]*\)?)"
-    r"(?:[ \t]*/[ \t]*(?i:cvc|cvv)2?)?"
-    r"(?:[ \t]*-?[ \t]*(?i:code|nummer|nr\.?|pr" + _UE + r"fnummer|pr" + _UE + r"fziffer|wert|zahl))?)"
-    r"|(?P<pruef>(?i:pr" + _UE + r"fnummer|pr" + _UE + r"fziffer|pr" + _UE + r"fcode|sicherheits-?code)(?!-))"
-    r")(?![\wäöüß])")
-_FORM_LUECKE_RE = re.compile(r"(?:[ \t:.=#\-–)]|\([^()\n]{1,30}\)|(?i:lautet|lauten|lautend(?:[ \t]+auf)?|ist|nr\.?"
-                             r"|nummer|no\.?)(?![\wäöüß]))*")
-# Zwischenwörter bis zu einer Ankündigung des Werts ("eVB-Nummer für die Zulassung lautet:", "eVB-Nummer vom
-# 12.03.2025:", "Die eVB-Nummer, die Sie brauchen, lautet …", "Sicherheitscode auf der Kartenrückseite:"): höchstens
-# acht Wörter derselben Zeile (auch ein Datum, Kommas eines Einschubs), das erste klein, kein anderes Satzzeichen
-_FORM_ZWISCHEN_RE = re.compile(r"(?:[ \t]*,)?[ \t]+(?P<woerter>[a-zäöüß][\wäöüß'’\-]*(?:(?:[ \t]*,)?[ \t]+"
-                               r"(?:\d{1,2}\.\d{1,2}\.\d{2,4}|[\w'’\-]+)){0,7}?)[ \t]*,?"
-                               r"(?:[ \t]+(?i:lautet|lauten|lautend(?:[ \t]+auf)?|ist|sind)(?![\wäöüß])[ \t]*:?"
-                               r"|[ \t]*:)")
-_FORM_WERT_RE = {
-    "evb": re.compile(r"(?<![\w\-/.])([A-Z0-9]{7})(?![\w]|[-/.][A-Za-z0-9])"),
-    "ticket": re.compile(r"(?<![\w\-/.])([A-Za-z0-9](?:[A-Za-z0-9]|[-/.](?=[A-Za-z0-9])){7,25})"
-                         r"(?![\w]|[-/.][A-Za-z0-9])"),
-    "cvc": re.compile(r"(?<![\d.,/])(\d{3,4})(?![\d]|[.,:/]\d)"),
-}
-_FORM_WERT_RE["pruef"] = _FORM_WERT_RE["cvc"]
-# eVB, wie die OCR sie mit eingefügten Zeichen liest ("K7/H3MY9P", "/RT4ZU9", "K7H3MJ9P"): 6 bis 9 Buchstaben/Ziffern
-_EVB_OCR_RE = re.compile(r"(?<![\w\-/.])([/|]?[A-Z0-9](?:[A-Z0-9]|[/|](?=[A-Z0-9])){4,9})(?![\w]|[-/.][A-Za-z0-9])")
-_FORM_GRUND = {"evb": "eVB-Nummer", "ticket": "Transferticket", "cvc": "Kartenprüfnummer",
-               "pruef": "Kartenprüfnummer"}
-# Wert unter seinem Etikett: beendet seine Zeile bzw. Zelle; hinter einer Kartenprüfnummer nie eine Einheit
-_FORM_WERT_ENDE_RE = re.compile(r"[ \t]*(?:$|\t\t|[.,;)](?=[ \t]|$))")
-_FORM_EINHEIT_RE = re.compile(r"[ \t]*(?:€|%|(?i:eur|euro|prozent|stk|stück|qm|m²|km|kg|jahre?|monate?|tage?|std)"
-                              r"(?![\wäöüß]))")
-_KARTENANGABE_RE = re.compile(
-    r"(?i:kredit-?kart|karten-?n(?:umme)?r|karteninhaber|zahlungskart|debit-?kart|bankkart|girocard|ec-karte"
-    r"|karten-?r(?:ü|ue|u)ck)"
-    r"|(?<![\wäöüß])(?i:visa|master-?card|maestro|american[ \t]+express|amex|diners|jcb)(?![\wäöüß])|\[KREDITKARTE\]")
-# Wörter, die eine Prüfnummer keinem anderen Gegenstand zuordnen (zwischen Etikett und Wert, in einer Klammer dahinter):
-# klein geschriebene Wörter, Kartenangaben, "Rückseite" – nicht "(TÜV)", "der HU", "für Ihr Online-Postfach"
-_KARTEN_NEUTRAL_RE = re.compile(r"(?i:karte|kredit|debit|visa|master|maestro|amex|express|diners|jcb|cvc|cvv|cav"
-                                r"|r(?:ü|ue|u)ckseite)")
-# großgeschriebenes Bezugswort vor "Prüfnummer" – direkt, mit Komma oder Strich ("TÜV Prüfnummer 123", "Zulassung,
-# Prüfnummer 1234") – oder in einer Klammer dahinter ("Prüfnummer (TÜV): 123"): die Nummer gehört zu etwas anderem
-_BEZUGSWORT_DAVOR_RE = re.compile(r"(?<![\wäöüß])([A-ZÄÖÜ][\wäöüß]*)[ \t]*[,–\-]?[ \t]+$")
-_KLAMMER_DANACH_RE = re.compile(r"[ \t]*\(([^()\n]{1,30})\)")
-_BEZUG_FUNKTIONSWORT = frozenset({"ihre", "ihr", "ihrer", "die", "der", "das", "den", "dem", "eine", "ein", "neue",
-                                  "bitte", "mit", "und", "oder", "zur", "zum", "für", "als", "unter", "sie", "wir",
-                                  "uns", "ihnen", "es"})
-
-
-def _kartenneutral(woerter: str) -> bool:
-    """Ordnen die Wörter eine Prüfnummer keinem anderen Gegenstand zu (siehe _KARTEN_NEUTRAL_RE)?"""
-    for w in re.findall(r"[^\W\d_][\w\-]*", woerter or ""):
-        if w[:1].isupper() and w.casefold() not in _BEZUG_FUNKTIONSWORT and not _KARTEN_NEUTRAL_RE.search(w):
-            return False
-    return True
-
-
+# Kennungen mit eigener Wertform hinter ihrem Etikett – eVB-Nummer, Transferticket, Kartenprüfnummer: Etiketten,
+# Wertformen und die Regel "Etikett + Wert" sind dieselben wie in der Erkennung (kennungsformen.py, Gegenprüfung Runde
+# 4c: getrennt gebaut hatten beide dieselben Lücken); hier kommen die Kartenangabe des Platzhalters [KREDITKARTE] und
+# die eVB mit Einfügungen der Texterkennung dazu ("K7/H3MY9P", auf jeder Zeile: die Ausgabe kann OCR-Text tragen)
+_FORM_GRUND = {"evb": "eVB-Nummer", "ticket": "Transferticket", "cvc": "Kartenprüfnummer"}
+_KREDITKARTE_PLATZHALTER_RE = re.compile(r"\[KREDITKARTE\]")
 # Geburtsname direkt hinter "geb." / "geb:" / "geborene" ("[PERSON A] geb. Quarnstedt", "GEB. QUARNSTEDT") – nicht
 # "Gebr." (Gebrüder), nicht "Geb." am Satz-/Zeilenanfang (Gebäude, Gebühr), nicht über eine Spaltenlücke
 _GEBURTSNAME_DAVOR_RE = re.compile(
     r"(?:(?<![\wäöüß.\-])(?:geb|GEB)(?:\.:?|:|,)?|(?<=[A-Za-zÄÖÜäöüß\]][ ])Geb\.|(?<=[A-Za-zÄÖÜäöüß\]],[ ])Geb\.|"
-    r"(?<![\wäöüß])(?P<geborene>geborene[rn]?|GEBORENE[RN]?|Geborene[rn]?))"
+    r"(?<![\wäöüß])(?P<geborene>geborene[rn]?|GEBORENE[RN]?|Geborene[rn]?)"
+    # "gab." – so liest die Texterkennung "geb." ("[PERSON A] gab. Quarnstedt"); nur zwischen zwei Namen
+    r"|(?<=[A-Za-zÄÖÜäöüß\]][ ])(?P<gab>gab|GAB)\.)"
     # Leerzeichen dahinter – direkt hinter "geb." / "geb:" auch keines ("geb.Quarnstedt")
     r"(?:[ ]{1,3}|(?<=[.:]))(?:(?:von|van|de|der|den|zu|zur|vom|ten|ter|da|di|dos|del|du|la|le|"
     r"VON|VAN|DE|DER|DEN|ZU|ZUR|VOM)[ ]+){0,2}$")
@@ -734,6 +683,13 @@ class _Wissen:
             self._cache[schluessel] = self._frage("ist_grossstadt", wort)
         return self._cache[schluessel]
 
+    def frage(self, name: str, wort: str) -> bool:
+        """Frage an die Wissensbasis (ist_nachname, ist_ort …) mit Zwischenspeicher; ohne Wissensbasis: nein."""
+        schluessel = (name, wort)
+        if schluessel not in self._cache:
+            self._cache[schluessel] = self._frage(name, wort)
+        return self._cache[schluessel]
+
     def wortgestalt(self, wort: str) -> bool:
         """Ein Wort statt eines Codes ohne Ziffer (wissen.ist_wortgestalt: "ERTEILT", "ALLIANZ", nicht "KXHPMTQ")?
         Ohne Wissensbasis: nein (die Prüfung bleibt vorsichtig)."""
@@ -815,6 +771,11 @@ def _jahr_aus(jahr_text: str) -> int:
         heute = _heute().year % 100
         jahr += 1900 if jahr > heute else 2000
     return jahr
+
+
+def _titel(wort: str) -> str:
+    """Versalien in Titelform ("QUARNSTEDT" -> "Quarnstedt") für Fragen an die Wissensbasis."""
+    return wort.title() if wort.isupper() else wort
 
 
 def _ziffern(text: str) -> int:
@@ -1059,12 +1020,23 @@ class _Seitenpruefung:
         return text[s:e], s, e
 
     def zeilen_oberhalb(self, z, anzahl: int):
-        """Zeilen über z (nächste zuerst), nach der Lage auf der Seite."""
+        """Zeilen über z (nächste zuerst), nach der Lage auf der Seite. Die Zeilen der Seite sind einmal nach ihrer
+        Unterkante geordnet (Gegenprüfung Runde 4c: neu sortiert je Aufruf wuchs die Spaltenprüfung quadratisch)."""
         if z is None or z.rect is None:
             return []
-        oben = [y for y in self.m.zeilen if y.rect is not None and y.rect.y1 <= z.rect.y0 + 1 and y.id != z.id]
-        oben.sort(key=lambda y: -y.rect.y1)
-        return oben[:anzahl]
+        ordnung = self._org.get("nach_unterkante")
+        if ordnung is None:
+            reihe = sorted((y for y in self.m.zeilen if y.rect is not None), key=lambda y: -y.rect.y1)
+            ordnung = ([-y.rect.y1 for y in reihe], reihe)
+            self._org["nach_unterkante"] = ordnung
+        schluessel, reihe = ordnung
+        aus = []
+        for y in reihe[bisect_left(schluessel, -(z.rect.y0 + 1)):]:
+            if y.id != z.id:
+                aus.append(y)
+                if len(aus) >= anzahl:
+                    break
+        return aus
 
     def zeilen_links(self, s: int, e: int) -> list:
         """Zeilen links der Stelle auf derselben Zeilenhöhe (Formular: Etikett links, Wert rechts – im Modell der
@@ -1749,6 +1721,7 @@ class _Seitenpruefung:
             self._kontakt(z, zeile)
             self._anschriften(z, zeile)
         self._namen()
+        self._geburtsname_etiketten()
         self._reste_neben_platzhaltern()
         self._ort_datum()
         return self.kandidaten
@@ -2067,6 +2040,9 @@ class _Seitenpruefung:
                     or re.fullmatch(r"[\d\s.,]+[€%]?", w) or any(maske[s:s + len(w)]) or _GLAEUBIGER_ID_RE.match(w)
                     or self.ist_platzhalter_bei(o + s, o + s + len(w))):
                 continue
+            if kennungsformen.etikett_art(v.text) is not None and not (
+                    kennungsformen.nummer_etikett(v.text) and kennungsformen.kennungsform(w)):
+                continue                                # eVB/Transferticket/CVC: eigene Regel ("SF 12", "250 Euro")
             if _UST_ID_RE.fullmatch(w) and _UST_ETIKETT_RE.search(zeile[:s]):
                 continue                                # USt-IdNr. hinter verlesenem Etikett ("uat-ıdNr."); hinter
                                                         # "Kundennummer" bleibt die Form DE + 9 Ziffern Verdacht
@@ -2074,150 +2050,129 @@ class _Seitenpruefung:
                 continue                                # Steuernummer, IBAN der Organisation (Fußbereich, Briefkopf)
             self.neu(o + s, o + s + len(w), f"Wert hinter Etikett »{v.text}«", "etikett")
 
+    def _wissen_frage(self, name: str, wort: str) -> bool:
+        return self.w.frage(name, wort)
+
+    def _geburtsname_etiketten(self):
+        """Name hinter dem Feld-Etikett "Geburtsname" / "Geb.-Name" – dieselbe Regel wie die Erkennung
+        (kennungsformen.geburtsname_hinter_etikett): direkt dahinter, in der Zelle daneben, hinter Zwischenwörtern bis
+        zu einer Ankündigung ("Geburtsname, falls abweichend: …", "Geburtsname (falls vom Familiennamen abweichend):
+        …"); nicht das nächste Feld-Etikett hinter einem leeren Feld, nicht die Zelle daneben in einer Kopfzeile."""
+        for m in kennungsformen.GEBURTSNAME_ETIKETT_RE.finditer(self.text):
+            sp = kennungsformen.geburtsname_hinter_etikett(self.text, m, ist_etikett=self.w.ist_etikett,
+                                                           frage=self._wissen_frage)
+            if sp is None or self.ist_gesperrt(sp.start, sp.ende) or self.ist_platzhalter_bei(sp.start, sp.ende):
+                continue
+            wort = self.text[sp.start:sp.ende].split()[-1]
+            if wort.casefold() in _GEBURTSNAME_FUELLWORT or self.w.art(_titel(wort))[4]:
+                continue                                # "Geburtsname: Siehe oben", Allerweltswort
+            if sp.getrennt and self._wort_harmlos(_titel(wort)):
+                continue                                # "Geburtsname:" ⏎ "Komfort", "Wohneigentum": kein Name
+            self.neu(sp.start, sp.ende, f"möglicher Geburtsname (hinter »{' '.join(m.group(0).split())}«)", "name")
+
     def _formen_hinter_etikett(self, z, zeile: str, maske: list):
         """Wert hinter dem Etikett einer eVB-Nummer, eines Transfertickets oder einer Kartenprüfnummer – mit der Form
         der jeweiligen Kennung, also auch kurz und mit nur einer Ziffer ("eVB: A1BCDEF", "CVC 123"), die die Regeln
-        für Ziffernfolgen und Etikett + Wert nicht melden. Der Wert steht in derselben Zeile hinter Trennzeichen,
-        Füllwörtern ("lautet") oder Zwischenwörtern mit einer Ankündigung ("für die Zulassung lautet:"), oder – wenn
-        das Etikett die Zeile beendet – am Anfang der nächsten Zeile (dort eine eVB bzw. ein Transferticket nur mit
-        Ziffer, eine Kartenprüfnummer nur unter einer Etikettzeile und als Ende ihrer Zeile). Ohne Ziffer zählt eine
-        eVB nur in gemischt geschriebenem Text und nur, wenn sie kein Wort ist ("EVB-NUMMER ANFRAGE", "eVB: ERTEILT");
-        eine eVB mit eingefügten Zeichen der Texterkennung ("K7/H3MY9P") mit mindestens zwei Ziffern; "Prüfnummer" und
-        "Sicherheitscode" allein nur mit einer Kartenangabe (auch dem Platzhalter einer Kreditkarte) in der Nähe und
-        ohne fremdes Bezugswort ("TÜV Prüfnummer", "Prüfnummer (TÜV)")."""
-        for m in _FORM_ETIKETT_RE.finditer(zeile):
-            art = m.lastgroup
-            if art == "pruef":
-                bezug = _BEZUGSWORT_DAVOR_RE.search(zeile, max(0, m.start() - 40), m.start())
-                if bezug and bezug.group(1).casefold() not in _BEZUG_FUNKTIONSWORT \
-                        and not _KARTENANGABE_RE.search(bezug.group(1)):
-                    continue                                # "TÜV Prüfnummer", "Zulassung, Prüfnummer"
-                klammer = _KLAMMER_DANACH_RE.match(zeile, m.end())
-                if klammer and not _kartenneutral(klammer.group(1)):
-                    continue                                # "Prüfnummer (TÜV)"
-            pos = _FORM_LUECKE_RE.match(zeile, m.end()).end()
-            zwischen = ""
-            if pos < len(zeile.rstrip(" \t")) and not self._form_wert_bei(art, zeile, pos):
-                zw = _FORM_ZWISCHEN_RE.match(zeile, m.end())
-                if zw is not None:
-                    zwischen = zw.group("woerter")
-                    pos = _FORM_LUECKE_RE.match(zeile, zw.end()).end()
-            if art == "pruef" and not _kartenneutral(zwischen):
-                continue                                    # "Prüfnummer der HU:", "… für Ihr Online-Postfach:"
-            ziel, zmaske = z, maske
-            darunter = False
-            if pos >= len(zeile.rstrip(" \t")):
-                if self.text[z.ende:z.ende + 1] != "\n":
-                    continue
-                ziel = self.zeile(z.ende + 1)              # Etikett am Zeilenende: Wert in der nächsten Zeile
-                if ziel is None:
-                    continue
-                if art in ("cvc", "pruef") and not self._etikett_zeile(zeile, m.start(), m.end()):
-                    continue                                # "… bitte nennen Sie keine CVC" ⏎ "2024 wurde …"
-                zmaske, darunter = None, True
-                pos = len(self.zeilen_text(ziel)) - len(self.zeilen_text(ziel).lstrip(" \t"))
-            ztext = self.zeilen_text(ziel)
-            w = _FORM_WERT_RE[art].match(ztext, pos)
-            rauschen = False
-            if w is None and art == "evb":
-                w = _EVB_OCR_RE.match(ztext, pos)           # OCR-Einfügungen ("K7/H3MY9P", "/RT4ZU9")
-                rauschen = w is not None
-            if w is None:
+        für Ziffernfolgen und Etikett + Wert nicht melden. Dieselbe Regel wie die Erkennung (kennungsformen.kennungen):
+        der Wert direkt hinter dem Etikett, am Anfang der nächsten Zeile bzw. in der Zelle daneben oder hinter
+        Zwischenwörtern desselben Satzes bis zu einer Ankündigung ("Die eVB-Nummer Ihres neuen Fahrzeugs lautet: …",
+        "Die CVC auf der" ⏎ "Rückseite ist 739."); eine eVB auch mit Einfügungen der Texterkennung ("K7/H3MY9P");
+        "Prüfnummer" und "Sicherheitscode" allein nur mit einer Kartenangabe (auch dem Platzhalter einer Kreditkarte) in
+        der Nähe und ohne fremden Bezug. Dazu Werte in Tabellenspalten mit einem solchen Etikett im Kopf
+        (_spalten_kennungen)."""
+        funde = self._org.get("kennungsfunde")
+        if funde is None:
+            funde = {}
+            for f in kennungsformen.kennungen(self.text, ocr=True, wortgestalt=self.w.wortgestalt,
+                                              ist_etikett=self.w.ist_etikett,
+                                              kartenbezug_extra=_KREDITKARTE_PLATZHALTER_RE):
+                zf = self.zeile(f.start)
+                if zf is not None:
+                    funde.setdefault(zf.id, []).append(
+                        (f.start, f.ende, f"{_FORM_GRUND[f.art]} hinter Etikett »{' '.join(f.etikett.split())}«"))
+            for s0, e0, grund in self._spalten_kennungen():
+                zf = self.zeile(s0)
+                if zf is not None:
+                    funde.setdefault(zf.id, []).append((s0, e0, grund))
+            self._org["kennungsfunde"] = funde
+        for g_s, g_e, grund in funde.get(z.id, ()):
+            ls, le = g_s - z.start, min(g_e, z.ende) - z.start
+            if any(maske[max(0, ls):max(0, le)]) or self.ist_gesperrt(g_s, g_e) or self.ist_platzhalter_bei(g_s, g_e):
                 continue
-            wert = w.group(1)
-            if art in ("cvc", "pruef") and (_FORM_EINHEIT_RE.match(ztext, w.end(1))
-                                            or darunter and not _FORM_WERT_ENDE_RE.match(ztext, w.end(1))):
-                continue                                    # "1500 EUR", "8001 Zürich"
-            g_s, g_e = ziel.start + w.start(1), ziel.start + w.end(1)
-            if (zmaske is not None and any(zmaske[w.start(1):w.end(1)])) or self.ist_gesperrt(g_s, g_e) \
-                    or self.ist_platzhalter_bei(g_s, g_e):
-                continue
-            if art == "pruef" and _KARTENANGABE_RE.search(zwischen):
-                pass                                        # "Sicherheitscode auf der Kartenrückseite:"
-            elif not self._form_wert_passt(art, wert, z, g_s, g_e, darunter, rauschen):
-                continue
-            self.neu(g_s, g_e, f"{_FORM_GRUND[art]} hinter Etikett »{m.group(0).strip()}«", "etikett")
-        # Tabellenspalte mit dem Etikett im Kopf ("eVB-Nummer" über "KXH4PMQ"), nur auf Seiten mit einem solchen Etikett
-        if "form_etiketten" not in self._org:
-            self._org["form_etiketten"] = any(k.lastgroup != "pruef" for k in _FORM_ETIKETT_RE.finditer(self.text))
-        if not self._org["form_etiketten"]:
-            return
-        for art in ("evb", "ticket", "cvc"):
-            for w in _FORM_WERT_RE[art].finditer(zeile):
-                g_s, g_e = z.start + w.start(1), z.start + w.end(1)
-                if any(maske[w.start(1):w.end(1)]) or self.ist_gesperrt(g_s, g_e) or self.ist_platzhalter_bei(g_s, g_e):
+            self.neu(g_s, g_e, grund, "etikett")
+
+    def _zeilen_nach_lage(self) -> list:
+        """Zeilen mit Lage auf der Seite, von oben nach unten (zwischengespeichert)."""
+        if "zeilen_lage" not in self._org:
+            self._org["zeilen_lage"] = sorted((y for y in self.m.zeilen if y.rect is not None),
+                                              key=lambda y: (y.rect.y0, y.rect.x0))
+        return self._org["zeilen_lage"]
+
+    def _spalten_kennungen(self) -> list:
+        """(start, ende, Grund) der Werte in Tabellenspalten mit dem Etikett einer eVB-Nummer, eines Transfertickets
+        oder einer Kartenprüfnummer im Kopf ("eVB-Nummer" über "KXH4PMQ"), auch mit einem Kopf über zwei Zeilen
+        ("Versicherungs-" ⏎ "bestätigung"); "Prüfnr." nur in einer Kopfzeile mit Kartenangabe ("Kartennummer"). Unter
+        dem Kopf zählt ein Wert nur mit Ziffer (eVB, Transferticket) bzw. als ganze Zelle ohne Einheit
+        (Kartenprüfnummer). Gelesen wird von jedem Kopf abwärts bis zu einer Absatzlücke – je Kopf höchstens
+        SPALTE_ZEILEN Zeilen (die Prüfung wächst linear mit der Seite)."""
+        text = self.text
+        if not kennungsformen.ETIKETT_RE.search(text) and "-\t" not in text and not re.search(r"-[ \t]*\n", text):
+            return []
+        zeilen = self._zeilen_nach_lage()
+        aus = []
+        for i, z in enumerate(zeilen):
+            zt = self.zeilen_text(z)
+            zellen = list(re.finditer(r"[^\t]+", zt))
+            if len([zm for zm in zellen if zm.group(0).strip()]) < 2:
+                continue                                # Kopfzeile einer Tabelle: mehrere Zellen
+            for zm in zellen:
+                inhalt = zm.group(0).strip()
+                if not inhalt or len(inhalt) > 40 or inhalt.endswith(":"):
+                    continue                            # "CVC:" ist ein Feld, kein Spaltenkopf
+                cs = z.start + zm.start() + (len(zm.group(0)) - len(zm.group(0).lstrip()))
+                ce = cs + len(inhalt)
+                b = self.box(cs, ce)
+                if b is None:
                     continue
-                kopf = self.spaltenkopf(g_s, g_e, ("kennung",))
-                k = _FORM_ETIKETT_RE.fullmatch(kopf[1].strip()) if kopf is not None else None
-                if k is None or k.lastgroup != art or not self._form_wert_passt(art, w.group(1), z, g_s, g_e, True):
+                kopf, art, erste = inhalt, kennungsformen.etikett_art(inhalt), i + 1
+                if art is None and inhalt.endswith("-") and i + 1 < len(zeilen):
+                    unten, _, _ = self.zelle_ueber(zeilen[i + 1], b.x0, b.x1)
+                    unten = unten.strip()
+                    for v in (inhalt[:-1] + unten, inhalt + unten):
+                        art = kennungsformen.etikett_art(v) if unten else None
+                        if art is not None:
+                            kopf, erste = v, i + 2
+                            break
+                if art is None:
                     continue
-                self.neu(g_s, g_e, f"{_FORM_GRUND[art]} in der Spalte »{kopf[1].strip()}«", "etikett")
-
-    @staticmethod
-    def _form_wert_bei(art: str, zeile: str, pos: int) -> bool:
-        """Beginnt bei pos ein Wert der Form `art` (die eVB auch mit OCR-Einfügungen)?"""
-        return bool(_FORM_WERT_RE[art].match(zeile, pos) or (art == "evb" and _EVB_OCR_RE.match(zeile, pos)))
-
-    @staticmethod
-    def _etikett_zeile(zeile: str, s: int, e: int) -> bool:
-        """Ist die Zeile des Etiketts zeile[s:e] eine Etikettzeile – Doppelpunkt dahinter oder höchstens zwei Wörter
-        davor in seiner Zelle – und kein Satz, der zufällig mit dem Etikett endet ("… die CVC")?"""
-        if ":" in zeile[e:]:
-            return True
-        zelle = zeile.rfind("\t\t", 0, s)
-        return len(re.findall(r"[^\W\d_]+", zeile[zelle + 2 if zelle >= 0 else 0:s])) <= 2
-
-    def _form_wert_passt(self, art: str, wert: str, z, s: int, e: int, darunter: bool = False,
-                         rauschen: bool = False) -> bool:
-        """Passt der lesbare Wert zur eigenen Form der Kennung? darunter: der Wert steht nicht in der Zeile des Etiketts
-        (Folgezeile, Spalte) – dann nur mit Ziffer; rauschen: eVB mit eingefügten Zeichen der Texterkennung."""
-        ziffern = _ziffern(wert)
-        if art == "evb":
-            if rauschen:
-                kern = re.sub(r"[/|]", "", wert)
-                return 6 <= len(kern) <= 9 and _ziffern(kern) >= 2 and not re.fullmatch(r"\d{1,2}[/.]\d{2,4}", wert)
-            if ziffern:
-                return True
-            return not darunter and not self._versalien_umgebung(z, s, e) and not self.w.wortgestalt(wert)
-        if art == "ticket":
-            zeichen = sum(c.isalnum() for c in wert)
-            if not 8 <= zeichen <= 20 or re.fullmatch(r"\d{1,4}[./\-]\d{1,2}[./\-]\d{1,4}", wert):
-                return False                                   # Länge, Datum ("12.03.2024")
-            if any(c.islower() for c in wert):
-                return ziffern >= 2                            # gemischte Schreibung ohne Ziffern: ein Wort
-            if ziffern:
-                return True
-            return not darunter and not self._versalien_umgebung(z, s, e) and not self.w.wortgestalt(wert)
-        if art == "pruef":
-            return self._kartenbezug(z.start, e)
-        return True
-
-    def _versalien_umgebung(self, z, s: int, e: int) -> bool:
-        """Ist die Zeile des Etiketts – und, steht der Wert darunter, dessen Zeile – ohne den Wert überwiegend in
-        Versalien geschrieben? Dann ist ein Wort aus Großbuchstaben ohne Ziffer keine Kennung."""
-        zw = self.zeile(s)
-        if zw is None or zw.id == z.id:
-            rest = self.text[z.start:s] + " " + self.text[e:z.ende]
-        else:
-            rest = self.zeilen_text(z) + " " + self.text[zw.start:s] + " " + self.text[e:zw.ende]
-        buchstaben = [c for c in rest if c.isalpha()]
-        return not buchstaben or sum(c.isupper() for c in buchstaben) > 0.7 * len(buchstaben)
-
-    def _kartenbezug(self, s: int, e: int) -> bool:
-        """Kartenangabe ("Kreditkarte", "Kartennummer", "Visa", Platzhalter [KREDITKARTE]) oder Kartennummer mit
-        gültiger Prüfziffer in der Zeile, den zwei Zeilen davor oder der Zeile danach (Textfolge)?"""
-        a = s
-        for _ in range(3):
-            a = self.text.rfind("\n", 0, a)
-            if a < 0:
-                break
-        b = self.text.find("\n", e)
-        if b >= 0:
-            b = self.text.find("\n", b + 1)
-        fenster = self.text[max(0, a + 1):b if b >= 0 else len(self.text)]
-        if _KARTENANGABE_RE.search(fenster):
-            return True
-        return any(luhn_gueltig(m.group(1)) for m in _KARTE_RE.finditer(fenster))
+                if art == "pruef" and not kennungsformen.KARTENANGABE_RE.search(zt):
+                    continue                            # "Prüfnr." nur neben "Kartennummer"/"Kreditkarte"
+                form = "cvc" if art == "pruef" else art
+                hoehe = max(z.rect.height, 8.0)
+                unten_y = z.rect.y1 if erste == i + 1 else zeilen[i + 1].rect.y1
+                for y in zeilen[erste:erste + SPALTE_ZEILEN]:
+                    if y.rect.y0 - unten_y > 2.5 * hoehe:
+                        break                           # Absatz: die Tabelle ist zu Ende
+                    unten_y = max(unten_y, y.rect.y1)
+                    zelle, zs, ze = self.zelle_ueber(y, b.x0, b.x1)
+                    if not zelle.strip():
+                        continue
+                    if kennungsformen.etikett_art(zelle.strip()) is not None:
+                        break                           # nächster Kopf
+                    vorn = len(zelle) - len(zelle.lstrip())
+                    w = kennungsformen.WERT_RE[form].match(text, zs + vorn, ze)
+                    if w is None or text[w.end():ze].strip(" .,;)"):
+                        continue                        # nur die ganze Zelle ("2024 wurde …" ist Fließtext)
+                    wert = w.group(0)
+                    if form == "evb" and not any(c.isdigit() for c in wert):
+                        continue
+                    if form == "ticket" and not (any(c.isdigit() for c in wert)
+                                                 and kennungsformen.ticket_gueltig(wert, True)):
+                        continue
+                    if form == "cvc" and kennungsformen.EINHEIT_DANACH_RE.match(text, w.end(), ze):
+                        continue
+                    aus.append((w.start(), w.end(), f"{_FORM_GRUND[form]} in der Spalte »{' '.join(kopf.split())}«"))
+        return aus
 
     # Datumsangaben
     def _datum(self, m, art):
@@ -2572,9 +2527,16 @@ class _Seitenpruefung:
                 return False                            # "geb. Ledig", "geb. Unbekannt"
             if self.w.grossstadt(wort) and not self.w.art(wort.title() if wort.isupper() else wort)[1]:
                 return False                            # "geb. Hamburg": der Geburtsort (Großstadt, kein Nachname)
-            if m.group("geborene"):
-                wort = re.search(r"([^\W\d_]+)[ \t]*$", davor[:m.start()])
-                if wort and wort.group(1)[:1].islower():
+            if not kennungsformen.geburtsname_moeglich(text, s, e, self._wissen_frage) \
+                    or kennungsformen.feld_etikett(text, s, e, self.w.ist_etikett):
+                return False                            # "geb. In Köln", "geb. Polen", "geb. Lt. Ausweis", "PLZ:"
+            if m.group("gab") and not kennungsformen.WERT_ENDE_RE.match(text, e):
+                return False                            # "… die ihm Frau Weber gab. Müller kam später"
+            if m.group("geborene") or m.group("gab") or m.group(0).startswith("Geb."):
+                # "Geb." (Gebäude) und "geborene" (Eigenschaftswort) nur direkt hinter einem Namen oder Platzhalter
+                # ("[PERSON A], geb. Schulz") – nicht "Klinikum Mitte, Geb. Nord", "Geborene Zwillinge sind …"
+                vorher = re.search(r"([^\W\d_][\w'’\-]*|\])[ \t]*,?[ \t]*\(?[ \t]*$", davor[:m.start()])
+                if vorher is None or (vorher.group(1) != "]" and not any(self.w.art(_titel(vorher.group(1)))[:2])):
                     return False
             return True
 

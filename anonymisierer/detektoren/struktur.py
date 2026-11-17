@@ -46,6 +46,7 @@ try:
     from .. import muster as _muster
 except Exception:  # pragma: no cover
     _muster = None
+from .. import kennungsformen
 
 try:
     from ..namen import personen_teilen as _personen_teilen
@@ -614,6 +615,8 @@ def etikett_fuer_text(text: str, mit_vertragsdaten: bool = False):
             eintrag = eintrag or e
     if not arten and _NUMMERN_WORT_RE.fullmatch(sauber) and not _NUMMERN_FREMD.match(sauber):
         arten, eintrag = {"kennung"}, sauber
+    if not arten and _muster is not None and (_muster.eigene_wertform(sauber) or _muster.pruefnummer_etikett(sauber)):
+        arten, eintrag = {"kennung"}, sauber          # "Versicherungsbestätigung" (zweizeiliger Kopf), "CVC", "Prüfnr."
     if not arten:
         k = sauber.casefold()
         if k in NEUTRALE_KOEPFE or k.rstrip(".") in NEUTRALE_KOEPFE:
@@ -1307,15 +1310,28 @@ def eigene_wertform(eintrag: str) -> str | None:
     return _muster.eigene_wertform(eintrag)
 
 
+def allgemein_hinter(eintrag: str) -> bool:
+    """Gilt hinter einem Etikett mit eigener Wertform ZUSÄTZLICH der allgemeine Kennungsweg – ein Etikett mit
+    Nummer-Wort ("Versicherungsbestätigung Nr. 123/24", "Transferticket-Nr.: TT-12345";
+    kennungsformen.nummer_etikett)?"""
+    return kennungsformen.nummer_etikett(eintrag)
+
+
+def allgemeiner_wert_passt(wert: str) -> bool:
+    """Allgemeiner Kennungsweg hinter einem Etikett mit eigener Wertform: die Form einer Kennung, kein Jahresbereich
+    und kein kurzes Datum ("eVB-Nummer 2024/2025", "12/2025"; muster.kennungsform)."""
+    return _muster is None or _muster.kennungsform(wert)
+
+
 def eigener_wert(text: str, s: int, e: int, art: str, kategorie: str | None, versalien: bool = True,
-                 darunter: bool = False) -> list:
+                 darunter: bool = False, etikett: str = "") -> list:
     """Wert der eigenen Form `art` am Anfang von [s, e) (muster.eigener_wert; leer, wenn keiner passt). versalien:
     das Etikett steht in Großbuchstaben bzw. ist nicht bekannt (dann zählen eVB/Transferticket nur mit Ziffer).
     darunter: der Wert steht nicht in der Zeile des Etiketts (Zelle darunter, Spalte, Folgezeile) – dann zählen
     eVB/Transferticket nur mit Ziffer ("ERTEILT" unter "eVB-Nummer") und eine Kartenprüfnummer nur als ganze Zelle."""
     while s < e and text[s] in " \t:":
         s += 1
-    sp = _muster.eigener_wert(art, text, s, e, versalien, darunter) if _muster is not None else None
+    sp = _muster.eigener_wert(art, text, s, e, versalien, darunter, etikett) if _muster is not None else None
     return [Wert(sp[0], sp[1], kategorie or "vertrag")] if sp else []
 
 
@@ -1326,8 +1342,16 @@ def _kennungs_wert(text: str, s: int, e: int, kategorie: str, streng: bool, eint
     if m and m.end() < e:
         s = m.end()
     art = eigene_wertform(eintrag)
-    if art is not None:                              # eVB, Transferticket, Kartenprüfnummer: nur ihre eigene Form
-        return eigener_wert(text, s, e, art, kategorie, _versalien(etikett_text or eintrag), darunter)
+    if art is not None:
+        # eVB, Transferticket, Kartenprüfnummer: ihre eigene Form – hinter einem Nummer-Etikett ZUSÄTZLICH der
+        # allgemeine Kennungsweg ("Versicherungsbestätigung Nr. 123/24"; eine Nummer hinter einem Kartenprüfnummer-
+        # Etikett, die keine Kartenprüfnummer ist, ist eine Kennung: "Kartenprüfnummer 4711-0815")
+        eigen = eigener_wert(text, s, e, art, kategorie, _versalien(etikett_text or eintrag), darunter,
+                             etikett_text or eintrag)
+        if eigen or not allgemein_hinter(eintrag):
+            return eigen
+        if art == "cvc":
+            kategorie = "vertrag"
     # Kennungsarten mit eigener Form (wenige oder keine Ziffern): Kennzeichen, BIC, Ausweis
     for kat, regel in (("kfz", _KFZ_RE), ("bic", _BIC_RE), ("ausweis", _AUSWEIS_RE)):
         if kategorie == kat:
@@ -1339,7 +1363,7 @@ def _kennungs_wert(text: str, s: int, e: int, kategorie: str, streng: bool, eint
             if a - s <= 2:
                 return [Wert(a, b, "iban")]
     sp = kennung_spanne(text, s, e, 2 if kategorie in ("mandat", "ausweis") else 3)
-    if sp is None:
+    if sp is None or (art is not None and not allgemeiner_wert_passt(text[sp[0]:sp[1]])):
         return []
     a, b = sp
     if streng:
@@ -1486,6 +1510,10 @@ _ORG_ROLLEN_RE = re.compile(r"(?i)^(?:arbeitgeber|auftraggeber|gläubiger|glaubi
                             r"hausverwalter|vermieter)")
 
 
+# ein Doppelpunkt direkt hinter einem unbekannten "Namen": ein Feld-Etikett, kein Name ("Geburtsland: Polen")
+_FELD_DAHINTER_RE = re.compile(r"[ \t]*:")
+
+
 def _namens_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> list:
     """Namen hinter einem Personen-Etikett; Gremien-Etiketten (Vorstand …) lesen eine Liste."""
     liste = bool(_GREMIUM_RE.search(et.eintrag)) or et.eintrag.casefold() in ("kinder", "erben", "zeugen",
@@ -1510,6 +1538,8 @@ def _namens_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
             continue
         if (not mit_trenner or org) and not sp.bekannt and not sp.komma:
             break
+        if not sp.bekannt and _FELD_DAHINTER_RE.match(text, sp.ende, e):
+            break                                    # "Geburtsname:" ⏎ "Geburtsland: Polen": das nächste Feld
         if liste and sp.woerter == 1 and not sp.bekannt:
             pos = sp.ende                            # einzelnes unbekanntes Wort in einer Liste: OCR-Rest?
             continue
@@ -1844,7 +1874,8 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
             return None                                 # Firma als Zahlungsempfänger/Versicherer
         if not _rohwert_passt(sauber, kat):
             return None
-        if art is not None and not _muster.eigener_rohwert(art, sauber):
+        if art is not None and not _muster.eigener_rohwert(art, sauber) and not (
+                allgemein_hinter(et.eintrag) and _muster.kennungsform(sauber)):
             return None                                 # eVB, Transferticket, CVC: "gültig bis 12/2025" ist keine
         return s, e
     art = eigene_wertform(et.eintrag)
@@ -1924,18 +1955,26 @@ def kennung_folgezeile(seite, lg: Lage, et: Etikett) -> list:
     if folge is None or folge.start != nach:
         return []
     art = eigene_wertform(et.eintrag)
+    kategorie = et.kategorie
     if art is not None:
-        # eVB, Transferticket, Kartenprüfnummer: nur ihre eigene Form, ganz vorn in der Folgezeile – eVB/Transferticket
+        # eVB, Transferticket, Kartenprüfnummer: ihre eigene Form, ganz vorn in der Folgezeile – eVB/Transferticket
         # mit Ziffer ("… das Transferticket" ⏎ "BEITRAGSRECHNUNG …"), eine Kartenprüfnummer nur, wenn die Zeile des
-        # Etiketts eine Etikettzeile ist und der Wert die Folgezeile beendet ("… die CVC" ⏎ "1500 EUR …")
-        if art == "cvc" and not _muster.etikett_zeile(text, et.start, et.ende):
+        # Etiketts eine Etikettzeile ist und der Wert die Folgezeile beendet ("… die CVC" ⏎ "1500 EUR …"); hinter einem
+        # Nummer-Etikett zusätzlich der allgemeine Kennungsweg ("Versicherungsbestätigung Nr." ⏎ "HR-4711-B")
+        if not (art == "cvc" and not _muster.etikett_zeile(text, et.start, et.ende)):
+            eigen = eigener_wert(text, folge.start, folge.ende, art, et.kategorie, True, darunter=True,
+                                 etikett=et.eintrag)
+            if eigen:
+                return eigen
+        if not allgemein_hinter(et.eintrag):
             return []
-        return eigener_wert(text, folge.start, folge.ende, art, et.kategorie, True, darunter=True)
+        if art == "cvc":
+            kategorie = "vertrag"
     m = re.match(r"[ \t]*(?:\S{1,2}[ \t]+)?", text[folge.start:folge.ende])
     for anfang in (folge.start, folge.start + (m.end() if m else 0)):
         sp = kennung_spanne(text, anfang, folge.ende, 3)
-        if sp and sp[0] - anfang <= 1:
-            return [Wert(sp[0], sp[1], et.kategorie or "vertrag")]
+        if sp and sp[0] - anfang <= 1 and (art is None or allgemeiner_wert_passt(text[sp[0]:sp[1]])):
+            return [Wert(sp[0], sp[1], kategorie or "vertrag")]
     return []
 
 

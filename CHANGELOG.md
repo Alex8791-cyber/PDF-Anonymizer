@@ -145,14 +145,28 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Kennung („eVB: ERTEILT“, „Transferticket: ANGEFORDERT“, „Versicherungsbestätigung ALLIANZ“), eine Zahl der
   Folgezeile im Fließtext keine Kartenprüfnummer („… die CVC“ ⏎ „1500 EUR …“). Eine Kartenprüfnummer wird nur hinter
   ihrem Etikett geschwärzt, nie dieselben drei oder vier Ziffern an anderer Stelle oder in anderen Dokumenten des
-  Laufs (Beträge, Seitenzahlen). Der Geburtsname hinter „geb.“, „geborene“ oder „Geburtsname“ bekommt den Platzhalter
-  seiner Person („[PERSON A] geb. [PERSON A]“, auch „Frau Weber geb. …“, „Weber, Anna geb. …“, mehrteilig „geb. Garcia
-  Lopez“; trägt ihn auch eine andere Person, `[FAMILIE A]`); Datum, Ort, Füllwörter und Feldkürzel hinter „geb.“
+  Laufs (Beträge, Seitenzahlen). Der Geburtsname hinter „geb.“ oder „geborene“ direkt hinter einem Namen bekommt den
+  Platzhalter seiner Person („[PERSON A] geb. [PERSON A]“, auch „Frau Weber geb. …“, „Weber, Anna geb. …“, mehrteilig
+  „geb. Garcia Lopez“; trägt ihn auch eine andere Person, `[FAMILIE A]`), hinter dem Feld „Geburtsname“ wird er
+  geschwärzt (eigener Platzhalter); Datum, Ort, Füllwörter und Feldkürzel hinter „geb.“
   („geb. Hamburg“, „geb. Ledig“, „Geburtsname: siehe oben“, „GEB.DAT.“), „Gebr.“ und „Geb.“ für Gebäude oder Gebühr
   bleiben wie bisher. Erkannt in derselben Zeile, in der nächsten Zeile, in der Tabellenzelle bzw. -spalte und auf
   Scans; die Restrisiko-Prüfung meldet einen lesbar gebliebenen Wert hinter diesen Etiketten (Ausgabe `_PRUEFEN`),
   auch mit Lesefehlern der Texterkennung („Kartenprufnummer“). Auf Scans ist „geb.“ vor einem geschwärzten
   Geburtsnamen kein Grund mehr für die Warnung „Schlüsselwort ohne Fund“.
+  Erkennung und Restrisiko-Prüfung lesen diese Kennungen nach derselben Regel „Etikett + Wert“ (neues Modul
+  `anonymisierer/kennungsformen.py`): der Wert direkt hinter dem Etikett, in der nächsten Zeile, in der Zelle daneben
+  oder hinter Zwischenwörtern desselben Satzes bis zu einer Ankündigung – auch groß geschrieben, mit Klammern,
+  Abkürzungen und Zeilenumbruch („Die eVB-Nummer Ihres neuen Fahrzeugs lautet: …“, „… für die Zulassung Ihres Pkw
+  (Kennzeichen M-AB 123) lautet: …“, „Die CVC auf der⏎Rückseite ist 739.“); Schluss am Satzende, an einem anderen
+  Etikett und nach 14 Wörtern. Dazu: Mehrzahl („eVB-Nummern: …, …“, „Transfertickets:“), zweizeilige Spaltenköpfe
+  („Versicherungs-“⏎„bestätigung“), „Kreditkartenprüfnummer“, „Kreditkarten-Prüfnummer“, „Kartenprüfnr.“, „Prüfnr.“
+  (auch als Spaltenkopf), „Sicherheitscode (3 Ziffern):“, „CID:“, „Card Verification Code“, Kammfelder mit einer Ziffer
+  je Kästchen, Kartendaten ohne Etikett („Visa 4111 …, gültig bis 12/27, 739“), wenige Wörter ohne Ankündigung in
+  Kunden-Mails („…, Prüfziffer hinten 739“), „Geburtsname, falls abweichend: …“ (auch in Versalien), „Geburtsname
+  (falls vom Familiennamen abweichend): …“, „Geb.-Name ⇥⇥ …“, „Familienname (Geburtsname): Weber (Quarnstedt)“
+  (derselbe Platzhalter wie „Weber“), Spaltenköpfe unter einer Titelzeile und Lesefehler wie „eVB-Nurnmer“ und
+  „Anna Weber gab. Quarnstedt“.
 
 ### Geändert
 - **Prüfziffern sind nur noch ein Indiz:** Eine IBAN mit falscher Prüfziffer wird trotzdem geschwärzt, wenn
@@ -207,6 +221,17 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   gelesen (10-seitiger Scan auf dem Entwicklungsrechner: 18 statt 46 Sekunden).
 - In „NACHNAME, VORNAME GEB. …“ wurde „GEB“ als Teil des Namens geschwärzt; der Geburtsname dahinter galt als
   eigene Person.
+- Hinter „Versicherungsbestätigung Nr.“, „VB-Nr.“, „eVB-Nr.“, „Transferticket-Nr.“ und „Kartenprüfnummer“ blieb
+  eine Nummer, die nicht die Form einer eVB, eines Transfertickets oder einer Kartenprüfnummer hat („123/24“,
+  „HR-4711-B“, „TT-12345“), seit der neuen Erkennung lesbar; sie wird wieder geschwärzt.
+- Ein leeres Feld „Geburtsname“ machte das nächste Feld-Etikett („PLZ, Ort:“, „Status“) zur Person, die im ganzen
+  Lauf geschwärzt wurde; hinter „geb.“ wurden auch Wörter wie „In“, „Lt.“, Länder und Orte („geb. Polen“, „geb.
+  Wien“, „Als geborener Kölner …“) und „Geb.“ für Gebäude („Standort Köln, Geb. Kantine“) zum Namen. Ein Feld-Etikett
+  ist nie ein Geburtsname; Orte erkennt die Wissensbasis (neue Liste `orte.txt`).
+- Die Restrisiko-Prüfung meldete hinter „Transferticket“, „eVB“ und „CVC“ Tarifangaben als Wert („SF 12 / SF 8“,
+  „250 Euro“), eine TÜV- oder DIN-Prüfnummer neben einer Kartenangabe galt als Kartenprüfnummer, eine kurze
+  Kartennummer („Karten-Nr.: 1234“) wurde nicht mehr weitergegeben, und große Tabellen mit eVB- oder CVC-Spalte
+  wurden quadratisch langsamer geprüft.
 - Statuszeile: Nach dem Hinzufügen von Dateien zu einer schon analysierten Liste blieb dort „Dateien werden
   geprüft …“ stehen. Jetzt steht dort, wie viele Dateien noch nicht analysiert sind; kam keine neue Datei
   hinzu, bleibt die Meldung der Analyse stehen. Sie folgt derselben Regel wie die Sperre vor dem Schwärzen:
