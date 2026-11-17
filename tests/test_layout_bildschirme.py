@@ -102,8 +102,11 @@ def _temp_ordner(monkeypatch, tmp_path):
     dateien.sitzung_aufraeumen()
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(scope="session", autouse=True)
 def _xvfb_beenden():
+    """Gestartete Xvfb erst am Ende der Sitzung beenden (wie test_gui.display_1366): Tk schließt die Verbindung zu
+    einem Display nie – endete ein Xvfb, an dem noch ein Tk-Interpreter hing, brach der nächste Test, der Tk-Ereignisse
+    verarbeitete, den ganzen Testlauf ab (X-Fehler, Exit 1)."""
     yield
     while _GESTARTET:
         prozess = _GESTARTET.pop()
@@ -243,6 +246,32 @@ def ganze_zeilen(app) -> int:
     return zeilen
 
 
+def hoehen(app) -> str:
+    """Höhen der Bereiche (für Meldungen – unter Windows sind Schrift und Knöpfe anders als unter Linux)."""
+    def h(w):
+        try:
+            return w.winfo_height() if w.winfo_ismapped() else "-"
+        except tk.TclError:
+            return "?"
+    return (f"Fenster {app.root.winfo_height()}, Einstellbereich {h(app.oben_canvas)} (mindestens "
+            f"{app._oben_untergrenze()}), Fund-Karte {h(app.karte3)} (Titelzeile {h(app.funde_titelzeile)}, "
+            f"Hinweiskasten {h(app.hinweis_kasten)}, Liste {h(app.baum)}, Mindesthöhe {app._baum_mindesthoehe()}), "
+            f"Protokoll {h(app.protokoll_rahmen)}, Aktionsleiste {h(app.aktionsleiste)}, Zeile {app.zeile_px}, "
+            f"Kompaktstufe {app._kompakt}")
+
+
+def windows_knopfmasse(app, mehr: int):
+    """Alle Knöpfe um mehr Pixel höher (und breiter) – wie unter Windows: dort sind tk.Button bei gleicher Schrift
+    und gleichem Innenabstand gut 10 Pixel höher als unter Linux (Bildschirmfoto der Windows-CI bei 150 %:
+    Nebenknöpfe 48 statt 37, Hauptknöpfe 55 statt 45 Pixel)."""
+    offen = [app.root]
+    while offen:
+        w = offen.pop()
+        offen += w.winfo_children()
+        if isinstance(w, tk.Button):
+            w.config(highlightthickness=int(w.cget("highlightthickness")) + mehr // 2)
+
+
 def spalten(app) -> dict:
     return {sp: app.baum.column(sp, "width") for sp in ("#0",) + gui.SPALTEN}
 
@@ -306,59 +335,141 @@ def test_hinweiszeile_fundliste_und_knoepfe_ohne_scrollen(bildschirm, breite, ho
                                                          tmp_path_factory):
     with hauptfenster(breite, hoehe, skalierung, umgebung, dialoge, monkeypatch) as (root, app, display):
         _screenshot(root, display, _screenshot_ordner(tmp_path_factory) / f"layout_{bildschirm}_{prozent}.png")
+        fenster_pruefen(root, app, breite, hoehe, mindestzeilen)
 
-        fenster_h, fenster_w = root.winfo_height(), root.winfo_width()
-        assert fenster_w <= breite and fenster_h <= hoehe - 60, "Fenster passt nicht auf den Bildschirm"
-        hinweis = app.datei_hinweis
-        text = hinweis.cget("text")
-        assert "NICHT geprüft" in text, text
-        assert len(app.dateien) == 3 and len(app.nicht_geprueft) == 1
 
-        # Hinweiszeile, Drop-Zone, alle Knöpfe: ganz im Fenster, im Einstellbereich ganz im sichtbaren Teil
-        knoepfe = [w for w in app.datei_knoepfe.pack_slaves() if isinstance(w, tk.Button)]
-        assert len(knoepfe) == 3
-        liste_knoepfe = [w for w in app.vorschau_knopf.master.pack_slaves() if isinstance(w, tk.Button)]
-        assert len(liste_knoepfe) == 4
-        canvas_oben = app.oben_canvas.winfo_rooty() - root.winfo_rooty()
-        canvas_unten = canvas_oben + app.oben_canvas.winfo_height()
-        assert float(app.oben_canvas.yview()[0]) == 0.0, "der Einstellbereich ist nicht ganz nach oben gerollt"
-        pruefen = [("Hinweiszeile", hinweis), ("Drop-Zone", app.drop_zone), ("Fundliste", app.baum),
-                   ("Hinweiskasten", app.hinweis_kasten), ("Protokoll", app.protokoll),
-                   ("Statuszeile", app.status_label), ("Fortschritt", app.fortschritt),
-                   ("Analysieren", app.analyse_knopf), ("Schwärzen", app.start_knopf),
-                   ("Abbrechen", app.abbrechen_knopf), ("Ergebnisordner", app.ordner_knopf)]
-        pruefen += [(k.cget("text"), k) for k in knoepfe + liste_knoepfe]
-        for name, w in pruefen:
-            assert w.winfo_ismapped(), f"{name} nicht sichtbar"
-            oben, unten, links, rechts = lage(root, w)
-            assert 0 <= oben and unten <= fenster_h and 0 <= links and rechts <= fenster_w, \
-                f"{name} ragt aus dem Fenster ({oben}..{unten}, {links}..{rechts} bei {fenster_w}x{fenster_h})"
-            if im_einstellbereich(app, w):
-                assert canvas_oben <= oben and unten <= canvas_unten, \
-                    f"{name} nur nach Scrollen sichtbar ({oben}..{unten}, Einstellbereich {canvas_oben}..{canvas_unten})"
-            if isinstance(w, (tk.Label, tk.Button)):
-                assert w.winfo_reqwidth() <= w.winfo_width() + 2, f"{name} seitlich abgeschnitten"
-        # Hinweiszeile: umgebrochen statt abgeschnitten, ganze Höhe sichtbar
-        assert hinweis.winfo_height() >= hinweis.winfo_reqheight()
-        # Fundliste: genug ganze Zeilen; waagrechte Bildlaufleiste nur, wenn die Spalten nicht passen
-        zeilen = ganze_zeilen(app)
-        assert zeilen >= mindestzeilen, f"Fundliste zeigt nur {zeilen} ganze Zeilen (mindestens {mindestzeilen})"
-        summe = sum(spalten(app).values())
-        if summe <= app.baum.winfo_width() - 2:
-            assert not app.baum_roll_x.winfo_ismapped(), "Bildlaufleiste ohne Not – sie kostet eine Zeile"
-        # erste Spalte: Dateiname passt (Anfang und Endung bleiben), der Zusatz steht ganz in der Kontextspalte
-        datei_zeilen_pruefen(app)
-        # Prüfspalten: nicht mehr auf der Mindestbreite, solange die erste Spalte mehr als ihren Entwurf hat
-        pruefspalten_pruefen(app)
-        # keine Zeile des Einstellbereichs am unteren Rand mittendurch geschnitten
-        for karte in app.oben.pack_slaves():
-            for kind in karte.pack_slaves():
-                oben, unten, _, _ = lage(root, kind)
-                assert not (oben < canvas_unten - 2 and unten > canvas_unten + 2), \
-                    f"Zeile {kind} am Rand des Einstellbereichs halb abgeschnitten ({oben}..{unten}, {canvas_unten})"
-        # großer Titel nur, wenn Platz ist; der Programmname steht immer in der Titelleiste
-        assert app.titel.winfo_ismapped() == (fenster_h >= app._px(gui.FENSTER_KLEIN_HOEHE))
-        assert root.title().startswith("PDF-Anonymisierer")
+def fenster_pruefen(root, app, breite, hoehe, mindestzeilen):
+    """Alle Prüfungen von test_hinweiszeile_fundliste_und_knoepfe_ohne_scrollen für ein fertig angepasstes Fenster."""
+    fenster_h, fenster_w = root.winfo_height(), root.winfo_width()
+    assert fenster_w <= breite and fenster_h <= hoehe - 60, "Fenster passt nicht auf den Bildschirm"
+    hinweis = app.datei_hinweis
+    text = hinweis.cget("text")
+    assert "NICHT geprüft" in text, text
+    assert len(app.dateien) == 3 and len(app.nicht_geprueft) == 1
+
+    # Hinweiszeile, Drop-Zone, alle Knöpfe: ganz im Fenster, im Einstellbereich ganz im sichtbaren Teil
+    knoepfe = [w for w in app.datei_knoepfe.pack_slaves() if isinstance(w, tk.Button)]
+    assert len(knoepfe) == 3
+    liste_knoepfe = [w for w in app.vorschau_knopf.master.pack_slaves() if isinstance(w, tk.Button)]
+    assert len(liste_knoepfe) == 4
+    canvas_oben = app.oben_canvas.winfo_rooty() - root.winfo_rooty()
+    canvas_unten = canvas_oben + app.oben_canvas.winfo_height()
+    assert float(app.oben_canvas.yview()[0]) == 0.0, "der Einstellbereich ist nicht ganz nach oben gerollt"
+    pruefen = [("Hinweiszeile", hinweis), ("Drop-Zone", app.drop_zone), ("Fundliste", app.baum),
+               ("Hinweiskasten", app.hinweis_kasten), ("Protokoll", app.protokoll),
+               ("Statuszeile", app.status_label), ("Fortschritt", app.fortschritt),
+               ("Analysieren", app.analyse_knopf), ("Schwärzen", app.start_knopf),
+               ("Abbrechen", app.abbrechen_knopf), ("Ergebnisordner", app.ordner_knopf)]
+    pruefen += [(k.cget("text"), k) for k in knoepfe + liste_knoepfe]
+    for name, w in pruefen:
+        assert w.winfo_ismapped(), f"{name} nicht sichtbar"
+        oben, unten, links, rechts = lage(root, w)
+        assert 0 <= oben and unten <= fenster_h and 0 <= links and rechts <= fenster_w, \
+            f"{name} ragt aus dem Fenster ({oben}..{unten}, {links}..{rechts} bei {fenster_w}x{fenster_h})"
+        if im_einstellbereich(app, w):
+            assert canvas_oben <= oben and unten <= canvas_unten, \
+                f"{name} nur nach Scrollen sichtbar ({oben}..{unten}, Einstellbereich {canvas_oben}..{canvas_unten})"
+        if isinstance(w, (tk.Label, tk.Button)):
+            assert w.winfo_reqwidth() <= w.winfo_width() + 2, f"{name} seitlich abgeschnitten"
+    # Hinweiszeile: umgebrochen statt abgeschnitten, ganze Höhe sichtbar
+    assert hinweis.winfo_height() >= hinweis.winfo_reqheight()
+    # Fundliste: genug ganze Zeilen; waagrechte Bildlaufleiste nur, wenn die Spalten nicht passen
+    zeilen = ganze_zeilen(app)
+    assert zeilen >= mindestzeilen, \
+        f"Fundliste zeigt nur {zeilen} ganze Zeilen (mindestens {mindestzeilen}) – {hoehen(app)}"
+    summe = sum(spalten(app).values())
+    if summe <= app.baum.winfo_width() - 2:
+        assert not app.baum_roll_x.winfo_ismapped(), "Bildlaufleiste ohne Not – sie kostet eine Zeile"
+    # erste Spalte: Dateiname passt (Anfang und Endung bleiben), der Zusatz steht ganz in der Kontextspalte
+    datei_zeilen_pruefen(app)
+    # Prüfspalten: nicht mehr auf der Mindestbreite, solange die erste Spalte mehr als ihren Entwurf hat
+    pruefspalten_pruefen(app)
+    # keine Zeile des Einstellbereichs am unteren Rand mittendurch geschnitten
+    for karte in app.oben.pack_slaves():
+        for kind in karte.pack_slaves():
+            oben, unten, _, _ = lage(root, kind)
+            assert not (oben < canvas_unten - 2 and unten > canvas_unten + 2), \
+                f"Zeile {kind} am Rand des Einstellbereichs halb abgeschnitten ({oben}..{unten}, {canvas_unten})"
+    # großer Titel nur, wenn Platz ist; der Programmname steht immer in der Titelleiste
+    assert app.titel.winfo_ismapped() == (fenster_h >= app._px(gui.FENSTER_KLEIN_HOEHE))
+    assert root.title().startswith("PDF-Anonymisierer")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Linux-Analogon: unter Windows prüft "
+                    "test_hinweiszeile_fundliste_und_knoepfe_ohne_scrollen die echten Knopfmaße")
+@pytest.mark.parametrize("skalierung, prozent, mindestzeilen", [(5 / 3, 125, 4), (2.0, 150, 3)],
+                         ids=["1366x768_125", "1366x768_150"])
+@pytest.mark.parametrize("mehr", [12, 24], ids=["knoepfe+12", "knoepfe+24"])
+def test_fundliste_auch_mit_windows_knopfmassen(mehr, skalierung, prozent, mindestzeilen, umgebung, dialoge,
+                                                 monkeypatch, tmp_path_factory):
+    """Befund Runde 3b (Windows-CI, Segoe UI): bei 1366x768 und 150 % zeigte die Fundliste keine einzige ganze
+    Zeile – unter Windows sind die Knöpfe gut 10 Pixel höher, unter Linux fiel das nicht auf (dort waren es noch
+    zwei, mit dem längeren Hinweiskasten aus „bilder-fotos“). Hier mit um 12 bzw. 24 Pixel höheren Knöpfen
+    nachgestellt: die Kompaktstufen (gui.KOMPAKT_STUFEN) halten die Mindestzeilen, alle übrigen Prüfungen des
+    Bildschirms bleiben erfüllt."""
+    with hauptfenster(1366, 768, skalierung, umgebung, dialoge, monkeypatch) as (root, app, display):
+        windows_knopfmasse(app, mehr)
+        app._anpassung_planen()
+        pumpe(root, timeout=0.6)
+        root.update_idletasks()
+        root.update()
+        _screenshot(root, display,
+                    _screenshot_ordner(tmp_path_factory) / f"layout_1366x768_{prozent}_knoepfe+{mehr}.png")
+        fenster_pruefen(root, app, 1366, 768, mindestzeilen)
+
+
+def test_kompaktstufen_nur_so_weit_wie_noetig_und_umkehrbar(umgebung, dialoge, monkeypatch):
+    """Befund Runde 3b: die Kompaktstufen greifen nur im kleinen Fenster und nur so weit, wie die Fundliste Platz
+    braucht. Der kurze Hinweiskasten ist einzeilig und zeigt per Klick weiter alle Grenzen; die Stufe pendelt nicht
+    (ohne Änderung keine neue Anpassung); ein höheres Fenster nimmt alles zurück – Reihenfolge, Text und Abstände
+    wie vorher –, und wieder kleiner gilt dieselbe Stufe wie zuvor."""
+    with hauptfenster(1366, 768, 2.0, umgebung, dialoge, monkeypatch) as (root, app, display):
+        stufe = app._kompakt
+        assert stufe >= 1, hoehen(app)
+        kasten = app.hinweis_kasten
+        assert kasten.cget("text") == gui.HINWEISKASTEN_KURZ
+        einzeilig = (app.zeilenhoehe + 2 * int(kasten.cget("pady")) + 2 * int(kasten.cget("highlightthickness"))
+                     + 2)
+        assert kasten.winfo_height() <= einzeilig, (kasten.winfo_height(), einzeilig)
+        kasten.event_generate("<Button-1>", x=5, y=5)
+        pumpe(root, timeout=0.2)
+        assert app.letzter_dialog[1] == "Was wird nicht erkannt?" and app.letzter_dialog[2] == gui.GRENZEN_TEXT
+
+        # ohne Änderung keine neue Anpassung (kein Hin und Her zwischen zwei Stufen)
+        aufrufe = []
+        original = app._oben_anpassen
+
+        def zaehlen():
+            aufrufe.append(app._kompakt)
+            original()
+        monkeypatch.setattr(app, "_oben_anpassen", zaehlen)
+        pumpe(root, timeout=0.8)
+        assert len(aufrufe) <= 2 and app._kompakt == stufe, aufrufe
+
+        # höheres (weiter kleines) Fenster: alles zurück wie ohne Kompaktstufe
+        breite = root.winfo_width()
+        root.geometry(f"{breite}x850")
+        pumpe(root, timeout=0.6)
+        assert root.winfo_height() == 850 and root.winfo_height() < app._px(gui.FENSTER_KLEIN_HOEHE)
+        assert app._kompakt == 0, hoehen(app)
+        assert kasten.cget("text") == gui.HINWEISKASTEN
+        karte1 = app.datei_knoepfe.master
+        assert karte1.pack_slaves()[:3] == [app.karte1_titel, app.drop_zone, app.datei_knoepfe]
+        assert not app.dateikopf.winfo_manager()
+        assert app._abstand(app.drop_zone.pack_info()["pady"]) == (2, gui.RAENDER["drop_unten"][1])
+        for zeile in (app.datei_knoepfe, app.funde_titelzeile, app.analyse_knopf.master):
+            for knopf in zeile.pack_slaves():
+                if isinstance(knopf, gui.PrimaerKnopf):
+                    assert int(knopf.cget("pady")) == gui.RAENDER["hauptknopf"][1]
+                elif isinstance(knopf, tk.Button):
+                    assert int(knopf.cget("pady")) == gui.KNOPF_PADY
+        assert ganze_zeilen(app) >= 3
+
+        # wieder so klein wie zu Beginn: dieselbe Stufe
+        root.geometry(f"{breite}x628")
+        pumpe(root, timeout=0.6)
+        assert app._kompakt == stufe and kasten.cget("text") == gui.HINWEISKASTEN_KURZ
+        assert ganze_zeilen(app) >= 3, hoehen(app)
 
 
 @pytest.mark.parametrize("bildschirm, breite, hoehe, skalierung, prozent, alles_ganz", MAXIMIERT,

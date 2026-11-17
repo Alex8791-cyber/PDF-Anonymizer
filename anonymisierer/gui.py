@@ -92,11 +92,25 @@ UNTERTITEL_MINDESTHOEHE = 700       # bei 100 %; darunter wird der Untertitel au
 OBEN_MINDESTHOEHE = 60              # bei 100 %, Mindesthöhe des scrollbaren Einstellbereichs (Titel + Drop-Zone)
 # Ränder (Pixel) im normalen und im kleinen Fenster (Laptop 1366x768 bei 100-150 %, 1024x768): im kleinen Fenster
 # fehlen sonst gut 60 Pixel – die Fundliste zeigte bei 150 % nur eine Zeile. Schrift und Inhalte bleiben gleich.
-RAENDER = {"haupt": (10, 4), "karte": (8, 4), "karte_abstand": (8, 4), "drop_innen": (6, 2), "drop_unten": (6, 4),
+# Seitlich (haupt_x, karte_x) gewinnt die Fundliste im kleinen Fenster 28 Pixel Breite: bei 1366x768 und 100 %
+# (maximiert) fehlten mit breiteren Schriften (DejaVu Sans) sonst ein paar Pixel für den ganzen Dateinamen neben den
+# Prüfspalten in Komfortbreite.
+RAENDER = {"haupt": (10, 4), "haupt_x": (16, 8), "karte": (8, 4), "karte_x": (14, 8), "karte_abstand": (8, 4),
+           "drop_innen": (6, 2), "drop_unten": (6, 4),
            "leiste": (6, 3), "leiste_abstand": (6, 4), "protokoll": (4, 2), "protokoll_abstand": (6, 4),
            "kasten": (3, 1), "hauptknopf": (6, 4), "fortschritt_abstand": (4, 2)}
 PROTOKOLL_ZEILEN = 5
 PROTOKOLL_ZEILEN_KLEIN = 3
+# Fundliste im kleinen Fenster mindestens BAUM_MINDESTHOEHE hoch, nie weniger als Kopfzeile + BAUM_MINDESTZEILEN
+# ganze Zeilen. Reicht der Platz dafür nicht, rücken diese Bereiche der Reihe nach zusammen – nur so weit wie nötig,
+# Inhalte und Bedienung bleiben (_kompakt_setzen). Befund Runde 3b: unter Windows (Segoe UI, Knöpfe gut 10 Pixel
+# höher als unter Linux) zeigte die Fundliste bei 1366x768 und 150 % keine einzige ganze Zeile.
+BAUM_MINDESTZEILEN = 3
+KOMPAKT_STUFEN = ("hinweiskasten",   # Hinweiskasten einzeilig; ein Klick zeigt weiter alle Grenzen
+                  "dateikopf",       # „1 · PDF-Dateien“ und Drop-Zone in einer Zeile
+                  "knoepfe")         # Knöpfe ohne Innenabstand oben und unten
+KOMPAKT_RUECKWEG = 4                 # Pixel Spielraum, bevor eine Stufe zurückgenommen wird (kein Hin und Her)
+KNOPF_PADY = 3                       # Innenabstand oben/unten der Nebenknöpfe (_knopf)
 PROTOKOLL_MAX_ZEILEN = 5000
 VORLADEN_NACH_MS = 800              # spaCy-Modell so lange nach dem Start im Hintergrund laden (PERF-09)
 ERSTSTART_NACH_MS = 300             # Hinweis beim ersten Start erst, wenn das Hauptfenster steht
@@ -260,6 +274,10 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
 
 
 UNTERTITEL, HINWEISKASTEN, GRENZEN_TEXT = _texte_zur_engine(_NEUE_KATEGORIEN)
+# Hinweiskasten im kleinen Fenster, wenn sonst der Platz für die Fundliste fehlt (KOMPAKT_STUFEN): eine Zeile; ein
+# Klick zeigt weiter alle Grenzen (wie Hilfe → „Was wird nicht erkannt?“)
+HINWEISKASTEN_KURZ = ("⚠ Nicht alles wird erkannt (u. a. Unterschriften, Handschrift, Gesichter) – Klick zeigt alle "
+                      "Grenzen")
 
 
 # ----------------------------------------------------------------------
@@ -932,6 +950,7 @@ class AnonymisiererApp:
         self._ner_sperre = threading.Lock()              # lade_ner nie doppelt gleichzeitig (Vorladen/Analyse)
         self._hauptthread_fehler_gemeldet = False
         self._anpassung_laeuft = False
+        self._kompakt = 0                                # gesetzte Kompaktstufe (KOMPAKT_STUFEN, 0 = keine)
         self.dnd_aktiv = False
         self._sperrbar: list = []
         self._einstellungen_werden_gesetzt = False
@@ -993,8 +1012,9 @@ class AnonymisiererApp:
         self.f_knopf = (SCHRIFT, 10, "bold")
         self.f_mono = (SCHRIFT_MONO, 9)
         self.zeilenhoehe = self.f_normal.metrics("linespace")
+        self.zeile_px = max(20, self.zeilenhoehe + 6)          # Zeilenhöhe der Fundliste
         stil = ttk.Style(self.root)
-        stil.configure("Treeview", font=self.f_normal, rowheight=max(20, self.zeilenhoehe + 6))
+        stil.configure("Treeview", font=self.f_normal, rowheight=self.zeile_px)
         stil.configure("Treeview.Heading", font=self.f_fett)
 
     def _px(self, wert: int) -> int:
@@ -1155,6 +1175,9 @@ class AnonymisiererApp:
 
     def _baue_karte_dateien(self, eltern):
         karte1 = self._karte(eltern, "1 · PDF-Dateien")
+        self.karte1_titel = karte1.titel
+        # Kompaktstufe „dateikopf“ (KOMPAKT_STUFEN): Titel und Drop-Zone nebeneinander in dieser Zeile
+        self.dateikopf = tk.Frame(karte1, bg=FARBE_KARTE)
         self.drop_zone = tk.Label(karte1, text="", font=(SCHRIFT, 10), bg=FARBE_AKZENT_HELL, fg=FARBE_AKZENT,
                                   height=1, pady=6, cursor="hand2", highlightthickness=2,
                                   highlightbackground="#b9cfee")
@@ -1299,6 +1322,7 @@ class AnonymisiererApp:
         self.karte3 = karte3
         titelzeile = tk.Frame(karte3, bg=FARBE_KARTE)
         titelzeile.pack(fill="x")
+        self.funde_titelzeile = titelzeile
         tk.Label(titelzeile, text="3 · Funde prüfen, dann schwärzen", font=self.f_karte,
                  bg=FARBE_KARTE, fg=FARBE_TEXT).pack(side="left")
         self.entfernen_knopf = self._knopf(titelzeile, "Datei aus Liste entfernen", self.datei_entfernen, True)
@@ -1323,6 +1347,9 @@ class AnonymisiererApp:
                                        wraplength=self._px(840), cursor="hand2")
         self.hinweis_kasten.pack(side="bottom", fill="x", pady=(2, 0))
         self.hinweis_kasten.bind("<Button-1>", lambda e: self.hilfe_grenzen())
+        # nie angezeigter Zwilling: misst die Höhe der langen und der kurzen Fassung (_kompakt_gewinne)
+        self._kasten_mess = tk.Label(karte3, text="", font=self.f_normal, justify="left", anchor="w", padx=8,
+                                     pady=3, highlightthickness=1)
 
         baum_rahmen = tk.Frame(karte3, bg=FARBE_KARTE)
         baum_rahmen.pack(fill="both", expand=True, pady=(2, 2))
@@ -1505,7 +1532,8 @@ class AnonymisiererApp:
         rahmen = tk.Frame(eltern, bg=FARBE_KARTE, padx=14, pady=8,
                           highlightthickness=1, highlightbackground=FARBE_RAND)
         rahmen.pack(fill="both" if expand else "x", expand=expand, pady=(0, 8))
-        tk.Label(rahmen, text=titel, font=self.f_karte, bg=FARBE_KARTE, fg=FARBE_TEXT).pack(anchor="w", pady=(0, 2))
+        rahmen.titel = tk.Label(rahmen, text=titel, font=self.f_karte, bg=FARBE_KARTE, fg=FARBE_TEXT)
+        rahmen.titel.pack(anchor="w", pady=(0, 2))
         return rahmen
 
     def _knopf(self, eltern, text, befehl, sekundaer=False, unterstrichen: int = -1):
@@ -1513,7 +1541,7 @@ class AnonymisiererApp:
         if sekundaer:
             knopf = tk.Button(eltern, text=text, command=befehl, font=self.f_normal,
                               bg="#eef1f5", fg=FARBE_TEXT, relief="flat", underline=unterstrichen,
-                              padx=10, pady=3, cursor="hand2", activebackground="#dde3ea",
+                              padx=10, pady=KNOPF_PADY, cursor="hand2", activebackground="#dde3ea",
                               disabledforeground="#9ca3af")
         else:
             knopf = PrimaerKnopf(eltern, text=text, command=befehl, font=self.f_knopf,
@@ -1552,6 +1580,8 @@ class AnonymisiererApp:
             if fenster_h <= 1:                               # noch nicht dargestellt: Startgeometrie nehmen
                 fenster_h = self._start_hoehe
             klein = fenster_h < self._px(FENSTER_KLEIN_HOEHE)
+            if not klein:
+                self._kompakt_setzen(0)                      # Kompaktstufen nur im kleinen Fenster
             # kleines Fenster (Laptop 1366x768 bei 100-150 %, 1024x768): großer Titel und Untertitel aus – der
             # Programmname steht in der Titelleiste, der Untertitel im Hinweis beim ersten Start – und engere Ränder
             self._kopf_zeigen(titel=not klein,
@@ -1567,22 +1597,21 @@ class AnonymisiererApp:
             if int(self.protokoll.cget("height")) != zeilen:
                 self.protokoll.config(height=zeilen)
             self.haupt.update_idletasks()                    # angeforderte Höhen nach den Änderungen
+            if klein:
+                # Reicht der Platz nicht für die Mindesthöhe der Fundliste, rücken Hinweiskasten, Dateikopf und
+                # Knöpfe der Reihe nach zusammen (KOMPAKT_STUFEN), nur so weit wie nötig
+                stufe = self._kompakt_stufe_waehlen(fenster_h)
+                if stufe != self._kompakt:
+                    self._kompakt_setzen(stufe)
+                    self.haupt.update_idletasks()
             benoetigt = self.oben.winfo_reqheight()
-            karte3_rand = max(0, self.karte3.winfo_reqheight() - self.baum_rahmen.winfo_reqheight())
-            kopf_h = self.kopf.winfo_reqheight() if self.kopf.winfo_manager() else 0
-            i = 1 if klein else 0
-            raender = (2 * RAENDER["haupt"][i] + RAENDER["leiste_abstand"][i] + RAENDER["protokoll_abstand"][i]
-                       + RAENDER["karte_abstand"][i] + 4)       # Ränder in Pixeln (skalieren nicht mit)
-            fest = (kopf_h + self.aktionsleiste.winfo_reqheight() + self.protokoll_rahmen.winfo_reqheight()
-                    + karte3_rand + raender)
-            rest = fenster_h - fest
-            # Die Fundliste ist der Arbeitsbereich (GR-02): fester Anteil des freien Platzes (mindestens
-            # BAUM_MINDESTHOEHE); der Einstellbereich bekommt den Rest und scrollt bei Bedarf – aber nie weniger als
+            rest, untergrenze = self._platz_unten(fenster_h, klein)
+            # Die Fundliste ist der Arbeitsbereich (GR-02): fester Anteil des freien Platzes (mindestens ihre
+            # Mindesthöhe); der Einstellbereich bekommt den Rest und scrollt bei Bedarf – aber nie weniger als
             # bis unter die Hinweiszeile zur Dateiauswahl, und sein sichtbarer Teil endet unter einer ganzen Zeile
             # (keine halb abgeschnittenen Knöpfe oder Häkchen).
-            baum_soll = max(self._px(BAUM_MINDESTHOEHE), int(rest * BAUM_ANTEIL))
+            baum_soll = max(self._baum_mindesthoehe(), int(rest * BAUM_ANTEIL))
             verfuegbar = rest - baum_soll
-            untergrenze = self._oben_untergrenze()
             hoehe = max(untergrenze, min(benoetigt, verfuegbar))
             if hoehe < benoetigt:
                 grenzen = [g for g in self._oben_zeilengrenzen() if untergrenze <= g <= hoehe]
@@ -1600,6 +1629,104 @@ class AnonymisiererApp:
             pass
         finally:
             self._anpassung_laeuft = False
+
+    def _platz_unten(self, fenster_h: int, klein: bool) -> tuple[int, int]:
+        """(rest, untergrenze): Höhe für Einstellbereich und Fundliste zusammen – das Fenster ohne Kopf,
+        Aktionsleiste, Protokoll, den Rest der Fund-Karte und die Ränder – und die Mindesthöhe des Einstellbereichs
+        (aus den angeforderten Höhen)."""
+        karte3_rand = max(0, self.karte3.winfo_reqheight() - self.baum_rahmen.winfo_reqheight())
+        kopf_h = self.kopf.winfo_reqheight() if self.kopf.winfo_manager() else 0
+        i = 1 if klein else 0
+        raender = (2 * RAENDER["haupt"][i] + RAENDER["leiste_abstand"][i] + RAENDER["protokoll_abstand"][i]
+                   + RAENDER["karte_abstand"][i] + 4)           # Ränder in Pixeln (skalieren nicht mit)
+        fest = (kopf_h + self.aktionsleiste.winfo_reqheight() + self.protokoll_rahmen.winfo_reqheight()
+                + karte3_rand + raender)
+        return fenster_h - fest, self._oben_untergrenze()
+
+    def _baum_mindesthoehe(self) -> int:
+        """Mindesthöhe der Fundliste samt Rahmen: BAUM_MINDESTHOEHE, nie weniger als Kopfzeile (wie eine Zeile
+        gerechnet) und BAUM_MINDESTZEILEN ganze Zeilen – dazu die waagrechte Bildlaufleiste, wenn sie zu sehen ist."""
+        roll = self.baum_roll_x.winfo_reqheight() if self.baum_roll_x.winfo_ismapped() else 0
+        return max(self._px(BAUM_MINDESTHOEHE), (BAUM_MINDESTZEILEN + 1) * self.zeile_px + self._px(4)) + roll
+
+    def _kompakt_stufe_waehlen(self, fenster_h: int) -> int:
+        """Kleinste Kompaktstufe, mit der die Fundliste ihre Mindesthöhe bekommt (reicht keine: die letzte). Der
+        Gewinn je Stufe wird vorhergesagt (_kompakt_gewinne), nicht durch Umschalten ausprobiert – jede Änderung
+        löste eine neue Anpassung aus. Eine gesetzte Stufe wird erst zurückgenommen, wenn danach noch
+        KOMPAKT_RUECKWEG Pixel Spielraum bleiben (kein Hin und Her an der Grenze)."""
+        rest, untergrenze = self._platz_unten(fenster_h, True)
+        gewinne = self._kompakt_gewinne()
+        ohne = rest - untergrenze - sum(gewinne[:self._kompakt])     # Platz der Fundliste ohne Kompaktstufe
+        mindest = self._baum_mindesthoehe()
+        for stufe in range(len(KOMPAKT_STUFEN)):
+            rueckweg = KOMPAKT_RUECKWEG if stufe < self._kompakt else 0
+            if ohne + sum(gewinne[:stufe]) >= mindest + rueckweg:
+                return stufe
+        return len(KOMPAKT_STUFEN)
+
+    def _kompakt_gewinne(self) -> list[int]:
+        """Platzgewinn der Fundliste (Pixel) je Kompaktstufe, aus den angeforderten Höhen – gleich, welche Stufe
+        gerade gesetzt ist."""
+        r = {name: werte[1] for name, werte in RAENDER.items()}      # Kompaktstufen gibt es nur im kleinen Fenster
+        # 1. Hinweiskasten: lange gegen kurze Fassung, gemessen am nie angezeigten Zwilling
+        kasten = self.hinweis_kasten
+        hoehen = []
+        for text in (HINWEISKASTEN, HINWEISKASTEN_KURZ):
+            self._kasten_mess.config(text=text, wraplength=kasten.cget("wraplength"), padx=kasten.cget("padx"),
+                                     pady=kasten.cget("pady"))
+            hoehen.append(self._kasten_mess.winfo_reqheight())
+        # 2. Titel und Drop-Zone untereinander (Titel pady (0, 2), Drop-Zone pady (2, unten)) oder nebeneinander
+        titel, drop = self.karte1_titel.winfo_reqheight(), self.drop_zone.winfo_reqheight()
+        dateikopf = titel + 2 + 2 + drop - max(titel, drop)
+        # 3. Knopfzeilen: Höhe mit und ohne Innenabstand der Knöpfe (die Zeile ist so hoch wie ihr höchstes Element)
+        knoepfe = 0
+        for zeile in (self.datei_knoepfe, self.funde_titelzeile, self.analyse_knopf.master):
+            normal, kompakt = [], []
+            for element in zeile.pack_slaves():
+                h = element.winfo_reqheight()
+                if isinstance(element, tk.Button):
+                    jetzt = int(float(element.cget("pady")))
+                    voll, knapp = (r["hauptknopf"], 1) if isinstance(element, PrimaerKnopf) else (KNOPF_PADY, 0)
+                    normal.append(h + 2 * (voll - jetzt))
+                    kompakt.append(h + 2 * (knapp - jetzt))
+                else:
+                    normal.append(h)
+                    kompakt.append(h)
+            if normal:
+                knoepfe += max(normal) - max(kompakt)
+        return [max(0, hoehen[0] - hoehen[1]), max(0, dateikopf), max(0, knoepfe)]
+
+    def _kompakt_setzen(self, stufe: int):
+        """Kompaktstufe setzen (die ersten stufe Einträge von KOMPAKT_STUFEN; 0 = keine) – nur bei einem Wechsel,
+        jede Stufe umkehrbar. Gespart wird nur Platz: Inhalte, Bedienung und Kürzel bleiben."""
+        if stufe == self._kompakt:
+            return
+        self._kompakt = stufe
+        klein = bool(getattr(self, "_raender_klein", False))
+        r = {name: werte[1 if klein else 0] for name, werte in RAENDER.items()}
+        # 1. Hinweiskasten einzeilig – ein Klick zeigt weiter alle Grenzen
+        self.hinweis_kasten.config(text=HINWEISKASTEN_KURZ if stufe >= 1 else HINWEISKASTEN)
+        # 2. Titel „1 · PDF-Dateien“ und Drop-Zone in einer Zeile
+        if stufe >= 2 and not self.dateikopf.winfo_manager():
+            self.dateikopf.pack(fill="x", pady=(0, r["drop_unten"]), before=self.datei_knoepfe)
+            self.karte1_titel.pack(in_=self.dateikopf, side="left", anchor="w", pady=0)
+            self.drop_zone.pack(in_=self.dateikopf, side="left", fill="x", expand=True, padx=(self._px(12), 0),
+                                pady=0)
+            for element in (self.karte1_titel, self.drop_zone):    # über dem Rahmen, der sie jetzt anordnet
+                element.lift(self.dateikopf)
+        elif stufe < 2 and self.dateikopf.winfo_manager():
+            karte1 = self.datei_knoepfe.master
+            self.karte1_titel.pack(in_=karte1, side="top", anchor="w", pady=(0, 2), before=self.datei_knoepfe)
+            self.drop_zone.pack(in_=karte1, side="top", fill="x", expand=False, padx=0, pady=(2, r["drop_unten"]),
+                                before=self.datei_knoepfe)
+            self.dateikopf.pack_forget()
+        # 3. Knöpfe ohne Innenabstand oben und unten (Hauptknöpfe 1 Pixel)
+        for zeile in (self.datei_knoepfe, self.funde_titelzeile, self.analyse_knopf.master):
+            for knopf in zeile.pack_slaves():
+                if isinstance(knopf, PrimaerKnopf):
+                    knopf.config(pady=1 if stufe >= 3 else r["hauptknopf"])
+                elif isinstance(knopf, tk.Button):
+                    knopf.config(pady=0 if stufe >= 3 else KNOPF_PADY)
 
     def _kopf_zeigen(self, titel: bool, untertitel: bool):
         """Titel und Untertitel ein-/ausblenden (in dieser Reihenfolge gepackt). Ohne beide verschwindet der ganze
@@ -1626,9 +1753,9 @@ class AnonymisiererApp:
             return
         self._raender_klein = klein
         r = {name: werte[1 if klein else 0] for name, werte in RAENDER.items()}
-        self.haupt.config(pady=r["haupt"])
+        self.haupt.config(padx=r["haupt_x"], pady=r["haupt"])
         for karte in (self.datei_hinweis.master, self.karte2, self.karte3):
-            karte.config(pady=r["karte"])
+            karte.config(padx=r["karte_x"], pady=r["karte"])
             karte.pack_configure(pady=(0, r["karte_abstand"]))
         self.drop_zone.config(pady=r["drop_innen"])
         self.drop_zone.pack_configure(pady=(2, r["drop_unten"]))
