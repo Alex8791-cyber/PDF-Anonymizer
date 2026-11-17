@@ -371,9 +371,18 @@ def umgebung(monkeypatch, tmp_path):
 
 @pytest.fixture
 def app(root, umgebung, dialoge):
+    """Hauptfenster für einen Test. Danach gilt es als geschlossen, und threading.excepthook zeigt wieder auf den
+    vorigen Haken – auch in Modulen ohne _prozesszustand. Befund Windows-CI (7a3f8a3): nach test_fotos_oberflaeche
+    zeigte der Haken noch auf die App eines beendeten Tests; eine Ausnahme im Lese-Thread von subprocess (pdftotext
+    mit Ausgabe, die kein UTF-8 ist) rief darüber root.after() auf und wartete auf den Hauptthread, der seinerseits in
+    communicate() auf den Lese-Thread wartete – der Testlauf hing bis zum Zeitlimit."""
+    haken = threading.excepthook
     a = gui.AnonymisiererApp(root, einstellungen={})
     root.update()
-    return a
+    yield a
+    a.beendet = True
+    if threading.excepthook == a._thread_excepthook:
+        threading.excepthook = haken
 
 
 def analysiere(app, pfade):

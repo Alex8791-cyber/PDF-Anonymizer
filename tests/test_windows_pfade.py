@@ -30,7 +30,7 @@ from anonymisierer.analyse import analysiere_pdf
 from anonymisierer.schwaerzung import schwaerze_pdf
 
 from conftest import braucht_ocr
-from test_gui import app, dialoge, pumpe, root, starte_lauf, umgebung  # noqa: F401  (Fixtures)
+from test_gui import _prozesszustand, app, dialoge, pumpe, root, starte_lauf, umgebung  # noqa: F401  (Fixtures)
 
 NAME = "Max Mustermann"
 IBAN = "DE89 3704 0044 0532 0130 00"

@@ -14,7 +14,7 @@ import pymupdf as fitz
 import foto_vorlagen as fv
 from anonymisierer import analyse, fotos, gui, schwaerzung
 
-from test_gui import app, dialoge, root, starte_lauf, umgebung  # noqa: F401,F811
+from test_gui import _prozesszustand, app, dialoge, root, starte_lauf, umgebung  # noqa: F401,F811
 from test_vorschau_fenster import klicke, mitte, oeffne
 
 pytestmark = [pytest.mark.skipif(not os.environ.get("DISPLAY") and sys.platform != "win32",

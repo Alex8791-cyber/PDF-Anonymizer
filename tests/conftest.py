@@ -3,6 +3,7 @@
 import functools
 import os
 import sys
+import threading
 import unicodedata
 import warnings
 from pathlib import Path
@@ -228,3 +229,17 @@ braucht_ocr = pytest.mark.skipif(not _tessdata_vorhanden(), reason="Tesseract-Sp
 def tmp_pdf_ordner(tmp_path):
     """Leerer Ordner für Test-PDFs."""
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def _threading_haken_unveraendert():
+    """Kein Test hinterlässt einen eigenen threading.excepthook. Befund Windows-CI (7a3f8a3): der liegen gebliebene
+    Haken der App eines beendeten Tests ließ einen späteren Test bis zum Zeitlimit hängen (Ausnahme im Lese-Thread von
+    subprocess, der Haken wartete auf den Tk-Hauptthread, der Hauptthread auf den Lese-Thread). Der vorige Haken wird
+    in jedem Fall zurückgesetzt, damit der Fehler nicht weiterwirkt – gemeldet wird er trotzdem."""
+    haken = threading.excepthook
+    yield
+    geblieben = threading.excepthook
+    if geblieben is not haken:
+        threading.excepthook = haken
+        pytest.fail(f"Test hinterlässt threading.excepthook = {geblieben!r}", pytrace=False)

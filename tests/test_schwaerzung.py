@@ -94,12 +94,16 @@ def scan_pdf(pfad, zeilen, dpi=200, winkel=0.0, rotate=0, fontsize=12, unsichtba
 
 
 def pdftotext(pfad):
-    """Textebene, wie ein fremdes Werkzeug sie liest: pdftotext -layout (Poppler); ohne Poppler (z. B. auf dem
-    Windows-Runner) PyMuPDF in Layout-Reihenfolge – der Test läuft dann trotzdem, statt übersprungen zu werden."""
+    """Textebene, wie ein fremdes Werkzeug sie liest: pdftotext -layout (Poppler/Xpdf); ohne pdftotext PyMuPDF in
+    Layout-Reihenfolge – der Test läuft dann trotzdem, statt übersprungen zu werden. Ausgabe ausdrücklich als UTF-8
+    und hier dekodiert: unter Windows schrieb das gefundene pdftotext eine andere Kodierung, das Dekodieren im
+    Lese-Thread von subprocess scheiterte (Befund Windows-CI 7a3f8a3). Ein hängendes Werkzeug lässt nur diesen Test
+    scheitern, nicht den ganzen Lauf."""
     if PDFTOTEXT:
-        aus = subprocess.run([PDFTOTEXT, "-layout", str(pfad), "-"], capture_output=True, text=True)
+        aus = subprocess.run([PDFTOTEXT, "-layout", "-enc", "UTF-8", str(pfad), "-"], capture_output=True,
+                             timeout=120)
         if aus.returncode == 0 and aus.stdout is not None:
-            return aus.stdout
+            return aus.stdout.decode("utf-8", errors="replace")
     with fitz.open(pfad) as doc:
         return "\n".join(seite.get_text("text", sort=True) for seite in doc)
 
