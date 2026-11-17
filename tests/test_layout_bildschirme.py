@@ -90,6 +90,8 @@ FUNDE = [("namen", "Name", "Max Mustermann", "[PERSON A]", "Sehr geehrter Herr �
          ("vertragsnummer", "Vertragsnummern", "LV-2024-887766", "[VERTRAG-NR]", "Schein-Nr. »LV-2024-887766« vom")]
 # Innenabstand einer Zelle (links + rechts), großzügig gerechnet: ttk schneidet den Text am Zellenrand ab
 ZELLENRAND = 10
+# Kernaussagen des Hinweiskastens (GR-09, wie test_gui.test_fenstertitel_und_texte für das große Fenster)
+GR09_WOERTER = ("Diagnosen", "Beruf", "Arbeitgeber", "Unterschriften", "Bilder", "Handschrift", "OneDrive")
 
 
 @pytest.fixture(autouse=True)
@@ -390,6 +392,10 @@ def fenster_pruefen(root, app, breite, hoehe, mindestzeilen):
             oben, unten, _, _ = lage(root, kind)
             assert not (oben < canvas_unten - 2 and unten > canvas_unten + 2), \
                 f"Zeile {kind} am Rand des Einstellbereichs halb abgeschnitten ({oben}..{unten}, {canvas_unten})"
+    # Hinweiskasten: die Kernaussagen von GR-09 stehen in jeder Kompaktstufe da (Review Runde 3b: die einzeilige
+    # Kurzfassung ließ sie im kleinen Fenster weg)
+    for wort in GR09_WOERTER:
+        assert wort in app.hinweis_kasten.cget("text"), (wort, app.hinweis_kasten.cget("text"), app._kompakt)
     # großer Titel nur, wenn Platz ist; der Programmname steht immer in der Titelleiste
     assert app.titel.winfo_ismapped() == (fenster_h >= app._px(gui.FENSTER_KLEIN_HOEHE))
     assert root.title().startswith("PDF-Anonymisierer")
@@ -422,23 +428,39 @@ def test_fundliste_auch_mit_windows_knopfmassen(mehr, breite, hoehe, skalierung,
 
 def test_kompaktstufen_nur_so_weit_wie_noetig_und_umkehrbar(umgebung, dialoge, monkeypatch):
     """Befund Runde 3b: die Kompaktstufen greifen nur im kleinen Fenster und nur so weit, wie die Fundliste Platz
-    braucht. Der kurze Hinweiskasten ist einzeilig und zeigt per Klick weiter alle Grenzen; die Stufe pendelt nicht
-    (ohne Änderung keine neue Anpassung); ein höheres Fenster nimmt alles zurück – Reihenfolge, Text und Abstände
-    wie vorher –, und wieder kleiner gilt dieselbe Stufe wie zuvor."""
+    braucht – zuerst die, die nur Platz sparen (Dateikopf, flache Knöpfe), zuletzt die Kurzfassung des
+    Hinweiskastens; sie ist höchstens zwei Zeilen hoch, kürzer als die lange Fassung, behält die Kernaussagen von
+    GR-09 (Review Runde 3b) und zeigt per Klick weiter alle Grenzen. Die Stufe pendelt nicht (ohne Änderung keine neue
+    Anpassung); ein höheres Fenster nimmt alles zurück – Reihenfolge, Text und Abstände wie vorher –, und wieder
+    kleiner gilt dieselbe Stufe wie zuvor."""
     with hauptfenster(1366, 768, 2.0, umgebung, dialoge, monkeypatch) as (root, app, display):
         stufe = app._kompakt
         assert stufe >= 1, hoehen(app)
+        aktiv = set(gui.KOMPAKT_STUFEN[:stufe])
         kasten = app.hinweis_kasten
-        assert kasten.cget("text") == gui.HINWEISKASTEN_KURZ
-        # Höhe einer Zeile in genau diesem Kasten: gemessen an einem gleich eingestellten Label mit einer Zeile (unter
-        # Windows hat ein Label mehr Innenrand, als Schrift und Abstände ergeben – Windows-CI: 33 statt 31 Pixel)
-        probe = tk.Label(kasten.master, text="X", font=kasten.cget("font"), padx=kasten.cget("padx"),
-                         pady=kasten.cget("pady"), bd=kasten.cget("bd"),
-                         highlightthickness=kasten.cget("highlightthickness"))
-        einzeilig = probe.winfo_reqheight()
-        probe.destroy()
-        assert einzeilig < 2 * app.zeilenhoehe
-        assert kasten.winfo_height() <= einzeilig + 1, (kasten.winfo_height(), einzeilig)
+        assert bool(app.dateikopf.winfo_manager()) == ("dateikopf" in aktiv and app._dateikopf_passt())
+        flach = all(int(k.cget("pady")) == (1 if isinstance(k, gui.PrimaerKnopf) else 0)
+                    for z in (app.datei_knoepfe, app.funde_titelzeile, app.analyse_knopf.master)
+                    for k in z.pack_slaves() if isinstance(k, tk.Button))
+        assert flach == ("knoepfe" in aktiv)
+        assert kasten.cget("text") == (gui.HINWEISKASTEN_KURZ if "hinweiskasten" in aktiv else gui.HINWEISKASTEN)
+        for wort in GR09_WOERTER:
+            assert wort in kasten.cget("text") and wort in gui.HINWEISKASTEN_KURZ, wort
+
+        # Kurzfassung: höchstens zwei Zeilen und kürzer als die lange Fassung – gemessen an gleich eingestellten
+        # Labels (unter Windows hat ein Label mehr Innenrand, als Schrift und Abstände ergeben)
+        def hoehe_mit(text):
+            probe = tk.Label(kasten.master, text=text, font=kasten.cget("font"), padx=kasten.cget("padx"),
+                             pady=kasten.cget("pady"), bd=kasten.cget("bd"), justify="left",
+                             highlightthickness=kasten.cget("highlightthickness"), wraplength=kasten.cget("wraplength"))
+            h = probe.winfo_reqheight()
+            probe.destroy()
+            return h
+        zweizeilig = hoehe_mit("X\nX")
+        assert zweizeilig < 3 * app.zeilenhoehe
+        assert hoehe_mit(gui.HINWEISKASTEN_KURZ) <= zweizeilig < hoehe_mit(gui.HINWEISKASTEN), \
+            (hoehe_mit(gui.HINWEISKASTEN_KURZ), zweizeilig, hoehe_mit(gui.HINWEISKASTEN))
+        assert kasten.winfo_height() <= hoehe_mit(kasten.cget("text")) + 1
         kasten.event_generate("<Button-1>", x=5, y=5)
         pumpe(root, timeout=0.2)
         assert app.letzter_dialog[1] == "Was wird nicht erkannt?" and app.letzter_dialog[2] == gui.GRENZEN_TEXT
@@ -476,8 +498,30 @@ def test_kompaktstufen_nur_so_weit_wie_noetig_und_umkehrbar(umgebung, dialoge, m
         # wieder so klein wie zu Beginn: dieselbe Stufe
         root.geometry(f"{breite}x628")
         pumpe(root, timeout=0.6)
-        assert app._kompakt == stufe and kasten.cget("text") == gui.HINWEISKASTEN_KURZ
+        assert app._kompakt == stufe
+        assert kasten.cget("text") == (gui.HINWEISKASTEN_KURZ if "hinweiskasten" in aktiv else gui.HINWEISKASTEN)
         assert ganze_zeilen(app) >= 3, hoehen(app)
+
+
+def test_dateikopf_nur_wenn_titel_und_drop_zone_nebeneinander_passen(umgebung, dialoge, monkeypatch):
+    """Review Runde 3b: mit Drag & Drop ist der Text der Drop-Zone länger (die Layout-Tests laufen ohne tkdnd und
+    sahen nur den kurzen Ersatztext) – in schmaleren Fenstern wurde er neben dem Kartentitel an beiden Enden
+    abgeschnitten. Die Stufe „dateikopf“ greift nur, wenn beide nebeneinander passen; in jedem Fenster bleibt der
+    ganze Text der Drop-Zone zu sehen."""
+    with hauptfenster(1366, 768, 2.0, umgebung, dialoge, monkeypatch) as (root, app, display):
+        app.drop_zone.config(text=gui.DROP_TEXT_DND)
+        stufen = set()
+        for breite, hoehe in ((1342, 628), (1300, 600), (1000, 600), (900, 600)):
+            root.geometry(f"{breite}x{hoehe}")
+            pumpe(root, timeout=0.6)
+            root.update_idletasks()
+            drop = app.drop_zone
+            stufen.add(app._kompakt)
+            assert drop.winfo_reqwidth() <= drop.winfo_width() + 2, \
+                (breite, hoehe, drop.winfo_reqwidth(), drop.winfo_width(), app._kompakt, hoehen(app))
+            assert bool(app.dateikopf.winfo_manager()) == (app._kompakt >= 1 and app._dateikopf_passt()), \
+                (breite, hoehe, app._kompakt)
+        assert max(stufen) >= 1, stufen                            # sonst prüfte der Test die Stufe gar nicht
 
 
 @pytest.mark.parametrize("bildschirm, breite, hoehe, skalierung, prozent, alles_ganz", MAXIMIERT,
