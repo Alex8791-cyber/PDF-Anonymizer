@@ -1,0 +1,308 @@
+# Anreden, Grußformeln, akademische, berufliche und Adelstitel, Rollenkürzel in
+# Unterschriften (Herr, Frau, Dr. med., Prof., Dipl.-Ing., RA, i. A., gez. …).
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+a. D.
+Amtsrat
+An
+apl. Prof.
+B.A.
+B.Ed.
+B.Eng.
+B.Mus.
+B.Sc.
+Bakk.
+Baron
+Baronesse
+Baronin
+Bay
+Bayan
+Beste Grüße
+Bey
+Bruder
+Bürgermeister
+Bürgermeisterin
+c/o
+d. Ä.
+d. J.
+Dame
+Damen und Herren
+DDr.
+Dekan
+Dekanin
+DI
+Diakon
+Diakonin
+Dipl.
+Dipl.-Betriebsw.
+Dipl.-Betriebswirt
+Dipl.-Biol.
+Dipl.-Chem.
+Dipl.-Des.
+Dipl.-Finanzwirt
+Dipl.-Geogr.
+Dipl.-Geol.
+Dipl.-Hdl.
+Dipl.-HTL-Ing.
+Dipl.-Inf.
+Dipl.-Ing.
+Dipl.-Ing. (FH)
+Dipl.-Ing. (TU)
+Dipl.-Ing. agr.
+Dipl.-Jur.
+Dipl.-Kauffrau
+Dipl.-Kaufmann
+Dipl.-Kffr.
+Dipl.-Kfm.
+Dipl.-Kfm. (FH)
+Dipl.-Math.
+Dipl.-Oec.
+Dipl.-Ökon.
+Dipl.-Päd.
+Dipl.-Pflegew.
+Dipl.-Phys.
+Dipl.-Psych.
+Dipl.-Rechtspfl.
+Dipl.-Soz.
+Dipl.-Soz.-Päd.
+Dipl.-Sozialpäd.
+Dipl.-Sportl.
+Dipl.-Theol.
+Dipl.-Verw.-Wiss.
+Dipl.-Verwaltungswirt
+Dipl.-Volksw.
+Dipl.-Vw.
+Dipl.-Wirt.-Ing.
+Dipl.-Wirtsch.-Ing.
+Don
+Dona
+Doña
+Dr
+Dr.
+Dr. disc. pol.
+Dr. h. c.
+Dr. h.c.
+Dr. habil.
+Dr. Ing.
+Dr. iur.
+Dr. jur.
+Dr. med.
+Dr. med. dent.
+Dr. med. univ.
+Dr. med. vet.
+Dr. mult.
+Dr. oec.
+Dr. paed.
+Dr. phil.
+Dr. rer. nat.
+Dr. rer. oec.
+Dr. rer. pol.
+Dr. rer. soc.
+Dr. sc.
+Dr. sc. nat.
+Dr. sc. techn.
+Dr. theol.
+Dr.-Ing.
+Dres.
+Edle
+Edler
+Eheleute
+Ehepaar
+EMBA
+Erbprinz
+Fa.
+Fachanwalt für
+Fachanwältin für
+Fam.
+Familie
+Firma
+Fr.
+Frau
+Frau und Herr
+Frau und Herrn
+Fräulein
+Freifrau
+Freiherr
+Freiin
+Freundliche Grüße
+Frl.
+Fürst
+Fürstin
+gez.
+gezeichnet
+Gospođa
+Gospodin
+Graf
+Gräfin
+Grüß Gott
+Guten Tag
+Hadschi
+Hajji
+Hallo
+Hanım
+Hebamme
+Herr
+Herr und Frau
+Herrn
+Herrn und Frau
+Herzliche Grüße
+Herzog
+Herzogin
+Hochachtungsvoll
+Hofrat
+Hon.-Prof.
+Honorarprofessor
+Hr.
+i. A.
+i. R.
+i. V.
+i.A.
+i.V.
+iA
+im Auftrag
+Imam
+in Vertretung
+Ing.
+iV
+jun.
+Junior
+Justizrat
+Kaplan
+Kommerzialrat
+KR
+Lady
+Landgraf
+Liebe
+Lieber
+LL.B.
+LL.M.
+Lord
+M.A.
+M.Ed.
+M.Eng.
+M.Mus.
+M.Phil.
+M.Sc.
+Madame
+Mademoiselle
+Mag.
+Mag. (FH)
+Mag. iur.
+Mag. pharm.
+Mag. phil.
+Mag. rer. soc. oec.
+Markgraf
+MBA
+MdB
+MdEP
+MdL
+Medizinalrat
+Miss
+Mit freundlichem Gruß
+Mit freundlichen Grüßen
+Mlle
+Mlle.
+MMag.
+Mme
+Mme.
+Moin
+Monsieur
+MPA
+MPH
+Mr
+Mr.
+Mrs
+Mrs.
+Ms
+Ms.
+Mx.
+Notar
+Notarin
+Oberstudienrat
+Ökonomierat
+ORR
+OStD
+OStR
+p. p.
+p.p.
+Pan
+Pani
+Pastor
+Pastorin
+Pater
+PD
+PD Dr.
+per procura
+Pfarrer
+Pfarrerin
+Ph.D.
+PhD
+pp.
+ppa.
+Prinz
+Prinzessin
+Priv.-Doz.
+Privatdozent
+Privatdozentin
+Prof.
+Prof. Dr.
+Prof. Dr. med.
+Prof. Dr.-Ing.
+Professor
+Professorin
+RA
+RA'in
+Rabbiner
+RAin
+RD
+Rechtsanwalt
+Rechtsanwältin
+Regierungsrat
+Reichsfreiherr
+Reichsgraf
+Ritter
+RR
+Sanitätsrat
+Sayın
+Scheich
+Schwester
+Sehr geehrte
+Sehr geehrte Damen und Herren
+Sehr geehrte Frau
+Sehr geehrter
+Sehr geehrter Herr
+sen.
+Senhor
+Senhora
+Senior
+Señor
+Señora
+Servus
+Sheikh
+Sig.
+Sig.ra
+Signor
+Signora
+Signorina
+Sir
+Sr.
+Sra.
+Staatl. gepr.
+staatlich anerkannt
+staatlich geprüft
+StB
+StBin
+StD
+Steuerberater
+Steuerberaterin
+StR
+Studienrat
+Syndikusrechtsanwalt
+Univ.-Prof.
+vBP
+Viele Grüße
+WP
+z. Hd.
+z.Hd.
+zu Händen

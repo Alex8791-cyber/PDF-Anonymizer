@@ -1,0 +1,241 @@
+[
+ {
+  "id": "brief1_allianz_riester",
+  "text": "Allianz Lebensversicherungs-AG\nReinsburgstraße 19, 70178 Stuttgart\n\nHerrn\nMax Mustermann\nBergstraße 7\n69117 Heidelberg\n\nVersicherungsschein-Nr.: LV-2024-887766\nKunden-Nr. 4711-0815\nIhr Ansprechpartner: Peter Schmidt, Vermittler-Nr. 55123\n\nStuttgart, 14.03.2025\n\nRiester-Rente \"Allianz RiesterRente Klassik\" – Jahresmitteilung 2024\n\nSehr geehrter Herr Mustermann,\n\nanbei erhalten Sie die Standmitteilung zu Ihrer Riester-Rente. Ihr Vertrag hat am 01.12.2015 begonnen\nund endet planmäßig am 01.12.2047. Der garantierte Rentenfaktor beträgt 28,50 EUR je 10.000 EUR Kapital.\nIhr Eigenbeitrag betrug im Jahr 2024 insgesamt 1.925,00 EUR, die staatliche Zulage 175,00 EUR\n(Zulagennummer 86 123456 M 789). Der Beitrag von monatlich 160,42 EUR wird von der IBAN\nDE89 3704 0044 0532 0130 00 eingezogen. Die Überschussbeteiligung beträgt 2,3 Prozent.\nDie maximale Leistung bei Berufsunfähigkeit (Zusatzbaustein KomfortDynamik) beträgt 1.500 EUR monatlich.\nIm Todesfall erhalten die Hinterbliebenen das Deckungskapital. Langfristig empfehlen wir eine Erhöhung.\n\nIhre Ehefrau Anna Mustermann, geb. am 12.05.1985, ist als Bezugsberechtigte eingetragen.\nWeitere Informationen zur Basisrente (Rürup) und zur PrivatRente finden Sie unter www.allianz.de.\nBei Fragen erreichen Sie uns unter 0800 4100104 oder lebensversicherung@allianz.de.\n\nMit freundlichen Grüßen\nAllianz Lebensversicherungs-AG\nDr. Klaus Weber                 Sabine Lang\nVorstand                        Kundenbetreuung\n",
+  "behalten": [
+   "Allianz Lebensversicherungs-AG",
+   "Riester",
+   "Rürup",
+   "Zulagennummer",
+   "Basisrente",
+   "PrivatRente",
+   "KomfortDynamik",
+   "1.925,00 EUR",
+   "175,00 EUR",
+   "160,42 EUR",
+   "28,50 EUR",
+   "01.12.2015",
+   "01.12.2047",
+   "2,3 Prozent",
+   "Berufsunfähigkeit",
+   "Hinterbliebenen",
+   "Vorstand",
+   "Kundenbetreuung",
+   "Jahresmitteilung",
+   "Stuttgart, 14.03.2025"
+  ],
+  "pflicht": [
+   {
+    "kategorie": "namen",
+    "text": "Max Mustermann"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Anna Mustermann"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Peter Schmidt"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Bergstraße 7"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "69117 Heidelberg"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "LV-2024-887766"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "4711-0815"
+   },
+   {
+    "kategorie": "iban",
+    "text": "DE89 3704 0044 0532 0130 00"
+   },
+   {
+    "kategorie": "geburt",
+    "text": "12.05.1985"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Klaus Weber"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Sabine Lang"
+   }
+  ]
+ },
+ {
+  "id": "brief2_nuernberger_bu",
+  "text": "Nürnberger Lebensversicherung AG\nOstendstraße 100, 90334 Nürnberg\n\nFrau\nEva Berg\nLanggasse 14\n90402 Nürnberg\n\nVersicherungsschein-Nummer: BU 7788 9900 12\nSchaden-Nr.: S-2025-0012345\nNürnberg, 02.06.2025\n\nBerufsunfähigkeitsversicherung – Ihr Leistungsantrag vom 15.05.2025\n\nSehr geehrte Frau Berg,\n\nvielen Dank für Ihren Antrag auf Leistungen aus der Berufsunfähigkeitsversicherung. Für die Prüfung\nbenötigen wir noch ärztliche Unterlagen Ihres behandelnden Arztes Dr. med. Hans Ross, Universitätsklinikum\nHeidelberg, sowie den Bericht der Deutschen Rentenversicherung Bund. Die versicherte monatliche Rente\nbeträgt 2.000,00 EUR gemäß § 2 der Allgemeinen Bedingungen (AVB-BU 2019). Die Beitragsbefreiung gilt\nab dem 01.06.2025. Nach § 172 VVG sind wir verpflichtet, Sie über das Ergebnis zu informieren.\n\nVergleichsangebote hatten Sie seinerzeit auch von der Alten Leipziger, der Hannoverschen, Swiss Life,\nCanada Life, der Bayerischen, HDI, Debeka, DKV, Signal Iduna, Gothaer, Württembergische, Hallesche,\nBarmenia, Continentale, Stuttgarter, LV 1871, Condor, Ergo, Zurich, Generali, Axa, R+V, Huk-Coburg\nund Hanse Merkur eingeholt. Ihr Vermittler Peter Schmidt (Schmidt Versicherungsmakler GmbH, Hauptstraße 5,\n90403 Nürnberg) hat uns Ihre Vollmacht vorgelegt.\n\nBitte senden Sie die Unterlagen bis zum 30.06.2025 an uns. Ihre Steuer-ID 86095742719 haben wir vorliegen.\nTelefonisch erreichen Sie uns unter 0911 531-5, per Fax 0911 531-3206.\n\nMit freundlichen Grüßen\nNürnberger Lebensversicherung AG\nLee Wagner                       i. A. Julia Lang\nLeistungsabteilung\n",
+  "behalten": [
+   "Nürnberger Lebensversicherung AG",
+   "Alten Leipziger",
+   "Hannoverschen",
+   "Swiss Life",
+   "Canada Life",
+   "Bayerischen",
+   "HDI",
+   "Debeka",
+   "DKV",
+   "Signal Iduna",
+   "Gothaer",
+   "Württembergische",
+   "Hallesche",
+   "Barmenia",
+   "Continentale",
+   "Stuttgarter",
+   "LV 1871",
+   "Condor",
+   "Ergo",
+   "Zurich",
+   "Generali",
+   "Axa",
+   "R+V",
+   "Huk-Coburg",
+   "Hanse Merkur",
+   "§ 172 VVG",
+   "§ 2",
+   "AVB-BU 2019",
+   "2.000,00 EUR",
+   "15.05.2025",
+   "01.06.2025",
+   "30.06.2025",
+   "Leistungsabteilung",
+   "Universitätsklinikum",
+   "Deutschen Rentenversicherung Bund"
+  ],
+  "pflicht": [
+   {
+    "kategorie": "namen",
+    "text": "Eva Berg"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Langgasse 14"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "90402 Nürnberg"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "BU 7788 9900 12"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "S-2025-0012345"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Hans Ross"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Peter Schmidt"
+   },
+   {
+    "kategorie": "steuerid",
+    "text": "86095742719"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Julia Lang"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Lee Wagner"
+   }
+  ]
+ },
+ {
+  "id": "brief3_huk_kfz",
+  "text": "HUK-COBURG Allgemeine Versicherung AG\nBahnhofsplatz, 96444 Coburg\n\nHerrn\nHans Bergmann\nMaximilianstraße 3\n80539 München\n\nKfz-Haftpflicht – Schadenfall vom 10.01.2025\nSchadennummer: 25-01-4455667\nVertragsnummer: KH 112233445\nKennzeichen: M-AB 1234\n\nCoburg, 20.01.2025\n\nSehr geehrter Herr Bergmann,\n\nwir haben Ihre Schadenmeldung zum Unfall am 10.01.2025 in der Bergstraße in Heidelberg erhalten.\nUnfallgegner ist Herr Maximilian Lang, Rossweg 2, 69115 Heidelberg (Kennzeichen HD-XY 987), versichert\nbei der Allianz Versicherungs-AG, Schadennummer dort AZ 2025-9988. Die Werkstatt Auto Berg GmbH hat einen\nKostenvoranschlag über 3.450,00 EUR eingereicht. Der Gutachter Dipl.-Ing. Max Hofer schätzt den Restwert\nauf 8.900 EUR. Ihre Selbstbeteiligung in der Vollkasko beträgt 500 EUR, der Beitragssatz steigt von\n35 Prozent auf 45 Prozent (Schadenfreiheitsklasse SF 12 auf SF 7). Die Beitragsrechnung über 684,30 EUR\nerhalten Sie zum 01.03.2025. Eine Rückstufung vermeiden Sie durch Rückkauf des Schadens bis 31.03.2025.\n\nKontoauszug und Kontonummer 1234567890 (BLZ 70150000) wurden uns bereits mitgeteilt.\nRückfragen: Frau Ross, Telefon 09561 96-101, hans.bergmann@gmx.de erreichen wir Sie am besten.\n\nMit freundlichen Grüßen\nHUK-COBURG\nThomas Berg\nSchadenregulierung\n",
+  "behalten": [
+   "HUK-COBURG Allgemeine Versicherung AG",
+   "Coburg, 20.01.2025",
+   "Allianz Versicherungs-AG",
+   "3.450,00 EUR",
+   "8.900 EUR",
+   "500 EUR",
+   "684,30 EUR",
+   "35 Prozent",
+   "45 Prozent",
+   "SF 12",
+   "SF 7",
+   "10.01.2025",
+   "01.03.2025",
+   "31.03.2025",
+   "Schadenregulierung",
+   "Werkstatt",
+   "Vollkasko",
+   "Kostenvoranschlag",
+   "Gutachter",
+   "Restwert"
+  ],
+  "pflicht": [
+   {
+    "kategorie": "namen",
+    "text": "Hans Bergmann"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Maximilianstraße 3"
+   },
+   {
+    "kategorie": "plzort",
+    "text": "80539 München"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "25-01-4455667"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "KH 112233445"
+   },
+   {
+    "kategorie": "kfz",
+    "text": "M-AB 1234"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Maximilian Lang"
+   },
+   {
+    "kategorie": "strasse",
+    "text": "Rossweg 2"
+   },
+   {
+    "kategorie": "kfz",
+    "text": "HD-XY 987"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Max Hofer"
+   },
+   {
+    "kategorie": "vertrag",
+    "text": "1234567890"
+   },
+   {
+    "kategorie": "email",
+    "text": "hans.bergmann@gmx.de"
+   },
+   {
+    "kategorie": "telefon",
+    "text": "09561 96-101"
+   },
+   {
+    "kategorie": "namen",
+    "text": "Thomas Berg"
+   }
+  ]
+ }
+]

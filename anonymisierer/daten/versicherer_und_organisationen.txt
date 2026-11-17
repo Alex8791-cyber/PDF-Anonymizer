@@ -1,0 +1,1349 @@
+# ERLAUBNISLISTE: Versicherer (Marken und Firmennamen), Pools und Maklerverbünde, Behörden,
+# Sozialversicherungsträger, Krankenkassen, Banken, Verbände sowie Produkt-, Tarif- und
+# Rechtsbegriffe. Diese Namen sollen für die KI lesbar bleiben (keine Personen).
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+Aachener Bausparkasse
+Abgabenordnung
+ACE Auto Club Europa
+ADAC
+ADAC e.V.
+Adcuri
+Admiral Direkt
+AdvoCard
+Advocard Rechtsschutzversicherung AG
+AfW
+AfW Bundesverband Finanzdienstleistung
+Agentur für Arbeit
+Agila
+Agrisano
+AHB
+AHV
+AIG
+AKB
+Allgemeine Unfallversicherungsanstalt
+Allgemeine Versicherungsbedingungen
+Allianz
+Allianz Beratungs- und Vertriebs-AG
+Allianz Deutschland AG
+Allianz Elementar
+Allianz Global Assistance
+Allianz Global Investors
+Allianz Lebensversicherungs-AG
+Allianz Pensionskasse
+Allianz Private Krankenversicherung
+Allianz Private Krankenversicherungs-AG
+Allianz Suisse
+Allianz Versicherungs-AG
+Allrecht
+AllSecur
+Alte Leipziger
+Alte Leipziger – Hallesche Konzern
+Alte Leipziger Bauspar AG
+Alte Leipziger Lebensversicherung
+Alte Leipziger Lebensversicherung a.G.
+Alte Leipziger Versicherung AG
+Alte Oldenburger
+Alte Oldenburger Krankenversicherung AG
+Alters- und Hinterlassenenversicherung
+Altersrente
+Altersvorsorge
+Altersvorsorgevertrag
+Altersvorsorgeverträge-Zertifizierungsgesetz
+Altersvorsorgezulage
+AltZertG
+American Express
+Ammerländer
+Ammerländer Versicherung
+Amtsgericht
+Amtshaftpflicht
+Annuitätendarlehen
+AO
+AOK
+AOK Baden-Württemberg
+AOK Bayern
+AOK Bremen/Bremerhaven
+AOK Hessen
+AOK Niedersachsen
+AOK Nordost
+AOK Nordwest
+AOK PLUS
+AOK Rheinland-Pfalz/Saarland
+AOK Rheinland/Hamburg
+AOK Sachsen-Anhalt
+AOK-Bundesverband
+Aon
+Apella
+apoBank
+Apothekerkammer
+Apothekerversorgung
+Aquilana
+ARAG
+ARAG Allgemeine Versicherungs-AG
+ARAG Krankenversicherungs-AG
+ARAG Lebensversicherungs-AG
+ARAG SE
+ARB
+Arbeitnehmersparzulage
+Arbeitsagentur
+Arbeitsgericht
+Arbeitslosengeld
+Architektenkammer
+Ärztekammer
+Ärzteversorgung
+Assekurata
+Asstel
+Assura
+Atlas BKK ahlmann
+Atupri
+AUB
+Audi BKK
+Augenoptiker Ausgleichskasse
+Augsburger Aktienbank
+Ausgleichskasse
+Ausländerbehörde
+Auslandsreisekrankenversicherung
+Autoschutzbrief
+Autoversicherung
+AUVA
+Auxilia
+Auxilia Rechtsschutz
+AVB
+AvD
+Avenir
+AWD
+AWP
+AXA
+AXA Krankenversicherung AG
+AXA Lebensversicherung AG
+AXA Schweiz
+AXA Versicherung AG
+Baader Bank
+Badenia
+Badische Rechtsschutzversicherung
+Badische Versicherungen
+BaFin
+Bahn-BKK
+Balance
+Baloise
+Baloise Schweiz
+Baloise Versicherung
+BAMF
+Bank Austria
+Bank Cler
+Bank für Kirche und Caritas
+Bank für Sozialwirtschaft
+Bank Julius Bär
+Bank11
+Bankhaus Metzler
+Barmenia
+Barmenia Allgemeine Versicherungs-AG
+Barmenia Gothaer
+Barmenia Krankenversicherung AG
+Barmenia Lebensversicherung a.G.
+Barmenia Versicherungen
+Barmer
+Basis
+Basis-Rente
+Basisrente
+Basisschutz
+Basistarif
+Basler
+Basler Kantonalbank
+Basler Lebensversicherungs-AG
+Basler Versicherungen
+Bauamt
+Bauaufsichtsamt
+Baufi24
+Baufinanzierung
+Bauherrenhaftpflicht
+Bauleistungsversicherung
+Bauspardarlehen
+Bausparen
+Bausparkasse Mainz
+Bausparkasse Schwäbisch Hall
+Bausparvertrag
+bAV
+BAWAG
+BAWAG P.S.K.
+BAYERISCHE
+Bayerische Beamten Lebensversicherung a.G.
+Bayerische Beamtenkrankenkasse
+Bayerische Landesbank
+Bayerische Landesbrandversicherung
+Bayerische Versorgungskammer
+Bayern-Versicherung
+BayernLB
+BB-BUZ
+BBBank
+BCA AG
+BDSG
+BdV
+Beihilfeergänzungstarif
+Beihilfestelle
+Beihilfetarif
+Beitragsbefreiung
+Beitragsdynamik
+Beitragsfreistellung
+Beitragsrückgewähr
+BEMA
+Berenberg Bank
+Berliner Sparkasse
+Berner Kantonalbank
+Bertelsmann BKK
+Berufsfeuerwehr
+Berufsgenossenschaft
+Berufshaftpflicht
+Berufshaftpflichtversicherung
+Berufsrechtsschutz
+Berufsunfähigkeits-Zusatzversicherung
+Berufsunfähigkeitsversicherung
+Bestattungsvorsorge
+BetrAVG
+Betreuungsgericht
+Betreuungsgesetz
+betriebliche Altersversorgung
+Betriebshaftpflicht
+Betriebshaftpflichtversicherung
+Betriebskrankenkasse
+Betriebsrente
+Betriebsrentengesetz
+Betriebsunterbrechungsversicherung
+BetrKV
+Bewertungsreserven
+Bezügestelle
+BfDI
+BFH
+BG BAU
+BG ETEM
+BG Kliniken
+BG RCI
+BG Verkehr
+BGB
+BGH
+BGHM
+BGHW
+BGN
+BGV
+BGV Badische Versicherungen
+BGW
+BHW
+BHW Bausparkasse
+BIG direkt gesund
+BiPRO
+BKK
+BKK Akzo Nobel Bayern
+BKK Diakonie
+BKK Dürkopp Adler
+BKK EUREGIO
+BKK exklusiv
+BKK Faber-Castell & Partner
+BKK firmus
+BKK Freudenberg
+BKK Gildemeister Seidensticker
+BKK Groz-Beckert
+BKK Herkules
+BKK Linde
+BKK MAHLE
+BKK Melitta HMR
+BKK Miele
+BKK Pfalz
+BKK ProVita
+BKK Public
+BKK Rieker.Ricosta.Weisser
+BKK Salzgitter
+BKK Scheufelen
+BKK Technoform
+BKK Textilgruppe Hof
+BKK VerbundPlus
+BKK Werra-Meissner
+BKK Wirtschaft & Finanzen
+BKK Würth
+BKK ZF & Partner
+BKK24
+blau direkt
+BMW BKK
+BNP Paribas
+Bonnfinanz
+Bosch BKK
+BSG
+BtG
+BU
+BU-Versicherung
+Bund der Versicherten
+Bundesagentur für Arbeit
+Bundesamt für Justiz
+Bundesamt für Migration und Flüchtlinge
+Bundesanstalt für Finanzdienstleistungsaufsicht
+Bundesarbeitsgericht
+Bundesärztekammer
+Bundesbank
+Bundesbeauftragter für den Datenschutz und die Informationsfreiheit
+Bundesdatenschutzgesetz
+Bundesfinanzhof
+Bundesgerichtshof
+Bundeskriminalamt
+Bundesministerium der Finanzen
+Bundesministerium der Justiz
+Bundesministerium für Arbeit und Soziales
+Bundesministerium für Gesundheit
+Bundespolizei
+Bundessozialgericht
+Bundesverband Deutscher Versicherungskaufleute
+Bundesverfassungsgericht
+Bundesverwaltungsamt
+Bundesverwaltungsgericht
+Bundeszentralamt für Steuern
+Bürgeramt
+Bürgerbüro
+Bürgergeld
+Bürgerliches Gesetzbuch
+BUV
+BUZ
+BVAEB
+BVerfG
+BVG
+BVK
+BZSt
+Canada Life
+Canada Life Assurance Europe plc
+Central Krankenversicherung
+Cetelem
+Chance
+Charta Börse für Versicherungen
+Check24
+Chubb
+CLARK Germany
+Classic
+Comdirect
+comdirect bank
+Comfort
+Commerzbank
+Commerzbank AG
+Concordia
+Concordia Schweiz
+Concordia Versicherung
+Concordia Versicherungs-Gesellschaft a.G.
+Condor
+Condor Lebensversicherung
+Condor Versicherungen
+Consors Finanz
+Consorsbank
+Continentale
+Continentale Betriebskrankenkasse
+Continentale Krankenversicherung a.G.
+Continentale Lebensversicherung AG
+Continentale Sachversicherung AG
+Continentale Versicherung
+Continentale Versicherungsverbund
+Cosmos Direkt
+Cosmos Lebensversicherungs-AG
+CosmosDirekt
+Coya
+Credit Life
+Credit Suisse
+Creditplus Bank
+Creditreform
+Crif Bürgel
+CSS
+CSS Versicherung
+Cyber-Versicherung
+Cyberversicherung
+D&O-Versicherung
+D.A.S.
+D.A.S. Rechtsschutz
+DA Deutsche Allgemeine Versicherung
+DA Direkt
+DAK
+DAK-Gesundheit
+Datenschutz-Grundverordnung
+Datenschutzbehörde
+Dauerzulagenantrag
+DB
+DBV Deutsche Beamtenversicherung
+Debeka
+Debeka Allgemeine Versicherung AG
+Debeka Bausparkasse
+Debeka Bausparkasse AG
+Debeka BKK
+Debeka Krankenversicherungsverein a.G.
+Debeka Lebensversicherungsverein a.G.
+Degussa Bank
+Deka
+Deka Investment
+DekaBank
+DEKRA
+DEMV
+Depot
+Deurag
+Deutsche Apotheker- und Ärztebank
+Deutsche Bahn
+Deutsche Bank
+Deutsche Bank AG
+Deutsche Bausparkasse Badenia
+Deutsche Bundesbank
+Deutsche Familienversicherung
+Deutsche Gesetzliche Unfallversicherung
+Deutsche Kreditbank
+Deutsche Makler Akademie
+Deutsche Post
+Deutsche Post AG
+Deutsche Post Renten Service
+Deutsche Postbank
+Deutsche Rentenversicherung
+Deutsche Rentenversicherung Baden-Württemberg
+Deutsche Rentenversicherung Bayern Süd
+Deutsche Rentenversicherung Berlin-Brandenburg
+Deutsche Rentenversicherung Braunschweig-Hannover
+Deutsche Rentenversicherung Bund
+Deutsche Rentenversicherung Hessen
+Deutsche Rentenversicherung Knappschaft-Bahn-See
+Deutsche Rentenversicherung Mitteldeutschland
+Deutsche Rentenversicherung Nord
+Deutsche Rentenversicherung Nordbayern
+Deutsche Rentenversicherung Oldenburg-Bremen
+Deutsche Rentenversicherung Rheinland
+Deutsche Rentenversicherung Rheinland-Pfalz
+Deutsche Rentenversicherung Saarland
+Deutsche Rentenversicherung Schwaben
+Deutsche Rentenversicherung Westfalen
+Deutsche Telekom
+Deutsche Vermögensberatung
+Deutscher Herold
+Deutscher Maklerverbund
+Deutscher Ring
+DEVK
+DEVK Allgemeine Versicherungs-AG
+DEVK Krankenversicherungs-AG
+DEVK Lebensversicherungsverein a.G.
+DEVK Versicherungen
+DFV
+DGUV
+DHL
+Dialog
+Dialog Lebensversicherungs-AG
+Dialog Versicherung
+Die Bayerische
+Die Haftpflichtkasse
+Die Mobiliar
+Diensthaftpflicht
+DIHK
+Direct Line
+DIREKTE LEBEN
+Direktversicherung
+Direktzusage
+DKB
+DKV
+DKV Deutsche Krankenversicherung AG
+Domcura
+Donau Versicherung
+DONAU Versicherung AG
+Donner & Reuschel
+Dortmunder Lebensversicherung
+Dr. Klein Privatkunden AG
+Dread-Disease-Versicherung
+DRG
+DRV
+DRV Bund
+DSGVO
+DVAG
+DWS
+Dynamik
+DZ Bank
+DZ Privatbank
+Easybank
+ebase
+EBM
+Ecclesia
+Ecclesia Gruppe
+EGK
+Eidgenössische Steuerverwaltung
+Einkommensteuergesetz
+Einwohnermeldeamt
+Elektronikversicherung
+Element Insurance
+Elementarschadenversicherung
+Elementarversicherung
+Elterngeld
+Energie-BKK
+Entgeltpunkte
+Entgeltumwandlung
+Envivas
+Envivas Krankenversicherung
+ErbStG
+ERGO
+ERGO Direkt
+ERGO Group
+ERGO Krankenversicherung AG
+ERGO Lebensversicherung AG
+Ergo Reiseversicherung
+ERGO Versicherung AG
+ERGO Versicherung Aktiengesellschaft
+ERGO Vorsorge Lebensversicherung AG
+Ernst & Young BKK
+Ersatzkasse
+Erste Bank
+Erste Bank und Sparkassen
+Ertragsausfallversicherung
+ERV
+Erwerbsminderungsrente
+Erwerbsunfähigkeitsversicherung
+EStG
+ETF
+ETF-Sparplan
+Ethikbank
+EU
+EuGH
+Europ Assistance
+Europa Lebensversicherung AG
+Europa Versicherung
+Europace
+Europäische Reiseversicherung
+Europäische Zentralbank
+Europäischer Gerichtshof
+Evangelische Bank
+EWR
+Exklusiv
+EZB
+Fahrerlaubnis-Verordnung
+Fahrerschutzversicherung
+Fahrradversicherung
+FamFG
+Familienfürsorge
+Familiengericht
+Familienkasse
+Familienkasse der Bundesagentur für Arbeit
+Familientarif
+Festgeld
+Feuersozietät
+Feuersozietät Berlin Brandenburg
+Feuerwehr
+FeV
+FFB
+FIL Fondsbank
+Finanzamt
+Finanzamt Österreich
+Finanzgericht
+Finanzmarktaufsicht
+Finanztest
+FINMA
+Fitch Ratings
+flatex
+flatexDEGIRO
+FMA
+Fonds Finanz
+Fonds Finanz Maklerservice GmbH
+Fondsdepot Bank
+fondsgebundene Lebensversicherung
+fondsgebundene Rentenversicherung
+Fondspolice
+Fondssparplan
+Formaxx
+Franke und Bornberg
+Frankfurter Sparkasse
+Freiwillige Feuerwehr
+Friday Versicherung
+Führerscheinstelle
+Funk Gruppe
+Fürstlich Castell'sche Bank
+FZV
+GAP-Versicherung
+Garanta
+Garantie
+Gartenbau-Versicherung
+GDV
+Gebäudeversicherung
+GebüH
+Gebührenordnung für Ärzte
+Gebührenordnung für Zahnärzte
+Geldwäschegesetz
+Gen Re
+Generali
+Generali Deutschland AG
+Generali Deutschland Lebensversicherung AG
+Generali Deutschland Versicherung AG
+Generali Schweiz
+Generali Versicherung AG
+Generalstaatsanwaltschaft
+Gerling
+Gesamtverband der Deutschen Versicherungswirtschaft
+Geschäftsinhaltsversicherung
+gesetzliche Krankenkasse
+gesetzliche Krankenversicherung
+gesetzliche Rentenversicherung
+gesetzliche Unfallversicherung
+Gesundheitsamt
+Getsafe
+Gewässerschadenhaftpflicht
+GewO
+GG
+Girocard
+Girokonto
+GKG
+GKV
+GKV-Spitzenverband
+Glasversicherung
+Global Finanz
+GLS Bank
+GOÄ
+Gothaer
+Gothaer Allgemeine Versicherung AG
+Gothaer Krankenversicherung AG
+Gothaer Lebensversicherung AG
+Gothaer Versicherung
+Gothaer Versicherungen
+GOZ
+GRAWE
+Grazer Wechselseitige
+GrEStG
+Groupe Mutuel
+Grundbuchamt
+Grundeigentümer-Versicherung
+Grundfähigkeitsversicherung
+Grundgesetz
+Grundzulage
+GTÜ
+GVO
+GVO Versicherung
+GVV Kommunalversicherung
+GwG
+Haftpflichtkasse
+Haftpflichtversicherung
+Hagelversicherung
+Hallesche
+Hallesche Krankenversicherung
+Hallesche Krankenversicherung a.G.
+Hamburg Commercial Bank
+Hamburg-Mannheimer
+Hamburger Sparkasse
+Handelsgesetzbuch
+Handwerkskammer
+Hannover Re
+Hannover Rück
+Hannoversche
+Hannoversche Direktversicherung
+Hannoversche Lebensversicherung AG
+Hanse Merkur
+HanseMerkur
+HanseMerkur Krankenversicherung AG
+HanseMerkur Lebensversicherung AG
+HanseMerkur Reiseversicherung AG
+Haspa
+Hauck Aufhäuser Lampe
+Haus- und Grundbesitzerhaftpflicht
+Hausrat
+Hausratversicherung
+HDI
+HDI Global SE
+HDI Lebensversicherung AG
+HDI Pensionskasse
+HDI Versicherung AG
+HDI Versicherung AG Österreich
+Heidelberger Leben
+Heidelberger Lebensversicherung
+Heimat Krankenkasse
+HeizkostenV
+HEK
+HEK – Hanseatische Krankenkasse
+Helaba
+Helsana
+Helvetia
+Helvetia Lebensversicherungs-AG
+Helvetia Schweiz
+Helvetia Versicherungen
+Helvetia Versicherungen AG
+Hepster
+HGB
+Hinterbliebenenrente
+Hinzuverdienstgrenze
+Hiscox
+Hiscox Deutschland
+hkk
+hkk Krankenkasse
+HUK-COBURG
+HUK-COBURG Allgemeine Versicherung AG
+HUK-COBURG Krankenversicherung AG
+HUK-COBURG Lebensversicherung AG
+HUK-COBURG-Rechtsschutzversicherung AG
+HUK24
+Hundehaftpflicht
+Hundekrankenversicherung
+Hüttig & Rompf
+HWK
+Hypo NOE
+Hypo Tirol
+Hypoport
+HypoVereinsbank
+ICD-10
+ICD-10-GM
+IDD
+Ideal
+Ideal Lebensversicherung a.G.
+IDEAL Versicherung
+Iduna
+Iduna Vereinigte Lebensversicherung aG
+IfSG
+IHK
+IKK
+IKK – Die Innovationskasse
+IKK classic
+IKK gesund plus
+IKK Südwest
+Immobilienfinanzierung
+IndexSelect
+Industrie- und Handelskammer
+Infoscore
+ING
+ING Deutschland
+ING-DiBa
+Ingenieurkammer
+Inhaltsversicherung
+Insassenunfallversicherung
+InsO
+Insolvenzordnung
+Inter
+Inter Krankenversicherung AG
+Inter Lebensversicherung AG
+INTER Versicherungsgruppe
+Interhyp
+Interrisk
+InterRisk Lebensversicherungs-AG
+InterRisk Versicherungs-AG
+Invalidenversicherung
+Invest
+Investitionsbank Berlin
+Investmentfonds
+Itzehoer
+Itzehoer Versicherung
+IV
+Janitos
+JDC Group
+Jobcenter
+Jugendamt
+Jung DMS
+Jung DMS & Cie.
+JVEG
+Kammergericht
+Kapitallebensversicherung
+Kärntner Landesversicherung
+Kassenärztliche Bundesvereinigung
+Kassenärztliche Vereinigung
+Kassenzahnärztliche Vereinigung
+Kautionsversicherung
+KBA
+KfW
+KfW Bankengruppe
+Kfz-Haftpflicht
+Kfz-Haftpflichtversicherung
+Kfz-Versicherung
+Kfz-Zulassungsstelle
+KfzPflVV
+Kindergeld
+Kinderinvaliditätsversicherung
+Kinderunfallversicherung
+Kinderzulage
+Kirchliche Zusatzversorgungskasse
+KKH
+KKH Kaufmännische Krankenkasse
+Klarna
+Klassik
+Knappschaft
+Koenig & Bauer BKK
+Komfort
+KomfortDynamik
+Komfortschutz
+Kommunaler Schadenausgleich
+Kompakttarif
+Kontenklärung
+Konzept & Marketing
+KPT
+Kraftfahrt-Bundesamt
+Kraftfahrzeug-Haftpflichtversicherung
+Krankengeld
+Krankenhaustagegeldversicherung
+Krankenhauszusatzversicherung
+Krankenkasse
+Krankentagegeld
+Krankentagegeldversicherung
+Krankenversicherung
+Krankenzusatzversicherung
+Krankheitskostenvollversicherung
+KRAVAG
+Kravag-Logistic
+Kreissparkasse
+Kreissparkasse Böblingen
+Kreissparkasse Esslingen-Nürtingen
+Kreissparkasse Köln
+Kreissparkasse Ludwigsburg
+Kriminalpolizei
+Krones BKK
+KS/AUXILIA
+KSK
+KStG
+Künstlersozialkasse
+KZBV
+KZVK
+L-Bank
+Landesamt für Besoldung und Versorgung
+Landesamt für Finanzen
+Landesarbeitsgericht
+Landesbank Baden-Württemberg
+Landesbank Berlin
+Landesbank Hessen-Thüringen
+Landesbausparkasse
+Landesdatenschutzbeauftragter
+Landeskrankenhilfe
+Landeskriminalamt
+Landessozialgericht
+Landgericht
+Landwirtschaftliche Krankenkasse
+LBBW
+LBS
+Lebensversicherung
+Lebensversicherung von 1871 a.G. München
+Leistungsdynamik
+Lemonade
+LfA Förderbank Bayern
+Lippische Landesbrandversicherung
+LKH
+Lloyd's
+Luko
+Luzerner Kantonalbank
+LV 1871
+LV1871
+LVM
+LVM Landwirtschaftlicher Versicherungsverein Münster a.G.
+LVM Versicherung
+M.M. Warburg & CO
+Mannheimer Versicherung
+Map-Report
+Markel
+Marsh & McLennan
+Maschinenversicherung
+Mastercard
+maxpool
+MB/KK
+MB/KT
+MB/PPV
+MD
+MDK
+Mecklenburgische
+Mecklenburgische Krankenversicherung
+Mecklenburgische Versicherungsgruppe
+Medicproof
+Medien-Versicherung
+Medizinischer Dienst
+Medizinischer Dienst der Krankenversicherung
+Meldebehörde
+Mercedes-Benz BKK
+Merck BKK
+Merck Finck
+Merkur Versicherung
+mhplus BKK
+mhplus Krankenkasse
+Mietkautionsversicherung
+Mietrechtsschutz
+MiFID II
+Migros Bank
+Minijob-Zentrale
+Mittelbrandenburgische Sparkasse
+mkk – meine krankenkasse
+MLP
+MLP SE
+Mobil Krankenkasse
+Mobiliar
+Monuta
+Moody's
+Morgen & Morgen
+Motorradversicherung
+Muki Versicherungsverein
+Multi-Risk-Versicherung
+Münchener Rück
+Münchener Rückversicherungs-Gesellschaft
+Münchener Verein
+Münchener Verein Krankenversicherung a.G.
+Münchener Verein Versicherungsgruppe
+Munich Re
+Mutterschaftsgeld
+N26
+Nachlassgericht
+Naspa
+Nassauische Sparkasse
+Neodigital
+Netfonds
+Netfonds AG
+Neue Bayerische Beamten Lebensversicherung AG
+neue leben
+Neue Leben Lebensversicherung AG
+Nexible
+Niederösterreichische Versicherung
+NÖ Versicherung
+Norddeutsche Landesbank
+NordLB
+Norisbank
+Notarkammer
+Notlagentarif
+Novitas BKK
+NRW.BANK
+NÜRNBERGER
+Nürnberger Allgemeine Versicherungs-AG
+Nürnberger Krankenversicherung AG
+Nürnberger Lebensversicherung AG
+Nürnberger Versicherung
+O2
+Oberbank
+Oberlandesgericht
+Oberösterreichische Versicherung
+Oberverwaltungsgericht
+Öffentliche Versicherung Braunschweig
+Öffentliche Versicherungen Oldenburg
+ÖGK
+ÖKK
+OLB
+Oldenburgische Landesbank
+Ombudsmann Private Kranken- und Pflegeversicherung
+onvista bank
+OÖ Versicherung
+OPS
+ÖRAG
+ÖRAG Rechtsschutzversicherungs-AG
+Ordnungsamt
+Ostangler
+Ostangler Versicherungen
+Österreichische Gesundheitskasse
+Österreichische Hagelversicherung
+Ostfriesische Landschaftliche Brandkasse
+Ostsächsische Sparkasse Dresden
+Ottonova
+OVB
+OVB Vermögensberatung
+OWiG
+Pax
+PAX Schweizerische Lebensversicherungs-Gesellschaft
+Pax-Bank
+Pax-Familienfürsorge
+PAX-Familienfürsorge Krankenversicherung
+PayPal
+PB Lebensversicherung AG
+PB Versicherung
+Pensionsfonds
+Pensionskasse
+Pensionsversicherungsanstalt
+Perspektive
+Petprotect
+Pferde-OP-Versicherung
+Pferdehaftpflicht
+Pflege-Bahr
+Pflegegeld
+Pflegekasse
+Pflegepflichtversicherung
+Pflegerentenversicherung
+Pflegetagegeldversicherung
+Pflegezusatzversicherung
+Pflichtversicherungsgesetz
+PflVG
+Philos
+PKV
+PKV-Verband
+Plansecur
+Plus
+Policen Direkt
+Polizei
+Polizeidirektion
+Polizeiinspektion
+Polizeipräsidium
+Postbank
+Postbank Finanzberatung
+PostFinance
+Premium
+Premiumschutz
+PRIIPs
+private Altersvorsorge
+private Krankenversicherung
+private Pflegeversicherung
+private Rentenversicherung
+private Unfallversicherung
+Privathaftpflicht
+Privathaftpflichtversicherung
+Privatrechtsschutz
+PrivatRente
+Produkthaftpflicht
+pronova BKK
+Provinzial
+Provinzial Holding
+Provinzial Lebensversicherung AG
+Provinzial NordWest
+Provinzial Rheinland
+Provinzial Versicherung AG
+PSD Bank
+PsychKG
+PVA
+R+V
+R+V Allgemeine Versicherung AG
+R+V Betriebskrankenkasse
+R+V Krankenversicherung AG
+R+V Lebensversicherung AG
+R+V Pensionsfonds
+R+V Versicherung
+R+V Versicherung AG
+Raiffeisen Bank International
+Raiffeisen Schweiz
+Raiffeisen-Volksbank
+Raiffeisenbank
+Raiffeisenlandesbank
+Rechtsanwaltskammer
+Rechtsanwaltsvergütungsgesetz
+Rechtsanwaltsversorgungswerk
+Rechtsschutz
+Rechtsschutz Union
+Rechtsschutzversicherung
+Regelaltersrente
+Reiseabbruchversicherung
+Reisegepäckversicherung
+Reiserücktrittsversicherung
+Rente Balance
+Rente Chance
+Rente Garantie
+Rente wegen teilweiser Erwerbsminderung
+Rente wegen voller Erwerbsminderung
+Renten Service
+Rentenauskunft
+Rentenbank
+Rentenbescheid
+Renteninformation
+Rentenversicherung
+Rentenversicherungsträger
+Restschuldversicherung
+Rettungsdienst
+Revolut
+Rhion
+Rhion Versicherung
+Riester-Förderung
+Riester-Rente
+Riester-Vertrag
+Riesterrente
+Risikolebensversicherung
+Roland Rechtsschutz
+Roland Rechtsschutz-Versicherungs-AG
+Rückkaufswert
+Rürup-Rente
+Rüruprente
+RVG
+s Versicherung
+Saarland Versicherungen
+Sächsische Aufbaubank
+Salus BKK
+Sanagate
+Sanitas
+Santander
+Santander Consumer Bank
+Säule 3a
+Säule 3b
+SBK
+Scalable Capital
+Schlussüberschuss
+Schufa
+SCHUFA Holding AG
+Schutzbrief
+Schwäbisch Hall
+Schwere-Krankheiten-Versicherung
+SCOR
+SDK
+Securvita
+Securvita Krankenkasse
+Select
+Seniorenunfallversicherung
+SEPA
+SGB
+SGB I
+SGB II
+SGB III
+SGB IV
+SGB IX
+SGB V
+SGB VI
+SGB VII
+SGB VIII
+SGB X
+SGB XI
+SGB XII
+Siemens-Betriebskrankenkasse
+Signal Iduna
+Signal Iduna Bauspar AG
+Signal Iduna Gruppe
+SIGNAL IDUNA Krankenversicherung a.G.
+Signal Krankenversicherung a.G.
+Single-Tarif
+Skandia
+Skandia Lebensversicherung
+SKD BKK
+Smart
+Smartbroker
+Sofortrente
+softfair
+Solvency II
+Sozialamt
+soziale Pflegeversicherung
+Sozialgericht
+Sozialgesetzbuch
+Sozialversicherung
+Sozialversicherung für Landwirtschaft, Forsten und Gartenbau
+Sozialversicherungsanstalt
+Sozialversicherungsanstalt der Selbständigen
+Spar- und Darlehnskasse
+Sparda-Bank
+Sparkasse
+Sparkasse Aachen
+Sparkasse Augsburg
+Sparkasse Bielefeld
+Sparkasse Bremen
+Sparkasse Dortmund
+Sparkasse Düsseldorf
+Sparkasse Essen
+Sparkasse Freiburg-Nördlicher Breisgau
+Sparkasse Hannover
+Sparkasse Heidelberg
+Sparkasse Karlsruhe
+Sparkasse KölnBonn
+Sparkasse Krefeld
+Sparkasse Leipzig
+Sparkasse Mainfranken Würzburg
+Sparkasse Münsterland Ost
+Sparkasse Nürnberg
+Sparkasse Pforzheim Calw
+Sparkasse Regensburg
+Sparkasse Saarbrücken
+Sparkasse Ulm
+Sparkassen Versicherung AG Vienna Insurance Group
+Sparkassen-Versicherung
+Sparkassen-Versicherung Sachsen
+Sparkassen-Versicherungen
+Sparkassenversicherung
+St. Galler Kantonalbank
+Staatsanwaltschaft
+Stadtsparkasse
+Stadtsparkasse Düsseldorf
+Stadtsparkasse München
+Standard & Poor's
+Standard Life
+Standardtarif
+Standesamt
+Sterbegeldversicherung
+Sterbekasse
+Steuerberaterkammer
+StGB
+Stiftung Warentest
+StPO
+Strafgesetzbuch
+Straßenverkehrsamt
+Straßenverkehrsordnung
+Stuttgarter
+Stuttgarter Lebensversicherung a.G.
+Stuttgarter Versicherung
+StVG
+StVO
+StVZO
+Süddeutsche Krankenversicherung
+Südzucker BKK
+Sumiswalder
+Suva
+SV Gebäudeversicherung
+SV Sparkassen-Versicherung
+SV SparkassenVersicherung
+SVA
+SVLFG
+SVS
+Swica
+Swiss Life
+Swiss Life AG
+Swiss Life Deutschland
+Swiss Life Schweiz
+Swiss Life Select
+Swiss Re
+SWK Bank
+Sympany
+Tagesgeld
+Talanx
+TARGO Lebensversicherung AG
+TARGO Versicherung
+Targobank
+Techniker Krankenkasse
+Tecis
+Teilkasko
+Teilkaskoversicherung
+Telefónica
+Telekom
+Telis Finanz
+Thüringer Aufbaubank
+Tierhalterhaftpflicht
+Tierkrankenversicherung
+Tiroler Versicherung
+TK
+Top-Schutz
+Trade Republic
+Transportversicherung
+Triodos Bank
+TTDSG
+TUI BKK
+TÜV
+TÜV NORD
+TÜV Rheinland
+TÜV SÜD
+Übergangsgeld
+Überschussbeteiligung
+UBS
+Uelzener
+Uelzener Versicherungen
+UKV
+Umweltbank
+Unfallkasse
+Unfallkasse des Bundes
+Unfallversicherung
+UniCredit
+UniCredit Bank AG
+Union Investment
+Union Krankenversicherung
+Uniqa
+UNIQA Österreich Versicherungen AG
+uniVersa
+uniVersa Krankenversicherung a.G.
+uniVersa Lebensversicherung a.G.
+Unterstützungskasse
+UStG
+VAG
+Valiant
+Vaudoise
+Vaudoise Versicherungen
+VAV Versicherung
+VBG
+VBL
+vdek
+VEMA
+VEMA eG
+Verband der Ersatzkassen
+Verband der Privaten Krankenversicherung
+Verbraucherzentrale
+Verbraucherzentrale Bundesverband
+Vereinigte Hagel
+Vereinigte Hagelversicherung
+Verivox
+Verkehrsrechtsschutz
+Verletztengeld
+Vermögensschadenhaftpflicht
+Vermögensschadenhaftpflichtversicherung
+Vermögenswirksame Leistungen
+VersAusglG
+Versicherungsaufsichtsgesetz
+Versicherungskammer Bayern
+Versicherungsombudsmann
+Versicherungsombudsmann e.V.
+Versicherungsteuergesetz
+Versicherungsverlauf
+Versicherungsvertragsgesetz
+Versicherungsvertriebsrichtlinie
+Versorgungsamt
+Versorgungsanstalt des Bundes und der Länder
+Versorgungsausgleich
+Versorgungswerk
+VersStG
+VersVermV
+Verti
+Verti Versicherung
+Verwaltungsgericht
+Verwaltungsgerichtshof
+VGB
+VGH
+VGH Versicherungen
+VHB
+VHV
+VHV Allgemeine Versicherung AG
+VHV Versicherungen
+Viactiv
+VIACTIV Krankenkasse
+Victoria Versicherung
+Vienna Insurance Group
+Visa
+Visana
+vivida bkk
+VL
+Vodafone
+Volks- und Raiffeisenbank
+Volksbank
+Volksbank Raiffeisenbank
+Volksbank Wien
+Volkswagen Versicherung
+Volkswohl Bund
+Volkswohl Bund Lebensversicherung a.V.
+Volkswohl Bund Sachversicherung AG
+Vollkasko
+Vollkaskoversicherung
+Vorarlberger Landes-Versicherung
+Vormundschaftsgericht
+VOTUM
+VOTUM Verband
+VR Bank
+VR-Bank
+VRK Versicherer im Raum der Kirchen
+VVG
+VVG-InfoV
+VW Versicherung
+W&W
+Waisenrente
+Warenkreditversicherung
+Wefox
+Wertpapierdepot
+Westfälische Provinzial
+Westfälische Provinzial Versicherung AG
+WGV
+WGV-Versicherung
+Wiener Städtische
+Wiener Städtische Versicherung AG
+WIFO
+Willis Towers Watson
+Wincare
+Wirtschaftsprüferkammer
+Wise
+Witwenrente
+WMF BKK
+Wohn-Riester
+Wohngebäude
+Wohngebäudeversicherung
+Wohngeld
+Wohnungsbauprämie
+Wohnungseigentumsgesetz
+Württembergische
+Württembergische Gemeinde-Versicherung
+Württembergische Krankenversicherung AG
+Württembergische Lebensversicherung AG
+Württembergische Versicherung AG
+Würzburger Versicherung
+Wüstenrot
+Wüstenrot & Württembergische
+Wüstenrot Bausparkasse
+Wüstenrot Bausparkasse AG
+Wüstenrot Versicherungs-AG
+WWK
+WWK Allgemeine Versicherung AG
+WWK Lebensversicherung a.G.
+Zahnärztekammer
+Zahnärzteversorgung
+Zahnzusatzversicherung
+ZfA
+Zielke Research
+Zivilprozessordnung
+ZKB
+ZPO
+Zulagenantrag
+Zulagenstelle für Altersvermögen
+Zulassungsstelle
+Zürcher Kantonalbank
+Zurich
+Zurich Deutscher Herold Lebensversicherung AG
+Zurich Gruppe Deutschland
+Zurich Insurance
+Zurich Schweiz
+Zurich Versicherung
+Zürich Versicherungs-Aktiengesellschaft
+Zusatzversorgungskasse
+ZVK

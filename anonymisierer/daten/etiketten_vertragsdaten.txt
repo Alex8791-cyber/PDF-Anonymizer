@@ -1,0 +1,218 @@
+# Feldbezeichner für Vertrags-, Schreiben- und Vorgangsdaten (Beginn, Ablauf, Fälligkeit,
+# Stand, gültig ab …): ein Datum dahinter ist KEIN Geburtsdatum.
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+ab
+ab dem
+Abbuchung am
+Abbuchungstermin
+Ablauf
+Ablauf am
+Ablauf der Versicherung
+Ablaufdatum
+Ablaufleistung zum
+Abrechnungszeitraum
+am
+Änderung zum
+Anpassung zum
+Anschaffungsdatum
+Antrag vom
+Antragsdatum
+Antragseingang
+Aufnahme am
+Aufnahmedatum
+Ausfertigungsdatum
+Ausgabedatum
+ausgefertigt am
+ausgestellt am
+Ausstellungsdatum
+Beginn
+Beginn der Versicherung
+Behandlungsdatum
+Behandlungszeitraum
+Beitragsänderung zum
+Beitragsanpassung zum
+Beitragsbeginn
+beitragsfrei ab
+Beitragsfreistellung ab
+Beitragsjahr
+Beitragszahlungsbeginn
+Beitragszahlungsdauer
+Beitragszeitraum
+Belegdatum
+Berechnungsstichtag
+Bescheid vom
+Bescheiddatum
+Bewertungsstichtag
+bis
+bis spätestens
+bis zum
+Buchungsdatum
+Buchungstag
+Date
+Datum
+Datum der Erstzulassung
+Datum der Unterschrift
+Datum des Schadens
+Datum des Unfalls
+Datum, Unterschrift
+Druckdatum
+Dynamik zum
+Dynamikerhöhung zum
+Effective date
+Eingang
+Eingangsdatum
+eingegangen am
+Einzug am
+End date
+Ende
+Ende der Beitragszahlung
+Ende der Versicherung
+Entlassung am
+Entlassungsdatum
+Ereignisdatum
+erstellt am
+Erstellungsdatum
+Erstzulassung
+Erstzulassungsdatum
+Expiry date
+EZ
+fällig am
+fällig zum
+Fälligkeit
+Fälligkeitsdatum
+Fälligkeitstermin
+Frist
+Frist bis
+Garantie bis
+geändert zum
+gedruckt am
+gekündigt am
+gekündigt zum
+gemeldet am
+Geschäftsjahr
+gültig ab
+gültig bis
+gültig für
+gültig vom
+gültig von
+Gültigkeit
+Gültigkeitsdauer
+Hauptfälligkeit
+HU
+HU bis
+Ihr Schreiben vom
+Ihre E-Mail vom
+Ihre Nachricht vom
+in Kraft ab
+Inkrafttreten
+Issue date
+Kalenderjahr
+Kaufdatum
+Kaufpreis vom
+Kunde seit
+Kündigung zum
+Kündigungsdatum
+Kündigungsfrist
+Lastschrift am
+Lastschrifteinzug am
+Laufzeit
+Leistungsbeginn
+Leistungsdatum
+Leistungsdauer
+Leistungszeitraum
+Lieferdatum
+materieller Beginn
+Meldedatum
+Mitglied seit
+Mitgliedschaft seit
+nächste HU
+Nachtrag gültig ab
+Nachtrag vom
+Ort und Datum
+Ort, Datum
+per
+Policierung
+Policierungsdatum
+Posteingang
+Rechnung vom
+Rechnungsdatum
+Rentenbeginn
+Rentenzahlungsdauer
+Rückkaufswert zum
+Rücktritt zum
+Ruhen ab
+Schadendatum
+Schadenereignis am
+Schadenmeldung vom
+Schadentag
+Schadenzeitpunkt
+Schreiben vom
+seit
+Sollzinsbindung bis
+spätestens am
+Stand
+Stand am
+Stand vom
+Start date
+Steuerjahr
+Stichtag
+Stichtag der Bewertung
+Tag der Zulassung
+Tag des Unfalls
+Tattag
+Tatzeit
+technischer Beginn
+Termin
+TÜV
+TÜV bis
+Überweisung vom
+Umstellung zum
+Unfalldatum
+Unfalltag
+Unfallzeitpunkt
+unser Schreiben vom
+Unterschriftsdatum
+Valid from
+Valid until
+Valuta
+Veranlagungszeitraum
+Vers.-Beginn
+Versanddatum
+versichert seit
+Versicherungsablauf
+Versicherungsbeginn
+Versicherungsbeginn am
+Versicherungsdauer
+Versicherungsende
+Versicherungsjahr
+Versicherungsperiode
+Vertrag seit
+Vertragsablauf
+Vertragsänderung zum
+Vertragsbeginn
+Vertragsbeginn am
+Vertragsende
+Vertragslaufzeit
+vom
+Wartezeit bis
+Wertstellung
+Widerruf bis
+Widerrufsfrist
+wirksam ab
+Wirksamkeit
+zahlbar am
+zahlbar bis
+Zahlung vom
+Zahlungsbeginn
+Zahlungsdatum
+Zahlungstermin
+Zahlungsziel
+Zeitraum
+Zinsbindung bis
+Zugang
+zugelassen am
+Zulassung
+Zulassungsdatum
+zum

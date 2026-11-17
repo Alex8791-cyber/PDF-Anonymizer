@@ -1,0 +1,5570 @@
+"""Grafische Oberfläche (tkinter): Dateien wählen, analysieren, Funde prüfen, schwärzen, Ausgaben freigeben.
+
+Die Engine wird direkt nach Vertrag aufgerufen (CONTRACT/CONTRACT_V2). Neue Vertragsteile (Schutzstufen,
+Kundenliste, Fundstellen, manuelle Bereiche, Freigabe, Vorschau, Meldungs-Codes) werden genutzt, sobald die
+Engine sie anbietet (Signatur bzw. hasattr); bis dahin greifen die Attrappen in gui_attrappen.py. Fehlt der
+Engine eine Fähigkeit, die der Nutzer anfordert, sagt die Oberfläche das – sie lässt nichts still weg.
+"""
+
+import base64
+import errno
+import importlib.metadata
+import os
+import re
+import sys
+import threading
+import time
+import tkinter as tk
+import tkinter.font as tkfont
+from datetime import datetime
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
+
+try:
+    import pymupdf as fitz
+except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
+    import fitz
+
+from . import __version__, dateien
+from . import analyse as _analyse_modul
+from . import auftrag as _auftrag_modul
+from . import gui_attrappen as attrappen
+from . import muster as _muster_modul
+from . import schwaerzung as _schwaerz_modul
+from .analyse import analysiere_pdf
+from .auftrag import kann
+from .muster import KATEGORIEN
+from .namen import lade_ner
+from .ocr import OcrDienst
+from .schwaerzung import schwaerze_pdf
+
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+    DND_VERFUEGBAR = True
+except ImportError:
+    DND_FILES = TkinterDnD = None
+    DND_VERFUEGBAR = False
+
+# Vertragsteile aus Phase 2: echte Engine, sonst Attrappe (12.5) bzw. None (Funktion entfällt)
+weitergabe_anwenden = getattr(_analyse_modul, "weitergabe_anwenden", None)
+LaufWissen = getattr(_analyse_modul, "LaufWissen", None)
+gesundheit_nur_vermutet = getattr(_analyse_modul, "gesundheit_nur_vermutet", None)
+freigeben = getattr(_schwaerz_modul, "freigeben", None) or attrappen.freigeben
+verwerfen = getattr(_schwaerz_modul, "verwerfen", None) or attrappen.verwerfen
+WARNUNG_KEIN_TREFFER = getattr(_schwaerz_modul, "WARNUNG_KEIN_TREFFER", attrappen.WARNUNG_KEIN_TREFFER)
+PROFILE = _auftrag_modul.PROFILE
+try:
+    from .kundenliste import Kundenliste
+except ImportError:
+    Kundenliste = attrappen.Kundenliste
+
+
+# ----------------------------------------------------------------------
+# Konstanten
+# ----------------------------------------------------------------------
+FARBE_HINTERGRUND = "#f4f5f7"
+FARBE_KARTE = "#ffffff"
+FARBE_AKZENT = "#1a5fb4"
+FARBE_AKZENT_HELL = "#e8f0fb"
+FARBE_TEXT = "#111827"
+FARBE_TEXT_GRAU = "#6b7280"
+FARBE_GRUEN = "#1a7f37"
+FARBE_ROT = "#b91c1c"
+FARBE_WARNUNG = "#b45309"
+FARBE_HINWEIS_HINTERGRUND = "#fff7e6"
+FARBE_HINWEIS_RAND = "#f0c36d"
+FARBE_RAND = "#e5e7eb"
+FARBE_KNOPF_GESPERRT = "#d1d5db"     # gesperrter Hauptknopf: grau statt blau – deutlich anders als „bereit“
+FARBE_KNOPF_GESPERRT_TEXT = "#4b5563"
+
+SCHRIFT = "Segoe UI"
+SCHRIFT_MONO = "Consolas"
+BASIS_SKALIERUNG = 4 / 3            # „tk scaling“ bei 96 dpi (Windows 100 %)
+FENSTER_BREITE, FENSTER_HOEHE = 940, 940   # Entwurfsmaße bei 100 % (passt auf 1080p mit Taskleiste)
+FENSTER_MINDESTMASS = (640, 520)
+FENSTER_RAND_UNTEN = 140            # Platz für Taskleiste, Titelleiste und Menüleiste
+FENSTER_KLEIN_HOEHE = 760           # darunter (bei 100 %) gilt das Fenster als klein: Protokoll kürzer
+BAUM_MINDESTHOEHE = 120             # bei 100 %, damit die Fundliste nie ganz verschwindet
+BAUM_ANTEIL = 0.45                  # Anteil des freien Platzes für die Fundliste (Arbeitsbereich, GR-02);
+                                    # der Einstellbereich (einmal einstellen) scrollt bei Bedarf
+KATEGORIE_SPALTEN = 3               # Häkchen-Gitter (4 Spalten schneiden bei 940 px Breite lange Namen ab)
+KONTEXT_VORLAUF = 14                # Zeichen vor dem Fund in der Kontextspalte, damit der Fund sichtbar ist
+UNTERTITEL_MINDESTHOEHE = 700       # bei 100 %; darunter wird der Untertitel ausgeblendet
+OBEN_MINDESTHOEHE = 60              # bei 100 %, Mindesthöhe des scrollbaren Einstellbereichs (Titel + Drop-Zone)
+# Ränder (Pixel) im normalen und im kleinen Fenster (Laptop 1366x768 bei 100-150 %, 1024x768): im kleinen Fenster
+# fehlen sonst gut 60 Pixel – die Fundliste zeigte bei 150 % nur eine Zeile. Schrift und Inhalte bleiben gleich.
+# Seitlich (haupt_x, karte_x) gewinnt die Fundliste im kleinen Fenster 28 Pixel Breite: bei 1366x768 und 100 %
+# (maximiert) fehlten mit breiteren Schriften (DejaVu Sans) sonst ein paar Pixel für den ganzen Dateinamen neben den
+# Prüfspalten in Komfortbreite.
+RAENDER = {"haupt": (10, 4), "haupt_x": (16, 8), "karte": (8, 4), "karte_x": (14, 8), "karte_abstand": (8, 4),
+           "drop_innen": (6, 2), "drop_unten": (6, 4),
+           "leiste": (6, 3), "leiste_abstand": (6, 4), "protokoll": (4, 2), "protokoll_abstand": (6, 4),
+           "kasten": (3, 1), "hauptknopf": (6, 4), "fortschritt_abstand": (4, 2)}
+PROTOKOLL_ZEILEN = 5
+PROTOKOLL_ZEILEN_KLEIN = 3
+# Fundliste im kleinen Fenster mindestens BAUM_MINDESTHOEHE hoch, nie weniger als Kopfzeile + BAUM_MINDESTZEILEN
+# ganze Zeilen. Reicht der Platz dafür nicht, rücken diese Bereiche der Reihe nach zusammen – nur so weit wie nötig
+# (_kompakt_setzen). Befund Runde 3b: unter Windows (Segoe UI, Knöpfe gut 10 Pixel höher als unter Linux) zeigte die
+# Fundliste bei 1366x768 und 150 % keine einzige ganze Zeile. Zuerst die Stufen, die nur Platz sparen; zuletzt die
+# Kurzfassung des Hinweiskastens – sie behält die Kernaussagen (GR-09), ein Klick zeigt alle Grenzen.
+BAUM_MINDESTZEILEN = 3
+KOMPAKT_STUFEN = ("dateikopf",       # „1 · PDF-Dateien“ und Drop-Zone in einer Zeile – nur, wenn beide hineinpassen
+                  "knoepfe",         # Knöpfe ohne Innenabstand oben und unten
+                  "hinweiskasten")   # Hinweiskasten in der Kurzfassung (HINWEISKASTEN_KURZ)
+KOMPAKT_RUECKWEG = 4                 # Pixel Spielraum, bevor eine Stufe zurückgenommen wird (kein Hin und Her)
+KNOPF_PADY = 3                       # Innenabstand oben/unten der Nebenknöpfe (_knopf)
+PROTOKOLL_MAX_ZEILEN = 5000
+VORLADEN_NACH_MS = 800              # spaCy-Modell so lange nach dem Start im Hintergrund laden (PERF-09)
+ERSTSTART_NACH_MS = 300             # Hinweis beim ersten Start erst, wenn das Hauptfenster steht
+RESTE_PRUEFEN_NACH_MS = 200         # Zwischendateien eines abgestürzten Programms erst suchen, wenn das Fenster steht
+RESTE_WARTEN_S = 30.0               # beim Beenden höchstens so lange auf den Arbeits-Thread warten, der eine
+                                    # Arbeitskopie noch offen hält (Windows löscht sie sonst nicht)
+BEENDEN_WARTEN_S = 20.0             # „Lauf läuft noch“ → „Ja“: so lange bleibt das Fenster offen und wartet auf den
+                                    # abgebrochenen Lauf (sein Aufräumen löscht die unfertigen Dateien)
+BEENDEN_PRUEFEN_MS = 100            # in diesem Abstand sieht das wartende Fenster nach, ob der Lauf zu Ende ist
+BEENDEN_ORDNER_WARTEN_S = 2.0       # beim Schließen höchstens so lange auf das Löschen eigener Zwischendateien in den
+                                    # Ausgabeordnern warten – ein nicht erreichbares Netzlaufwerk hält es nicht auf
+BEENDEN_TEXT = "Programm wird beendet – der Lauf wird abgebrochen, unfertige Dateien werden gelöscht …"
+BEENDEN_RESTE_TEXT = "Programm wird beendet – unfertige Zwischendateien werden gelöscht …"   # ohne laufenden Lauf
+LAUF_LAEUFT_TITEL = "Lauf läuft noch"                # Rückfrage beim Beenden während eines Laufs
+
+HAKEN = {"an": "☑", "aus": "☐", "teil": "⊟"}
+# Zeichen vor der Kategorie in der Fundliste: ⚑ = Fund mit Hinweis der Engine (Statuszeile zeigt ihn; steht auch an
+# angehakten Kennungen), ⚕ = Gesundheitsdaten (Art. 9 DSGVO), die nur angeboten werden – nur dieses Zeichen nennt
+# der Abschlussdialog (Befund: wer jedes ⚑ anklickt, hakte angehakte Kennungen ab)
+MARKE_HINWEIS = "⚑ "
+MARKE_GESUNDHEIT = "⚕ "
+GESUNDHEIT_KATEGORIEN = frozenset(getattr(_muster_modul, "GESUNDHEIT", ("diagnose", "medikament")))
+SPALTEN = ("kategorie", "text", "seiten", "anzahl", "kontext", "ersatz")
+# Spalte -> (Breite, Mindestbreite, dehnbar) bei 100 %. „Gefundener Text“ und „Kontext“ sind der Prüfschritt: Sie
+# bekommen ihre Entwurfsbreite (im knappen Fenster ihren Anteil daran) und wachsen bei mehr Platz zuerst bis
+# SPALTEN_KOMFORT (ganze IBAN oder E-Mail, Vorlauf samt Fund). Erst was danach frei ist, bekommt die erste Spalte
+# (Häkchen / Datei) – bis zum längsten Dateinamen, höchstens SPALTE0_MAX_ANTEIL der Breite (spalten_verteilen).
+# Befund Runde 3a: wuchs sie auf Kosten der Prüfspalten, standen beide selbst auf 1920x1080 auf ihrer Mindestbreite.
+# Lange Namen werden in der Mitte gekürzt; der Zusatz „Kennwort entfernt“ / „Bild → PDF“ steht deshalb in der
+# Kontextspalte der Dateizeile (DATEI_KONTEXT_ART). Die erste Spalte ist dehnbar: Zieht man „Gefundener Text“ oder
+# „Kontext“ von Hand breiter, holt ttk beim Loslassen den Platz aus den dehnbaren Spalten (die Summe bleibt die
+# Breite der Liste) – ohne die Dateispalte nur aus dem Rest der Kontextspalte (Befund: „hilft nicht“).
+SPALTEN_MASSE = {"#0": (185, 150, True), "kategorie": (130, 105, False), "text": (160, 130, True),
+                 "seiten": (60, 52, False), "anzahl": (55, 48, False), "kontext": (210, 160, True),
+                 "ersatz": (95, 85, False)}
+SPALTEN_KOMFORT = {"text": 210, "kontext": 250}
+SPALTE0_MAX_ANTEIL = 0.4
+SPALTE0_EINZUG = 30                 # bei 100 %: Aufklapp-Zeichen und Rand links vom Text der Dateizeile
+ANALYSE_TEXT = "  Analysieren – Funde anzeigen  "
+START_TEXT = "  Schwärzen starten  "
+VORSCHAU_TEXT = "Vorschau …"
+# Tastenkürzel (Alt + Buchstabe); der Buchstabe ist im Knopf unterstrichen (M-67)
+KUERZEL = {"analyse": "a", "start": "s", "vorschau": "v"}
+SYMBOL_GROESSEN = (16, 32, 48, 64)        # Fenstersymbol (iconphoto); icon.ico enthält 16, 32, 48 und 256
+ERSTSTART_TITEL = "Bitte vor der ersten Nutzung lesen"
+# Unterschrift und Handschrift in „Maximal“: abgedeckt nur als eigenes Rasterbild einer digitalen Seite – auf Scans
+# und Fotos entfernt die Fotoerkennung Striche vorab (fotos.STRICH_MM), gezeichnete Linien (Vektorgrafik) sieht die
+# Bildprüfung gar nicht (fotos.bilder_der_seite)
+ERSTSTART_TEXT = (
+    "Dieses Programm PSEUDONYMISIERT: Es ersetzt direkte Angaben wie Namen, Anschriften, Geburtsdaten, IBAN, "
+    "Telefon- und Vertragsnummern durch Platzhalter wie [PERSON A].\n\n"
+    "Andere Angaben bleiben je nach Schutzstufe lesbar – zum Beispiel Diagnosen, Beruf, Beträge oder Orte. "
+    "Daraus kann eine Person unter Umständen noch zu erkennen sein.\n\n"
+    "Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt – aber nicht immer gefunden. Andere Gesichter "
+    "und Fotos deckt nur die Schutzstufe „Maximal“ ab, und auch sie nicht jedes Bild. Unterschriften und "
+    "Handschrift werden nicht erkannt – auf Scans, Fotos und als Zeichnung bleiben sie auch in „Maximal“ stehen. "
+    "Was stehen bleibt, decken Sie in der Vorschau mit einem Rahmen ab.\n\n"
+    "Keine automatische Erkennung ist fehlerfrei. Sehen Sie sich deshalb jedes Ergebnis in der Vorschau an, "
+    "bevor Sie es weitergeben.\n\n"
+    "Die Verantwortung für die Weitergabe an einen KI-Dienst bleibt bei Ihnen.")
+# Fotos und Ausweiskopien (Befund Runde 2): Gesicht/Lichtbild, Unterschrift und Handschrift bleiben stehen. Ein
+# umgewandeltes Foto ist eine Bildseite: „Maximal“ deckt darauf nur Fotobereiche ab – Striche (Unterschrift,
+# Handschrift) entfernt die Fotoerkennung vorab (fotos.STRICH_MM)
+FOTO_GRENZEN = ("Gesichter und Lichtbilder: Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt – aber nicht "
+                "immer gefunden; andere Gesichter deckt nur die Schutzstufe „Maximal“ ab, wenn sie den Fotobereich "
+                "erkennt. Unterschriften und Handschrift werden NICHT geschwärzt, auch in „Maximal“ nicht – in der "
+                "Vorschau unter „Geplante Schwärzung“ prüfen und einen Rahmen darüber ziehen.")
+KENNWORT_TITEL = "Kennwort erforderlich"
+ANZEIGE_ART = {"bild": " (Bild → PDF)", "entschluesselt": " (Kennwort entfernt)", "kopie": " (als PDF)"}
+# derselbe Hinweis in der Kontextspalte der Dateizeile (dort ist Platz; Wortlaut wie im Laufprotokoll)
+DATEI_KONTEXT_ART = {"bild": "Bild → PDF", "entschluesselt": "Kennwort entfernt", "kopie": "PDF ohne Endung"}
+NEBENKANAL_NAMEN = (("metadaten", "Metadaten"), ("lesezeichen", "Lesezeichen"), ("anhaenge", "Anhänge"),
+                    ("xfa", "Formulardaten (XFA)"))
+BAUM_HINWEIS = ("Kästchen (oder Leertaste) = Fund an/aus · Doppelklick auf eine Datei = Vorschau (dort per Klick "
+               "oder Rahmen nachschwärzen) · Rechtsklick = mehr")
+ANZEIGE_BEGRIFF_VORSCHAU = "Begriff (Vorschau)"
+ANZEIGE_MANUELL = "Manuell (Vorschau)"
+ANZEIGE_NACHSCHWAERZEN = "Manuell (Nachschwärzen)"
+PLATZHALTER_MANUELL = attrappen.PLATZHALTER_MANUELL
+PRUEFEN_ERKLAERUNG = ("„_PRUEFEN“ im Dateinamen heißt: noch nicht zur Weitergabe freigegeben – erst in der "
+                      "Vorschau prüfen und dort „Freigeben“ drücken.")
+FREIGABE_OFFEN_TITEL = "Freigabe noch offen"         # Rückfrage beim Beenden (offene_freigaben)
+STATUS_TEXT = {"fertig": "✔ fertig", "pruefen": "⚠ prüfen", "fehler": "✖ Fehler", "verworfen": "verworfen",
+               "keine": "keine Ausgabe"}
+
+_KATEGORIE_SCHLUESSEL = {eintrag[0] for eintrag in KATEGORIEN}
+
+
+_ist_bildfund = _auftrag_modul.ist_bildfund     # Lichtbild, Bild, Foto: Stellen sind Bereiche im Bild
+
+
+def _fundtext_anzeige(fund: dict) -> str:
+    """Text eines Funds für die Fundliste; Bildfunde (Lichtbild, Bild, Foto) haben keinen Text, nur Bereiche."""
+    text = str(fund.get("text") or "").replace("\n", " ")
+    if not text and _ist_bildfund(fund):
+        return "(Bereich im Bild)"
+    return text
+
+
+def _ohne_marke(anzeige: str) -> str:
+    """Kategorie-Anzeige ohne vorangestelltes Zeichen (⚑/⚕)."""
+    for marke in (MARKE_GESUNDHEIT, MARKE_HINWEIS):
+        if anzeige.startswith(marke):
+            return anzeige[len(marke):]
+    return anzeige
+
+
+def _profil_wert(profile, name: str, schluessel: str):
+    """Eintrag `schluessel` einer Schutzstufe (dict wie muster.PROFILE oder Objekt mit Attribut), sonst None."""
+    eintrag = profile.get(name) if isinstance(profile, dict) else None
+    if isinstance(eintrag, dict):
+        return eintrag.get(schluessel)
+    return getattr(eintrag, schluessel, None)
+
+
+_NEUE_KATEGORIEN = bool(_KATEGORIE_SCHLUESSEL & {"beruf", "arbeitgeber", "diagnose", "medikament"})
+
+
+def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
+    """Untertitel, Hinweiskasten und Hilfetext – wahrheitsgemäß für den Funktionsumfang der Engine (GR-09). Eine
+    Engine ohne die neuen Kategorien ist älter als die Bildprüfung (fotos.py): Sie sucht keine Lichtbilder, und ihre
+    Schutzstufen sind gleich (gui_attrappen.PROFILE) – „Maximal“ deckt dort keine Bilder ab."""
+    if neue_kategorien:
+        lesbar = "je nach Schutzstufe bleiben Diagnosen, Beruf, Arbeitgeber, Beträge und Orte lesbar"
+        # nicht länger als bisher: der Kasten darf auf kleinen Bildschirmen keine Zeile mehr brauchen (Layout-Tests)
+        kasten = ("Diagnosen, Beruf, Arbeitgeber bleiben je nach Schutzstufe lesbar. Lichtbilder auf Ausweiskopien "
+                  "werden gesucht, nicht immer gefunden. Andere Gesichter und Bilder bleiben, außer „Maximal“ "
+                  "erkennt sie. Nicht erkannt: Unterschriften, Handschrift, Freitext; Text in Bildern nur unsicher "
+                  "(OCR).")
+        grenzen_kopf = "NICHT oder nur teilweise erkannt werden:\n"
+        grenzen_umfang = ("  • Diagnosen, Krankheiten, Medikamente: nur bekannte Begriffe, angehakt erst in der "
+                          "Schutzstufe „Maximal“ (sonst gemeldet und nicht angehakt in der Fundliste angeboten, "
+                          "Zeichen ⚕)\n"
+                          "  • Beruf, Arbeitgeber: nur mit Etikett oder Personenbezug (ab Schutzstufe „Hoch“); "
+                          "Einkommen und Familienstand nicht\n")
+        # „Maximal“ (fotos.seite_pruefen): Rasterbilder auf Textseiten („digitale PDF-Seiten“), Fotobereiche auf Scans
+        # und Bildseiten – nicht winzige Bilder (fotos.bild_winzig), Vektorgrafik („gezeichnete Grafiken“), Text über
+        # einem Bild und ein Bild über die halbe Textseite (wie ein Scan: nur die Fotos darin). Unterschrift, Stempel
+        # und Handschrift deckt es also nur als eigenes Rasterbild ab: Striche entfernt die Fotoerkennung vorab, und
+        # gezeichnete Linien sieht die Bildprüfung nicht (fotos.bilder_der_seite: nur Rasterbilder)
+        grenzen_bilder = (
+            "  • Gesichter und Fotos: Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt (Fund „Lichtbild“), "
+            "aber nicht immer gefunden; andere bleiben in „Ausgewogen“ und „Hoch“ stehen\n"
+            "  • Gesichter und Fotos in „Maximal“: abgedeckt werden Bilder auf digitalen PDF-Seiten und erkannte "
+            "Fotobereiche auf Scans und Fotos – nicht winzige Bilder und gezeichnete Grafiken (z. B. Logos). Text über "
+            "einem Bild bleibt lesbar; ein Bild über mindestens die halbe Seite gilt als Scan\n"
+            "  • Unterschriften, Stempel, Handschrift – auch in „Maximal“ nur abgedeckt, wenn sie als eigenes Bild "
+            "eingefügt sind (nicht auf Scans und Fotos, nicht als Zeichnung)\n")
+        fotos = ("Gesichter darauf werden nur abgedeckt, wenn sie als Lichtbild oder – in „Maximal“ – als Fotobereich "
+                 "erkannt werden, Unterschriften und Handschrift NICHT:")
+    else:
+        lesbar = "Diagnosen, Beruf, Arbeitgeber, Beträge und Orte bleiben lesbar"
+        kasten = ("Nicht erkannt werden: Diagnosen, Beruf, Arbeitgeber, Gesichter/Lichtbilder (z. B. auf "
+                  "Ausweiskopien), Unterschriften, Handschrift, Freitext; Text in Bildern nur unsicher (OCR).")
+        grenzen_kopf = "NICHT erkannt werden:\n"
+        grenzen_umfang = ("  • Diagnosen, Krankheiten, ICD-Codes, Medikamente\n"
+                          "  • Beruf, Arbeitgeber, Einkommen, Familienstand\n")
+        grenzen_bilder = ("  • Gesichter und Lichtbilder (z. B. auf Ausweiskopien), Fotos und andere Bilder\n"
+                          "  • Unterschriften, Stempel, Handschrift\n")
+        fotos = "Gesichter, Lichtbilder, Unterschriften und Handschrift darauf werden NICHT geschwärzt:"
+    untertitel = ("Ersetzt direkte Identifikatoren (Namen, IBAN, Adresse, Telefon …) durch Platzhalter wie "
+                  f"[PERSON A] – eine Pseudonymisierung, keine vollständige Anonymisierung: {lesbar}. "
+                  "Fundliste und Ergebnis müssen vor jeder Weitergabe geprüft werden.")
+    hinweis = (kasten + " Ausgaben in Cloud-Ordnern (OneDrive, Dropbox …) werden mitsynchronisiert. "
+               "Mehr: Hilfe → „Was wird nicht erkannt?“")
+    grenzen = (
+        "Das Programm ersetzt direkte Identifikatoren durch Platzhalter (Pseudonymisierung).\n\n"
+        + grenzen_kopf + grenzen_umfang + grenzen_bilder +
+        "  • Text in Bildern, Fotos und Logos wird per OCR nur unsicher gelesen (Handyfotos, geringe Auflösung)\n"
+        "  • Freitext, aus dem eine Person erkennbar bleibt\n"
+        "  • Dateinamen (die Ausgabe heißt neutral anonym_01.pdf; der Originalname steht in der Zuordnungsdatei, "
+        "meist _zuordnung_anonymisiert.txt NEBEN dem Ausgabeordner – den Ort nennt das Protokoll; nicht mit "
+        "hochladen)\n\n"
+        "Deshalb: jede Ausgabe in der Vorschau prüfen (Doppelklick auf die Datei). Was dort noch zu sehen ist, "
+        "per Klick oder Rahmen nachschwärzen.\n\n"
+        "Pseudonymisierte Dokumente bleiben personenbezogene Daten. Für die Weitergabe an einen KI-Dienst "
+        "braucht es weiterhin eine Rechtsgrundlage und in der Regel einen Auftragsverarbeitungsvertrag. Die "
+        "Verantwortung für die Weitergabe bleibt bei Ihnen (Hilfe → „Hinweise vor der Nutzung …“).\n\n"
+        "Fotos und Bild-Scans (JPEG, PNG, TIFF, BMP) werden auf Wunsch in eine PDF umgewandelt und per "
+        "Texterkennung gelesen. " + fotos + " in der Vorschau unter „Geplante Schwärzung“ prüfen und einen Rahmen "
+        "darüber ziehen. Die Ausgabe eines Fotos muss deshalb immer in der Vorschau freigegeben werden "
+        "(„_PRUEFEN“). PDFs mit Kennwort werden nach Eingabe des Kennworts geprüft – die Ausgabe hat dann kein "
+        "Kennwort mehr. Die umgewandelte bzw. entschlüsselte Arbeitskopie liegt nur während der Bearbeitung in "
+        "%LOCALAPPDATA%\\PDF-Anonymisierer\\temp und wird beim Entfernen aus der Liste und beim Beenden gelöscht. "
+        "Andere Dateien (Word, Mails, HEIC-, WEBP- oder GIF-Bilder …) werden nicht geprüft: zuerst als PDF "
+        "speichern.\n\n"
+        "Ausgaben in Ordnern, die mit OneDrive, Dropbox o. Ä. synchronisiert werden, landen ebenfalls in der "
+        "Cloud. Per Dateidialog geöffnete Dateien merkt sich Windows unter „Zuletzt verwendet“."
+    )
+    return untertitel, hinweis, grenzen
+
+
+UNTERTITEL, HINWEISKASTEN, GRENZEN_TEXT = _texte_zur_engine(_NEUE_KATEGORIEN)
+
+
+def _hinweiskasten_kurz(neue_kategorien: bool) -> str:
+    """Kurzfassung des Hinweiskastens für die letzte Kompaktstufe (KOMPAKT_STUFEN): höchstens zwei Zeilen, aber mit
+    den Kernaussagen von GR-09 – was je nach Schutzstufe lesbar bleibt, was nie geschwärzt wird, Cloud-Ordner. Review
+    Runde 3b: die einzeilige Fassung ließ genau diese Angaben im kleinen Fenster weg. Ein Klick zeigt alle Grenzen."""
+    lesbar = "Je nach Schutzstufe bleiben" if neue_kategorien else "Es bleiben"
+    return (f"⚠ {lesbar} Diagnosen, Beruf, Arbeitgeber und Bilder lesbar; Unterschriften und Handschrift werden nicht "
+            "erkannt; Cloud-Ordner (OneDrive …) synchronisieren mit – Klick: alle Grenzen")
+
+
+HINWEISKASTEN_KURZ = _hinweiskasten_kurz(_NEUE_KATEGORIEN)
+# Text der Drop-Zone mit bzw. ohne Drag & Drop (tkinterdnd2)
+DROP_TEXT_DND = "⬇  PDFs, Fotos oder ganze Ordner hierher ziehen  (oder klicken zum Auswählen)"
+DROP_TEXT_OHNE_DND = "⬇  Drag & Drop nicht verfügbar – klicken zum Auswählen"
+
+
+# ----------------------------------------------------------------------
+# Engine-Aufruf: Ergebnisprüfung, Meldungs-Codes (Fähigkeiten: auftrag.kann)
+# ----------------------------------------------------------------------
+class Vertragsfehler(RuntimeError):
+    """Die Engine hat ein Ergebnis geliefert, das nicht dem Vertrag entspricht."""
+
+
+ANALYSE_PFLICHT = ("datei", "funde", "warnungen", "hinweise", "fehler", "seiten", "ocr_seiten", "ocr_cache")
+FUND_PFLICHT = ("kategorie", "anzeige", "text", "ersatz", "seiten", "anzahl", "kontext")
+SCHWAERZ_PFLICHT = ("ausgabe", "treffer", "warnungen", "hinweise", "reste", "fehler")
+
+
+def _analyse_ergebnis_pruefen(ergebnis, pdf: Path) -> dict:
+    """Prüft das Analyse-Ergebnis streng (KQ-07): fehlende Pflichtschlüssel sind ein Fehler, keine
+    stille Entwarnung („0 Funde“)."""
+    if not isinstance(ergebnis, dict):
+        raise Vertragsfehler(f"analysiere_pdf lieferte {type(ergebnis).__name__} statt dict")
+    fehlend = [k for k in ANALYSE_PFLICHT if k not in ergebnis]
+    if fehlend:
+        raise Vertragsfehler("analysiere_pdf: Ergebnis ohne " + ", ".join(fehlend))
+    if not isinstance(ergebnis["funde"], list):
+        raise Vertragsfehler("analysiere_pdf: „funde“ ist keine Liste")
+    for nummer, fund in enumerate(ergebnis["funde"], 1):
+        fehlend = [k for k in FUND_PFLICHT if k not in fund]
+        if fehlend:
+            raise Vertragsfehler(f"analysiere_pdf: Fund {nummer} ohne " + ", ".join(fehlend))
+    ergebnis["datei"] = Path(ergebnis["datei"])
+    ergebnis["warnungen"] = [str(w) for w in ergebnis["warnungen"] or []]
+    ergebnis["hinweise"] = [str(h) for h in ergebnis["hinweise"] or []]
+    return ergebnis
+
+
+def _schwaerz_ergebnis_pruefen(ergebnis, pdf: Path) -> dict:
+    if not isinstance(ergebnis, dict):
+        raise Vertragsfehler(f"schwaerze_pdf lieferte {type(ergebnis).__name__} statt dict")
+    fehlend = [k for k in SCHWAERZ_PFLICHT if k not in ergebnis]
+    if fehlend:
+        raise Vertragsfehler("schwaerze_pdf: Ergebnis ohne " + ", ".join(fehlend))
+    if ergebnis["ausgabe"] is not None:
+        ergebnis["ausgabe"] = Path(ergebnis["ausgabe"])
+    ergebnis.setdefault("original", pdf)
+    ergebnis["warnungen"] = [str(w) for w in ergebnis["warnungen"] or []]
+    ergebnis["hinweise"] = [str(h) for h in ergebnis["hinweise"] or []]
+    ergebnis["reste"] = [str(r) for r in ergebnis["reste"] or []]
+    return ergebnis
+
+
+def _fehler_ergebnis(pdf: Path, text: str) -> dict:
+    """Analyse-Ergebnis für eine Datei, deren Analyse mit einer Ausnahme endete."""
+    return {"datei": pdf, "funde": [], "warnungen": [], "hinweise": [], "fehler": text, "seiten": 0,
+            "ocr_seiten": 0, "ocr_cache": {}}
+
+
+def meldungs_codes(ergebnis: dict) -> set[str]:
+    """Codes der strukturierten Meldungen (12.6). Liefert die Engine keine "meldungen", leitet die Attrappe
+    sie aus den Texten ab – Entscheidungen der Oberfläche hängen nur an Codes (KQ-08)."""
+    meldungen = ergebnis.get("meldungen")
+    if meldungen is None:
+        meldungen = attrappen.meldungen_aus_texten(ergebnis)
+    return {str(m.get("code")) for m in meldungen if isinstance(m, dict) and m.get("code")}
+
+
+# ----------------------------------------------------------------------
+# Texte für den Nutzer
+# ----------------------------------------------------------------------
+_FEHLERTEXT_MUSTER = (
+    (("permission denied", "zugriff verweigert", "errno 13", "winerror 5]", "winerror 32]",
+      "used by another process", "von einem anderen prozess verwendet", "cannot remove file", "errno 1]",
+      "errno 30]", "read-only file system"),
+     "Ausgabedatei konnte nicht geschrieben werden – vermutlich ist sie in einem anderen Programm (PDF-Reader) "
+     "geöffnet oder der Ordner ist schreibgeschützt. Bitte die Datei schließen oder einen anderen Zielordner "
+     "wählen und erneut schwärzen."),
+    (("file exists", "errno 17]", "winerror 183]", "bereits vorhanden", "not a directory", "errno 20]",
+      "winerror 267]"),
+     "Im Zielordner liegt bereits eine Datei mit dem Namen des Ausgabeordners („anonymisiert“) – bitte "
+     "umbenennen oder einen anderen Zielordner wählen."),
+    (("no space left", "errno 28]", "winerror 112]", "nicht genügend speicherplatz"),
+     "Kein Speicherplatz mehr auf dem Laufwerk – bitte Platz schaffen oder anderen Zielordner wählen."),
+    (("winerror 206]", "errno 36]", "file name too long"),
+     "Der Dateipfad ist zu lang für Windows – bitte den Ordner näher an C:\\ kopieren oder einen kurzen "
+     "Zielordner wählen."),
+    (("as type pdf", "cannot open empty file", "no objects found", "not a pdf", "format error"),
+     "Die Datei ist keine lesbare PDF-Datei (beschädigt, leer oder nur umbenannt) – bitte neu aus dem "
+     "Ursprungsprogramm als PDF speichern."),
+    # „nicht gefunden“ (WinError 2: Datei, 3: Pfad) ist kein Längenproblem: lange Pfade öffnet das Programm mit „\\?\“
+    # (R-09). Befund: WinError 3 hieß hier „Dateipfad zu lang“ – auch für einen kurzen Pfad, einen verschobenen
+    # Ordner oder ein getrenntes Netzlaufwerk. Einen langen Pfad ohne Präfix erkennt _pfad_zu_lang an der Ausnahme.
+    (("winerror 2]", "winerror 3]"),
+     "Datei oder Ordner nicht gefunden – vermutlich verschoben, umbenannt oder gelöscht, oder ein Netzlaufwerk ist "
+     "getrennt. Bitte prüfen und erneut versuchen."),
+)
+
+
+def _mit_systemmeldung(meldung: str, text: str) -> str:
+    """Handlungsanweisung mit der gekürzten Systemmeldung in Klammern (GR-04)."""
+    kurz = text if len(text) <= 120 else text[:117] + "…"
+    return f"{meldung} (Systemmeldung: {kurz})"
+
+
+def _fehlertext_verstaendlich(text: str) -> str:
+    """Übersetzt eine Fehlermeldung der Engine (auch deutsche Windows-Systemtexte) in eine Handlungsanweisung;
+    die Systemmeldung bleibt gekürzt in Klammern erhalten (GR-04)."""
+    tl = (text or "").lower()
+    for muster, meldung in _FEHLERTEXT_MUSTER:
+        if any(m in tl for m in muster):
+            return _mit_systemmeldung(meldung, text)
+    return text
+
+
+def _pfad_zu_lang(fehler: BaseException, pfad: Path | None) -> bool:
+    """Liegt es wirklich an einem zu langen Pfad? Lange Pfade öffnet das Programm unter Windows mit „\\\\?\\“ (R-09),
+    ein langer Pfad allein erklärt also keinen Fehler mehr (Befund: bis dahin hieß unter Windows JEDE Ausnahme bei
+    einem Pfad über 240 Zeichen „Dateipfad zu lang“ – auch eine beschädigte PDF oder Speichermangel). Es zählen nur
+    „Name zu lang“ (ENAMETOOLONG, WinError 206) und bei einem langen Pfad OHNE „\\\\?\\“ (Dateidialog, Zielordner)
+    „nicht gefunden“: so meldet Windows einen Pfad über MAX_PATH. Jedes andere „nicht gefunden“ (WinError 2/3,
+    ENOENT) meldet _verstaendliche_fehlermeldung als solches."""
+    if not isinstance(fehler, OSError):
+        return False
+    winfehler = getattr(fehler, "winerror", None)
+    if fehler.errno == errno.ENAMETOOLONG or winfehler == 206:
+        return True
+    return (sys.platform == "win32" and pfad is not None and len(str(pfad)) > 240
+            and not str(pfad).startswith(_LANGPFAD_PRAEFIX)
+            and (winfehler == 3 or isinstance(fehler, FileNotFoundError)))
+
+
+def _verstaendliche_fehlermeldung(fehler: BaseException, pfad: Path | None = None) -> str:
+    """Übersetzt eine Ausnahme in eine Handlungsanweisung."""
+    text = str(fehler)
+    if isinstance(fehler, PermissionError):
+        return _FEHLERTEXT_MUSTER[0][1]
+    if isinstance(fehler, (FileExistsError, NotADirectoryError)):
+        return _FEHLERTEXT_MUSTER[1][1]
+    if isinstance(fehler, OSError) and getattr(fehler, "errno", None) == errno.ENOSPC:
+        return _FEHLERTEXT_MUSTER[2][1]
+    if _pfad_zu_lang(fehler, pfad):
+        return _FEHLERTEXT_MUSTER[3][1]
+    if isinstance(fehler, FileNotFoundError):        # WinError 2/3, ENOENT – die Systemmeldung nennt den Pfad
+        return _mit_systemmeldung(_FEHLERTEXT_MUSTER[5][1], text)
+    uebersetzt = _fehlertext_verstaendlich(text)
+    if uebersetzt != text:
+        return uebersetzt
+    return f"Unerwarteter Fehler ({type(fehler).__name__}: {text[:200]}) – Details stehen in fehler.log."
+
+
+def _kontext_anzeige(kontext: str) -> str:
+    """Kürzt den Vorlauf vor dem Fund, damit in der schmalen Kontextspalte der Fund selbst zu sehen ist (GR-05)."""
+    kontext = str(kontext or "").replace("\n", " ")
+    pos = kontext.find("»")
+    if pos > KONTEXT_VORLAUF:
+        return "…" + kontext[pos - KONTEXT_VORLAUF:].lstrip()
+    return kontext
+
+
+def name_einpassen(name: str, zusatz: str, platz: float, messen) -> str:
+    """name + zusatz, so gekürzt, dass messen(text) <= platz: zuerst die Mitte des Namens (Anfang, Ende und Endung
+    bleiben: „Kontoauszug_Spa…Juni.pdf (Kennwort entfernt)“), der Zusatz bleibt immer stehen; reicht der Platz nicht
+    einmal für ihn, steht nur „…“ + Zusatz da. messen: Breite eines Texts in Pixeln (tkfont.Font.measure)."""
+    if messen(name + zusatz) <= platz:
+        return name + zusatz
+    stamm, punkt, endung = name.rpartition(".")
+    if not punkt or not stamm or len(endung) > 5 or "/" in endung:
+        stamm, endung = name, ""
+    else:
+        endung = "." + endung
+
+    def gekuerzt(behalten: int) -> str:
+        vorne = (behalten + 1) * 3 // 5
+        hinten = behalten - vorne
+        return stamm[:vorne] + "…" + (stamm[len(stamm) - hinten:] if hinten else "") + endung + zusatz
+
+    unten, oben = 0, len(stamm) - 1             # binäre Suche: längste Kürzung, die passt
+    while unten < oben:
+        mitte = (unten + oben + 1) // 2
+        if messen(gekuerzt(mitte)) <= platz:
+            unten = mitte
+        else:
+            oben = mitte - 1
+    if unten > 0 or messen(gekuerzt(0)) <= platz:
+        return gekuerzt(unten)
+    return "…" + zusatz
+
+
+def spalten_verteilen(verfuegbar: int, masse: dict, komfort: dict, bedarf0: int, max_anteil0: float) -> dict:
+    """Breiten der Fundliste in Pixeln; ihre Summe ist genau `verfuegbar`, solange die Mindestbreiten hineinpassen.
+    masse: {Spalte: (Entwurf, Mindestbreite, dehnbar)}, schon skaliert; komfort: Wunschbreiten von „text“ und
+    „kontext“ (ganze IBAN/E-Mail, Vorlauf samt Fund); bedarf0: Breite, die der längste Dateiname in der ersten
+    Spalte braucht.
+
+    Die Prüfspalten „Gefundener Text“ und „Kontext“ gehen der Dateispalte vor (Befund Runde 3a):
+      1. Die festen Spalten bekommen ihren Entwurf, die erste Spalte ihren Entwurf (bei kurzen Namen weniger, nie
+         unter ihrer Mindestbreite); „text“ und „kontext“ teilen sich den Rest im Verhältnis ihrer Entwurfsbreiten,
+         im knappen Fenster bis hinunter zu ihrer Mindestbreite – so wie vor Runde 3.
+      2. Ist mehr Platz da, wachsen zuerst „text“ und „kontext“ bis zur Komfortbreite (im selben Verhältnis), dann
+         die erste Spalte bis zu bedarf0 (höchstens max_anteil0 der Breite); was übrig bleibt, geht wieder an „text“
+         und „kontext“.
+      3. Passen nicht einmal deren Mindestbreiten, schrumpft die erste Spalte bis zu ihrer Mindestbreite, danach die
+         festen Spalten; reicht auch das nicht, behalten alle ihre Mindestbreite (dann rollt die Liste waagrecht)."""
+    breiten = {sp: e for sp, (e, _, _) in masse.items() if sp not in ("#0", "text", "kontext")}
+    frei = verfuegbar - sum(breiten.values())
+    e0, m0, _ = masse["#0"]
+    et, mt, _ = masse["text"]
+    ek, mk, _ = masse["kontext"]
+    anteil_t = et / (et + ek)
+    basis0 = max(m0, min(e0, bedarf0))
+    if frei >= basis0 + et + ek:                          # 2. mehr Platz als die Entwurfsbreiten
+        rest = frei - basis0 - et - ek
+        luecke_t, luecke_k = max(0, komfort.get("text", et) - et), max(0, komfort.get("kontext", ek) - ek)
+        dazu = min(rest, luecke_t + luecke_k)
+        dazu_t = min(luecke_t, max(dazu - luecke_k, dazu * anteil_t))   # Verhältnis, keine über die Komfortbreite
+        t = et + dazu_t                                   # („kontext“ bekommt unten den Rest)
+        rest -= dazu
+        dazu0 = max(0, min(rest, min(bedarf0, int(verfuegbar * max_anteil0)) - basis0))
+        b0 = basis0 + dazu0
+        t += (rest - dazu0) * anteil_t
+    elif frei >= basis0 + mt + mk:                        # 1. Entwurfsverhältnis, nie unter der Mindestbreite
+        b0, rest = basis0, frei - basis0
+        t = min(max(mt, rest * anteil_t), rest - mk)
+    else:                                                 # 3. zu schmal
+        b0, t = max(m0, frei - mt - mk), mt
+        mangel = m0 + mt + mk - frei
+        spiel = {sp: breiten[sp] - masse[sp][1] for sp in breiten}
+        gesamt = sum(spiel.values())
+        for sp in breiten:                  # feste Spalten anteilig kürzen (genau um den Mangel), nie unter Mindestbreite
+            if mangel <= 0 or gesamt <= 0:
+                break
+            weg = min(spiel[sp], -(-spiel[sp] * mangel // gesamt))
+            breiten[sp] -= weg
+            mangel, gesamt = mangel - weg, gesamt - spiel[sp]
+    breiten["#0"], breiten["text"] = int(b0), int(t)
+    breiten["kontext"] = max(mk, verfuegbar - sum(breiten.values()))
+    return breiten
+
+
+def _seitenzahl(pdf: Path) -> int:
+    """Seitenzahl für den Fortschrittsbalken (1, wenn das PDF nicht lesbar ist – oder gar keine PDF, R-01)."""
+    if not dateien.fuer_engine_erlaubt(dateien.datei_art(pdf)):
+        return 1
+    try:
+        with fitz.open(pdf) as doc:
+            return max(1, len(doc))
+    except Exception:
+        return 1
+
+
+def _profil_name(name: str) -> str:
+    return attrappen.PROFIL_ANZEIGE.get(name, name)
+
+
+def _kuerzel_index(text: str, buchstabe: str) -> int:
+    """Stelle des Kürzel-Buchstabens im Knopftext (für underline); -1, wenn er fehlt."""
+    return text.lower().find(buchstabe.lower())
+
+
+# Hilfetexte der Engine nennen „Installieren.bat“ – in der EXE gibt es die nicht (M-70)
+_EXE_ERSETZUNGEN = (
+    ("Der Ordner »tessdata« mit deu.traineddata muss neben dem Programm liegen",
+     "Die Datei deu.traineddata muss im Programmordner unter _internal\\tessdata liegen"),
+    ("(Installieren.bat erneut ausführen)",
+     "(bitte den Programmordner vollständig neu entpacken bzw. eine neue ZIP-Datei anfordern; ggf. die "
+     "Quarantäne des Virenscanners prüfen)"),
+    ("Installieren.bat erneut ausführen",
+     "bitte den Programmordner vollständig neu entpacken bzw. eine neue ZIP-Datei anfordern"),
+    ("Bitte einmal 'Installieren.bat' ausführen",
+     "Bitte den Programmordner vollständig neu entpacken bzw. eine neue ZIP-Datei anfordern"),
+    ("Installieren.bat", "eine neue ZIP-Datei des Programms (neu entpacken)"),
+)
+
+
+def _text_fuer_exe(text: str) -> str:
+    """In der EXE (sys.frozen) führen Hinweise auf Installieren.bat ins Leere: dort heißt die Abhilfe „Programmordner
+    neu entpacken“. Im Skriptbetrieb bleibt der Text unverändert."""
+    if not getattr(sys, "frozen", False) or not text or ("Installieren.bat" not in text and "tessdata" not in text):
+        return text
+    for alt, neu in _EXE_ERSETZUNGEN:
+        text = text.replace(alt, neu)
+    return text
+
+
+_LANGPFAD_PRAEFIX = "\\\\?\\"            # „\\?\“ vor langen Windows-Pfaden (R-09)
+
+
+def _anzeigetext(text: str) -> str:
+    """Text für Protokoll und Dialoge: EXE-gerechte Hilfetexte (M-70), ohne das Präfix langer Windows-Pfade."""
+    text = _text_fuer_exe(text)
+    if text and _LANGPFAD_PRAEFIX in text:
+        text = text.replace(_LANGPFAD_PRAEFIX + "UNC\\", "\\\\").replace(_LANGPFAD_PRAEFIX, "")
+    return text
+
+
+def _nebenkanal_bezug(ergebnis: dict) -> dict | None:
+    """Personenbezogene Daten nur in Nebenkanälen (Metadaten, Lesezeichen, Anhänge, XFA – R-04, Paket
+    analyse-status): {"metadaten", "lesezeichen", "anhaenge", "xfa", "personenbezug"} oder None."""
+    nk = ergebnis.get("nebenkanaele") if isinstance(ergebnis, dict) else None
+    if isinstance(nk, dict) and nk.get("personenbezug"):
+        return nk
+    if isinstance(ergebnis, dict) and "NEBENKANAL_FUND" in meldungs_codes(ergebnis):
+        return nk if isinstance(nk, dict) else {"personenbezug": True}
+    return None
+
+
+def _nebenkanal_text(nk: dict) -> str:
+    """„Metadaten (2), Anhänge (1)“ – wo die Daten stehen (ohne Inhalte)."""
+    teile = []
+    for schluessel, name in NEBENKANAL_NAMEN:
+        wert = nk.get(schluessel)
+        if isinstance(wert, bool):
+            if wert:
+                teile.append(name)
+        elif isinstance(wert, (int, float)) and wert:
+            teile.append(f"{name} ({int(wert)})")
+    return ", ".join(teile) or "Metadaten/Anhänge"
+
+
+def programm_symbol_png(groesse: int) -> bytes:
+    """Programmsymbol als PNG (groesse × groesse Pixel, durchsichtiger Hintergrund), mit PyMuPDF gezeichnet: ein
+    Blatt mit umgeknickter Ecke, schwarzen Balken (geschwärzte Stellen) und grauen Textzeilen. Dieselbe Zeichnung
+    schreibt werkzeuge/programmsymbol.py in icon.ico (EXE und Desktop-Verknüpfung). Ganzzahlige Kanten, damit
+    das Symbol auch mit 16 Pixeln scharf bleibt."""
+    n = int(groesse)
+    doc = fitz.open()
+    try:
+        seite = doc.new_page(width=n, height=n)
+        blau, weiss, schwarz = (0.10, 0.37, 0.71), (1, 1, 1), (0.07, 0.09, 0.15)
+        grau, hell = (0.61, 0.64, 0.69), (0.86, 0.91, 0.97)
+        x0, y0 = round(n * 0.15), round(n * 0.06)
+        x1, y1 = n - x0, n - y0
+        rand = max(1, round(n / 24))
+        ecke = max(3, round(n * 0.24))
+        form = seite.new_shape()
+        aussen = [(x0, y0), (x1 - ecke, y0), (x1, y0 + ecke), (x1, y1), (x0, y1), (x0, y0)]
+        form.draw_polyline([fitz.Point(p) for p in aussen])
+        form.finish(color=None, fill=blau, closePath=True)
+        innen = [(x0 + rand, y0 + rand), (x1 - ecke - rand * 0.4, y0 + rand), (x1 - rand, y0 + ecke + rand * 0.4),
+                 (x1 - rand, y1 - rand), (x0 + rand, y1 - rand), (x0 + rand, y0 + rand)]
+        form.draw_polyline([fitz.Point(p) for p in innen])
+        form.finish(color=None, fill=weiss, closePath=True)
+        knick = [(x1 - ecke, y0), (x1 - ecke, y0 + ecke), (x1, y0 + ecke), (x1 - ecke, y0)]
+        form.draw_polyline([fitz.Point(p) for p in knick])
+        form.finish(color=None, fill=blau if n < 48 else hell, closePath=True)
+        if n >= 48:
+            form.draw_polyline([fitz.Point(p) for p in knick])
+            form.finish(color=blau, width=rand, closePath=True)
+        # Zeilen: schwarze Balken im Wechsel mit grauen Textzeilen (bei 16 Pixeln nur Balken)
+        innen_x0, innen_x1 = x0 + rand + max(1, round(n * 0.07)), x1 - rand - max(1, round(n * 0.07))
+        hoehe = max(2, round(n * 0.085))
+        abstand = max(1, round(n * 0.065))
+        y = y0 + ecke + abstand
+        breiten = (1.0, 0.8, 0.9, 0.65, 1.0)
+        for nr, anteil in enumerate(breiten):
+            if y + hoehe > y1 - rand - max(1, round(n * 0.05)):
+                break
+            balken = n < 32 or nr % 2 == 0
+            ende = innen_x0 + round((innen_x1 - innen_x0) * anteil)
+            zeile_h = hoehe if balken else max(1, round(hoehe * 0.45))
+            versatz = 0 if balken else (hoehe - zeile_h) // 2
+            form.draw_rect(fitz.Rect(innen_x0, y + versatz, ende, y + versatz + zeile_h))
+            form.finish(color=None, fill=schwarz if balken else grau)
+            y += hoehe + abstand
+        form.commit()
+        return seite.get_pixmap(alpha=True).tobytes("png")
+    finally:
+        doc.close()
+
+
+# ----------------------------------------------------------------------
+# Dialog: Spalten der Kundenliste zuordnen
+# ----------------------------------------------------------------------
+class SpaltenDialog:
+    """Zuordnung der CSV-Spalten zu Merkmalen der Kundenliste, wenn die Kopfzeile nicht erkannt wurde.
+    Nicht blockierend: fertig(spalten) wird mit {merkmal: spaltenname | spaltenindex} aufgerufen."""
+
+    NICHT = "— nicht verwenden —"
+
+    def __init__(self, app, csv_pfad: Path, vorschau: dict, fertig):
+        self.app = app
+        self.fertig = fertig
+        self.zeilen = vorschau["zeilen"]
+        self.merkmale = dict(getattr(sys.modules.get(Kundenliste.__module__), "MERKMALE", None)
+                             or attrappen.MERKMALE)
+        breite = max((len(z) for z in self.zeilen), default=0)
+        self.fenster = tk.Toplevel(app.root)
+        self.fenster.title("Kundenliste – Spalten zuordnen")
+        self.fenster.configure(bg=FARBE_KARTE)
+        self.fenster.transient(app.root)
+        rahmen = tk.Frame(self.fenster, bg=FARBE_KARTE, padx=14, pady=10)
+        rahmen.pack(fill="both", expand=True)
+        tk.Label(rahmen, text=f"Die Spalten von „{csv_pfad.name}“ wurden nicht erkannt. Bitte angeben, was in "
+                              "welcher Spalte steht – mindestens Name, Nachname, Kundennummer, IBAN oder E-Mail.",
+                 font=app.f_normal, bg=FARBE_KARTE, wraplength=app._px(560), justify="left").pack(anchor="w")
+        erste = self.zeilen[0] if self.zeilen else []
+        kopf_vermutet = len(self.zeilen) > 1 and not any(ch.isdigit() for ch in "".join(erste))
+        self.kopf_var = tk.BooleanVar(value=kopf_vermutet)
+        tk.Checkbutton(rahmen, text="Erste Zeile enthält Spaltenüberschriften (wird nicht importiert)",
+                       variable=self.kopf_var, font=app.f_normal, bg=FARBE_KARTE,
+                       activebackground=FARBE_KARTE).pack(anchor="w", pady=(6, 4))
+        gitter = tk.Frame(rahmen, bg=FARBE_KARTE)
+        gitter.pack(fill="x")
+        auswahl = [self.NICHT] + list(self.merkmale.values())
+        vorschlag = attrappen.spalten_erkennen(erste) if kopf_vermutet else {}
+        index_zu_merkmal = {i: m for m, i in vorschlag.items()}
+        self.boxen: list[ttk.Combobox] = []
+        for i in range(breite):
+            beispiele = [z[i] for z in self.zeilen[:4] if i < len(z) and z[i]]
+            tk.Label(gitter, text=f"Spalte {i + 1}", font=app.f_fett, bg=FARBE_KARTE).grid(
+                row=i, column=0, sticky="w", padx=(0, 8), pady=1)
+            text = " · ".join(beispiele)[:60] or "(leer)"
+            tk.Label(gitter, text=text, font=app.f_normal, bg=FARBE_KARTE, fg=FARBE_TEXT_GRAU,
+                     anchor="w", width=36).grid(row=i, column=1, sticky="w", padx=(0, 8))
+            box = ttk.Combobox(gitter, values=auswahl, state="readonly", width=28)
+            box.set(self.merkmale.get(index_zu_merkmal.get(i), self.NICHT))
+            box.grid(row=i, column=2, sticky="w")
+            self.boxen.append(box)
+        self.meldung = tk.Label(rahmen, text="", font=app.f_normal, bg=FARBE_KARTE, fg=FARBE_ROT,
+                                wraplength=app._px(560), justify="left")
+        self.meldung.pack(anchor="w", pady=(6, 0))
+        knoepfe = tk.Frame(rahmen, bg=FARBE_KARTE)
+        knoepfe.pack(fill="x", pady=(8, 0))
+        self.ok_knopf = app._knopf(knoepfe, "Importieren", self.bestaetigen)
+        self.ok_knopf.pack(side="right")
+        app._knopf(knoepfe, "Abbrechen", self.abbrechen, True).pack(side="right", padx=(0, 8))
+        self.fenster.protocol("WM_DELETE_WINDOW", self.abbrechen)
+
+    def zuordnung(self) -> dict | None:
+        """{merkmal: spaltenname (mit Kopfzeile) | spaltenindex (ohne)} oder None (Meldung im Dialog)."""
+        name_zu_merkmal = {v: k for k, v in self.merkmale.items()}
+        gewaehlt: dict[str, int] = {}
+        for i, box in enumerate(self.boxen):
+            merkmal = name_zu_merkmal.get(box.get())
+            if merkmal is None:
+                continue
+            if merkmal in gewaehlt:
+                self.meldung.config(text=f"„{box.get()}“ ist mehreren Spalten zugeordnet – bitte nur einer.")
+                return None
+            gewaehlt[merkmal] = i
+        if not any(m in gewaehlt for m in attrappen.STARKE_MERKMALE):
+            self.meldung.config(text="Bitte mindestens eine Spalte mit Name, Nachname, Kundennummer, IBAN oder "
+                                     "E-Mail zuordnen – sonst kann kein Kunde sicher erkannt werden.")
+            return None
+        if not self.kopf_var.get():
+            return gewaehlt
+        kopf = self.zeilen[0] if self.zeilen else []
+        namen = {}
+        for merkmal, i in gewaehlt.items():
+            name = kopf[i] if i < len(kopf) else ""
+            if not name or kopf.count(name) > 1:
+                self.meldung.config(text="Die Spaltenüberschriften sind leer oder doppelt – bitte in der CSV-Datei "
+                                         "eindeutige Überschriften vergeben oder „Erste Zeile enthält "
+                                         "Spaltenüberschriften“ abwählen.")
+                return None
+            namen[merkmal] = name
+        return namen
+
+    def bestaetigen(self):
+        spalten = self.zuordnung()
+        if spalten is None:
+            return
+        self.fenster.destroy()
+        self.fertig(spalten)
+
+    def abbrechen(self):
+        self.fenster.destroy()
+
+
+# ----------------------------------------------------------------------
+# Hauptknopf mit sichtbarem gesperrten Zustand (Punkt 12)
+# ----------------------------------------------------------------------
+class PrimaerKnopf(tk.Button):
+    """Blauer Hauptknopf. Gesperrt wird er grau mit dunkelgrauer Schrift – vorher blieb er blau und sah wie
+    „bereit“ aus. Die Farbe folgt jedem config(state=…), auch aus Vorschau und Tests."""
+
+    def _farben(self, zustand):
+        gesperrt = str(zustand) == "disabled"
+        tk.Button.configure(self, bg=FARBE_KNOPF_GESPERRT if gesperrt else FARBE_AKZENT,
+                            cursor="arrow" if gesperrt else "hand2")
+
+    def configure(self, cnf=None, **kw):
+        ergebnis = tk.Button.configure(self, cnf, **kw)
+        zustand = kw.get("state", cnf.get("state") if isinstance(cnf, dict) else None)
+        if zustand is not None:
+            self._farben(zustand)
+        return ergebnis
+
+    config = configure
+
+    def __setitem__(self, schluessel, wert):
+        self.configure({schluessel: wert})
+
+
+# ----------------------------------------------------------------------
+# Dialoge: Kennwort (R-12), Hinweis beim ersten Start (M-19)
+# ----------------------------------------------------------------------
+def _modal_machen(fenster):
+    """Dialog vor das Hauptfenster legen und Eingaben dorthin lenken (grab erst, wenn das Fenster sichtbar ist)."""
+    def greifen(versuche=20):
+        try:
+            if fenster.winfo_exists():
+                fenster.grab_set()
+        except tk.TclError:
+            if versuche:
+                fenster.after(50, greifen, versuche - 1)
+    try:
+        fenster.lift()
+        fenster.focus_force()
+    except tk.TclError:
+        pass
+    greifen()
+
+
+class KennwortDialog:
+    """Fragt das Kennwort einer geschützten PDF ab – maskiert, nur für diesen Augenblick im Speicher (nie
+    gespeichert oder protokolliert). ergebnis: das Kennwort oder None (Überspringen)."""
+
+    def __init__(self, app, name: str, fehlversuch: bool = False):
+        self.app = app
+        self.ergebnis: str | None = None
+        self._fertig = False
+        f = self.fenster = tk.Toplevel(app.root)
+        f.title(KENNWORT_TITEL)
+        f.configure(bg=FARBE_KARTE)
+        f.resizable(False, False)
+        try:
+            f.transient(app.root)
+        except tk.TclError:
+            pass
+        rahmen = tk.Frame(f, bg=FARBE_KARTE, padx=16, pady=12)
+        rahmen.pack(fill="both", expand=True)
+        breite = app._px(420)
+        tk.Label(rahmen, text=f"„{name}“ ist mit einem Kennwort geschützt.", font=app.f_fett, bg=FARBE_KARTE,
+                 wraplength=breite, justify="left").pack(anchor="w")
+        tk.Label(rahmen, text="Bitte das Kennwort zum Öffnen eingeben. Es wird nicht gespeichert. Die Ausgabedatei "
+                              "wird OHNE Kennwort gespeichert – sie ist ja zur Weitergabe gedacht.",
+                 font=app.f_normal, bg=FARBE_KARTE, fg=FARBE_TEXT_GRAU, wraplength=breite,
+                 justify="left").pack(anchor="w", pady=(4, 8))
+        self.fehler_label = tk.Label(rahmen, text="Das Kennwort ist falsch. Bitte erneut eingeben oder "
+                                                  "„Überspringen“ wählen." if fehlversuch else "",
+                                     font=app.f_fett, bg=FARBE_KARTE, fg=FARBE_ROT, wraplength=breite,
+                                     justify="left")
+        if fehlversuch:
+            self.fehler_label.pack(anchor="w", pady=(0, 6))
+        zeile = tk.Frame(rahmen, bg=FARBE_KARTE)
+        zeile.pack(fill="x")
+        tk.Label(zeile, text="Kennwort:", font=app.f_normal, bg=FARBE_KARTE).pack(side="left")
+        self.var = tk.StringVar(master=f)
+        self.eingabe = tk.Entry(zeile, textvariable=self.var, show="•", width=30, font=app.f_normal,
+                                relief="flat", highlightthickness=1, highlightbackground=FARBE_RAND)
+        self.eingabe.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        knoepfe = tk.Frame(rahmen, bg=FARBE_KARTE)
+        knoepfe.pack(fill="x", pady=(12, 0))
+        self.ok_knopf = app._knopf(knoepfe, "  Öffnen  ", self.ok, unterstrichen=2)
+        self.ok_knopf.pack(side="right")
+        self.ueberspringen_knopf = app._knopf(knoepfe, "Überspringen", self.abbrechen, True, unterstrichen=0)
+        self.ueberspringen_knopf.pack(side="right", padx=(0, 8))
+        f.bind("<Return>", lambda e: self.ok())
+        f.bind("<KP_Enter>", lambda e: self.ok())
+        f.bind("<Escape>", lambda e: self.abbrechen())
+        f.protocol("WM_DELETE_WINDOW", self.abbrechen)
+        self.eingabe.focus_set()
+
+    def ok(self):
+        if self._fertig:
+            return
+        self.ergebnis = self.var.get()
+        self._schliessen()
+
+    def abbrechen(self):
+        if self._fertig:
+            return
+        self.ergebnis = None
+        self._schliessen()
+
+    def _schliessen(self):
+        self._fertig = True
+        try:
+            self.var.set("")
+            self.fenster.grab_release()
+            self.fenster.destroy()
+        except tk.TclError:
+            pass
+
+    def zeigen(self) -> str | None:
+        """Blockiert (mit laufender Ereignisschleife), bis der Dialog geschlossen ist."""
+        _modal_machen(self.fenster)
+        try:
+            self.eingabe.focus_force()
+        except tk.TclError:
+            pass
+        try:
+            self.app.root.wait_window(self.fenster)
+        except tk.TclError:
+            pass
+        ergebnis, self.ergebnis = self.ergebnis, None
+        return ergebnis
+
+
+class HinweisDialog:
+    """Hinweis beim ersten Start (M-19): Pseudonymisierung, Ergebnis immer ansehen, Verantwortung bleibt beim
+    Makler. „Nicht mehr anzeigen“ ist vorbelegt – der Hinweis erscheint also einmal; über Hilfe → „Hinweise vor der
+    Nutzung …“ ist er jederzeit wieder da."""
+
+    def __init__(self, app):
+        self.app = app
+        self._fertig = False
+        f = self.fenster = tk.Toplevel(app.root)
+        f.title(ERSTSTART_TITEL)
+        f.configure(bg=FARBE_KARTE)
+        f.resizable(False, False)
+        try:
+            f.transient(app.root)
+        except tk.TclError:
+            pass
+        rahmen = tk.Frame(f, bg=FARBE_KARTE, padx=18, pady=14)
+        rahmen.pack(fill="both", expand=True)
+        tk.Label(rahmen, text="Wichtig: Pseudonymisierung, keine vollständige Anonymisierung", font=app.f_karte,
+                 bg=FARBE_KARTE, fg=FARBE_TEXT, wraplength=app._px(480), justify="left").pack(anchor="w")
+        self.text_label = tk.Label(rahmen, text=ERSTSTART_TEXT, font=app.f_normal, bg=FARBE_KARTE, fg=FARBE_TEXT,
+                                   wraplength=app._px(480), justify="left")
+        self.text_label.pack(anchor="w", pady=(8, 10))
+        self.nicht_mehr = tk.BooleanVar(master=f, value=True)
+        tk.Checkbutton(rahmen, text="Nicht mehr anzeigen", variable=self.nicht_mehr, font=app.f_normal,
+                       bg=FARBE_KARTE, activebackground=FARBE_KARTE, underline=0).pack(anchor="w")
+        knoepfe = tk.Frame(rahmen, bg=FARBE_KARTE)
+        knoepfe.pack(fill="x", pady=(10, 0))
+        self.ok_knopf = app._knopf(knoepfe, "  Verstanden  ", self.bestaetigen, unterstrichen=2)
+        self.ok_knopf.pack(side="right")
+        f.bind("<Return>", lambda e: self.bestaetigen())
+        f.bind("<Escape>", lambda e: self.bestaetigen())
+        f.bind("<Alt-n>", lambda e: self.nicht_mehr.set(not self.nicht_mehr.get()))
+        f.protocol("WM_DELETE_WINDOW", self.bestaetigen)
+        _modal_machen(f)
+        self.ok_knopf.focus_set()
+
+    def bestaetigen(self):
+        if self._fertig:
+            return
+        self._fertig = True
+        self.app.hinweis_bestaetigt(bool(self.nicht_mehr.get()))
+        try:
+            self.fenster.grab_release()
+            self.fenster.destroy()
+        except tk.TclError:
+            pass
+
+
+class _OrdnerAufraeumen:
+    """Beim Beenden: die eigenen Zwischendateien EINES Ausgabeordners löschen – in einem eigenen Hintergrund-Thread
+    (daemon), denn ein nicht erreichbares Netzlaufwerk (VPN getrennt) kann schon das Lesen des Ordners lange
+    blockieren. Darauf wartet weder das Fenster (höchstens BEENDEN_ORDNER_WARTEN_S auf den ersten Versuch) noch das
+    Programmende (der Nachlauf höchstens bis zur Frist); ein Ordner, der bis dahin nicht erledigt ist, bleibt für den
+    nächsten Start vermerkt. Lief beim Beenden noch ein Lauf (lauf), wird nach seinem Ende noch einmal gelöscht – er
+    kann noch eine Hilfsdatei angelegt haben; was sich nicht löschen lässt (unter Windows: noch geöffnet), wird bis zur
+    Frist erneut versucht."""
+
+    def __init__(self, ordner, lauf: threading.Thread | None, frist: float):
+        self.ordner = Path(ordner)
+        self._lauf = lauf
+        self._frist = frist
+        self.erster_versuch = threading.Event()
+        self.uebrig: list[Path] = []
+        self.lesefehler: Exception | None = None
+        self.faden = threading.Thread(target=self._arbeiten, daemon=True, name="Zwischendateien-loeschen")
+        self.faden.start()
+
+    def _versuch(self):
+        try:
+            self.uebrig = dateien.eigene_zwischendateien_loeschen(self.ordner, lesefehler=True)
+            self.lesefehler = None
+        except Exception as fehler:              # Ordner nicht lesbar: offen, ob dort noch eine liegt
+            self.lesefehler = fehler
+
+    def _arbeiten(self):
+        try:
+            self._versuch()
+        finally:
+            self.erster_versuch.set()
+        if self._lauf is not None and self._lauf.is_alive():
+            self._lauf.join(max(0.1, self._frist - time.monotonic()))
+            self._versuch()
+        while (self.uebrig or self.lesefehler is not None) and time.monotonic() < self._frist:
+            time.sleep(0.25)
+            self._versuch()
+
+    def erledigt(self) -> bool:
+        """Fertig, und im Ordner liegt sicher keine eigene Zwischendatei mehr."""
+        return not self.faden.is_alive() and self.lesefehler is None and not self.uebrig
+
+
+# ----------------------------------------------------------------------
+# Hauptfenster
+# ----------------------------------------------------------------------
+class AnonymisiererApp:
+    """Hauptfenster: Dateien wählen, analysieren, Funde prüfen, schwärzen, in der Vorschau freigeben."""
+
+    def __init__(self, root, einstellungen: dict | None = None, modell_vorladen: bool = False):
+        self.root = root
+        self.einstellungen = dict(einstellungen) if einstellungen is not None else dateien.einstellungen_laden()
+        self.root.title(f"PDF-Anonymisierer {__version__}")
+        self.root.configure(bg=FARBE_HINTERGRUND)
+
+        self.dateien: list[Path] = []
+        self.analyse_ergebnisse: dict[Path, dict] = {}   # Pfad -> Ergebnis von analysiere_pdf
+        self.zeilen: dict[str, Path] = {}                # iid der Datei-Zeile -> Pfad
+        self.beschriftungen: dict[str, str] = {}         # iid -> Anzeigename (relativ zum Stamm)
+        self.manuell: dict[Path, dict[int, dict]] = {}   # Pfad -> {mid: manuelle Markierung aus der Vorschau}
+        self._manuell_zaehler = 0
+        self.lauf_immer: dict[Path, list[str]] = {}      # Pfad -> „überall in diesem Dokument schwärzen“
+        self.ausgaben: dict[Path, dict] = {}             # Pfad -> {"pfad", "status", "verdacht", "ergebnis"}
+        self.vorschauen: dict[Path, object] = {}         # Pfad -> offenes Vorschau-Fenster
+        self.kundenliste = None
+        self.laeuft = False
+        self.lauf_art: str | None = None
+        self.abbruch: threading.Event | None = None
+        self.ocr = None
+        self.analyse_veraltet = False
+        self.warnungen_anzahl = 0
+        self.letzte_ausgabeordner: list[Path] = []
+        self.letzter_dialog: tuple | None = None         # (Art, Titel, Text) des letzten Dialogs
+        self.laeufe_beendet = 0                          # Zähler abgeschlossener Läufe (für Tests/Skripte)
+        self.beendet = False                             # Fenster wird geschlossen: keine Tk-Aufrufe mehr
+        self.instanz_sperre = None                       # von main() gesetzt (Einzelinstanz, GR-10)
+        self.basis_profil = attrappen.STANDARD_PROFIL
+        self.vorladen_thread: threading.Thread | None = None
+        self._ner_sperre = threading.Lock()              # lade_ner nie doppelt gleichzeitig (Vorladen/Analyse)
+        self._hauptthread_fehler_gemeldet = False
+        self._anpassung_laeuft = False
+        self._kompakt = 0                                # gesetzte Kompaktstufe (KOMPAKT_STUFEN, 0 = keine)
+        self.dnd_aktiv = False
+        self._sperrbar: list = []
+        self._einstellungen_werden_gesetzt = False
+        self._profil_wird_gesetzt = False
+        self._anpassung_geplant = False
+        self._alter_threading_haken = threading.excepthook
+        # Arbeitskopien (Bild als PDF, entschlüsselte PDF, PDF ohne Endung): Original -> {"pfad", "art"}; die Engine
+        # liest die Kopie, Liste, Ausgabeordner und Protokoll gehören zum Original
+        self.arbeitskopien: dict[Path, dict] = {}
+        self.nicht_geprueft: dict[Path, str] = {}        # Datei -> Grund (keine PDF, unlesbar, ohne Kennwort …)
+        self._auswahl_ungeprueft: dict[Path, str] | None = None   # davon aus der gerade laufenden Auswahl
+        self._auswahl_dateien: list[Path] = []           # alle Dateien der gerade laufenden Auswahl (für einen Abbruch)
+        self._hinzufuegen_laeuft = False
+        # Text, den _beschaeftigt in die Statuszeile geschrieben hat, und die Meldung davor (kommt danach zurück)
+        self._beschaeftigt_text: str | None = None
+        self._status_vor_beschaeftigt = ""
+        # Schließen, während eine Auswahl auf eine Rückfrage wartet (Kennwort, Fotos …): erst die Auswahl sauber
+        # abbrechen (keine weitere Arbeitskopie), dann schließen (Befund Runde 2)
+        self._schliessen_angefordert = False
+        self._beenden_frage_offen = False                # Rückfrage beim Beenden steht gerade da
+        self._beenden_wartet = False                     # „Lauf läuft noch“ → „Ja“: das Fenster wartet auf den Lauf
+        self._beenden_frist = 0.0                        # bis dahin (time.monotonic) wartet es höchstens
+        # Wo eigene Zwischendateien liegen können (beim Beenden wird nur dort gelöscht, Befund Korrekturrunde
+        # „Schließen“ 2 – sonst las das Beenden jeden Ausgabeordner der Sitzung): Ausgabeordner, in denen nach einem
+        # Lauf eine eigene liegen blieb, und die, in die der laufende Schwärzlauf schon geschrieben hat. Beide ändert
+        # der Arbeits-Thread – nur unter _reste_sperre lesen oder ändern.
+        self._ordner_mit_resten: set[Path] = set()
+        self._lauf_beruehrt: set[Path] = set()
+        self._reste_sperre = threading.Lock()
+        # Ergebnisse des laufenden bzw. letzten Schwärzlaufs, Datei für Datei (der Arbeits-Thread hängt an): die
+        # Rückfrage beim Beenden nennt auch schon fertige Ausgaben des laufenden Laufs (self.ausgaben kennt sie erst
+        # nach dem Lauf)
+        self._lauf_ergebnisse: list[tuple[Path, dict]] = []
+        self._aufgeraeumt = False                        # _aufraeumen ist gelaufen (läuft nur einmal)
+        # Statuszeile (_status_dateien): eigene Meldung und die Meldung davor – sie kommt zurück, wenn der Grund der
+        # eigenen Meldung wegfällt (mit dem Stand der Analyse, für den sie galt)
+        self._status_eigen: str | None = None
+        self._status_vor_eigen = ""
+        self._status_vor_eigen_stand: frozenset | None = None
+        self._lauf_thread: threading.Thread | None = None   # Arbeits-Thread des laufenden bzw. letzten Laufs
+        self._reste_threads: dict[str, threading.Thread] = {}   # Sitzungsordner -> Thread, der ihn später löscht
+        self.laufprotokoll: list[dict] = []              # je Lauf eine Zusammenfassung ohne Inhalte (M-61)
+        self.ereignisse: list[tuple[str, str]] = []      # (Uhrzeit, Ereignis) – Freigeben/Verwerfen/Nachschwärzen
+        self._lauf_kontext: dict | None = None
+        self._nach_start: list = []                      # after()-Kennungen, die beim Schließen verworfen werden
+        self._symbole: list = []
+        self.hinweis_dialog = None
+        self.kennwort_dialog = None
+        self.hinweis_gelesen = bool(self.einstellungen.get("hinweis_gelesen", False))
+        dateien.sitzung_beginnen()                        # Arbeitskopien dieses Fensters in einem neuen Ordner
+
+        self.skalierung = float(self.root.tk.call("tk", "scaling"))
+        self.k = self.skalierung / BASIS_SKALIERUNG     # 1.0 = Windows 100 %
+        self._schriften_anlegen()
+        self._geometrie_setzen()
+        self._fenstersymbol_setzen()
+        self._baue_oberflaeche()
+        self._menue_anlegen()
+        self._einstellungen_anwenden()
+        self._kundenliste_laden()
+
+        self.root.protocol("WM_DELETE_WINDOW", self.schliessen)
+        self.root.report_callback_exception = self._fehler_melden
+        threading.excepthook = self._thread_excepthook
+        self.root.bind("<Configure>", self._fenster_geaendert)
+        # Alt+Buchstabe (unterstrichen im Knopf); Großbuchstabe für Feststelltaste und Alt+Umschalt (M-67)
+        for name, knopf in (("analyse", self.analyse_knopf), ("start", self.start_knopf),
+                            ("vorschau", self.vorschau_knopf)):
+            for taste in (KUERZEL[name], KUERZEL[name].upper()):
+                self.root.bind(f"<Alt-{taste}>", lambda e, k=knopf: k.invoke())
+        self.root.after_idle(self._oben_anpassen)
+        if modell_vorladen:
+            self._nach_start.append(self.root.after(VORLADEN_NACH_MS, self.modell_vorladen))
+
+    # ------------------------------------------------------------------
+    # Aufbau
+    # ------------------------------------------------------------------
+    def _schriften_anlegen(self):
+        self.f_normal = tkfont.Font(family=SCHRIFT, size=9)
+        self.f_fett = tkfont.Font(family=SCHRIFT, size=9, weight="bold")
+        self.f_titel = (SCHRIFT, 19, "bold")
+        self.f_karte = (SCHRIFT, 11, "bold")
+        self.f_knopf = (SCHRIFT, 10, "bold")
+        self.f_mono = (SCHRIFT_MONO, 9)
+        self.zeilenhoehe = self.f_normal.metrics("linespace")
+        self.zeile_px = max(20, self.zeilenhoehe + 6)          # Zeilenhöhe der Fundliste
+        stil = ttk.Style(self.root)
+        stil.configure("Treeview", font=self.f_normal, rowheight=self.zeile_px)
+        stil.configure("Treeview.Heading", font=self.f_fett)
+
+    def _px(self, wert: int) -> int:
+        """Entwurfsmaß (bei 100 %) in Bildschirmpixel umrechnen."""
+        return max(1, round(wert * self.k))
+
+    def _fenstersymbol_setzen(self):
+        """Programmsymbol für dieses und alle später geöffneten Fenster (Vorschau, Dialoge; M-27/M-67). Ein Fehler
+        dabei darf den Start nie verhindern."""
+        try:
+            self._symbole = [tk.PhotoImage(master=self.root, format="png",
+                                           data=base64.b64encode(programm_symbol_png(g)).decode("ascii"))
+                             for g in SYMBOL_GROESSEN]
+            self.root.iconphoto(True, *self._symbole)
+        except Exception:
+            self._symbole = []
+            dateien.fehler_protokollieren(*sys.exc_info())
+
+    def _geometrie_setzen(self):
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        breite = min(self._px(FENSTER_BREITE), max(FENSTER_MINDESTMASS[0], sw - 24))
+        hoehe = min(self._px(FENSTER_HOEHE), max(FENSTER_MINDESTMASS[1], sh - FENSTER_RAND_UNTEN))
+        self.root.minsize(*FENSTER_MINDESTMASS)
+        geometrie = f"{breite}x{hoehe}"
+        gespeichert = self.einstellungen.get("fenster")
+        if isinstance(gespeichert, str):
+            m = re.fullmatch(r"(\d+)x(\d+)(?:([+-]\d+)([+-]\d+))?", gespeichert)
+            if m:
+                b, h = int(m.group(1)), int(m.group(2))
+                if FENSTER_MINDESTMASS[0] <= b <= sw and FENSTER_MINDESTMASS[1] <= h <= sh:
+                    geometrie = f"{b}x{h}"
+                    if m.group(3) and m.group(4):
+                        x, y = int(m.group(3)), int(m.group(4))
+                        if 0 <= x < sw - 100 and 0 <= y < sh - 100:
+                            geometrie += f"+{x}+{y}"
+        self.root.geometry(geometrie)
+        self._start_hoehe = int(geometrie.split("x")[1].split("+")[0])
+        # Kleine Bildschirme (Laptops mit 1366x768 oder hoher Skalierung): maximiert starten
+        if sh - FENSTER_RAND_UNTEN < self._px(FENSTER_HOEHE) or self.einstellungen.get("maximiert"):
+            self._maximieren()
+
+    def _maximieren(self):
+        try:
+            self.root.state("zoomed")                   # Windows
+        except tk.TclError:
+            try:
+                self.root.attributes("-zoomed", True)   # Linux-Fenstermanager
+            except tk.TclError:
+                pass
+
+    def _ist_maximiert(self) -> bool:
+        try:
+            if self.root.state() == "zoomed":
+                return True
+        except tk.TclError:
+            pass
+        try:
+            return bool(self.root.attributes("-zoomed"))
+        except tk.TclError:
+            return False
+
+    def _baue_oberflaeche(self):
+        haupt = tk.Frame(self.root, bg=FARBE_HINTERGRUND, padx=16, pady=10)
+        haupt.pack(fill="both", expand=True)
+        self.haupt = haupt
+
+        self.kopf = tk.Frame(haupt, bg=FARBE_HINTERGRUND)
+        self.kopf.pack(fill="x")
+        # im kleinen Fenster ausgeblendet (_oben_anpassen): der Programmname steht ohnehin in der Titelleiste
+        self.titel = tk.Label(self.kopf, text="PDF-Anonymisierer", font=self.f_titel,
+                              bg=FARBE_HINTERGRUND, fg=FARBE_TEXT)
+        self.titel.pack(anchor="w")
+        self.untertitel = tk.Label(self.kopf, text=UNTERTITEL, font=self.f_normal, bg=FARBE_HINTERGRUND,
+                                   fg=FARBE_TEXT_GRAU, wraplength=self._px(840), justify="left")
+        self.untertitel.pack(anchor="w", pady=(0, 6))
+
+        # Unten verankert (zuerst packen, damit sie nie abgeschnitten werden): Aktionsleiste, Protokoll
+        self._baue_aktionsleiste(haupt)
+        self._baue_protokoll(haupt)
+
+        # Oben: scrollbarer Bereich mit Schritt 1 und 2
+        self.oben_rahmen = tk.Frame(haupt, bg=FARBE_HINTERGRUND)
+        self.oben_rahmen.pack(fill="x")
+        self.oben_canvas = tk.Canvas(self.oben_rahmen, bg=FARBE_HINTERGRUND, highlightthickness=0, bd=0)
+        self.oben_roll = ttk.Scrollbar(self.oben_rahmen, orient="vertical", command=self.oben_canvas.yview)
+        self.oben_canvas.configure(yscrollcommand=self.oben_roll.set)
+        self.oben_canvas.pack(side="left", fill="x", expand=True)
+        self.oben = tk.Frame(self.oben_canvas, bg=FARBE_HINTERGRUND)
+        self._oben_fenster = self.oben_canvas.create_window((0, 0), window=self.oben, anchor="nw")
+        self.oben.bind("<Configure>", lambda e: self._anpassung_planen())
+        self.oben_canvas.bind("<Configure>",
+                              lambda e: self.oben_canvas.itemconfigure(self._oben_fenster, width=e.width))
+        self.root.bind_all("<MouseWheel>", self._mausrad, add="+")
+        self.root.bind_all("<Button-4>", self._mausrad, add="+")
+        self.root.bind_all("<Button-5>", self._mausrad, add="+")
+
+        self._baue_karte_dateien(self.oben)
+        self._baue_karte_kategorien(self.oben)
+
+        # Schritt 3 füllt den Rest
+        self._baue_karte_funde(haupt)
+
+    def _baue_aktionsleiste(self, eltern):
+        leiste = tk.Frame(eltern, bg=FARBE_KARTE, padx=12, pady=6,
+                          highlightthickness=1, highlightbackground=FARBE_RAND)
+        leiste.pack(side="bottom", fill="x", pady=(6, 0))
+        self.aktionsleiste = leiste
+        # Statuszeile in eigener Zeile über die volle Breite (GR-06): zwischen Knöpfen und Warnzähler
+        # wurde sie abgeschnitten.
+        self.status_label = tk.Label(leiste, text="Bereit.", font=self.f_normal, bg=FARBE_KARTE,
+                                     fg=FARBE_TEXT_GRAU, anchor="w")
+        self.status_label.pack(side="bottom", fill="x", pady=(2, 0))
+        knoepfe = tk.Frame(leiste, bg=FARBE_KARTE)
+        knoepfe.pack(side="top", fill="x")
+        # Beide Hauptaktionen in der unten verankerten Leiste (GR-01): der Analysieren-Knopf lag im
+        # scrollbaren Einstellbereich und war auf 1366x768 nur nach Scrollen erreichbar.
+        self.analyse_knopf = self._knopf(knoepfe, ANALYSE_TEXT, self.analysieren,
+                                         unterstrichen=_kuerzel_index(ANALYSE_TEXT, KUERZEL["analyse"]))
+        self.analyse_knopf.pack(side="left")
+        self.start_knopf = self._knopf(knoepfe, START_TEXT, self.schwaerzen,
+                                       unterstrichen=_kuerzel_index(START_TEXT, KUERZEL["start"]))
+        self.start_knopf.pack(side="left", padx=(8, 0))
+        self.start_knopf.config(state="disabled")
+        self.abbrechen_knopf = self._knopf(knoepfe, "Abbrechen", self.abbrechen, True)
+        self.abbrechen_knopf.pack(side="left", padx=(8, 0))
+        self.abbrechen_knopf.config(state="disabled")
+        self.ordner_knopf = self._knopf(knoepfe, "Ergebnisordner öffnen", self.ergebnisordner_oeffnen, True)
+        self.ordner_knopf.pack(side="left", padx=(8, 0))
+        self.ordner_knopf.config(state="disabled")
+        # Fortschritt und Warnzähler in eigener Zeile: in der Knopfzeile bekam der Balken bei breiten
+        # Systemschriften (z. B. DejaVu Sans, 150 % Skalierung) keinen Platz mehr und verschwand.
+        fortschritt_zeile = tk.Frame(leiste, bg=FARBE_KARTE)
+        fortschritt_zeile.pack(side="top", fill="x", pady=(4, 0))
+        self.fortschritt_zeile = fortschritt_zeile
+        self.warn_label = tk.Label(fortschritt_zeile, text="", font=self.f_fett, bg=FARBE_KARTE,
+                                   fg=FARBE_WARNUNG)
+        self.warn_label.pack(side="right", padx=(8, 0))
+        self.fortschritt = ttk.Progressbar(fortschritt_zeile, mode="determinate")
+        self.fortschritt.pack(side="left", fill="x", expand=True)
+
+    def _baue_protokoll(self, eltern):
+        rahmen = tk.Frame(eltern, bg=FARBE_KARTE, padx=8, pady=4,
+                          highlightthickness=1, highlightbackground=FARBE_RAND)
+        rahmen.pack(side="bottom", fill="x", pady=(6, 0))
+        self.protokoll_rahmen = rahmen
+        innen = tk.Frame(rahmen, bg=FARBE_KARTE)
+        innen.pack(fill="x")
+        self.protokoll = tk.Text(innen, height=PROTOKOLL_ZEILEN, width=40, font=self.f_mono, relief="flat",
+                                 highlightthickness=1, highlightbackground=FARBE_RAND,
+                                 bg="#fafafa", state="disabled", wrap="word")
+        roll = ttk.Scrollbar(innen, orient="vertical", command=self.protokoll.yview)
+        self.protokoll.configure(yscrollcommand=roll.set)
+        self.protokoll.pack(side="left", fill="x", expand=True)
+        roll.pack(side="right", fill="y")
+        for stil, farbe in [("ok", FARBE_GRUEN), ("warnung", FARBE_WARNUNG), ("fehler", FARBE_ROT),
+                            ("grau", FARBE_TEXT_GRAU), ("hinweis", FARBE_AKZENT), ("trenner", FARBE_TEXT_GRAU)]:
+            self.protokoll.tag_configure(stil, foreground=farbe)
+
+    def _baue_karte_dateien(self, eltern):
+        karte1 = self._karte(eltern, "1 · PDF-Dateien")
+        self.karte1_titel = karte1.titel
+        # Kompaktstufe „dateikopf“ (KOMPAKT_STUFEN): Titel und Drop-Zone nebeneinander in dieser Zeile
+        self.dateikopf = tk.Frame(karte1, bg=FARBE_KARTE)
+        self.drop_zone = tk.Label(karte1, text="", font=(SCHRIFT, 10), bg=FARBE_AKZENT_HELL, fg=FARBE_AKZENT,
+                                  height=1, pady=6, cursor="hand2", highlightthickness=2,
+                                  highlightbackground="#b9cfee")
+        self.drop_zone.pack(fill="x", pady=(2, 6))
+        self.drop_zone.bind("<Button-1>", lambda e: self.dateien_waehlen())
+        if DND_VERFUEGBAR and DND_FILES is not None:
+            try:
+                self.drop_zone.drop_target_register(DND_FILES)
+                self.drop_zone.dnd_bind("<<Drop>>", self._drop_ereignis)
+                self.dnd_aktiv = True
+            except Exception:
+                self.dnd_aktiv = False
+        self.drop_zone.config(text=DROP_TEXT_DND if self.dnd_aktiv else DROP_TEXT_OHNE_DND)
+
+        zeile = tk.Frame(karte1, bg=FARBE_KARTE)
+        zeile.pack(fill="x")
+        k1 = self._knopf(zeile, "Dateien auswählen …", self.dateien_waehlen, True)
+        k1.pack(side="left")
+        k2 = self._knopf(zeile, "Ordner auswählen …", self.ordner_waehlen, True)
+        k2.pack(side="left", padx=(6, 0))
+        k3 = self._knopf(zeile, "Liste leeren", self.liste_leeren, True)
+        k3.pack(side="right")
+        self._sperrbar += [k1, k2, k3]
+        self.datei_knoepfe = zeile
+        # Bericht zum Hinzufügen in eigener Zeile unter den Knöpfen, mit Umbruch (Breite folgt dem Fenster): in der
+        # Knopfzeile wurde er abgeschnitten – genau „(nicht geprüft)“ war nicht mehr zu sehen (Befund Runde 2). Der
+        # Einstellbereich zeigt immer mindestens bis unter diese Zeile (_oben_untergrenze): auf kleinen Laptops lag
+        # sie sonst unter dem sichtbaren Rand – genau die Zeile, die NICHT geprüfte Dateien nennt (Befund Runde 3)
+        self.datei_hinweis = tk.Label(karte1, text="Noch keine Dateien. Die Liste erscheint unten in Schritt 3.",
+                                      font=self.f_normal, bg=FARBE_KARTE, fg=FARBE_TEXT_GRAU, anchor="w",
+                                      justify="left", wraplength=self._px(840))
+        self.datei_hinweis.pack(fill="x", pady=(4, 0))
+
+        ziel = tk.Frame(karte1, bg=FARBE_KARTE)
+        ziel.pack(fill="x", pady=(6, 0))
+        self.zielordner_aktiv = tk.BooleanVar(value=False)
+        self.zielordner_var = tk.StringVar(value="")
+        zk = tk.Checkbutton(ziel, text="Alle Ergebnisse in einen gemeinsamen Zielordner:",
+                            variable=self.zielordner_aktiv, font=self.f_normal, bg=FARBE_KARTE,
+                            activebackground=FARBE_KARTE, anchor="w")
+        zk.pack(side="left")
+        self.zielordner_feld = tk.Entry(ziel, textvariable=self.zielordner_var, font=self.f_normal, width=28,
+                                        relief="flat", highlightthickness=1, highlightbackground=FARBE_RAND)
+        self.zielordner_feld.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        zb = self._knopf(ziel, "Wählen …", self.zielordner_waehlen, True)
+        zb.pack(side="left", padx=(6, 0))
+        self._sperrbar += [zk, self.zielordner_feld, zb]
+
+        self.freigabe_var = tk.BooleanVar(value=_auftrag_modul.STANDARD_FREIGABE)
+        fk = tk.Checkbutton(karte1, text="Freigabe vor Weitergabe erforderlich (Ausgaben heißen „_PRUEFEN“, bis "
+                                         "sie in der Vorschau freigegeben sind – empfohlen)",
+                            variable=self.freigabe_var, font=self.f_normal, bg=FARBE_KARTE,
+                            activebackground=FARBE_KARTE, anchor="w", justify="left")
+        fk.pack(fill="x", pady=(4, 0))
+        self.freigabe_knopf = fk
+        self._sperrbar.append(fk)
+
+    def _baue_karte_kategorien(self, eltern):
+        karte2 = tk.Frame(eltern, bg=FARBE_KARTE, padx=14, pady=8,
+                          highlightthickness=1, highlightbackground=FARBE_RAND)
+        karte2.pack(fill="x", pady=(0, 8))
+        self.karte2 = karte2
+        titelzeile = tk.Frame(karte2, bg=FARBE_KARTE)
+        titelzeile.pack(fill="x", pady=(0, 2))
+        tk.Label(titelzeile, text="2 · Was soll erkannt werden?", font=self.f_karte,
+                 bg=FARBE_KARTE, fg=FARBE_TEXT).pack(side="left")
+        tk.Label(titelzeile, text="→ danach unten „Analysieren“ drücken", font=self.f_normal,
+                 bg=FARBE_KARTE, fg=FARBE_TEXT_GRAU).pack(side="right")
+
+        # Schutzstufe (Profil) über den Kategorien: die Häkchen folgen der Stufe
+        stufe = tk.Frame(karte2, bg=FARBE_KARTE)
+        stufe.pack(fill="x", pady=(2, 0))
+        tk.Label(stufe, text="Schutzstufe:", font=self.f_fett, bg=FARBE_KARTE).pack(side="left")
+        self.profil_var = tk.StringVar(value=attrappen.STANDARD_PROFIL)
+        self.profil_knoepfe: dict[str, tk.Radiobutton] = {}
+        for name in attrappen.PROFIL_REIHENFOLGE + (attrappen.BENUTZERDEFINIERT,):
+            rb = tk.Radiobutton(stufe, text=_profil_name(name), value=name, variable=self.profil_var,
+                                command=self._profil_gewaehlt, font=self.f_normal, bg=FARBE_KARTE,
+                                activebackground=FARBE_KARTE)
+            rb.pack(side="left", padx=(8, 0))
+            self.profil_knoepfe[name] = rb
+            self._sperrbar.append(rb)
+        self.profil_beschreibung = tk.Label(karte2, text="", font=self.f_normal, bg=FARBE_KARTE,
+                                            fg=FARBE_TEXT_GRAU, anchor="w", justify="left",
+                                            wraplength=self._px(820))
+        self.profil_beschreibung.pack(fill="x", pady=(0, 4))
+
+        gitter = tk.Frame(karte2, bg=FARBE_KARTE)
+        gitter.pack(fill="x")
+        self.kategorie_vars: dict[str, tk.BooleanVar] = {}
+        for i, eintrag in enumerate(KATEGORIEN):
+            schluessel, anzeige = eintrag[0], eintrag[1]
+            standard = bool(eintrag[4]) if len(eintrag) > 4 else True
+            var = tk.BooleanVar(value=standard)
+            self.kategorie_vars[schluessel] = var
+            cb = tk.Checkbutton(gitter, text=anzeige, variable=var, font=self.f_normal,
+                                bg=FARBE_KARTE, activebackground=FARBE_KARTE, anchor="w")
+            cb.grid(row=i // KATEGORIE_SPALTEN, column=i % KATEGORIE_SPALTEN, sticky="w", padx=(0, 12))
+            self._sperrbar.append(cb)
+            var.trace_add("write", self._kategorie_geaendert)
+        for spalte in range(KATEGORIE_SPALTEN):
+            gitter.columnconfigure(spalte, weight=1)
+
+        listen = tk.Frame(karte2, bg=FARBE_KARTE)
+        listen.pack(fill="x", pady=(8, 0))
+        links = tk.Frame(listen, bg=FARBE_KARTE)
+        links.pack(side="left", fill="both", expand=True, padx=(0, 8))
+        rechts = tk.Frame(listen, bg=FARBE_KARTE)
+        rechts.pack(side="left", fill="both", expand=True)
+        tk.Label(links, text="Zusätzlich IMMER schwärzen (ein Begriff pro Zeile):",
+                 font=self.f_fett, bg=FARBE_KARTE).pack(anchor="w")
+        self.immer_feld = tk.Text(links, height=2, width=30, font=self.f_normal, relief="flat", undo=False,
+                                  highlightthickness=1, highlightbackground=FARBE_RAND, bg="#fafafa")
+        self.immer_feld.pack(fill="x")
+        tk.Label(rechts, text="NIE schwärzen (z. B. eigene Firmen-/Beraternamen):",
+                 font=self.f_fett, bg=FARBE_KARTE).pack(anchor="w")
+        self.nie_feld = tk.Text(rechts, height=2, width=30, font=self.f_normal, relief="flat", undo=False,
+                                highlightthickness=1, highlightbackground=FARBE_RAND, bg="#fafafa")
+        self.nie_feld.pack(fill="x")
+        for feld in (self.immer_feld, self.nie_feld):
+            feld.bind("<<Modified>>", self._text_geaendert)
+            self._sperrbar.append(feld)
+
+        kunden = tk.Frame(karte2, bg=FARBE_KARTE)
+        kunden.pack(fill="x", pady=(6, 0))
+        tk.Label(kunden, text="Kundenliste:", font=self.f_fett, bg=FARBE_KARTE).pack(side="left")
+        self.kunden_entfernen_knopf = self._knopf(kunden, "Entfernen", self.kundenliste_entfernen, True)
+        self.kunden_entfernen_knopf.pack(side="right")
+        self.kunden_import_knopf = self._knopf(kunden, "Importieren …", self.kundenliste_importieren, True)
+        self.kunden_import_knopf.pack(side="right", padx=(0, 6))
+        self._sperrbar.append(self.kunden_import_knopf)
+        self.kunden_label = tk.Label(kunden, text="", font=self.f_normal, bg=FARBE_KARTE, fg=FARBE_TEXT_GRAU,
+                                     anchor="w", justify="left")
+        self.kunden_label.pack(side="left", padx=(8, 0), fill="x", expand=True)
+
+    def _baue_karte_funde(self, eltern):
+        karte3 = tk.Frame(eltern, bg=FARBE_KARTE, padx=14, pady=8,
+                          highlightthickness=1, highlightbackground=FARBE_RAND)
+        karte3.pack(fill="both", expand=True, pady=(0, 8))
+        self.karte3 = karte3
+        titelzeile = tk.Frame(karte3, bg=FARBE_KARTE)
+        titelzeile.pack(fill="x")
+        self.funde_titelzeile = titelzeile
+        tk.Label(titelzeile, text="3 · Funde prüfen, dann schwärzen", font=self.f_karte,
+                 bg=FARBE_KARTE, fg=FARBE_TEXT).pack(side="left")
+        self.entfernen_knopf = self._knopf(titelzeile, "Datei aus Liste entfernen", self.datei_entfernen, True)
+        self.entfernen_knopf.pack(side="right")
+        b2 = self._knopf(titelzeile, "Alle aus", lambda: self.alle_setzen("aus"), True)
+        b2.pack(side="right", padx=(0, 6))
+        b1 = self._knopf(titelzeile, "Alle an", lambda: self.alle_setzen("an"), True)
+        b1.pack(side="right", padx=(0, 6))
+        self.vorschau_knopf = self._knopf(titelzeile, VORSCHAU_TEXT, self.vorschau_auswahl, True,
+                                          unterstrichen=_kuerzel_index(VORSCHAU_TEXT, KUERZEL["vorschau"]))
+        self.vorschau_knopf.pack(side="right", padx=(0, 6))
+        self._sperrbar += [b1, b2, self.entfernen_knopf, self.vorschau_knopf]
+        self.baum_hinweis = tk.Label(karte3, text=BAUM_HINWEIS, font=self.f_normal, bg=FARBE_KARTE,
+                                     fg=FARBE_TEXT_GRAU, anchor="w", justify="left", wraplength=self._px(840))
+        self.baum_hinweis.pack(anchor="w", fill="x")
+
+        # Hinweiskasten zuerst unten verankern: wird das Fenster knapp, schrumpft die Fundliste, nicht der Hinweis.
+        # Ein Klick zeigt alle Grenzen (wie Hilfe → „Was wird nicht erkannt?“).
+        self.hinweis_kasten = tk.Label(karte3, text=HINWEISKASTEN, font=self.f_normal, justify="left",
+                                       anchor="w", bg=FARBE_HINWEIS_HINTERGRUND, fg="#7c4a03", padx=8, pady=3,
+                                       highlightthickness=1, highlightbackground=FARBE_HINWEIS_RAND,
+                                       wraplength=self._px(840), cursor="hand2")
+        self.hinweis_kasten.pack(side="bottom", fill="x", pady=(2, 0))
+        self.hinweis_kasten.bind("<Button-1>", lambda e: self.hilfe_grenzen())
+        # nie angezeigter Zwilling: misst die Höhe der langen und der kurzen Fassung (_kompakt_gewinne)
+        self._kasten_mess = tk.Label(karte3, text="", font=self.f_normal, justify="left", anchor="w", padx=8,
+                                     pady=3, highlightthickness=1)
+
+        baum_rahmen = tk.Frame(karte3, bg=FARBE_KARTE)
+        baum_rahmen.pack(fill="both", expand=True, pady=(2, 2))
+        self.baum_rahmen = baum_rahmen
+        baum_rahmen.rowconfigure(0, weight=1)
+        baum_rahmen.columnconfigure(0, weight=1)
+        self.baum = ttk.Treeview(baum_rahmen, columns=SPALTEN, show="tree headings",
+                                 selectmode="browse", height=4)
+        self.baum.heading("#0", text="Häkchen / Datei")
+        self.baum.heading("kategorie", text="Kategorie")
+        self.baum.heading("text", text="Gefundener Text")
+        self.baum.heading("seiten", text="Seite(n)")
+        self.baum.heading("anzahl", text="Anzahl")
+        self.baum.heading("kontext", text="Kontext")
+        self.baum.heading("ersatz", text="Ersatz")
+        for spalte, (breite, mindest, dehnbar) in SPALTEN_MASSE.items():
+            self.baum.column(spalte, width=self._px(breite), minwidth=self._px(mindest), stretch=dehnbar,
+                             anchor="center" if spalte in ("seiten", "anzahl") else "w")
+        roll_y = ttk.Scrollbar(baum_rahmen, orient="vertical", command=self.baum.yview)
+        roll_x = ttk.Scrollbar(baum_rahmen, orient="horizontal", command=self.baum.xview)
+        self.baum_roll_x = roll_x            # nur sichtbar, wenn die Spalten breiter sind als die Liste
+        self.baum.configure(yscrollcommand=roll_y.set, xscrollcommand=self._roll_x_melden)
+        self.baum.grid(row=0, column=0, sticky="nsew")
+        roll_y.grid(row=0, column=1, sticky="ns")
+        roll_x.grid(row=1, column=0, sticky="ew")
+        self.baum.tag_configure("aus", foreground=FARBE_TEXT_GRAU)
+        self.baum.tag_configure("teil", foreground=FARBE_WARNUNG)
+        self.baum.tag_configure("datei", font=self.f_fett)
+        self.baum.bind("<Button-1>", self._baum_klick)
+        self.baum.bind("<Double-Button-1>", self._baum_doppelklick)
+        self.baum.bind("<Button-3>", self._kontextmenue)
+        self.baum.bind("<space>", self._taste_leer)
+        self.baum.bind("<Delete>", lambda e: self.datei_entfernen())
+        self.baum.bind("<Return>", lambda e: self.vorschau_auswahl())
+        self.baum.bind("<<TreeviewSelect>>", self._auswahl_geaendert)
+        self.baum.bind("<Configure>", self._spalten_anpassen)
+        self.baum.bind("<ButtonRelease-1>", self._maus_losgelassen, add="+")
+
+    def _spalten_anpassen(self, ereignis=None):
+        """Spaltenbreiten der Fundliste nach spalten_verteilen: „Gefundener Text“ und „Kontext“ zuerst, die erste
+        Spalte nur in den Platz, der danach frei ist. Neu verteilt wird nur, wenn sich die Breite der Liste oder der
+        Platzbedarf der Dateinamen geändert hat – ändert sich nur die Höhe (Bildlaufleiste, Protokollzeilen), bleiben
+        auch Breiten stehen, die der Nutzer am Spaltenrand gezogen hat. Zu lange Dateinamen werden in der Mitte
+        gekürzt (der volle Pfad steht in der Statuszeile, sobald die Datei gewählt ist)."""
+        try:
+            verfuegbar = self.baum.winfo_width() - 4
+        except tk.TclError:
+            return
+        if verfuegbar < 50:
+            return
+        bedarf0 = self._erste_spalte_bedarf()
+        if (verfuegbar, bedarf0) != getattr(self, "_spalten_schluessel", None):
+            self._spalten_schluessel = (verfuegbar, bedarf0)
+            masse = {sp: (self._px(e), self._px(m), d) for sp, (e, m, d) in SPALTEN_MASSE.items()}
+            komfort = {sp: self._px(b) for sp, b in SPALTEN_KOMFORT.items()}
+            for sp, breite in spalten_verteilen(verfuegbar, masse, komfort, bedarf0, SPALTE0_MAX_ANTEIL).items():
+                if self.baum.column(sp, "width") != breite:
+                    self.baum.column(sp, width=breite)
+        self._dateinamen_einpassen()
+        self._roll_x_pruefen()
+
+    def _erste_spalte_bedarf(self) -> int:
+        """Breite, die die erste Spalte für den längsten Dateinamen braucht – ohne den Zusatz „Kennwort entfernt“ /
+        „Bild → PDF“, der in der Kontextspalte der Dateizeile steht; ohne Dateien die Entwurfsbreite."""
+        namen = tuple(self._name_ohne_zusatz(iid) for iid in self.zeilen)
+        gemerkt = getattr(self, "_bedarf0_gemerkt", None)
+        if gemerkt is not None and gemerkt[0] == namen:
+            return gemerkt[1]
+        if namen:
+            bedarf = max(self._px(SPALTE0_EINZUG) + self.f_fett.measure(f"{HAKEN['an']}  {name}") for name in namen)
+        else:
+            bedarf = self._px(SPALTEN_MASSE["#0"][0])
+        self._bedarf0_gemerkt = (namen, bedarf)
+        return bedarf
+
+    def _dateinamen_einpassen(self):
+        """Dateinamen der ersten Spalte an deren aktuelle Breite anpassen (nur wenn sie sich geändert hat)."""
+        try:
+            breite0 = self.baum.column("#0", "width")
+        except tk.TclError:
+            return
+        if breite0 == getattr(self, "_dateinamen_breite", None):
+            return
+        self._dateinamen_breite = breite0
+        for iid in self.zeilen:
+            if self.baum.exists(iid):
+                self._zeilentext_setzen(iid)
+
+    def _roll_x_melden(self, anfang, ende):
+        """xscrollcommand der Fundliste: Bildlaufleiste nachführen und nur zeigen, wenn sie etwas bewirkt – auch
+        nachdem eine Spalte von Hand breiter gezogen wurde, als die Liste ist."""
+        self.baum_roll_x.set(anfang, ende)
+        self._roll_x_pruefen()
+
+    def _roll_x_pruefen(self):
+        """Waagrechte Bildlaufleiste nur, wenn die Spalten breiter sind als die Liste (jede Zeile zählt)."""
+        roll_x = getattr(self, "baum_roll_x", None)
+        if roll_x is None or self.beendet:
+            return
+        try:
+            summe = sum(self.baum.column(sp, "width") for sp in ("#0",) + SPALTEN)
+            noetig = summe > self.baum.winfo_width() - 2 or float(self.baum.xview()[0]) > 0.0
+            if noetig and not roll_x.winfo_manager():
+                roll_x.grid()
+            elif not noetig and roll_x.winfo_manager():
+                roll_x.grid_remove()
+                self.baum.xview_moveto(0)
+        except tk.TclError:
+            pass
+
+    def _maus_losgelassen(self, ereignis=None):
+        """Nach einem Zug am Spaltenrand (ttk ändert die Breiten selbst, ohne <Configure>): die Dateinamen an die neue
+        Breite der ersten Spalte anpassen – im Leerlauf, also nach der Klassenbindung von ttk."""
+        def danach():
+            if not self.beendet:
+                self._dateinamen_einpassen()
+        self.root.after_idle(danach)
+
+    def _name_ohne_zusatz(self, iid) -> str:
+        """Anzeigename der Datei ohne den Zusatz „(Bild → PDF)“ / „(Kennwort entfernt)“."""
+        voll = self.beschriftungen.get(iid, "")
+        zusatz = ANZEIGE_ART.get((self.arbeitskopien.get(self.zeilen.get(iid)) or {}).get("art"), "")
+        return voll[:len(voll) - len(zusatz)] if zusatz and voll.endswith(zusatz) else voll
+
+    def _datei_zusatz(self, pdf) -> str:
+        """„Kennwort entfernt“ / „Bild → PDF“ / „PDF ohne Endung“ (leer bei einer gewöhnlichen PDF) – steht in der
+        Kontextspalte der Dateizeile, damit die erste Spalte für keine Zeile breiter werden muss (Befund Runde 3a)."""
+        return DATEI_KONTEXT_ART.get((self.arbeitskopien.get(pdf) or {}).get("art"), "")
+
+    def _datei_kontext_setzen(self, pdf):
+        """Kontextspalte der Dateizeile: der Grund aus der Ausgabe (prüfen, Fehler), sonst der Zusatz."""
+        iid = str(pdf)
+        if self.baum.exists(iid):
+            grund = (self.ausgaben.get(pdf) or {}).get("grund", "")
+            self.baum.set(iid, "kontext", grund or self._datei_zusatz(pdf))
+
+    def _beschriftung_passend(self, iid) -> str:
+        """Anzeigename der Datei-Zeile, passend zur ersten Spalte: zu lange Namen in der Mitte gekürzt – Anfang und
+        Endung bleiben sichtbar; der Zusatz steht in der Kontextspalte (_datei_zusatz)."""
+        name = self._name_ohne_zusatz(iid)
+        try:
+            platz = (self.baum.column("#0", "width") - self._px(SPALTE0_EINZUG)
+                     - self.f_fett.measure(f"{HAKEN['an']}  "))
+        except tk.TclError:
+            return name
+        return name_einpassen(name, "", platz, self.f_fett.measure)
+
+    def _menue_anlegen(self):
+        menue = tk.Menu(self.root)
+        datei = tk.Menu(menue, tearoff=0)
+        datei.add_command(label="Dateien hinzufügen …", command=self.dateien_waehlen, underline=0)
+        datei.add_command(label="Ordner hinzufügen …", command=self.ordner_waehlen, underline=0)
+        datei.add_separator()
+        datei.add_command(label="Protokoll speichern …", command=self.protokoll_speichern, underline=0)
+        datei.add_separator()
+        datei.add_command(label="Beenden", command=self.schliessen, underline=0)
+        menue.add_cascade(label="Datei", menu=datei, underline=0)
+        kunden = tk.Menu(menue, tearoff=0)
+        kunden.add_command(label="Kundenliste importieren …", command=self.kundenliste_importieren, underline=12)
+        kunden.add_command(label="Kundenliste entfernen", command=self.kundenliste_entfernen, underline=12)
+        menue.add_cascade(label="Kundenliste", menu=kunden, underline=0)
+        hilfe = tk.Menu(menue, tearoff=0)
+        hilfe.add_command(label="Hinweise vor der Nutzung …", command=self.hilfe_hinweis, underline=0)
+        hilfe.add_command(label="Was wird nicht erkannt?", command=self.hilfe_grenzen, underline=0)
+        hilfe.add_command(label="Ordner des Fehlerprotokolls öffnen", command=self.fehlerlog_oeffnen, underline=11)
+        hilfe.add_separator()
+        hilfe.add_command(label="Über PDF-Anonymisierer …", command=self.hilfe_ueber, underline=0)
+        menue.add_cascade(label="Hilfe", menu=hilfe, underline=0)
+        self.menue = menue
+        self.datei_menue = datei
+        self.kunden_menue = kunden
+        self.hilfe_menue = hilfe
+        try:
+            self.root.config(menu=menue)
+        except tk.TclError:
+            pass
+
+    # Oberflächen-Helfer ------------------------------------------------
+    def _karte(self, eltern, titel, expand=False):
+        rahmen = tk.Frame(eltern, bg=FARBE_KARTE, padx=14, pady=8,
+                          highlightthickness=1, highlightbackground=FARBE_RAND)
+        rahmen.pack(fill="both" if expand else "x", expand=expand, pady=(0, 8))
+        rahmen.titel = tk.Label(rahmen, text=titel, font=self.f_karte, bg=FARBE_KARTE, fg=FARBE_TEXT)
+        rahmen.titel.pack(anchor="w", pady=(0, 2))
+        return rahmen
+
+    def _knopf(self, eltern, text, befehl, sekundaer=False, unterstrichen: int = -1):
+        """Knopf im Stil des Programms; unterstrichen = Index des Buchstabens für Alt+Buchstabe (-1: keiner)."""
+        if sekundaer:
+            knopf = tk.Button(eltern, text=text, command=befehl, font=self.f_normal,
+                              bg="#eef1f5", fg=FARBE_TEXT, relief="flat", underline=unterstrichen,
+                              padx=10, pady=KNOPF_PADY, cursor="hand2", activebackground="#dde3ea",
+                              disabledforeground="#9ca3af")
+        else:
+            knopf = PrimaerKnopf(eltern, text=text, command=befehl, font=self.f_knopf,
+                                 bg=FARBE_AKZENT, fg="white", relief="flat", padx=12, pady=6, cursor="hand2",
+                                 activebackground="#134a8e", activeforeground="white", underline=unterstrichen,
+                                 disabledforeground=FARBE_KNOPF_GESPERRT_TEXT)
+        knopf.bind("<Return>", lambda e: knopf.invoke())
+        return knopf
+
+    def _anpassung_planen(self):
+        if not self._anpassung_geplant:
+            self._anpassung_geplant = True
+            try:
+                self.root.after_idle(self._oben_anpassen)
+            except tk.TclError:
+                self._anpassung_geplant = False
+
+    def _oben_anpassen(self):
+        """Höhe des scrollbaren Einstellbereichs so wählen, dass Fundliste, Protokoll und Leiste sichtbar bleiben –
+        und der Einstellbereich mindestens bis unter die Hinweiszeile zur Dateiauswahl reicht (Drop-Zone, Knöpfe und
+        die Zeile, die NICHT geprüfte Dateien nennt, sind immer ohne Scrollen zu sehen)."""
+        self._anpassung_geplant = False
+        if self.beendet:
+            return
+        if self._anpassung_laeuft:
+            try:
+                self.root.after(1, self._oben_anpassen)     # läuft gerade: später noch einmal (nicht verwerfen)
+            except tk.TclError:
+                pass
+            return
+        self._anpassung_laeuft = True
+        try:
+            if not self.oben.winfo_exists():
+                return
+            fenster_h = self.root.winfo_height()
+            if fenster_h <= 1:                               # noch nicht dargestellt: Startgeometrie nehmen
+                fenster_h = self._start_hoehe
+            klein = fenster_h < self._px(FENSTER_KLEIN_HOEHE)
+            if not klein:
+                self._kompakt_setzen(0)                      # Kompaktstufen nur im kleinen Fenster
+            # kleines Fenster (Laptop 1366x768 bei 100-150 %, 1024x768): großer Titel und Untertitel aus – der
+            # Programmname steht in der Titelleiste, der Untertitel im Hinweis beim ersten Start – und engere Ränder
+            self._kopf_zeigen(titel=not klein,
+                              untertitel=not klein and fenster_h >= self._px(UNTERTITEL_MINDESTHOEHE))
+            self._raender_setzen(klein)
+            # kleines Fenster: Bedienhinweis über der Fundliste ausblenden (der Knopf „Vorschau …“ und die
+            # Statuszeile nennen die Vorschau weiterhin) – jede Zeile zählt für die Fundliste
+            if klein and self.baum_hinweis.winfo_manager():
+                self.baum_hinweis.pack_forget()
+            elif not klein and not self.baum_hinweis.winfo_manager():
+                self.baum_hinweis.pack(anchor="w", fill="x", before=self.baum_rahmen)
+            zeilen = PROTOKOLL_ZEILEN_KLEIN if klein else PROTOKOLL_ZEILEN
+            if int(self.protokoll.cget("height")) != zeilen:
+                self.protokoll.config(height=zeilen)
+            self.haupt.update_idletasks()                    # angeforderte Höhen nach den Änderungen
+            if klein:
+                # Reicht der Platz nicht für die Mindesthöhe der Fundliste, rücken Dateikopf, Knöpfe und
+                # Hinweiskasten der Reihe nach zusammen (KOMPAKT_STUFEN), nur so weit wie nötig
+                self._kompakt_setzen(self._kompakt_stufe_waehlen(fenster_h))
+                self.haupt.update_idletasks()
+            benoetigt = self.oben.winfo_reqheight()
+            rest, untergrenze = self._platz_unten(fenster_h, klein)
+            # Die Fundliste ist der Arbeitsbereich (GR-02): fester Anteil des freien Platzes (mindestens ihre
+            # Mindesthöhe); der Einstellbereich bekommt den Rest und scrollt bei Bedarf – aber nie weniger als
+            # bis unter die Hinweiszeile zur Dateiauswahl, und sein sichtbarer Teil endet unter einer ganzen Zeile
+            # (keine halb abgeschnittenen Knöpfe oder Häkchen).
+            baum_soll = max(self._baum_mindesthoehe(), int(rest * BAUM_ANTEIL))
+            verfuegbar = rest - baum_soll
+            hoehe = max(untergrenze, min(benoetigt, verfuegbar))
+            if hoehe < benoetigt:
+                # an einer Zeilengrenze enden; gibt es keine zwischen Mindesthöhe und Wunschhöhe, an der Mindesthöhe
+                # (dort endet die Hinweiszeile) – nie mitten in einer Zeile mit Knöpfen oder Häkchen
+                grenzen = [g for g in self._oben_zeilengrenzen() if untergrenze <= g <= hoehe]
+                hoehe = max(grenzen) if grenzen else untergrenze
+            self.oben_canvas.configure(height=hoehe,
+                                       scrollregion=(0, 0, self.oben.winfo_reqwidth(), benoetigt))
+            if benoetigt > hoehe + 2:
+                if not self.oben_roll.winfo_ismapped():
+                    self.oben_roll.pack(side="right", fill="y")
+            else:
+                self.oben_roll.pack_forget()
+                self.oben_canvas.yview_moveto(0)
+        except tk.TclError:
+            pass
+        finally:
+            self._anpassung_laeuft = False
+
+    def _platz_unten(self, fenster_h: int, klein: bool) -> tuple[int, int]:
+        """(rest, untergrenze): Höhe für Einstellbereich und Fundliste zusammen – das Fenster ohne Kopf,
+        Aktionsleiste, Protokoll, den Rest der Fund-Karte und die Ränder – und die Mindesthöhe des Einstellbereichs
+        (aus den angeforderten Höhen)."""
+        karte3_rand = max(0, self.karte3.winfo_reqheight() - self.baum_rahmen.winfo_reqheight())
+        kopf_h = self.kopf.winfo_reqheight() if self.kopf.winfo_manager() else 0
+        i = 1 if klein else 0
+        raender = (2 * RAENDER["haupt"][i] + RAENDER["leiste_abstand"][i] + RAENDER["protokoll_abstand"][i]
+                   + RAENDER["karte_abstand"][i] + 4)           # Ränder in Pixeln (skalieren nicht mit)
+        fest = (kopf_h + self.aktionsleiste.winfo_reqheight() + self.protokoll_rahmen.winfo_reqheight()
+                + karte3_rand + raender)
+        return fenster_h - fest, self._oben_untergrenze()
+
+    def _baum_mindesthoehe(self) -> int:
+        """Mindesthöhe der Fundliste samt Rahmen: BAUM_MINDESTHOEHE, nie weniger als Kopfzeile (wie eine Zeile
+        gerechnet) und BAUM_MINDESTZEILEN ganze Zeilen – dazu die waagrechte Bildlaufleiste, wenn sie zu sehen ist."""
+        roll = self.baum_roll_x.winfo_reqheight() if self.baum_roll_x.winfo_ismapped() else 0
+        return max(self._px(BAUM_MINDESTHOEHE), (BAUM_MINDESTZEILEN + 1) * self.zeile_px + self._px(4)) + roll
+
+    def _kompakt_stufe_waehlen(self, fenster_h: int) -> int:
+        """Kleinste Kompaktstufe, mit der die Fundliste ihre Mindesthöhe bekommt (reicht keine: die letzte). Der
+        Gewinn je Stufe wird vorhergesagt (_kompakt_gewinne), nicht durch Umschalten ausprobiert – jede Änderung
+        löste eine neue Anpassung aus. Eine gesetzte Stufe wird erst zurückgenommen, wenn danach noch
+        KOMPAKT_RUECKWEG Pixel Spielraum bleiben (kein Hin und Her an der Grenze)."""
+        rest, untergrenze = self._platz_unten(fenster_h, True)
+        gewinne, angewandt = self._kompakt_gewinne()
+        ohne = rest - untergrenze - angewandt                        # Platz der Fundliste ohne Kompaktstufe
+        mindest = self._baum_mindesthoehe()
+        for stufe in range(len(KOMPAKT_STUFEN)):
+            rueckweg = KOMPAKT_RUECKWEG if stufe < self._kompakt else 0
+            if ohne + sum(gewinne[:stufe]) >= mindest + rueckweg:
+                return stufe
+        return len(KOMPAKT_STUFEN)
+
+    def _kompakt_gewinne(self) -> tuple[list[int], int]:
+        """(Gewinne, angewandt): Platzgewinn der Fundliste (Pixel) je Kompaktstufe in der Reihenfolge von
+        KOMPAKT_STUFEN, aus den angeforderten Höhen – gleich, welche Stufe gerade gesetzt ist; der Dateikopf zählt nur,
+        wenn Titel und Drop-Zone nebeneinander passen. „angewandt“: Summe der Gewinne der Stufen, die gerade gelten."""
+        r = {name: werte[1] for name, werte in RAENDER.items()}      # Kompaktstufen gibt es nur im kleinen Fenster
+        gewinn = {}
+        # Titel und Drop-Zone untereinander (Titel pady (0, 2), Drop-Zone pady (2, unten)) oder nebeneinander
+        titel, drop = self.karte1_titel.winfo_reqheight(), self.drop_zone.winfo_reqheight()
+        gewinn["dateikopf"] = max(0, titel + 2 + 2 + drop - max(titel, drop))
+        # Knopfzeilen: Höhe mit und ohne Innenabstand der Knöpfe (die Zeile ist so hoch wie ihr höchstes Element)
+        knoepfe, flach = 0, False
+        for zeile in (self.datei_knoepfe, self.funde_titelzeile, self.analyse_knopf.master):
+            normal, kompakt = [], []
+            for element in zeile.pack_slaves():
+                h = element.winfo_reqheight()
+                if isinstance(element, tk.Button):
+                    jetzt = int(float(element.cget("pady")))
+                    voll, knapp = (r["hauptknopf"], 1) if isinstance(element, PrimaerKnopf) else (KNOPF_PADY, 0)
+                    flach = flach or jetzt == knapp
+                    normal.append(h + 2 * (voll - jetzt))
+                    kompakt.append(h + 2 * (knapp - jetzt))
+                else:
+                    normal.append(h)
+                    kompakt.append(h)
+            if normal:
+                knoepfe += max(normal) - max(kompakt)
+        gewinn["knoepfe"] = max(0, knoepfe)
+        # Hinweiskasten: lange gegen kurze Fassung, gemessen am nie angezeigten Zwilling
+        kasten = self.hinweis_kasten
+        hoehen = []
+        for text in (HINWEISKASTEN, HINWEISKASTEN_KURZ):
+            self._kasten_mess.config(text=text, wraplength=kasten.cget("wraplength"), padx=kasten.cget("padx"),
+                                     pady=kasten.cget("pady"))
+            hoehen.append(self._kasten_mess.winfo_reqheight())
+        gewinn["hinweiskasten"] = max(0, hoehen[0] - hoehen[1])
+        angewandt = ((gewinn["dateikopf"] if self.dateikopf.winfo_manager() else 0)
+                     + (gewinn["knoepfe"] if flach else 0)
+                     + (gewinn["hinweiskasten"] if kasten.cget("text") == HINWEISKASTEN_KURZ else 0))
+        if not self._dateikopf_passt():
+            gewinn["dateikopf"] = 0
+        return [gewinn[name] for name in KOMPAKT_STUFEN], angewandt
+
+    def _dateikopf_passt(self) -> bool:
+        """Passen Kartentitel und Drop-Zone nebeneinander in die Karte, ohne dass der Text der Drop-Zone seitlich
+        abgeschnitten wird? Review Runde 3b: mit Drag & Drop ist der Text länger – in schmaleren Fenstern wurde er an
+        beiden Enden abgeschnitten. Solange die Karte noch keine Breite hat: nein."""
+        karte = self.datei_knoepfe.master
+        try:
+            rand = int(karte.cget("padx")) + int(karte.cget("highlightthickness")) + int(karte.cget("bd"))
+            breite = karte.winfo_width() - 2 * rand
+            return breite > 1 and (self.karte1_titel.winfo_reqwidth() + self._px(12)
+                                   + self.drop_zone.winfo_reqwidth() <= breite)
+        except (tk.TclError, ValueError):
+            return False
+
+    def _kompakt_setzen(self, stufe: int):
+        """Kompaktstufe setzen (die ersten stufe Einträge von KOMPAKT_STUFEN; 0 = keine) und dabei nur ändern, was
+        anders ist; jede Stufe umkehrbar. Die ersten beiden Stufen sparen nur Platz (Inhalte, Bedienung und Kürzel
+        bleiben), die letzte zeigt den Hinweiskasten in der Kurzfassung mit den Kernaussagen."""
+        self._kompakt = stufe
+        aktiv = set(KOMPAKT_STUFEN[:stufe])
+        klein = bool(getattr(self, "_raender_klein", False))
+        r = {name: werte[1 if klein else 0] for name, werte in RAENDER.items()}
+        # Titel „1 · PDF-Dateien“ und Drop-Zone in einer Zeile – nur, wenn beide nebeneinander passen
+        nebeneinander = "dateikopf" in aktiv and self._dateikopf_passt()
+        if nebeneinander and not self.dateikopf.winfo_manager():
+            self.dateikopf.pack(fill="x", pady=(0, r["drop_unten"]), before=self.datei_knoepfe)
+            self.karte1_titel.pack(in_=self.dateikopf, side="left", anchor="w", pady=0)
+            self.drop_zone.pack(in_=self.dateikopf, side="left", fill="x", expand=True, padx=(self._px(12), 0),
+                                pady=0)
+            for element in (self.karte1_titel, self.drop_zone):    # über dem Rahmen, der sie jetzt anordnet
+                element.lift(self.dateikopf)
+        elif not nebeneinander and self.dateikopf.winfo_manager():
+            karte1 = self.datei_knoepfe.master
+            self.karte1_titel.pack(in_=karte1, side="top", anchor="w", pady=(0, 2), before=self.datei_knoepfe)
+            self.drop_zone.pack(in_=karte1, side="top", fill="x", expand=False, padx=0, pady=(2, r["drop_unten"]),
+                                before=self.datei_knoepfe)
+            self.dateikopf.pack_forget()
+        # Knöpfe ohne Innenabstand oben und unten (Hauptknöpfe 1 Pixel)
+        flach = "knoepfe" in aktiv
+        for zeile in (self.datei_knoepfe, self.funde_titelzeile, self.analyse_knopf.master):
+            for knopf in zeile.pack_slaves():
+                if isinstance(knopf, PrimaerKnopf):
+                    soll = 1 if flach else r["hauptknopf"]
+                elif isinstance(knopf, tk.Button):
+                    soll = 0 if flach else KNOPF_PADY
+                else:
+                    continue
+                if int(float(knopf.cget("pady"))) != soll:
+                    knopf.config(pady=soll)
+        # Hinweiskasten in der Kurzfassung – ein Klick zeigt weiter alle Grenzen
+        text = HINWEISKASTEN_KURZ if "hinweiskasten" in aktiv else HINWEISKASTEN
+        if self.hinweis_kasten.cget("text") != text:
+            self.hinweis_kasten.config(text=text)
+
+    def _kopf_zeigen(self, titel: bool, untertitel: bool):
+        """Titel und Untertitel ein-/ausblenden (in dieser Reihenfolge gepackt). Ohne beide verschwindet der ganze
+        Kopf – ein leerer Rahmen behielte sonst seine alte Höhe."""
+        if (bool(self.titel.winfo_manager()), bool(self.untertitel.winfo_manager())) == (titel, untertitel) \
+                and bool(self.kopf.winfo_manager()) == (titel or untertitel):
+            return
+        self.titel.pack_forget()
+        self.untertitel.pack_forget()
+        if titel:
+            self.titel.pack(anchor="w")
+        if untertitel:
+            self.untertitel.pack(anchor="w", pady=(0, 6))
+        if titel or untertitel:
+            if not self.kopf.winfo_manager():
+                self.kopf.pack(fill="x", before=self.aktionsleiste)
+        elif self.kopf.winfo_manager():
+            self.kopf.pack_forget()
+
+    def _raender_setzen(self, klein: bool):
+        """Ränder (RAENDER) für das normale bzw. kleine Fenster setzen – nur bei einem Wechsel. Schrift, Inhalte und
+        Reihenfolge bleiben; im kleinen Fenster gewinnt die Fundliste so gut 60 Pixel (1366x768 bei 150 %)."""
+        if getattr(self, "_raender_klein", None) is klein:
+            return
+        self._raender_klein = klein
+        r = {name: werte[1 if klein else 0] for name, werte in RAENDER.items()}
+        self.haupt.config(padx=r["haupt_x"], pady=r["haupt"])
+        for karte in (self.datei_hinweis.master, self.karte2, self.karte3):
+            karte.config(padx=r["karte_x"], pady=r["karte"])
+            karte.pack_configure(pady=(0, r["karte_abstand"]))
+        self.drop_zone.config(pady=r["drop_innen"])
+        self.drop_zone.pack_configure(pady=(2, r["drop_unten"]))
+        self.aktionsleiste.config(pady=r["leiste"])
+        self.aktionsleiste.pack_configure(pady=(r["leiste_abstand"], 0))
+        self.fortschritt_zeile.pack_configure(pady=(r["fortschritt_abstand"], 0))
+        self.protokoll_rahmen.config(pady=r["protokoll"])
+        self.protokoll_rahmen.pack_configure(pady=(r["protokoll_abstand"], 0))
+        self.hinweis_kasten.config(pady=r["kasten"])
+        for knopf in (self.analyse_knopf, self.start_knopf):
+            knopf.config(pady=r["hauptknopf"])
+
+    @staticmethod
+    def _abstand(wert) -> tuple[int, int]:
+        """pady aus pack_info (Zahl, Text oder Paar) als (oben, unten)."""
+        if isinstance(wert, (tuple, list)):
+            teile = [int(float(w)) for w in wert] or [0]
+        else:
+            teile = [int(float(w)) for w in str(wert).split()] or [0]
+        return teile[0], teile[-1]
+
+    def _oben_untergrenze(self) -> int:
+        """Mindesthöhe des Einstellbereichs: bis unter die Hinweiszeile zur Dateiauswahl (aus den angeforderten
+        Höhen – gilt auch, bevor das Fenster gezeichnet ist und gleich nachdem sich der Text der Zeile geändert hat).
+        Der kleine Rand darunter reicht nie in die nächste Zeile – genau wie bei den Zeilengrenzen
+        (_oben_zeilengrenzen): sonst lag ab 200 % (Rand 11 px, Abstand zur Zielordner-Zeile 6 px) keine Zeilengrenze
+        mehr über der Mindesthöhe, und der Einstellbereich endete mitten in der Zielordner-Zeile (Befund Windows-CI)."""
+        karte = self.datei_hinweis.master
+        try:
+            hoehe = int(karte.cget("pady")) + int(karte.cget("highlightthickness")) + int(karte.cget("bd"))
+            rand = self._px(4)
+            kinder = karte.pack_slaves()
+            for nr, kind in enumerate(kinder):
+                oben, unten = self._abstand(kind.pack_info().get("pady", 0))
+                hoehe += oben + kind.winfo_reqheight()
+                if kind is self.datei_hinweis:
+                    if nr + 1 < len(kinder):
+                        rand = min(rand, unten + self._abstand(kinder[nr + 1].pack_info().get("pady", 0))[0])
+                    break
+                hoehe += unten
+            oben_karte, _ = self._abstand(karte.pack_info().get("pady", 0))
+            return max(self._px(OBEN_MINDESTHOEHE), oben_karte + hoehe + rand)
+        except (tk.TclError, ValueError):
+            return self._px(OBEN_MINDESTHOEHE)
+
+    def _oben_zeilengrenzen(self) -> list[int]:
+        """Untere Kanten der Zeilen des Einstellbereichs (Koordinaten im Bereich, mit kleinem Rand): dort darf der
+        sichtbare Teil enden, ohne eine Zeile mit Knöpfen oder Häkchen mittendurch zu schneiden. Leer, solange die
+        Lage noch nicht feststeht."""
+        grenzen = set()
+        rand = self._px(4)
+
+        def zeilen_eintragen(zeilen):
+            """zeilen: [(oben, unten)] einer Spalte; Grenze = unten + Rand, aber nie in die nächste Zeile hinein."""
+            zeilen = sorted(zeilen)
+            for nr, (_, unten) in enumerate(zeilen):
+                naechste = min((o for o, _ in zeilen[nr + 1:] if o >= unten), default=None)
+                grenzen.add(unten + rand if naechste is None else min(unten + rand, naechste))
+
+        try:
+            for karte in self.oben.pack_slaves():
+                ky = karte.winfo_y()
+                if karte.winfo_height() <= 1:
+                    return []
+                grenzen.add(ky + karte.winfo_height())
+                kinder = karte.pack_slaves()
+                zeilen_eintragen([(ky + k.winfo_y(), ky + k.winfo_y() + k.winfo_height()) for k in kinder])
+                for kind in kinder:                              # Zeilen des Häkchen-Gitters
+                    gitter: dict = {}
+                    for enkel in kind.grid_slaves():
+                        oben = ky + kind.winfo_y() + enkel.winfo_y()
+                        alt = gitter.get(int(enkel.grid_info().get("row", 0)), (oben, oben))
+                        gitter[int(enkel.grid_info().get("row", 0))] = (min(alt[0], oben),
+                                                                         max(alt[1], oben + enkel.winfo_height()))
+                    zeilen_eintragen(list(gitter.values()))
+        except (tk.TclError, ValueError):
+            return []
+        return sorted(grenzen)
+
+    def _fenster_geaendert(self, ereignis):
+        if ereignis.widget is not self.root:
+            return
+        breite = max(300, ereignis.width - self._px(60))
+        self.untertitel.config(wraplength=breite)
+        self.datei_hinweis.config(wraplength=max(300, breite - self._px(40)))
+        self.hinweis_kasten.config(wraplength=max(300, breite - self._px(40)))
+        self.profil_beschreibung.config(wraplength=max(300, breite - self._px(40)))
+        self.baum_hinweis.config(wraplength=max(300, breite - self._px(40)))
+        self._anpassung_planen()
+
+    def _mausrad(self, ereignis):
+        """Mausrad über dem Einstellbereich scrollt den Canvas (Text/Baum scrollen selbst)."""
+        try:
+            ziel = self.root.winfo_containing(ereignis.x_root, ereignis.y_root)
+        except (tk.TclError, KeyError):
+            return
+        w = ziel
+        while w is not None:
+            if isinstance(w, (tk.Text, ttk.Treeview, tk.Listbox, tk.Entry)):
+                return
+            if w is self.oben_canvas:
+                break
+            w = getattr(w, "master", None)
+        else:
+            return
+        if not self.oben_roll.winfo_ismapped():
+            return
+        if getattr(ereignis, "num", None) == 4 or getattr(ereignis, "delta", 0) > 0:
+            self.oben_canvas.yview_scroll(-1, "units")
+        else:
+            self.oben_canvas.yview_scroll(1, "units")
+
+    # ------------------------------------------------------------------
+    # Dateiauswahl
+    # ------------------------------------------------------------------
+    def _drop_ereignis(self, ereignis):
+        try:                                   # tkdnd liefert eine Tcl-Liste (Leerzeichen/Klammern gequotet, GR-08)
+            pfade = list(self.root.tk.splitlist(ereignis.data))
+        except tk.TclError:
+            pfade = [a or b for a, b in re.findall(r"\{([^}]*)\}|(\S+)", ereignis.data)]
+        self._pdfs_hinzufuegen(pfade)
+
+    def dateien_waehlen(self):
+        if self.laeuft:
+            self._laeuft_hinweis()
+            return
+        bilder = " ".join(f"*{e}" for e in sorted(dateien.BILD_ENDUNGEN))
+        pfade = filedialog.askopenfilenames(title="PDF-Dateien oder Fotos auswählen",
+                                            filetypes=[("PDF-Dateien und Fotos", f"*.pdf {bilder}"),
+                                                       ("PDF-Dateien", "*.pdf"), ("Fotos und Bild-Scans", bilder),
+                                                       ("Alle Dateien", "*")], parent=self.root)
+        if pfade:
+            self._pdfs_hinzufuegen(list(pfade))
+
+    def ordner_waehlen(self):
+        if self.laeuft:
+            self._laeuft_hinweis()
+            return
+        ordner = filedialog.askdirectory(title="Ordner mit PDFs oder Fotos auswählen", parent=self.root)
+        if ordner:
+            self._pdfs_hinzufuegen([ordner])
+
+    def zielordner_waehlen(self):
+        if self.laeuft:
+            self._laeuft_hinweis()
+            return
+        ordner = filedialog.askdirectory(title="Gemeinsamen Zielordner wählen", parent=self.root)
+        if ordner:
+            self.zielordner_var.set(ordner)
+            self.zielordner_aktiv.set(True)
+
+    def _beschaeftigt(self, an: bool, text: str | None = None):
+        """Sanduhr während längerer Prüfungen im Hauptthread (großer Ordner, Netzlaufwerk). Der Text steht nur so lange
+        in der Statuszeile, wie die Prüfung dauert – danach steht dort wieder die Meldung von vorher, sofern niemand
+        inzwischen eine neue gesetzt hat (Befund: „Dateien werden geprüft …“ blieb nach dem Hinzufügen zu einer schon
+        analysierten Liste stehen)."""
+        try:
+            self.root.config(cursor="watch" if an else "")
+            if an and text:
+                if self._beschaeftigt_text is None:
+                    self._status_vor_beschaeftigt = self.status_label.cget("text")
+                self._beschaeftigt_text = text
+                self.status_label.config(text=text)
+            elif not an and self._beschaeftigt_text is not None:
+                if self.status_label.cget("text") == self._beschaeftigt_text:
+                    self.status_label.config(text=self._status_vor_beschaeftigt)
+                self._beschaeftigt_text = None
+            self.root.update_idletasks()
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _kurzname(pfad) -> str:
+        return Path(dateien.ohne_langpfad(pfad)).name
+
+    def _nicht_geprueft_merken(self, pfad, grund: str):
+        """Datei aus der Auswahl, die NICHT geprüft wird – steht in den Abschlussdialogen von Analyse und Schwärzung
+        und (für die laufende Auswahl) in der letzten Protokollzeile des Hinzufügens."""
+        self.nicht_geprueft[Path(pfad)] = grund
+        if self._auswahl_ungeprueft is not None:
+            self._auswahl_ungeprueft[Path(pfad)] = grund
+
+    @staticmethod
+    def _grund_keine_pdf(pfad, arten: dict) -> str:
+        """„keine PDF, sondern eine Webseite (HTML)“ – mit der Art, wenn der Inhalt geprüft wurde, sonst nach der
+        Endung („keine PDF, sondern eine Outlook-Nachricht“)."""
+        art = (arten or {}).get(pfad)
+        if art and art not in ("endung", "unbekannt"):
+            return f"keine PDF, sondern {dateien.art_beschreibung(art)}"
+        vermutlich = dateien.endung_beschreibung(dateien.ohne_langpfad(pfad)) if art == "endung" else None
+        return f"keine PDF, sondern {vermutlich}" if vermutlich else "keine PDF"
+
+    def _nicht_geprueft_text(self, eintraege, anzahl: int = 8) -> str:
+        """„a.msg (keine PDF), b.pdf (Kennwort nicht eingegeben) und 2 weitere“."""
+        eintraege = list(eintraege)
+        teile = [f"{self._kurzname(pfad)} ({grund})" for pfad, grund in eintraege[:anzahl]]
+        return ", ".join(teile) + (f" und {len(eintraege) - anzahl} weitere" if len(eintraege) > anzahl else "")
+
+    def _nicht_geprueft_block(self, anzahl: int = 5) -> list[str]:
+        """Block für die Abschlussdialoge: alle Dateien der Auswahl, die NICHT geprüft wurden – mit Grund."""
+        eintraege = list(self.nicht_geprueft.items())
+        if not eintraege:
+            return []
+        zeilen = [f"NICHT geprüft wurden {len(eintraege)} Datei(en) aus der Auswahl (keine PDF, Foto nicht "
+                  f"übernommen, ohne Kennwort, nicht lesbar …) – diese Dateien nicht ungeprüft weitergeben:"]
+        zeilen += [f"  • {self._kurzname(pfad)}: {grund}" for pfad, grund in eintraege[:anzahl]]
+        if len(eintraege) > anzahl:
+            zeilen.append(f"  • … und {len(eintraege) - anzahl} weitere (siehe Protokoll)")
+        return zeilen
+
+    def _namen_liste(self, pfade, anzahl=5, arten: dict | None = None) -> str:
+        teile = []
+        for p in pfade[:anzahl]:
+            art = (arten or {}).get(p)
+            if art and art not in ("endung", "unbekannt") and Path(p).suffix.lower() == ".pdf":
+                teile.append(f"{self._kurzname(p)} (in Wahrheit {dateien.art_beschreibung(art)})")
+            else:
+                teile.append(self._kurzname(p))
+        return ", ".join(teile) + (f" und {len(pfade) - anzahl} weitere" if len(pfade) > anzahl else "")
+
+    def _ausgaben_namen(self, ausgaben: list) -> str:
+        return ", ".join(f"„{self._kurzname(p)}“" for p in ausgaben[:3]) + (" …" if len(ausgaben) > 3 else "")
+
+    def _ausgaben_bestaetigen(self, ausgaben: list) -> bool:
+        """M-63: Datei ist schon eine Ausgabe des Programms – warnen und fragen. „Trotzdem hinzugefügt“ meldet
+        _pdfs_hinzufuegen_ausfuehren erst, wenn die Dateien wirklich in der Liste stehen (die Auswahl kann danach
+        noch abgebrochen werden)."""
+        namen = self._ausgaben_namen(ausgaben)
+        einzahl = len(ausgaben) == 1
+        text = (f"{namen} {'ist' if einzahl else 'sind'} bereits {'eine Ausgabe' if einzahl else 'Ausgaben'} "
+                f"dieses Programms (Name „anonym_…“ oder Ordner „{dateien.AUSGABE_ORDNER}“).\n\n"
+                f"Zum Nachschwärzen besser das ORIGINAL wählen und in der Vorschau nachschwärzen. Eine Ausgabe "
+                f"erneut zu bearbeiten, legt eine weitere Ausgabe in „{dateien.AUSGABE_ORDNER}\\"
+                f"{dateien.AUSGABE_ORDNER}“ an.\n\nTrotzdem hinzufügen?")
+        ja = self._frage("Bereits anonymisierte Datei", text, warnung=True, standard_nein=True)
+        if not ja:
+            self._log(f"ℹ {namen}: bereits Ausgabe(n) des Programms – nicht hinzugefügt.", "hinweis")
+        return ja
+
+    def _bilder_bestaetigen(self, bilder: list, arten: dict) -> bool:
+        """R-01: Fotos und Bild-Scans (auch umbenannte) als PDF übernehmen?"""
+        zeilen = [f"  • {self._kurzname(p)}" + (" (ein Bild mit der Endung .pdf)" if Path(p).suffix.lower() == ".pdf"
+                                                 else "") for p in bilder[:8]]
+        if len(bilder) > 8:
+            zeilen.append(f"  … und {len(bilder) - 8} weitere")
+        text = (f"{len(bilder)} Foto(s) bzw. Bild-Scan(s) gefunden:\n" + "\n".join(zeilen) + "\n\n"
+                "In PDFs umwandeln und mitprüfen? Der Text wird dann per Texterkennung (OCR) gelesen – das ist "
+                "unsicherer als bei einer echten PDF; das Ergebnis bitte besonders sorgfältig ansehen. Die Umwandlung "
+                "liegt nur vorübergehend im Ordner für Zwischendateien (%LOCALAPPDATA%\\PDF-Anonymisierer\\temp), die "
+                "Ausgabe heißt wie gewohnt anonym_NN.pdf (bis zur Freigabe anonym_NN_PRUEFEN.pdf).\n\n"
+                f"ACHTUNG: {FOTO_GRENZEN} Die Ausgabe eines Fotos muss deshalb immer in der Vorschau freigegeben "
+                "werden.\n\n"
+                "„Nein“: Die Bilder werden NICHT geprüft und nicht in die Liste aufgenommen.")
+        return self._frage("Fotos als PDF übernehmen?", text)
+
+    def _bild_umwandeln(self, bild: Path, art: str | None) -> dict | None:
+        """Bild -> PDF-Arbeitskopie im Programmordner für Zwischendateien; None (mit Meldung), wenn es nicht geht."""
+        ziel = None
+        try:
+            ziel = dateien.arbeitskopie_ziel(self._kurzname(bild))
+            seiten = dateien.bild_als_pdf(bild, ziel, art)
+        except Exception as fehler:
+            if ziel is not None:
+                dateien.arbeitskopie_entfernen(ziel)
+            if not isinstance(fehler, (OSError, ValueError, dateien.SitzungBeendet)):
+                dateien.fehler_protokollieren(*sys.exc_info())
+            grund = str(fehler) if isinstance(fehler, ValueError) else _verstaendliche_fehlermeldung(fehler, bild)
+            self._log(f"⚠ {self._kurzname(bild)}: konnte nicht als PDF übernommen werden ({grund}) – NICHT geprüft.",
+                      "warnung", zaehlen=False)
+            self._nicht_geprueft_merken(bild, "Bild nicht lesbar")
+            return None
+        return {"pfad": ziel, "art": "bild", "seiten": seiten}
+
+    def _kennwort_abfragen(self, pfad, fehlversuch: bool = False) -> str | None:
+        """Kennwort einer geschützten PDF abfragen (maskierter Dialog); None = überspringen. Nichts wird gespeichert."""
+        dialog = KennwortDialog(self, self._kurzname(pfad), fehlversuch)
+        self.kennwort_dialog = dialog
+        try:
+            return dialog.zeigen()
+        finally:
+            self.kennwort_dialog = None
+
+    def _geschuetzte_pdf_entsperren(self, pdf: Path, bekannt: list) -> dict | None:
+        """R-12: Kennwort abfragen (falsch: erneut fragen, bis „Überspringen“) und eine Kopie OHNE Kennwort im
+        Programmordner für Zwischendateien ablegen. „bekannt“ hält höchstens das zuletzt richtige Kennwort dieser
+        Auswahl (oft gilt eines für mehrere Schreiben) – nur bis zum Ende der Auswahl, nie auf der Festplatte."""
+        ziel = None
+        try:
+            ziel = dateien.arbeitskopie_ziel(self._kurzname(pdf))
+            if bekannt and dateien.pdf_entschluesseln(pdf, bekannt[0], ziel):
+                return {"pfad": ziel, "art": "entschluesselt"}
+            fehlversuch = False
+            while True:
+                kennwort = self._kennwort_abfragen(pdf, fehlversuch)
+                if kennwort is None or self._auswahl_abgebrochen():   # „Überspringen“ oder Fenster geschlossen
+                    dateien.arbeitskopie_entfernen(ziel)
+                    return None
+                if dateien.pdf_entschluesseln(pdf, kennwort, ziel):
+                    bekannt[:] = [kennwort]
+                    return {"pfad": ziel, "art": "entschluesselt"}
+                fehlversuch = True
+        except Exception as fehler:
+            if ziel is not None:
+                dateien.arbeitskopie_entfernen(ziel)
+            if isinstance(fehler, dateien.SitzungBeendet):        # Programm wird beendet: still abbrechen
+                return None
+            log = dateien.fehler_protokollieren(*sys.exc_info())
+            self._log(f"✖ {self._kurzname(pdf)}: konnte nicht entschlüsselt werden "
+                      f"({_verstaendliche_fehlermeldung(fehler, pdf)}) – NICHT geprüft." + (f" Details: {log}" if log
+                                                                                           else ""),
+                      "fehler", zaehlen=False)
+            return False
+
+    def _pdfs_hinzufuegen(self, pfade):
+        """Dateien und Ordner aufnehmen. Jede Datei wird am INHALT geprüft (R-01): echte PDFs kommen in die Liste,
+        Fotos und Bild-Scans auf Wunsch als PDF-Arbeitskopie, geschützte PDFs nach Eingabe des Kennworts (R-12).
+        Alles andere wird mit Namen und Grund gemeldet – nichts fällt still weg (R-10, R-09). Eine Datei, die schon
+        eine Ausgabe des Programms ist, wird nur nach Rückfrage aufgenommen (M-63)."""
+        if self.laeuft:
+            self._laeuft_hinweis()
+            return
+        if self._hinzufuegen_laeuft:                  # z. B. Drag & Drop, während der Kennwortdialog offen ist
+            self._status("Bitte erst die laufende Auswahl abschließen (Kennwort eingeben oder überspringen).")
+            return
+        if self.beendet or self._schliessen_angefordert:
+            return
+        self._hinzufuegen_laeuft = True
+        self._auswahl_ungeprueft = {}
+        self._auswahl_dateien = []
+        try:
+            self._pdfs_hinzufuegen_ausfuehren(pfade)
+        finally:
+            abgebrochen = self._schliessen_angefordert and not self.beendet
+            verworfen = [p for p in self._auswahl_dateien if p not in self.dateien] if abgebrochen else []
+            self._hinzufuegen_laeuft = False
+            self._auswahl_ungeprueft = None
+            self._auswahl_dateien = []
+            self._beschaeftigt(False)
+            if abgebrochen:
+                # Das Fenster wurde während einer Rückfrage geschlossen: jetzt, da die Auswahl abgebrochen und ihre
+                # Arbeitskopien gelöscht sind, wirklich schließen (nach dem laufenden Tk-Ereignis). Bleibt das
+                # Programm doch offen („Freigabe noch offen“ → „Nein“), nennt _schliessen_nachholen die Dateien.
+                try:
+                    self.root.after_idle(self._schliessen_nachholen, verworfen)
+                except tk.TclError:
+                    self._schliessen_nachholen(verworfen)
+
+    def _schliessen_nachholen(self, verworfen=()):
+        self._schliessen_angefordert = False
+        if not self.beendet:
+            self.schliessen()
+        if not self.beendet:
+            # „Freigabe noch offen“ → „Nein“: Das Programm bleibt offen, die Auswahl aber ist abgebrochen
+            self._auswahl_abgebrochen_melden(list(verworfen))
+
+    def _auswahl_abgebrochen_melden(self, verworfen: list):
+        """Die Auswahl wurde abgebrochen, weil das Fenster während einer Rückfrage geschlossen wurde (Kennwort, Fotos
+        …), das Programm blieb dann aber offen: Keine Datei der Auswahl steht in der Liste. Das muss sichtbar sein –
+        in Statuszeile, Hinweiszeile und Protokoll und als „NICHT geprüft“ in den Abschlussdialogen (R-10)."""
+        for pfad in verworfen:
+            self._nicht_geprueft_merken(pfad, "Hinzufügen abgebrochen")
+        anzahl = f"{len(verworfen)} Datei(en)"
+        namen = f" – {self._namen_liste(verworfen)}" if verworfen else ""
+        self._status(f"⚠ Hinzufügen abgebrochen – {anzahl} NICHT in der Liste (siehe Protokoll). Bitte erneut "
+                     f"hinzufügen.")
+        self.datei_hinweis.config(text=f"Hinzufügen abgebrochen · insgesamt {len(self.dateien)} Datei(en). ⚠ {anzahl} "
+                                       f"der letzten Auswahl stehen NICHT in der Liste und werden NICHT geprüft – "
+                                       f"bitte erneut hinzufügen.", fg=FARBE_WARNUNG)
+        self._log(f"⚠ Hinzufügen abgebrochen: {anzahl} der letzten Auswahl stehen NICHT in der Liste und werden NICHT "
+                  f"geprüft{namen}. Bitte erneut hinzufügen.", "warnung", zaehlen=False)
+
+    def _auswahl_abgebrochen(self) -> bool:
+        """Wurde das Fenster während der Auswahl geschlossen? Dann keine weitere Datei und keine Arbeitskopie mehr."""
+        return self.beendet or self._schliessen_angefordert
+
+    def _kopien_verwerfen(self, kopien: dict):
+        """Arbeitskopien einer abgebrochenen Auswahl löschen (sie stehen noch nicht in self.arbeitskopien)."""
+        for eintrag in kopien.values():
+            if eintrag and eintrag.get("pfad"):
+                dateien.arbeitskopie_entfernen(eintrag["pfad"])
+        kopien.clear()
+
+    def _pdfs_hinzufuegen_ausfuehren(self, pfade):
+        self._beschaeftigt(True, "Dateien werden geprüft …")
+        try:
+            bericht = dateien.sammle_pdfs_bericht(pfade)
+        finally:
+            self._beschaeftigt(False)
+        arten = bericht.get("arten", {})
+        gruende = bericht.get("gruende", {})
+        teile = []
+        kopien: dict[Path, dict] = {}
+        # Wird die Auswahl abgebrochen (Fenster während einer Rückfrage geschlossen), fehlen alle diese Dateien in der
+        # Liste – _auswahl_abgebrochen_melden nennt sie, falls das Programm dann doch offen bleibt
+        self._auswahl_dateien = [p for art in ("pdfs", "pdf_ohne_endung", "bilder", "uebersprungen", "keine_pdf",
+                                               "nicht_lesbar") for p in bericht.get(art, []) if p not in self.dateien]
+
+        # M-63: einzeln gewählte Ausgaben nur nach Rückfrage
+        pdf_kandidaten = [p for p in bericht["pdfs"] if p not in self.dateien]
+        ausgaben = [p for p in bericht.get("ausgaben_einzeln", []) if p in pdf_kandidaten]
+        if ausgaben and not self._ausgaben_bestaetigen(ausgaben):
+            pdf_kandidaten = [p for p in pdf_kandidaten if p not in ausgaben]
+            self._auswahl_dateien = [p for p in self._auswahl_dateien if p not in ausgaben]
+            teile.append(f"{len(ausgaben)} Ausgabe(n) nicht hinzugefügt")
+        if self._auswahl_abgebrochen():
+            return
+        ohne_endung = [p for p in bericht.get("pdf_ohne_endung", []) if p not in self.dateien]
+
+        # Fotos und Bild-Scans: auf Wunsch als PDF-Arbeitskopie
+        bilder = [p for p in bericht.get("bilder", []) if p not in self.dateien]
+        bilder_neu = 0
+        if bilder:
+            if self._bilder_bestaetigen(bilder, arten):
+                if self._auswahl_abgebrochen():
+                    return
+                self._beschaeftigt(True, "Fotos werden in PDFs umgewandelt …")
+                try:
+                    for bild in bilder:
+                        eintrag = self._bild_umwandeln(bild, arten.get(bild))
+                        if eintrag is not None:
+                            kopien[bild] = eintrag
+                finally:
+                    self._beschaeftigt(False)
+            else:
+                if self._auswahl_abgebrochen():
+                    return
+                for bild in bilder:
+                    self._nicht_geprueft_merken(bild, "Bild nicht übernommen")
+                teile.append(f"{len(bilder)} Bild(er) nicht übernommen")
+                self._log(f"⚠ {len(bilder)} Foto(s)/Bild-Scan(s) NICHT übernommen und NICHT geprüft: "
+                          f"{self._namen_liste(bilder, arten=arten)}", "warnung", zaehlen=False)
+
+        # R-12: geschützte PDFs entsperren; PDFs ohne Endung als Kopie mit „.pdf“
+        uebersprungen_kennwort = []
+        ausgelassen: set[Path] = set()
+        bekannt: list[str] = []
+        try:
+            for pdf in pdf_kandidaten + ohne_endung:
+                if self._auswahl_abgebrochen():
+                    break                    # geschlossen, während ein Kennwortdialog offen war: nichts mehr anlegen
+                if dateien.pdf_kennwort_noetig(pdf):
+                    eintrag = self._geschuetzte_pdf_entsperren(pdf, bekannt)
+                    if not eintrag:
+                        ausgelassen.add(pdf)
+                        if eintrag is None:
+                            uebersprungen_kennwort.append(pdf)
+                        self._nicht_geprueft_merken(pdf, "Kennwort nicht eingegeben" if eintrag is None
+                                                    else "nicht entschlüsselbar")
+                        continue
+                    kopien[pdf] = eintrag
+                elif pdf in ohne_endung:
+                    ziel = None
+                    try:
+                        ziel = dateien.arbeitskopie_ziel(self._kurzname(pdf))
+                        dateien.pdf_kopieren(pdf, ziel)
+                    except (OSError, dateien.SitzungBeendet) as fehler:
+                        if ziel is not None:
+                            dateien.arbeitskopie_entfernen(ziel)
+                        self._log(f"⚠ {self._kurzname(pdf)}: {_verstaendliche_fehlermeldung(fehler, pdf)} – NICHT "
+                                  f"geprüft.", "warnung", zaehlen=False)
+                        self._nicht_geprueft_merken(pdf, "nicht lesbar")
+                        ausgelassen.add(pdf)
+                        continue
+                    kopien[pdf] = {"pfad": ziel, "art": "kopie"}
+        finally:
+            bekannt.clear()                  # das Kennwort lebt nicht über die Auswahl hinaus
+        if self._auswahl_abgebrochen():
+            # Fenster während einer Rückfrage geschlossen: nichts davon kommt in die Liste – und keine
+            # (entschlüsselte) Arbeitskopie bleibt liegen (Befund Runde 2)
+            self._kopien_verwerfen(kopien)
+            return
+
+        neu = 0
+        for pdf in pdf_kandidaten + ohne_endung + bilder:
+            if pdf in self.dateien or pdf in ausgelassen or (pdf in bilder and pdf not in kopien):
+                continue
+            if pdf in kopien:
+                self.arbeitskopien[pdf] = kopien[pdf]
+                if kopien[pdf].get("art") == "entschluesselt":
+                    # erst hier melden, nicht schon beim Entschlüsseln: eine abgebrochene Auswahl kommt nie hierher
+                    self._log(f"ℹ {self._kurzname(pdf)}: mit Kennwort geöffnet – geprüft wird eine Kopie ohne "
+                              f"Kennwort; auch die Ausgabedatei hat KEIN Kennwort.", "hinweis")
+            self.nicht_geprueft.pop(pdf, None)          # z. B. jetzt mit Kennwort: doch geprüft
+            self.dateien.append(pdf)
+            self._datei_zeile_einfuegen(pdf)
+            if pdf in bilder:
+                bilder_neu += 1
+            else:
+                neu += 1
+        self._beschriftungen_aktualisieren()
+
+        # Meldungen zur Auswahl zählen nicht als Warnung eines Laufs (GR-07)
+        uebernommen = [p for p in ausgaben if p in self.dateien]
+        if uebernommen:                                 # M-63 „Ja“ – erst jetzt: die Dateien stehen in der Liste
+            self._log(f"ℹ {self._ausgaben_namen(uebernommen)}: bereits Ausgabe(n) des Programms – auf Wunsch "
+                      f"trotzdem hinzugefügt.", "hinweis")
+        teile.insert(0, f"{neu} PDF-Datei(en) hinzugefügt" if neu else "Keine neue PDF-Datei")
+        if bilder_neu:
+            teile.insert(1, f"{bilder_neu} Bild(er) als PDF übernommen")
+            self._log(f"ℹ {bilder_neu} Foto(s)/Bild-Scan(s) als PDF übernommen – der Text wird per Texterkennung "
+                      f"gelesen; das Ergebnis bitte besonders sorgfältig prüfen.", "hinweis")
+        if uebersprungen_kennwort:
+            teile.append(f"{len(uebersprungen_kennwort)} ohne Kennwort übersprungen")
+            self._log(f"⚠ Ohne Kennwort übersprungen und NICHT geprüft: {self._namen_liste(uebersprungen_kennwort)} "
+                      f"– zum Prüfen erneut hinzufügen und das Kennwort eingeben (oder die PDF ohne Kennwort "
+                      f"speichern).", "warnung", zaehlen=False)
+        if bericht["uebersprungen"]:
+            namen = self._namen_liste(bericht["uebersprungen"], arten=arten)
+            for p in bericht["uebersprungen"]:
+                self._nicht_geprueft_merken(p, self._grund_keine_pdf(p, arten))
+            teile.append(f"{len(bericht['uebersprungen'])} übersprungen – keine PDF")
+            self._log(f"⚠ Übersprungen (keine PDF-Datei; Fotos, Mails oder Office-Dateien bitte zuerst als "
+                      f"PDF speichern): {namen}", "warnung", zaehlen=False)
+        keine_pdf = bericht.get("keine_pdf", [])
+        if keine_pdf:
+            for p in keine_pdf:
+                self._nicht_geprueft_merken(p, self._grund_keine_pdf(p, arten))
+            teile.append(f"{len(keine_pdf)} keine PDF (nicht geprüft)")
+            satz = ("1 Datei im Ordner ist keine PDF und wurde" if len(keine_pdf) == 1 else
+                    f"{len(keine_pdf)} Dateien im Ordner sind keine PDF und wurden")
+            self._log(f"⚠ {satz} NICHT geprüft: {self._namen_liste(keine_pdf, 8, arten)} – bei Bedarf zuerst "
+                      f"als PDF speichern (z. B. Drucken → „Microsoft Print to PDF“).", "warnung", zaehlen=False)
+        unlesbar = bericht.get("nicht_lesbar", [])
+        if unlesbar:
+            for p in unlesbar:
+                self._nicht_geprueft_merken(p, gruende.get(p, "nicht lesbar"))
+            teile.append(f"{len(unlesbar)} nicht lesbar")
+            liste = ", ".join(f"{self._kurzname(p)} ({gruende.get(p, 'nicht lesbar')})" for p in unlesbar[:5])
+            self._log(f"⚠ {len(unlesbar)} Datei(en)/Ordner konnten nicht gelesen werden und wurden NICHT geprüft: "
+                      f"{liste}" + (" …" if len(unlesbar) > 5 else ""), "warnung", zaehlen=False)
+        if bericht["ausgaben"]:
+            teile.append(f"{len(bericht['ausgaben'])} bereits anonymisierte Datei(en) ausgelassen")
+            self._log(f"ℹ {len(bericht['ausgaben'])} Datei(en) im Ordner sind bereits Ausgaben des Programms "
+                      f"und wurden ausgelassen.", "hinweis")
+        if bericht.get("zwischendateien"):
+            self._zwischendateien_beim_hinzufuegen(bericht["zwischendateien"])
+        if bericht["leere_ordner"]:
+            namen = ", ".join(dateien.ohne_langpfad(p) for p in bericht["leere_ordner"][:3])
+            teile.append("Ordner ohne PDF-Dateien")
+            self._log(f"⚠ Ordner enthält keine PDF-Dateien: {namen}", "warnung", zaehlen=False)
+        if bericht["fehlend"]:
+            teile.append(f"{len(bericht['fehlend'])} nicht gefunden")
+            self._log("⚠ Nicht gefunden: " + ", ".join(
+                dateien.ohne_langpfad(p) + (f" ({gruende[p]} – unter Windows ggf. zu lang)" if p in gruende else "")
+                for p in bericht["fehlend"][:3]), "warnung", zaehlen=False)
+        ungeprueft = dict(self._auswahl_ungeprueft or {})
+        hinweis = "; ".join(teile) + f" · insgesamt {len(self.dateien)} Datei(en)."
+        if ungeprueft:
+            hinweis += f" ⚠ {len(ungeprueft)} Datei(en) dieser Auswahl werden NICHT geprüft – Namen im Protokoll."
+        self.datei_hinweis.config(text=hinweis, fg=FARBE_WARNUNG if ungeprueft else FARBE_TEXT_GRAU)
+        if (neu or bilder_neu) and self.analyse_ergebnisse:
+            self._log("ℹ Neue Dateien sind noch nicht analysiert – bitte erneut analysieren, bevor geschwärzt wird.",
+                      "hinweis")
+        if ungeprueft:
+            # als LETZTE Zeile: das Protokoll zeigt auf kleinen Bildschirmen nur drei Zeilen – die Namen der nicht
+            # geprüften Dateien dürfen nicht von einer ℹ-Zeile hinausgeschoben werden (Befund Runde 2)
+            self._log(f"⚠ NICHT geprüft aus dieser Auswahl: {len(ungeprueft)} Datei(en) – "
+                      f"{self._nicht_geprueft_text(ungeprueft.items())}. Diese Dateien nicht ungeprüft weitergeben.",
+                      "warnung", zaehlen=False)
+        self._status_dateien()
+        self._start_knopf_aktualisieren()
+
+    def _zwischendateien_beim_hinzufuegen(self, gefunden: list):
+        """Zwischendateien einer Schwärzung (.anonym_tmp_…) in der Auswahl: nie eine Eingabe. Sicher verwaiste (ein
+        Programm auf diesem Rechner ist abgestürzt oder wurde abgewürgt; die eines anderen Rechners erst nach 24
+        Stunden, dateien.zwischendateien_aufraeumen) werden gleich gelöscht und gemeldet – sie sind unfertig und
+        gehören nicht in einen Ordner, der hochgeladen wird. Die eines noch laufenden Programms bleiben unberührt –
+        auch die eines anderen Rechners an derselben Netzwerkfreigabe (Befund Korrekturrunde „Schließen“ 2)."""
+        entfernt: list[Path] = []
+        for ordner in dict.fromkeys(Path(p).parent for p in gefunden):
+            try:
+                entfernt += dateien.zwischendateien_aufraeumen(ordner)
+            except Exception:
+                dateien.fehler_protokollieren(*sys.exc_info())
+        self._reste_melden(entfernt)
+        geblieben = [p for p in gefunden if os.path.exists(dateien.langpfad(p))]
+        hier = [p for p in geblieben if dateien.zwischendatei_herkunft(p) in ("prozess", "rechner")]
+        anderswo = [p for p in geblieben if p not in hier]
+        if hier:
+            self._log(f"ℹ {len(hier)} Zwischendatei(en) einer laufenden Schwärzung (.anonym_tmp_…) ignoriert – "
+                      f"unfertig, nie weitergeben.", "hinweis")
+        if anderswo:
+            self._log(f"ℹ {len(anderswo)} Zwischendatei(en) einer Schwärzung auf einem anderen Rechner oder aus einer "
+                      f"älteren Programmversion (.anonym_tmp_…) ignoriert – unfertig, nie weitergeben. Dort läuft "
+                      f"vielleicht noch ein Lauf; liegen gebliebene löscht das Programm, sobald sie älter als 24 "
+                      f"Stunden sind.", "hinweis")
+
+    def _reste_melden(self, entfernt: list, eigene_pids=None):
+        """Gelöschte unfertige Zwischendateien im Protokoll nennen, mit ihren Ordnern: Wer aus einem davon schon
+        hochgeladen hat, soll wissen, dass dort eine unfertige Datei lag. eigene_pids (beim Programmstart): PIDs der
+        abgestürzten früheren Sitzungen dieses Benutzers – nur deren Reste meldet der Start als „Beim letzten
+        Programmende blieb eine Schwärzung unfertig“; die eines anderen Programms bzw. Rechners nicht (Befund
+        Korrekturrunde „Schließen“ 2)."""
+        if not entfernt:
+            return
+        eigene: list[Path] = []
+        if eigene_pids:
+            eigene = [Path(p) for p in entfernt if dateien.zwischendatei_herkunft(p) in ("rechner", "unbekannt")
+                      and dateien.zwischendatei_pid(p) in eigene_pids]
+        andere = [Path(p) for p in entfernt if Path(p) not in eigene]
+        for gruppe, anlass in ((eigene, "Beim letzten Programmende blieb eine Schwärzung unfertig (Absturz?): "),
+                               (andere, "")):
+            if not gruppe:
+                continue
+            ordner = list(dict.fromkeys(dateien.ohne_langpfad(p.parent) for p in gruppe))
+            orte = ", ".join(ordner[:3]) + (f" und {len(ordner) - 3} weiteren Ordner(n)" if len(ordner) > 3 else "")
+            self._log(f"⚠ {anlass}{len(gruppe)} unfertige Zwischendatei(en) einer abgebrochenen Schwärzung "
+                      f"(.anonym_tmp_…) gelöscht – in {orte}. Sie waren nicht fertig geschwärzt; weitergegeben werden "
+                      f"nur anonym_….pdf-Dateien.", "warnung", zaehlen=False)
+
+    def reste_beim_start_aufraeumen(self, ordner=(), eigene_pids=()) -> threading.Thread | None:
+        """Nach dem Start (main): sicher verwaiste Zwischendateien in den Ausgabeordnern löschen, die eine frühere,
+        abgestürzte oder abgewürgte Sitzung vermerkt hat (eigene_pids: deren PIDs), und im gemeinsamen Zielordner –
+        diesen nur, wenn er eingeschaltet ist („zielordner_aktiv“; Befund Korrekturrunde „Schließen“ 2: sonst las und
+        löschte jeder Start in einem längst nicht mehr benutzten Ordner einer Netzwerkfreigabe) – und im Protokoll
+        melden. Hilfsdateien eines anderen Rechners gelten erst nach 24 Stunden als verwaist. Im Hintergrund: ein
+        Netzlaufwerk kann lange nicht antworten, das Fenster wartet nicht."""
+        liste = [Path(o) for o in ordner]
+        ziel = self.zielordner_var.get().strip() if self.zielordner_aktiv.get() else ""
+        if ziel and Path(ziel) not in liste:
+            liste.append(Path(ziel))
+        if not liste:
+            return None
+        pids = {int(pid) for pid in eigene_pids}
+
+        def aufraeumen():
+            entfernt: list[Path] = []
+            for o in liste:
+                try:
+                    entfernt += dateien.zwischendateien_aufraeumen(o, eigene_pids=pids)
+                except Exception:
+                    dateien.fehler_protokollieren(*sys.exc_info())
+            if entfernt:
+                self._im_hauptthread(self._reste_melden, entfernt, pids)
+
+        faden = threading.Thread(target=aufraeumen, daemon=True, name="Reste-beim-Start")
+        faden.start()
+        return faden
+
+    @staticmethod
+    def _analyse_abgebrochen(ergebnis: dict | None) -> bool:
+        """Ist das Ergebnis das einer abgebrochenen Analyse („Abgebrochen“ – die Datei ist nicht analysiert)?"""
+        return bool(ergebnis) and (ergebnis.get("fehler") == "Abgebrochen" or "ABGEBROCHEN" in meldungs_codes(ergebnis))
+
+    def _analyse_luecken(self, dateiliste=None) -> tuple[bool, list[Path]]:
+        """Dieselbe Regel für die Sperre vor dem Schwärzen (schwaerzen) und die Statuszeile (_status_dateien):
+        (veraltet, nicht analysiert). Veraltet: Einstellungen geändert oder Analyse abgebrochen; nicht analysiert: ohne
+        Ergebnis oder nur mit dem Ergebnis einer abgebrochenen Analyse."""
+        liste = list(self.dateien) if dateiliste is None else list(dateiliste)
+        fehlend = [p for p in liste
+                   if p not in self.analyse_ergebnisse or self._analyse_abgebrochen(self.analyse_ergebnisse[p])]
+        return bool(self.analyse_veraltet), fehlend
+
+    def _analysierte_dateien(self) -> frozenset:
+        _, fehlend = self._analyse_luecken()
+        return frozenset(p for p in self.dateien if p not in fehlend)
+
+    def _status_dateien_text(self) -> str | None:
+        """Meldung zum Stand der Liste; None: alles analysiert und aktuell (dann gilt die Meldung der Analyse)."""
+        # die Statuszeile ist immer sichtbar (auch wenn der Einstellbereich weggescrollt ist): nicht geprüfte Dateien
+        # stehen dort zuerst
+        vorne = (f"⚠ {len(self.nicht_geprueft)} Datei(en) werden NICHT geprüft (siehe Protokoll) · "
+                 if self.nicht_geprueft else "")
+        veraltet, fehlend = self._analyse_luecken()
+        if not self.dateien:
+            return vorne + "Bereit. Bitte PDF-Dateien hinzufügen (Schritt 1)."
+        if not self.analyse_ergebnisse:
+            return vorne + f"{len(self.dateien)} Datei(en) ausgewählt – jetzt unten „Analysieren“ drücken."
+        if veraltet:
+            # z. B. nach einer abgebrochenen Analyse (Befund: dort stand „die bisherige Analyse gilt weiter“, obwohl
+            # „Schwärzen starten“ gesperrt war)
+            return vorne + ("Die letzte Analyse wurde abgebrochen oder gilt nicht mehr – bitte erneut „Analysieren“ "
+                            "drücken, bevor geschwärzt wird.")
+        if fehlend:
+            # z. B. zu einer schon analysierten Liste hinzugefügt (Befund: dort blieb „Dateien werden geprüft …“ stehen)
+            return vorne + (f"{len(fehlend)} Datei(en) noch nicht analysiert – bitte erneut „Analysieren“ drücken, "
+                            f"bevor geschwärzt wird.")
+        if self._auswahl_ungeprueft:
+            # alles analysiert, aber Dateien dieser Auswahl werden NICHT geprüft – das gehört vorn in die Statuszeile
+            return vorne + "Keine neue Datei zum Analysieren – die bisherige Analyse gilt weiter."
+        return None
+
+    def _status_dateien(self):
+        """Statuszeile nach einer Änderung der Liste (Hinzufügen, Entfernen, Leeren) – nach derselben Regel wie die
+        Sperre vor dem Schwärzen. Die eigene Meldung wird ersetzt, sobald sich der Stand ändert; fällt ihr Grund weg
+        (alles analysiert und aktuell), steht wieder die Meldung von vorher da (meist die der Analyse) – wenn sie für
+        dieselben analysierten Dateien galt, sonst eine neue. Befund: „1 Datei(en) noch nicht analysiert“ blieb stehen,
+        nachdem die Datei wieder entfernt war."""
+        text = self._status_dateien_text()
+        aktuell = self.status_label.cget("text")
+        eigen = self._status_eigen is not None and aktuell == self._status_eigen
+        if text is None:
+            if eigen:
+                vorne = (f"⚠ {len(self.nicht_geprueft)} Datei(en) werden NICHT geprüft (siehe Protokoll) · "
+                         if self.nicht_geprueft else "")
+                if self._status_vor_eigen and self._status_vor_eigen_stand == self._analysierte_dateien():
+                    # ohne den alten Vorspann „⚠ … NICHT geprüft“ (die Zahl kann sich geändert haben)
+                    basis = re.sub(r"^⚠ \d+ Datei\(en\) (?:werden )?NICHT geprüft \(siehe Protokoll\) · ", "",
+                                   self._status_vor_eigen)
+                else:
+                    basis = (f"{len(self.dateien)} Datei(en) analysiert – Liste prüfen (Doppelklick auf eine Datei = "
+                             f"Vorschau), dann „Schwärzen starten“.")
+                self._status(vorne + basis)
+            self._status_eigen = None
+            return
+        if not eigen:
+            # die Meldung davor (meist die der Analyse) gilt für die Dateien, die jetzt analysiert sind
+            self._status_vor_eigen = aktuell
+            self._status_vor_eigen_stand = self._analysierte_dateien()
+        self._status(text)
+        self._status_eigen = text
+
+    def _datei_vergessen(self, pdf: Path):
+        """Alles zu einer Datei vergessen (Vorschau, manuelle Markierungen, Ausgabestatus, Arbeitskopie)."""
+        fenster = self.vorschauen.pop(pdf, None)
+        if fenster is not None:
+            fenster.schliessen(benachrichtigen=False)
+        self.analyse_ergebnisse.pop(pdf, None)
+        self.manuell.pop(pdf, None)
+        self.lauf_immer.pop(pdf, None)
+        self.ausgaben.pop(pdf, None)
+        self._arbeitskopie_loeschen(pdf)
+
+    def _arbeitsdatei(self, pdf: Path) -> Path:
+        """Datei, die die Engine liest: die Arbeitskopie (Bild als PDF, entschlüsselte PDF) oder das Original."""
+        eintrag = self.arbeitskopien.get(pdf)
+        return Path(eintrag["pfad"]) if eintrag else pdf
+
+    def _arbeitskopie_loeschen(self, pdf: Path):
+        """Arbeitskopie einer Datei löschen (vorher offene Vorschau-Dokumente freigeben – Windows sperrt sie sonst)."""
+        eintrag = self.arbeitskopien.pop(pdf, None)
+        if not eintrag:
+            return
+        try:
+            self._vorschau_dateien_freigeben(Path(eintrag["pfad"]))
+        except Exception:
+            pass
+        dateien.arbeitskopie_entfernen(eintrag["pfad"])
+
+    def liste_leeren(self):
+        if self.laeuft:
+            self._laeuft_hinweis()
+            return
+        for pdf in list(self.dateien):
+            self._datei_vergessen(pdf)
+        self.dateien.clear()
+        self.analyse_ergebnisse.clear()
+        self.zeilen.clear()
+        self.beschriftungen.clear()
+        self.baum.delete(*self.baum.get_children())
+        self.analyse_veraltet = False
+        self.nicht_geprueft.clear()
+        self.datei_hinweis.config(text="Noch keine Dateien. Die Liste erscheint unten in Schritt 3.",
+                                  fg=FARBE_TEXT_GRAU)
+        self._status_dateien()
+        self._start_knopf_aktualisieren()
+
+    def datei_entfernen(self, iid=None):
+        """Entfernt eine Datei (die ausgewählte, falls keine angegeben) aus Liste und Baum."""
+        if self.laeuft:
+            self._laeuft_hinweis()
+            return
+        if iid is None:
+            auswahl = self.baum.selection()
+            if not auswahl:
+                self._dialog("info", "Keine Datei gewählt",
+                             "Bitte zuerst eine Datei in der Liste anklicken, dann „Datei aus Liste entfernen“.")
+                return
+            iid = auswahl[0]
+        if iid not in self.zeilen:
+            iid = self.baum.parent(iid)
+        pdf = self.zeilen.pop(iid, None)
+        if pdf is None:
+            return
+        self.beschriftungen.pop(iid, None)
+        if pdf in self.dateien:
+            self.dateien.remove(pdf)
+        self._datei_vergessen(pdf)
+        if self.baum.exists(iid):
+            self.baum.delete(iid)
+        self._beschriftungen_aktualisieren()
+        self.datei_hinweis.config(text=f"„{pdf.name}“ entfernt · insgesamt {len(self.dateien)} Datei(en).",
+                                  fg=FARBE_TEXT_GRAU)
+        self._status_dateien()
+        self._start_knopf_aktualisieren()
+
+    # ------------------------------------------------------------------
+    # Baum (Dateien, Funde, manuelle Markierungen)
+    # ------------------------------------------------------------------
+    def _datei_zeile_einfuegen(self, pdf: Path) -> str:
+        iid = str(pdf)
+        if not self.baum.exists(iid):
+            self.baum.insert("", "end", iid=iid, text="", open=True,
+                             values=("noch nicht analysiert", "", "", "", "", ""), tags=("datei", "aus"))
+            self.zeilen[iid] = pdf
+            self.beschriftungen[iid] = pdf.name
+            self._zeilentext_setzen(iid)
+        return iid
+
+    def _beschriftungen_aktualisieren(self):
+        """Dateinamen relativ zum gemeinsamen Stammordner anzeigen (KundeA/Police.pdf, KundeB/Police.pdf); Bilder
+        und entsperrte PDFs tragen einen Zusatz („(Bild → PDF)“, „(Kennwort entfernt)“) – in Dialogen und Titeln
+        hinter dem Namen, in der Liste in der Kontextspalte der Dateizeile."""
+        stamm = dateien.gemeinsamer_stamm(self.dateien)
+        ein_ordner = len({Path(dateien.ohne_langpfad(p)).parent for p in self.dateien}) <= 1
+        for iid, pdf in self.zeilen.items():
+            anzeige = Path(dateien.ohne_langpfad(pdf))
+            if stamm is None or ein_ordner:
+                name = anzeige.name
+            else:
+                try:
+                    name = anzeige.relative_to(stamm).as_posix()
+                except ValueError:
+                    name = str(anzeige)
+            art = (self.arbeitskopien.get(pdf) or {}).get("art")
+            self.beschriftungen[iid] = name + ANZEIGE_ART.get(art, "")
+            self._zeilentext_setzen(iid)
+            self._datei_kontext_setzen(pdf)
+        self._spalten_anpassen()                   # erste Spalte folgt dem längsten Namen (nur in freien Platz)
+        for fenster in self.vorschauen.values():
+            fenster.titel_setzen()
+
+    def _anzeigename(self, pdf: Path) -> str:
+        return self.beschriftungen.get(str(pdf), pdf.name)
+
+    def _zustand(self, iid) -> str:
+        tags = self.baum.item(iid, "tags")
+        for zustand in ("an", "aus", "teil"):
+            if zustand in tags:
+                return zustand
+        return "aus"
+
+    def _zustand_setzen(self, iid, zustand):
+        tags = [t for t in self.baum.item(iid, "tags") if t not in HAKEN]
+        tags.append(zustand)
+        self.baum.item(iid, tags=tuple(tags))
+        self._zeilentext_setzen(iid)
+
+    def _zeilentext_setzen(self, iid):
+        zustand = self._zustand(iid)
+        if iid in self.zeilen:
+            self.baum.item(iid, text=f"{HAKEN[zustand]}  {self._beschriftung_passend(iid)}")
+        else:
+            self.baum.item(iid, text=HAKEN[zustand])
+
+    def _eltern_ableiten(self, eltern):
+        kinder = self.baum.get_children(eltern)
+        if not kinder:
+            zustand = "aus"
+        else:
+            zustaende = [self._zustand(k) for k in kinder]
+            if all(z == "an" for z in zustaende):
+                zustand = "an"
+            elif all(z == "aus" for z in zustaende):
+                zustand = "aus"
+            else:
+                zustand = "teil"
+        self._zustand_setzen(eltern, zustand)
+
+    @staticmethod
+    def _kind_art(iid: str):
+        """("fund", Index) | ("manuell", mid) | (None, None) für eine Kind-iid „<pfad>::<index>“/„<pfad>::m<mid>“."""
+        teile = str(iid).rsplit("::", 1)
+        if len(teile) != 2:
+            return None, None
+        teil = teile[1]
+        if teil.startswith("m") and teil[1:].isdigit():
+            return "manuell", int(teil[1:])
+        if teil.isdigit():
+            return "fund", int(teil)
+        return None, None
+
+    def einzelstellen_moeglich(self, pdf: Path, ergebnis: dict | None = None) -> bool:
+        """Kann die Engine einzelne Fundstellen schwärzen? (Analyse lieferte ein Seitenmodell, die Schwärzung
+        nimmt es an – Vertrag Abschnitt 5). Sonst gilt ein Fund immer an allen seinen Stellen."""
+        ergebnis = self.analyse_ergebnisse.get(pdf) if ergebnis is None else ergebnis
+        return _auftrag_modul.einzelstellen_moeglich(ergebnis, schwaerze_pdf)
+
+    def kann_manuelle_bereiche(self) -> bool:
+        return kann(schwaerze_pdf, "manuelle_bereiche")
+
+    def kann_manuelle_stellen(self) -> bool:
+        return kann(schwaerze_pdf, "manuelle_stellen")
+
+    def _fund_hat_stellen(self, pdf: Path, fund: dict, ergebnis: dict | None = None) -> bool:
+        return _auftrag_modul.hat_einzelstellen(fund, self.einzelstellen_moeglich(pdf, ergebnis))
+
+    def fund_zustand(self, pdf: Path, index: int) -> str:
+        """an | aus | teil – bei Einzelstellen aus den Stellen abgeleitet, sonst das Häkchen des Funds."""
+        ergebnis = self.analyse_ergebnisse.get(pdf)
+        if not ergebnis or not 0 <= index < len(ergebnis["funde"]):
+            return "aus"
+        fund = ergebnis["funde"][index]
+        if self._fund_hat_stellen(pdf, fund):
+            return _auftrag_modul.zustand_aus_stellen(fund["stellen"])
+        iid = f"{pdf}::{index}"
+        return self._zustand(iid) if self.baum.exists(iid) else "an"
+
+    def _fund_zeile_einfuegen(self, pdf: Path, index: int, fund: dict, zustand: str):
+        iid = str(pdf)
+        seiten = fund.get("seiten") or []
+        seiten_text = ", ".join(str(s) for s in seiten[:6]) + (" …" if len(seiten) > 6 else "")
+        anzeige = fund["anzeige"]
+        if fund.get("hinweis"):
+            # ⚕ = angebotene Gesundheitsdaten, ⚑ = sonstiger Hinweis der Engine (auch an angehakten Funden)
+            marke = MARKE_GESUNDHEIT if fund.get("kategorie") in GESUNDHEIT_KATEGORIEN else MARKE_HINWEIS
+            anzeige = marke + anzeige
+        self.baum.insert(iid, "end", iid=f"{iid}::{index}", text=HAKEN[zustand],
+                         values=(anzeige, _fundtext_anzeige(fund), seiten_text,
+                                 fund.get("anzahl", 1), _kontext_anzeige(fund.get("kontext", "")),
+                                 fund["ersatz"]),
+                         tags=("fund", zustand))
+
+    def _manuell_zeile_einfuegen(self, pdf: Path, mid: int, eintrag: dict):
+        anzeige = ANZEIGE_NACHSCHWAERZEN if eintrag.get("herkunft") == "nachschwaerzen" else ANZEIGE_MANUELL
+        zustand = "an" if eintrag.get("an", True) else "aus"
+        text = eintrag.get("text") or ("Bereich" if eintrag["art"] == "bereich" else "Stelle")
+        self.baum.insert(str(pdf), "end", iid=f"{pdf}::m{mid}", text=HAKEN[zustand],
+                         values=(anzeige, text, str(eintrag["seite"] + 1), 1,
+                                 "Rahmen aus der Vorschau" if eintrag["art"] == "bereich" else "Klick in der Vorschau",
+                                 PLATZHALTER_MANUELL),
+                         tags=("manuell", zustand))
+
+    def _baum_datei_fuellen(self, pdf: Path, ergebnis: dict):
+        """Trägt die Funde einer Datei ein (Kind-iid = „<pfad>::<index>“, manuelle: „<pfad>::m<mid>“)."""
+        if self.beendet:
+            return
+        iid = self._datei_zeile_einfuegen(pdf)
+        self.baum.delete(*self.baum.get_children(iid))
+        funde = ergebnis["funde"]
+        einzelstellen = self.einzelstellen_moeglich(pdf, ergebnis)
+        for index, fund in enumerate(funde):
+            # Häkchen nach der Analyse: mit Einzelstellen aus den Stellen (nur angebotene Funde „aus“), sonst „an“
+            self._fund_zeile_einfuegen(pdf, index, fund, _auftrag_modul.standard_zustand(fund, einzelstellen))
+        for mid, eintrag in self.manuell.get(pdf, {}).items():
+            self._manuell_zeile_einfuegen(pdf, mid, eintrag)
+        codes = meldungs_codes(ergebnis)
+        nebenkanal = _nebenkanal_bezug(ergebnis)
+        if ergebnis["fehler"]:
+            status = f"Fehler: {ergebnis['fehler']}"
+        elif not funde and codes & {"KEIN_TEXT", "KAUM_LESBAR"}:
+            status = "0 Funde – kein Text lesbar!"
+        else:
+            status = f"{len(funde)} Fund(e)"
+        if nebenkanal is not None and not ergebnis["fehler"]:
+            status += " · Personendaten in Metadaten/Anhängen – werden entfernt"
+        if ergebnis["warnungen"]:
+            status += f" · {len(ergebnis['warnungen'])} Warnung(en)"
+        self.baum.set(iid, "kategorie", status)
+        self.baum.set(iid, "seiten", str(ergebnis["seiten"]) if ergebnis["seiten"] else "")
+        self.baum.set(iid, "anzahl", str(sum(f.get("anzahl", 1) for f in funde)) if funde else "")
+        self._ausgabe_zeile_setzen(pdf)
+        self._eltern_ableiten(iid)
+
+    def _ausgabe_zeile_setzen(self, pdf: Path):
+        """Status der Ausgabe (fertig / prüfen / Fehler) in der Dateizeile (Spalten Text und Kontext)."""
+        iid = str(pdf)
+        if not self.baum.exists(iid):
+            return
+        eintrag = self.ausgaben.get(pdf)
+        if not eintrag:
+            self.baum.set(iid, "text", "")
+            self._datei_kontext_setzen(pdf)        # Grund, sonst „Kennwort entfernt“ / „Bild → PDF“
+            return
+        status = STATUS_TEXT.get(eintrag["status"], eintrag["status"])
+        ausgabe = eintrag.get("pfad")
+        self.baum.set(iid, "text", f"{status}: {ausgabe.name}" if ausgabe is not None else status)
+        self._datei_kontext_setzen(pdf)
+
+    def _baum_klick(self, ereignis):
+        """Einfachklick in die Häkchen-Spalte schaltet um; Dreieck, Kopfzeile und Trenner bleiben Tk überlassen."""
+        region = self.baum.identify_region(ereignis.x, ereignis.y)
+        if region not in ("tree", "cell"):
+            return None
+        zeile = self.baum.identify_row(ereignis.y)
+        if not zeile:
+            return None
+        if self.baum.identify_column(ereignis.x) != "#0":
+            return None
+        element = self.baum.identify_element(ereignis.x, ereignis.y)
+        if element.endswith("indicator") and self.baum.get_children(zeile):
+            return None
+        if zeile in self.zeilen and not self._trifft_haken(zeile, ereignis.x):
+            return None                 # Klick auf den Dateinamen: nur auswählen (Pfad anzeigen, Entfernen)
+        self.baum.focus_set()           # Tastaturfokus für die Leertaste
+        self.baum.selection_set(zeile)
+        self.baum.focus(zeile)
+        self._umschalten(zeile)
+        return "break"
+
+    def _trifft_haken(self, zeile, x) -> bool:
+        """Liegt x (Baumkoordinate) auf dem Häkchen-Symbol einer Dateizeile?"""
+        bbox = self.baum.bbox(zeile, "#0")
+        if not bbox:
+            return False
+        einzug = self._px(20)                        # Platz des Aufklapp-Dreiecks
+        haken_breite = self.f_fett.measure(HAKEN["an"] + "  ") + self._px(6)
+        return bbox[0] + einzug - self._px(4) <= x <= bbox[0] + einzug + haken_breite
+
+    def _baum_doppelklick(self, ereignis):
+        zeile = self.baum.identify_row(ereignis.y)
+        element = self.baum.identify_element(ereignis.x, ereignis.y)
+        if zeile and element.endswith("indicator") and self.baum.get_children(zeile):
+            return None                 # Dreieck: Tk klappt auf/zu
+        if zeile and self.baum.identify_region(ereignis.x, ereignis.y) in ("tree", "cell"):
+            if zeile in self.zeilen or self.baum.identify_column(ereignis.x) != "#0":
+                self.root.after_idle(self._vorschau_fuer_zeile, zeile)
+        return "break"                  # sonst nichts umschalten, nichts zuklappen
+
+    def _taste_leer(self, ereignis=None):
+        zeile = self.baum.focus()
+        if zeile:
+            self._umschalten(zeile)
+        return "break"
+
+    def _haken_umschalten(self, ereignis=None):
+        """Umschalten der fokussierten Zeile (Tastatur / Skripte)."""
+        return self._taste_leer(ereignis)
+
+    def _umschalten(self, zeile):
+        if self.laeuft or not self.baum.exists(zeile):
+            return
+        if zeile in self.zeilen:
+            neu = "aus" if self._zustand(zeile) == "an" else "an"
+            self._datei_setzen(zeile, neu)
+            return
+        pdf = self.zeilen.get(self.baum.parent(zeile))
+        art, nummer = self._kind_art(zeile)
+        if pdf is None or art is None:
+            return
+        if art == "fund":
+            self.fund_setzen(pdf, nummer, self.fund_zustand(pdf, nummer) != "an")
+        else:
+            self.manuell_umschalten(pdf, nummer)
+
+    def _kind_setzen(self, pdf: Path, kind: str, an: bool):
+        """Fund- oder manuelle Zeile setzen, ohne Eltern/Knopf/Vorschau nachzuführen (für Sammelaktionen)."""
+        art, nummer = self._kind_art(kind)
+        if art == "fund":
+            funde = self.analyse_ergebnisse[pdf]["funde"] if pdf in self.analyse_ergebnisse else []
+            fund = funde[nummer] if 0 <= nummer < len(funde) else None
+            if fund is not None and self._fund_hat_stellen(pdf, fund):
+                for stelle in fund["stellen"]:
+                    stelle["an"] = an
+        elif art == "manuell":
+            eintrag = self.manuell.get(pdf, {}).get(nummer)
+            if eintrag is not None:
+                eintrag["an"] = an
+        self._zustand_setzen(kind, "an" if an else "aus")
+
+    def _nach_aenderung(self, pdf: Path | None):
+        """Nach jeder Änderung von Häkchen/Stellen: Elternzeile, Schwärzen-Knopf, offene Vorschau."""
+        if pdf is not None and self.baum.exists(str(pdf)):
+            self._eltern_ableiten(str(pdf))
+        self._start_knopf_aktualisieren()
+        fenster = self.vorschauen.get(pdf) if pdf is not None else None
+        ziele = [fenster] if fenster is not None else (list(self.vorschauen.values()) if pdf is None else [])
+        for f in ziele:
+            f.neu_zeichnen()
+
+    def fund_setzen(self, pdf: Path, index: int, an: bool):
+        """Fund an allen Stellen an/aus (Hauptliste und Vorschau bleiben gleich)."""
+        if self.laeuft:
+            return
+        iid = f"{pdf}::{index}"
+        if not self.baum.exists(iid):
+            return
+        self._kind_setzen(pdf, iid, an)
+        self._nach_aenderung(pdf)
+
+    def stelle_setzen(self, pdf: Path, index: int, stelle_index: int, an: bool):
+        """Eine einzelne Fundstelle an/aus (nur wenn die Engine Einzelstellen kann)."""
+        if self.laeuft:
+            return
+        fund = self.analyse_ergebnisse[pdf]["funde"][index]
+        if not self._fund_hat_stellen(pdf, fund):
+            self.fund_setzen(pdf, index, an)
+            return
+        fund["stellen"][stelle_index]["an"] = an
+        iid = f"{pdf}::{index}"
+        if self.baum.exists(iid):
+            self._zustand_setzen(iid, self.fund_zustand(pdf, index))
+        self._nach_aenderung(pdf)
+
+    def manuell_hinzufuegen(self, pdf: Path, eintrag: dict) -> int | None:
+        """Neue manuelle Markierung aus der Vorschau: {"art": "stelle"|"bereich", "seite", "rechtecke",
+        "start", "ende", "text", "herkunft"}; erscheint als eigene Zeile in der Fundliste."""
+        if self.laeuft or pdf not in self.analyse_ergebnisse:
+            return None
+        self._manuell_zaehler += 1
+        mid = self._manuell_zaehler
+        eintrag = dict(eintrag)
+        eintrag.setdefault("an", True)
+        eintrag.setdefault("herkunft", "vorschau")
+        self.manuell.setdefault(pdf, {})[mid] = eintrag
+        if self.baum.exists(str(pdf)):
+            self._manuell_zeile_einfuegen(pdf, mid, eintrag)
+        self._nach_aenderung(pdf)
+        return mid
+
+    def manuell_umschalten(self, pdf: Path, mid: int):
+        eintrag = self.manuell.get(pdf, {}).get(mid)
+        if self.laeuft or eintrag is None:
+            return
+        self._kind_setzen(pdf, f"{pdf}::m{mid}", not eintrag.get("an", True))
+        self._nach_aenderung(pdf)
+
+    def manuell_entfernen(self, pdf: Path, mid: int):
+        if self.laeuft:
+            return
+        if self.manuell.get(pdf, {}).pop(mid, None) is None:
+            return
+        iid = f"{pdf}::m{mid}"
+        if self.baum.exists(iid):
+            self.baum.delete(iid)
+        self._nach_aenderung(pdf)
+
+    def begriff_ueberall(self, pdf: Path, text: str) -> int | None:
+        """„Überall in diesem Dokument schwärzen“: IMMER-Begriff für diesen Lauf (diese Datei). Wird sofort als
+        Fund ergänzt (ohne „stellen“ – die Schwärzung sucht alle Vorkommen selbst) und bei einer erneuten
+        Analyse dieser Datei als IMMER-Begriff mitgegeben. Liefert den Fund-Index."""
+        text = " ".join(str(text).split())
+        ergebnis = self.analyse_ergebnisse.get(pdf)
+        if self.laeuft or not text or ergebnis is None:
+            return None
+        for index, fund in enumerate(ergebnis["funde"]):
+            if fund["kategorie"] == "begriff" and fund["text"].casefold() == text.casefold():
+                self.fund_setzen(pdf, index, True)
+                return index
+        begriffe = self.lauf_immer.setdefault(pdf, [])
+        if text not in begriffe:
+            begriffe.append(text)
+        fund = {"id": f"vorschau_{len(ergebnis['funde']) + 1}", "kategorie": "begriff", "anzeige": ANZEIGE_BEGRIFF_VORSCHAU,
+                "text": text, "ersatz": "[BEGRIFF]", "seiten": [], "anzahl": 1,
+                "kontext": "in der Vorschau hinzugefügt", "quellen": ["vorschau"], "sicherheit": 1.0,
+                "hinweis": None}
+        ergebnis["funde"].append(fund)
+        index = len(ergebnis["funde"]) - 1
+        if self.baum.exists(str(pdf)):
+            self._fund_zeile_einfuegen(pdf, index, fund, "an")
+            # manuelle Zeilen bleiben am Ende der Liste
+            for mid in self.manuell.get(pdf, {}):
+                if self.baum.exists(f"{pdf}::m{mid}"):
+                    self.baum.move(f"{pdf}::m{mid}", str(pdf), "end")
+        self._log(f"ℹ {self._anzeigename(pdf)}: „{text}“ wird überall in diesem Dokument geschwärzt "
+                  f"(IMMER-Begriff für diesen Lauf).", "hinweis")
+        self._nach_aenderung(pdf)
+        return index
+
+    def _datei_setzen(self, iid, zustand):
+        if self.laeuft or not self.baum.exists(iid):
+            return
+        pdf = self.zeilen.get(iid)
+        for kind in self.baum.get_children(iid):
+            self._kind_setzen(pdf, kind, zustand == "an")
+        self._nach_aenderung(pdf)
+
+    def alle_setzen(self, zustand):
+        """Alle Funde aller Dateien an („an“) oder aus („aus“)."""
+        if self.laeuft:
+            return
+        for iid in self.baum.get_children(""):
+            self._datei_setzen(iid, zustand)
+
+    def kategorie_setzen(self, anzeige, zustand):
+        """Alle Funde einer Kategorie (Anzeigename) in allen Dateien an/aus."""
+        if self.laeuft:
+            return
+        for iid in self.baum.get_children(""):
+            pdf = self.zeilen.get(iid)
+            for kind in self.baum.get_children(iid):
+                if _ohne_marke(self.baum.set(kind, "kategorie")) == _ohne_marke(anzeige):
+                    self._kind_setzen(pdf, kind, zustand == "an")
+            self._nach_aenderung(pdf)
+        self._start_knopf_aktualisieren()
+
+    def _kontextmenue(self, ereignis):
+        zeile = self.baum.identify_row(ereignis.y)
+        menue = tk.Menu(self.root, tearoff=0)
+        if zeile:
+            self.baum.selection_set(zeile)
+            self.baum.focus(zeile)
+            datei = zeile if zeile in self.zeilen else self.baum.parent(zeile)
+            name = self.beschriftungen.get(datei, "")
+            menue.add_command(label=f"Vorschau von „{name}“ öffnen",
+                              command=lambda: self._vorschau_fuer_zeile(zeile))
+            menue.add_separator()
+            menue.add_command(label=f"Alle Funde von „{name}“ anhaken",
+                              command=lambda: self._datei_setzen(datei, "an"))
+            menue.add_command(label=f"Alle Funde von „{name}“ abhaken",
+                              command=lambda: self._datei_setzen(datei, "aus"))
+            if zeile not in self.zeilen:
+                kategorie = self.baum.set(zeile, "kategorie")
+                menue.add_separator()
+                menue.add_command(label=f"Kategorie „{kategorie}“ überall anhaken",
+                                  command=lambda: self.kategorie_setzen(kategorie, "an"))
+                menue.add_command(label=f"Kategorie „{kategorie}“ überall abhaken",
+                                  command=lambda: self.kategorie_setzen(kategorie, "aus"))
+            menue.add_separator()
+            menue.add_command(label="Datei aus der Liste entfernen", command=lambda: self.datei_entfernen(datei))
+            menue.add_separator()
+        menue.add_command(label="Alle an", command=lambda: self.alle_setzen("an"))
+        menue.add_command(label="Alle aus", command=lambda: self.alle_setzen("aus"))
+        try:
+            menue.tk_popup(ereignis.x_root, ereignis.y_root)
+        finally:
+            menue.grab_release()
+
+    def _auswahl_geaendert(self, ereignis=None):
+        """Statuszeile: vollständiger Pfad der gewählten Datei bzw. vollständiger Kontext des Funds."""
+        if self.laeuft:
+            return
+        auswahl = self.baum.selection()
+        if not auswahl:
+            return
+        iid = auswahl[0]
+        if iid in self.zeilen:
+            self.status_label.config(text=f"Datei: {self._pfad_passend(self.zeilen[iid])}")
+            return
+        pdf = self.zeilen.get(self.baum.parent(iid))
+        art, nummer = self._kind_art(iid)
+        if art == "fund" and pdf in self.analyse_ergebnisse:
+            fund = self.analyse_ergebnisse[pdf]["funde"][nummer]
+            teile = [f"Seite(n) {', '.join(map(str, fund.get('seiten') or [])) or '?'}"]
+            if fund.get("hinweis"):
+                teile.append(f"Hinweis: {fund['hinweis']}")
+            teile.append(f"Kontext: {str(fund.get('kontext', '')).replace(chr(10), ' ')}")
+            self.status_label.config(text=" · ".join(teile))
+        elif art == "manuell":
+            self.status_label.config(text="Manuelle Markierung aus der Vorschau – Kästchen schaltet sie an/aus.")
+
+    def _pfad_passend(self, pfad: Path) -> str:
+        """Voller Pfad, wenn er in die Statuszeile passt; sonst in der Mitte gekürzt (Dateiname bleibt sichtbar)."""
+        text = str(pfad)
+        try:
+            breite = self.status_label.winfo_width() - self.f_normal.measure("Datei: ") - 8
+        except tk.TclError:
+            return text
+        if breite < 100 or self.f_normal.measure(text) <= breite:
+            return text
+        teile = pfad.parts
+        kandidat = f"…{os.sep}{pfad.name}"
+        for i in range(1, len(teile) - 1):
+            versuch = str(Path(*teile[:i + 1])) + f"{os.sep}…{os.sep}{pfad.name}"
+            if self.f_normal.measure(versuch) > breite:
+                break
+            kandidat = versuch
+        return kandidat
+
+    def _angehakte_funde(self) -> int:
+        """Angehakte (auch teilweise) Funde und manuelle Markierungen aller Dateien."""
+        return sum(1 for e in self.baum.get_children("") for k in self.baum.get_children(e)
+                   if self._zustand(k) in ("an", "teil"))
+
+    def _nebenkanal_dateien(self) -> list[Path]:
+        """Analysierte Dateien mit Personendaten in Metadaten, Lesezeichen, Anhängen oder XFA (R-04): auch ohne
+        Fund auf den Seiten gibt es eine bereinigte Ausgabe."""
+        return [pdf for pdf in self.dateien if pdf in self.analyse_ergebnisse
+                and not self.analyse_ergebnisse[pdf].get("fehler")
+                and _nebenkanal_bezug(self.analyse_ergebnisse[pdf]) is not None]
+
+    def _bearbeitbare_dateien(self) -> list[Path]:
+        """Analysierte Dateien ohne Fehler: jede bekommt beim Schwärzen eine bereinigte Ausgabe (Runde 3: „nur aus dem
+        Ausgabeordner hochladen“) – auch ohne angehakten Fund."""
+        return [pdf for pdf in self.dateien if pdf in self.analyse_ergebnisse
+                and not self.analyse_ergebnisse[pdf].get("fehler")]
+
+    def _start_knopf_aktualisieren(self):
+        aktiv = not self.laeuft and not self.analyse_veraltet and (bool(self._bearbeitbare_dateien())
+                                                                   or self._angehakte_funde() > 0)
+        self.start_knopf.config(state="normal" if aktiv else "disabled")
+
+    # ------------------------------------------------------------------
+    # Vorschau
+    # ------------------------------------------------------------------
+    def _vorschau_fuer_zeile(self, zeile):
+        if not self.baum.exists(zeile):
+            return
+        if zeile in self.zeilen:
+            self.vorschau_oeffnen(self.zeilen[zeile])
+            return
+        pdf = self.zeilen.get(self.baum.parent(zeile))
+        art, nummer = self._kind_art(zeile)
+        seite, markieren = None, None
+        if art == "fund" and pdf in self.analyse_ergebnisse:
+            fund = self.analyse_ergebnisse[pdf]["funde"][nummer]
+            seiten = fund.get("seiten") or []
+            stellen = fund.get("stellen") or []
+            seite = stellen[0]["seite"] if stellen else (seiten[0] - 1 if seiten else None)
+            markieren = nummer
+        elif art == "manuell":
+            eintrag = self.manuell.get(pdf, {}).get(nummer)
+            seite = eintrag["seite"] if eintrag else None
+        if pdf is not None:
+            self.vorschau_oeffnen(pdf, seite=seite, modus="vorher", markieren=markieren)
+
+    def vorschau_auswahl(self):
+        """Knopf „Vorschau …“: Vorschau der gewählten Datei (sonst der ersten zu prüfenden bzw. ersten)."""
+        auswahl = self.baum.selection()
+        if auswahl:
+            self._vorschau_fuer_zeile(auswahl[0])
+            return
+        zu_pruefen = [p for p in self.dateien if self.ausgaben.get(p, {}).get("status") == "pruefen"]
+        kandidaten = zu_pruefen or [p for p in self.dateien if p in self.analyse_ergebnisse]
+        if not kandidaten:
+            self._dialog("info", "Vorschau", "Bitte zuerst Dateien hinzufügen und analysieren – dann zeigt die "
+                                             "Vorschau jede Seite mit allen Fundstellen.")
+            return
+        self.vorschau_oeffnen(kandidaten[0])
+
+    def ausgabe_vorhanden(self, pdf: Path) -> bool:
+        """Liegt die Ausgabe dieser Sitzung („fertig“ oder „pruefen“) noch da? Eine nicht erreichbare Ausgabe
+        (Netzlaufwerk getrennt, Zugriff verweigert …) gilt wie bei os.path.exists als nicht vorhanden: Path.exists()
+        reicht solche Fehler weiter – beim Schließen ließe sich das Programm dann nicht mehr beenden."""
+        eintrag = self.ausgaben.get(pdf)
+        if not eintrag or eintrag.get("pfad") is None or eintrag["status"] not in ("fertig", "pruefen"):
+            return False
+        try:
+            return Path(eintrag["pfad"]).exists()
+        except OSError:
+            return False
+
+    def vorschau_oeffnen(self, pdf: Path, seite: int | None = None, modus: str | None = None, markieren=None):
+        """Öffnet (oder holt nach vorn) das Vorschau-Fenster einer Datei. modus: "vorher" (geplante Schwärzung)
+        oder "nachher" (Ausgabe mit Verdachtsstellen); ohne Angabe: Ausgabe, wenn sie noch zu prüfen ist."""
+        from .vorschau_fenster import VorschauFenster
+        if modus is None:
+            modus = "nachher" if self.ausgabe_vorhanden(pdf) and (
+                self.ausgaben[pdf]["status"] == "pruefen" or pdf not in self.analyse_ergebnisse) else "vorher"
+        if modus == "nachher" and not self.ausgabe_vorhanden(pdf):
+            modus = "vorher"
+        if modus == "vorher" and pdf not in self.analyse_ergebnisse:
+            self._dialog("info", "Vorschau", f"„{self._anzeigename(pdf)}“ ist noch nicht analysiert – bitte zuerst "
+                                             f"unten „Analysieren“ drücken.")
+            return None
+        if modus == "vorher":
+            art = dateien.datei_art(self._arbeitsdatei(pdf))
+            if not dateien.fuer_engine_erlaubt(art):          # R-01: nie eine Nicht-PDF an PyMuPDFs Seitenfunktionen
+                self._dialog("error", "Vorschau nicht möglich",
+                             f"„{self._anzeigename(pdf)}“ ist keine PDF mehr, sondern {dateien.art_beschreibung(art)} "
+                             f"(Datei inzwischen ersetzt?). Bitte aus der Liste entfernen und neu hinzufügen.")
+                return None
+        fenster = self.vorschauen.get(pdf)
+        try:
+            if fenster is not None and fenster.existiert():
+                fenster.modus_wechseln(modus, seite=seite, markieren=markieren)
+                fenster.nach_vorn()
+                return fenster
+            fenster = VorschauFenster(self, pdf, modus=modus, seite=seite or 0, markieren=markieren)
+            if not fenster.existiert():
+                return None
+        except Exception as fehler:
+            pfad = dateien.fehler_protokollieren(*sys.exc_info())
+            self._dialog("error", "Vorschau nicht möglich",
+                         f"Die Vorschau von „{self._anzeigename(pdf)}“ konnte nicht geöffnet werden:\n"
+                         f"{_verstaendliche_fehlermeldung(fehler, pdf)}\n\nDetails: {pfad or 'fehler.log'}")
+            return None
+        self.vorschauen[pdf] = fenster
+        return fenster
+
+    def vorschau_geschlossen(self, pdf: Path):
+        self.vorschauen.pop(pdf, None)
+
+    def _vorschauen_schliessen(self):
+        for fenster in list(self.vorschauen.values()):
+            fenster.schliessen(benachrichtigen=False)
+        self.vorschauen.clear()
+        self._vorschau_dateien_freigeben()
+
+    @staticmethod
+    def _vorschau_dateien_freigeben(pfad: Path | None = None):
+        """Zwischengespeicherte PDF-Dokumente der Vorschau (Attrappe und Vorschau-Modul der Engine) freigeben –
+        vor dem Umbenennen/Löschen einer Ausgabe (unter Windows verhindert ein offener Handle beides)."""
+        attrappen.cache_leeren(pfad)
+        from .vorschau_fenster import engine_zwischenspeicher_leeren
+        engine_zwischenspeicher_leeren()
+
+    def offene_freigaben(self) -> list[Path]:
+        """Dateien (in Listenreihenfolge), deren Ausgabe noch „_PRUEFEN“ heißt und in der Vorschau freigegeben werden
+        kann. Dieser Stand lebt nur im Speicher (self.ausgaben, nicht in den Einstellungen): Nach dem Beenden lässt
+        sich keine dieser Ausgaben mehr freigeben."""
+        return [p for p in self.dateien if self.ausgabe_vorhanden(p) and self.ausgaben[p]["status"] == "pruefen"]
+
+    def _wartende_ausgaben(self, nur_laufender_lauf: bool = False) -> list[tuple[Path, Path]]:
+        """(Datei, Ausgabe) in Listenreihenfolge für jede Ausgabe, die noch auf die Freigabe wartet: aus früheren
+        Läufen dieser Sitzung (offene_freigaben) und die schon fertigen Ausgaben des LAUFENDEN Schwärzlaufs –
+        self.ausgaben kennt sie erst nach dem Lauf (Befund Korrekturrunde „Schließen“ 2: mehrere Dateien schwärzen und
+        mittendrin schließen ist der häufigste Fall). Hat der laufende Lauf für eine Datei schon eine neue Ausgabe
+        geschrieben, zählt nur diese. nur_laufender_lauf: ohne die früheren (sie sind in diesem Beenden schon
+        bestätigt). Die Ausgaben des laufenden Laufs hat der Arbeits-Thread eben geschrieben – sie werden hier nicht
+        noch einmal auf dem (vielleicht nicht erreichbaren) Laufwerk nachgesehen."""
+        neu: dict[Path, Path | None] = {}
+        if self.laeuft and self.lauf_art == "schwaerzen":
+            for pdf, e in list(self._lauf_ergebnisse):
+                ausgabe = e.get("ausgabe")
+                status = e.get("_status")
+                if ausgabe is None or status not in ("fertig", "pruefen"):
+                    continue
+                neu[pdf] = Path(ausgabe) if status == "pruefen" else None
+        frueher = set() if nur_laufender_lauf else set(self.offene_freigaben())
+        wartend: list[tuple[Path, Path]] = []
+        for pdf in self.dateien:
+            if pdf in neu:
+                if neu[pdf] is not None:
+                    wartend.append((pdf, neu[pdf]))
+            elif pdf in frueher:
+                wartend.append((pdf, Path(self.ausgaben[pdf]["pfad"])))
+        return wartend
+
+    def naechste_zu_pruefen(self, nach: Path | None = None) -> Path | None:
+        """Nächste Datei (in Listenreihenfolge nach „nach“), deren Ausgabe noch freigegeben werden muss."""
+        reihe = self.offene_freigaben()
+        if nach in self.dateien:
+            spaeter = [p for p in reihe if self.dateien.index(p) > self.dateien.index(nach)]
+            reihe = spaeter + [p for p in reihe if p not in spaeter]
+        reihe = [p for p in reihe if p != nach]
+        return reihe[0] if reihe else None
+
+    def ausgabe_freigeben(self, pdf: Path) -> Path | None:
+        """Ausgabe einer Datei freigeben (schwaerzung.freigeben bzw. Attrappe): _PRUEFEN entfällt."""
+        eintrag = self.ausgaben.get(pdf)
+        if self.laeuft or not eintrag or eintrag.get("pfad") is None:
+            return None
+        alt = Path(eintrag["pfad"])
+        self._vorschau_dateien_freigeben(alt)
+        try:
+            neu = Path(freigeben(alt))
+        except Exception as fehler:
+            log = dateien.fehler_protokollieren(*sys.exc_info())
+            self._dialog("error", "Freigabe nicht möglich",
+                         f"„{alt.name}“ konnte nicht freigegeben werden:\n{_verstaendliche_fehlermeldung(fehler, alt)}"
+                         + (f"\n\nDetails: {log}" if log else ""))
+            return None
+        eintrag.update(pfad=neu, status="fertig", grund="freigegeben", freigegeben=True)
+        self._ereignis(f"{alt.name} freigegeben → {neu.name}")
+        self._log(f"✔ {self._anzeigename(pdf)}: freigegeben  →  {neu}", "ok")
+        self._ausgabe_zeile_setzen(pdf)
+        self._status(f"„{self._anzeigename(pdf)}“ freigegeben: {neu.name}")
+        return neu
+
+    def ausgabe_verwerfen(self, pdf: Path) -> bool:
+        """Ausgabe löschen (schwaerzung.verwerfen bzw. Attrappe) – das Original bleibt unberührt."""
+        eintrag = self.ausgaben.get(pdf)
+        if self.laeuft or not eintrag or eintrag.get("pfad") is None:
+            return False
+        alt = Path(eintrag["pfad"])
+        self._vorschau_dateien_freigeben(alt)
+        try:
+            verwerfen(alt)
+        except Exception as fehler:
+            log = dateien.fehler_protokollieren(*sys.exc_info())
+            self._dialog("error", "Verwerfen nicht möglich",
+                         f"„{alt.name}“ konnte nicht gelöscht werden:\n{_verstaendliche_fehlermeldung(fehler, alt)}"
+                         + (f"\n\nDetails: {log}" if log else ""))
+            return False
+        eintrag.update(pfad=None, status="verworfen", grund=f"{alt.name} gelöscht")
+        self._ereignis(f"{alt.name} verworfen (gelöscht)")
+        self._log(f"ℹ {self._anzeigename(pdf)}: Ausgabe {alt.name} verworfen (gelöscht).", "hinweis")
+        self._ausgabe_zeile_setzen(pdf)
+        return True
+
+    def nachschwaerzen(self, pdf: Path, verdachte: list) -> bool:
+        """Verdachtsstellen der Ausgabe als manuelle Markierungen übernehmen und die Datei erneut schwärzen;
+        die alte Ausgabe wird nach Erfolg verworfen. Liefert True, wenn der Lauf gestartet wurde."""
+        eintrag = self.ausgaben.get(pdf)
+        if self.laeuft or not eintrag or not verdachte or pdf not in self.analyse_ergebnisse:
+            return False
+        if not (self.kann_manuelle_stellen() or self.kann_manuelle_bereiche()):
+            self._dialog("warning", "Nachschwärzen nicht möglich",
+                         "Diese Programmversion kann noch keine einzelnen Stellen nachschwärzen. Bitte den Text "
+                         "in die IMMER-Liste eintragen und erneut analysieren und schwärzen.")
+            return False
+        from .vorschau_fenster import verdacht_zu_markierungen
+        neue = 0
+        for verdacht in verdachte:
+            for markierung in verdacht_zu_markierungen(self, pdf, verdacht):
+                markierung["herkunft"] = "nachschwaerzen"
+                if self.manuell_hinzufuegen(pdf, markierung) is not None:
+                    neue += 1
+        if not neue:
+            fenster = self.vorschauen.get(pdf)
+            self._dialog("warning", "Nachschwärzen nicht möglich",
+                         "Für die markierten Stellen ist keine Lage auf der Seite bekannt (z. B. Text aus "
+                         "einem Scan). Bitte in „Geplante Schwärzung“ einen Rahmen um die Stelle ziehen oder "
+                         "den Text in die IMMER-Liste eintragen und erneut schwärzen.",
+                         eltern=fenster.fenster if fenster is not None and fenster.existiert() else None)
+            return False
+        return self.schwaerzen(nur=[pdf], ersetzt=Path(eintrag["pfad"]))
+
+    # ------------------------------------------------------------------
+    # Einstellungen (Schutzstufe, Kategorien, Listen, Freigabe)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _zeilen_aus(feld) -> list[str]:
+        return [z.strip() for z in feld.get("1.0", "end").splitlines() if z.strip()]
+
+    def profil_kategorien(self, name: str) -> set[str] | None:
+        """Aktive Kategorien einer Schutzstufe (muster.PROFILE, sonst Attrappe)."""
+        return _auftrag_modul.stufe_kategorien(PROFILE, name, set(self.kategorie_vars))
+
+    def _aktive_kategorien(self) -> set[str]:
+        return {k for k, v in self.kategorie_vars.items() if v.get()}
+
+    def _profil_anwenden(self, name: str):
+        """Häkchen auf die Kategorien der Schutzstufe setzen (ohne „Benutzerdefiniert“ auszulösen)."""
+        menge = self.profil_kategorien(name)
+        if menge is None:
+            return
+        self._profil_wird_gesetzt = True
+        try:
+            for schluessel, var in self.kategorie_vars.items():
+                var.set(schluessel in menge)
+        finally:
+            self._profil_wird_gesetzt = False
+
+    def _profil_beschreibung_anzeigen(self):
+        name = self.profil_var.get()
+        text = attrappen.profil_beschreibung(PROFILE, name, KATEGORIEN)
+        if name == attrappen.BENUTZERDEFINIERT:
+            text = (f"Eigene Auswahl der Kategorien (Erkennungsregeln der Stufe „{_profil_name(self.basis_profil)}“).")
+            if set(_profil_wert(PROFILE, self.basis_profil, "hinweis") or ()) & GESUNDHEIT_KATEGORIEN \
+                    - self._aktive_kategorien():
+                text += " Nicht angehakte Gesundheitsdaten werden gemeldet und abgewählt angeboten."
+        self.profil_beschreibung.config(text=text)
+
+    @staticmethod
+    def _mindestens_so_stark(neu: str, basis: str) -> bool:
+        """Ist die Stufe `neu` mindestens so streng wie die Grundstufe `basis`? Reihenfolge Ausgewogen < Hoch <
+        Maximal; dazu dürfen keine Erkennungsregeln (muster.PROFILE "optionen", z. B. alle_geburtsdaten) und keine
+        Hinweis-Kategorien der Grundstufe fehlen. Nur auf eine solche Stufe springt die Auswahl von selbst."""
+        reihenfolge = attrappen.PROFIL_REIHENFOLGE
+        if neu in reihenfolge and basis in reihenfolge and reihenfolge.index(neu) < reihenfolge.index(basis):
+            return False
+        optionen_neu = _profil_wert(PROFILE, neu, "optionen") or {}
+        optionen_basis = _profil_wert(PROFILE, basis, "optionen") or {}
+        if any(an and not optionen_neu.get(schluessel) for schluessel, an in dict(optionen_basis).items()):
+            return False
+        return set(_profil_wert(PROFILE, basis, "hinweis") or ()) <= set(_profil_wert(PROFILE, neu, "hinweis") or ())
+
+    def _profil_gewaehlt(self):
+        """Radioknopf der Schutzstufe angeklickt."""
+        name = self.profil_var.get()
+        if name != attrappen.BENUTZERDEFINIERT:
+            self.basis_profil = name
+            self._profil_anwenden(name)
+        self._profil_beschreibung_anzeigen()
+        self._einstellung_geaendert()
+
+    def _kategorie_geaendert(self, *_):
+        """Häkchen einer Kategorie geändert: Stufe nachführen. Passt die Auswahl genau zu einer Stufe, die mindestens
+        so streng ist wie die Grundstufe (Ausgewogen + E-Mail -> Hoch), gilt diese; sonst „Benutzerdefiniert“ mit den
+        Erkennungsregeln der Grundstufe – „Maximal“ ohne Diagnosen und Medikamente bleibt also „Maximal“ (alle
+        Geburtsdaten, unbekannte Eigennamen) und springt nicht auf das schwächere „Hoch“ mit derselben
+        Kategorienmenge."""
+        if not self._profil_wird_gesetzt and not self._einstellungen_werden_gesetzt:
+            aktive = self._aktive_kategorien()
+            aktuell = self.profil_var.get()
+            if aktuell == attrappen.BENUTZERDEFINIERT or self.profil_kategorien(aktuell) != aktive:
+                passend = [n for n in attrappen.PROFIL_REIHENFOLGE if self.profil_kategorien(n) == aktive
+                           and self._mindestens_so_stark(n, self.basis_profil)]
+                if aktuell in passend:
+                    neu = aktuell
+                elif passend:
+                    neu = passend[0]
+                else:
+                    neu = attrappen.BENUTZERDEFINIERT
+                if neu != attrappen.BENUTZERDEFINIERT:
+                    self.basis_profil = neu
+                self.profil_var.set(neu)
+            self._profil_beschreibung_anzeigen()
+        self._einstellung_geaendert()
+
+    def _einstellungen_anwenden(self):
+        e = self.einstellungen
+        self._einstellungen_werden_gesetzt = True
+        try:
+            echte = attrappen.PROFIL_REIHENFOLGE
+            profil = e.get("profil")
+            basis = e.get("basis_profil")
+            kategorien = e.get("kategorien") if isinstance(e.get("kategorien"), dict) else None
+            if profil not in echte + (attrappen.BENUTZERDEFINIERT,):
+                # ältere Einstellungen ohne Schutzstufe: unveränderter Standard -> neue Standardstufe,
+                # eigene Auswahl bleibt „Benutzerdefiniert“
+                standard = attrappen._standard_kategorien(KATEGORIEN)
+                gespeichert = {k for k, v in (kategorien or {}).items() if v and k in self.kategorie_vars}
+                if kategorien is None or gespeichert == (standard & set(self.kategorie_vars)):
+                    profil = attrappen.STANDARD_PROFIL
+                else:
+                    profil = attrappen.BENUTZERDEFINIERT
+            self.basis_profil = basis if basis in echte else (profil if profil in echte else attrappen.STANDARD_PROFIL)
+            self.profil_var.set(profil)
+            if profil == attrappen.BENUTZERDEFINIERT:
+                self._profil_anwenden(self.basis_profil)
+                for schluessel, var in self.kategorie_vars.items():
+                    if kategorien and schluessel in kategorien:
+                        var.set(bool(kategorien[schluessel]))
+            else:
+                self._profil_anwenden(profil)
+            self._profil_beschreibung_anzeigen()
+            for feld, schluessel in ((self.immer_feld, "immer"), (self.nie_feld, "nie")):
+                werte = e.get(schluessel)
+                if isinstance(werte, list):
+                    feld.delete("1.0", "end")
+                    feld.insert("1.0", "\n".join(str(w) for w in werte))
+                feld.edit_modified(False)
+            if isinstance(e.get("zielordner"), str):
+                self.zielordner_var.set(e["zielordner"])
+            self.zielordner_aktiv.set(bool(e.get("zielordner_aktiv", False)))
+            self.freigabe_var.set(bool(e.get("freigabe_erforderlich", _auftrag_modul.STANDARD_FREIGABE)))
+        finally:
+            self._einstellungen_werden_gesetzt = False
+
+    def _einstellungen_sammeln(self) -> dict:
+        # Erst den Stand auf der Festplatte lesen und nur die eigenen Schlüssel überschreiben (GR-10)
+        daten = dict(self.einstellungen)
+        daten.update(dateien.einstellungen_laden())
+        daten.update({
+            "version": __version__,
+            "profil": self.profil_var.get(),
+            "basis_profil": self.basis_profil,
+            "kategorien": {k: bool(v.get()) for k, v in self.kategorie_vars.items()},
+            "immer": self._zeilen_aus(self.immer_feld),
+            "nie": self._zeilen_aus(self.nie_feld),
+            "zielordner": self.zielordner_var.get().strip(),
+            "zielordner_aktiv": bool(self.zielordner_aktiv.get()),
+            "freigabe_erforderlich": bool(self.freigabe_var.get()),
+            "maximiert": self._ist_maximiert(),
+            "hinweis_gelesen": bool(self.hinweis_gelesen),
+        })
+        if not daten["maximiert"]:
+            try:
+                daten["fenster"] = self.root.geometry()
+            except tk.TclError:
+                pass
+        return daten
+
+    def einstellungen_speichern(self):
+        self.einstellungen = self._einstellungen_sammeln()
+        if not dateien.einstellungen_speichern(self.einstellungen):
+            self._log("⚠ Einstellungen konnten nicht gespeichert werden (Ordner nicht beschreibbar).", "warnung",
+                      zaehlen=False)
+
+    def _text_geaendert(self, ereignis):
+        feld = ereignis.widget
+        if feld.edit_modified():
+            feld.edit_modified(False)
+            self._einstellung_geaendert()
+
+    def _einstellung_geaendert(self, *_):
+        """Stufe, Kategorie, Liste oder Kundenliste geändert: eine vorhandene Analyse passt nicht mehr ->
+        zurücksetzen (auch Vorschau-Fenster und manuelle Markierungen)."""
+        if self._einstellungen_werden_gesetzt or self.laeuft or not self.analyse_ergebnisse:
+            return
+        self.analyse_veraltet = True
+        self.analyse_ergebnisse.clear()
+        markierungen = sum(len(m) for m in self.manuell.values())
+        self.manuell.clear()
+        # Vorschau der geplanten Schwärzung passt nicht mehr; eine noch zu prüfende Ausgabe bleibt sichtbar
+        for pdf, fenster in list(self.vorschauen.items()):
+            if self.ausgabe_vorhanden(pdf):
+                fenster.modus_wechseln("nachher")
+            else:
+                fenster.schliessen()
+        for iid in self.zeilen:
+            if self.baum.exists(iid):
+                self.baum.delete(*self.baum.get_children(iid))
+                self.baum.set(iid, "kategorie", "erneut analysieren")
+                self.baum.set(iid, "anzahl", "")
+                self._zustand_setzen(iid, "aus")
+        self._start_knopf_aktualisieren()
+        self._status("Einstellungen geändert – bitte erneut analysieren.")
+        self._log("ℹ Schutzstufe, Kategorien oder Listen wurden geändert – die Fundliste wurde zurückgesetzt. "
+                  "Bitte erneut analysieren.", "hinweis")
+        if markierungen:
+            self._log(f"ℹ {markierungen} manuelle Markierung(en) aus der Vorschau wurden verworfen – bitte nach "
+                      f"der Analyse erneut setzen.", "hinweis")
+
+    # ------------------------------------------------------------------
+    # Kundenliste
+    # ------------------------------------------------------------------
+    def _kundenliste_nutzbar(self) -> bool:
+        return self.kundenliste is not None and kann(analysiere_pdf, "kundenliste") \
+            and not getattr(self.kundenliste, "attrappe", False)
+
+    def _kundenliste_laden(self):
+        try:
+            self.kundenliste = Kundenliste.laden(dateien.kundenliste_pfad())
+        except Exception:
+            self.kundenliste = None
+            dateien.fehler_protokollieren(*sys.exc_info())
+            self._log("⚠ Die gespeicherte Kundenliste konnte nicht gelesen werden – bitte erneut importieren.",
+                      "warnung", zaehlen=False)
+        self._kundenliste_anzeigen()
+
+    def _kundenliste_anzeigen(self):
+        if self.kundenliste is None:
+            text = "keine geladen – optional den Kundenbestand (CSV) importieren, damit bekannte Kunden sicher " \
+                   "erkannt werden"
+        else:
+            anzahl = int(getattr(self.kundenliste, "anzahl_kunden", 0))
+            text = f"{anzahl} Kunden geladen – gespeichert ohne Klartext"
+            if not self._kundenliste_nutzbar():
+                text += " (Abgleich in dieser Programmversion noch nicht aktiv)"
+        self.kunden_label.config(text=text)
+        self._kunden_knoepfe_aktualisieren()
+
+    def _kunden_knoepfe_aktualisieren(self):
+        aktiv = not self.laeuft and self.kundenliste is not None
+        self.kunden_entfernen_knopf.config(state="normal" if aktiv else "disabled")
+        try:
+            self.kunden_menue.entryconfigure(1, state="normal" if aktiv else "disabled")
+        except tk.TclError:
+            pass
+
+    def kundenliste_importieren(self, pfad=None):
+        """Menü/Knopf „Kundenliste importieren …“: CSV wählen, Spalten erkennen (sonst zuordnen lassen)."""
+        if self.laeuft:
+            self._laeuft_hinweis()
+            return
+        if pfad is None:
+            pfad = filedialog.askopenfilename(
+                title="Kundenliste (CSV) auswählen", parent=self.root,
+                filetypes=[("CSV-Dateien", "*.csv *.txt"), ("Alle Dateien", "*.*")])
+            if not pfad:
+                return
+        self._kundenliste_import(Path(pfad), None)
+
+    def _kundenliste_import(self, pfad: Path, spalten: dict | None):
+        self.spalten_dialog = None
+        try:
+            liste = Kundenliste.importieren(pfad) if spalten is None else Kundenliste.importieren(pfad, spalten)
+        except (ValueError, KeyError, LookupError) as fehler:
+            if spalten is None:
+                self._spalten_zuordnen(pfad)
+                return
+            self._dialog("warning", "Kundenliste nicht importiert", f"Die Kundenliste konnte nicht importiert "
+                                                                    f"werden:\n{fehler}")
+            return
+        except Exception as fehler:
+            if spalten is None and "spalte" in type(fehler).__name__.lower():
+                self._spalten_zuordnen(pfad)              # eigene Ausnahme der Engine für unbekannte Spalten
+                return
+            log = dateien.fehler_protokollieren(*sys.exc_info())
+            self._dialog("error", "Kundenliste nicht importiert",
+                         f"„{pfad.name}“ konnte nicht gelesen werden:\n{_verstaendliche_fehlermeldung(fehler, pfad)}"
+                         + (f"\n\nDetails: {log}" if log else ""))
+            return
+        anzahl = int(getattr(liste, "anzahl_kunden", 0) or 0)
+        if not anzahl:
+            if spalten is None:
+                self._spalten_zuordnen(pfad)
+                return
+            self._dialog("warning", "Kundenliste nicht importiert",
+                         "In der CSV-Datei wurde kein Kunde gefunden (leere Spalten?). Es wurde nichts gespeichert.")
+            return
+        try:
+            liste.speichern(dateien.kundenliste_pfad())
+        except Exception as fehler:
+            log = dateien.fehler_protokollieren(*sys.exc_info())
+            self._dialog("error", "Kundenliste nicht gespeichert",
+                         f"Die Kundenliste konnte nicht gespeichert werden:\n"
+                         f"{_verstaendliche_fehlermeldung(fehler)}" + (f"\n\nDetails: {log}" if log else ""))
+            return
+        self.kundenliste = liste
+        self._kundenliste_anzeigen()
+        hinweis = "" if self._kundenliste_nutzbar() else (" Hinweis: Diese Programmversion nutzt die Kundenliste "
+                                                           "noch nicht beim Analysieren.")
+        self._log(f"✔ Kundenliste: {anzahl} Kunden importiert – gespeichert ohne Klartext (nur Prüfwerte). "
+                  f"Die CSV-Datei selbst wurde nicht verändert.{hinweis}", "ok")
+        self._einstellung_geaendert()
+        self._dialog("info", "Kundenliste importiert",
+                     f"{anzahl} Kunden geladen – gespeichert ohne Klartext.\n\nDas Programm merkt sich nur "
+                     f"nicht umkehrbare Prüfwerte, keine Namen oder Nummern. Die CSV-Datei wurde nicht verändert und "
+                     f"kann gelöscht werden, wenn sie sonst nicht gebraucht wird.{hinweis}")
+
+    def _spalten_zuordnen(self, pfad: Path):
+        try:
+            vorschau = dateien.csv_vorschau(pfad)
+        except (OSError, ValueError) as fehler:
+            self._dialog("error", "Kundenliste nicht lesbar", f"„{pfad.name}“ ist keine lesbare CSV-Datei:\n{fehler}")
+            return
+        if not vorschau["zeilen"]:
+            self._dialog("warning", "Kundenliste leer", f"„{pfad.name}“ enthält keine Daten.")
+            return
+        self.spalten_dialog = SpaltenDialog(self, pfad, vorschau,
+                                            lambda spalten: self._kundenliste_import(pfad, spalten))
+
+    def kundenliste_entfernen(self):
+        if self.laeuft:
+            self._laeuft_hinweis()
+            return
+        pfad = dateien.kundenliste_pfad()
+        if self.kundenliste is None and not pfad.exists():
+            self._dialog("info", "Keine Kundenliste", "Es ist keine Kundenliste gespeichert.")
+            return
+        anzahl = int(getattr(self.kundenliste, "anzahl_kunden", 0) or 0) if self.kundenliste else 0
+        if not self._frage("Kundenliste entfernen", f"Die gespeicherte Kundenliste ({anzahl} Kunden) wird "
+                                                     f"gelöscht. Fortfahren?"):
+            return
+        try:
+            if hasattr(Kundenliste, "entfernen"):
+                Kundenliste.entfernen(pfad)
+            elif pfad.exists():
+                pfad.unlink()
+        except OSError as fehler:
+            self._dialog("error", "Kundenliste nicht entfernt", _verstaendliche_fehlermeldung(fehler, pfad))
+            return
+        self.kundenliste = None
+        self._kundenliste_anzeigen()
+        self._log("ℹ Kundenliste entfernt.", "hinweis")
+        self._einstellung_geaendert()
+
+    # ------------------------------------------------------------------
+    # Lauf-Verwaltung (Sperren, Fortschritt, Abbruch)
+    # ------------------------------------------------------------------
+    def _eingaben_sperren(self, sperren: bool):
+        zustand = "disabled" if sperren else "normal"
+        for w in self._sperrbar:
+            try:
+                w.config(state=zustand)
+            except tk.TclError:
+                pass
+        self.drop_zone.config(fg=FARBE_TEXT_GRAU if sperren else FARBE_AKZENT,
+                              cursor="arrow" if sperren else "hand2")
+        self._kunden_knoepfe_aktualisieren()
+        for fenster in self.vorschauen.values():
+            fenster.sperren(sperren)
+
+    def _lauf_starten(self, art: str):
+        self.laeuft = True
+        self.lauf_art = art
+        self.abbruch = threading.Event()
+        self.ocr = None
+        self.warnungen_anzahl = 0
+        self._warnzaehler_anzeigen()
+        self._eingaben_sperren(True)
+        analyse_text = "  Analysiere …  " if art == "analyse" else ANALYSE_TEXT
+        start_text = "  Läuft …  " if art == "schwaerzen" else START_TEXT
+        self.analyse_knopf.config(state="disabled", text=analyse_text,
+                                  underline=-1 if analyse_text != ANALYSE_TEXT else
+                                  _kuerzel_index(ANALYSE_TEXT, KUERZEL["analyse"]))
+        self.start_knopf.config(state="disabled", text=start_text,
+                                underline=-1 if start_text != START_TEXT else _kuerzel_index(START_TEXT,
+                                                                                             KUERZEL["start"]))
+        self.abbrechen_knopf.config(state="normal")
+        self.ordner_knopf.config(state="disabled")
+        self.fortschritt.config(value=0, maximum=1)
+        titel = "Analyse" if art == "analyse" else "Schwärzung"
+        self._trenner(f"{titel} {datetime.now():%d.%m.%Y %H:%M:%S} · Schutzstufe {_profil_name(self.basis_profil)}")
+
+    def _lauf_beenden(self):
+        self.laeuft = False
+        self.lauf_art = None
+        self.laeufe_beendet += 1
+        self.abbruch = None
+        self.ocr = None
+        self._eingaben_sperren(False)
+        self.analyse_knopf.config(state="normal", text=ANALYSE_TEXT,
+                                  underline=_kuerzel_index(ANALYSE_TEXT, KUERZEL["analyse"]))
+        self.start_knopf.config(text=START_TEXT, underline=_kuerzel_index(START_TEXT, KUERZEL["start"]))
+        self.abbrechen_knopf.config(state="disabled")
+        self.ordner_knopf.config(state="normal" if self.letzte_ausgabeordner else "disabled")
+        self._start_knopf_aktualisieren()
+
+    def _ocr_dienst_anlegen(self):
+        """Ein OCR-Dienst je Lauf (im Arbeits-Thread angelegt, damit die Oberfläche nicht wartet)."""
+        try:
+            return OcrDienst()
+        except Exception as fehler:
+            self._log(f"⚠ OCR-Dienst konnte nicht gestartet werden ({fehler}) – OCR läuft ohne Hilfsprozesse.",
+                      "warnung")
+            return None
+
+    @staticmethod
+    def _ocr_schliessen(ocr):
+        if ocr is None:
+            return
+        try:
+            ocr.schliessen()
+        except Exception:
+            pass
+
+    def abbrechen(self):
+        if not self.laeuft or self.abbruch is None:
+            return
+        self.abbruch.set()
+        ocr = self.ocr
+        if ocr is not None:
+            try:
+                ocr.abbrechen()
+            except Exception:
+                pass
+        self.abbrechen_knopf.config(state="disabled")
+        self._status("Abbruch angefordert – die aktuelle Seite wird noch beendet …")
+        self._log("Abbruch angefordert …", "warnung", zaehlen=False)
+
+    def _laeuft_hinweis(self):
+        if self._beenden_wartet:                      # es wird schon beendet: nur sagen, worauf das Fenster wartet
+            self._status(BEENDEN_TEXT)
+            return
+        self._dialog("info", "Lauf läuft noch",
+                     "Gerade läuft noch eine Analyse oder Schwärzung. Bitte warten oder „Abbrechen“ drücken.")
+
+    def _beenden_trotz_offener_freigaben(self) -> bool:
+        """Warten Ausgaben dieser Sitzung noch auf die Freigabe, einmal nachfragen (Enter = „Nein“, das Fenster bleibt
+        offen). Freigeben geht nur in dieser Sitzung (offene_freigaben). True: beenden. Die Rückfrage ist nur ein
+        Hinweis: Scheitert schon die Prüfung, steht das in fehler.log, und das Programm wird trotzdem beendet."""
+        if self._beenden_frage_offen:
+            # erneut geschlossen, während die Frage noch offen ist (unter Linux erreicht das X der Titelleiste das
+            # Fenster trotz modaler Meldung): nicht ein zweites Mal fragen – es gilt die Antwort auf die offene Frage
+            return False
+        try:
+            offen = [(p, Path(self.ausgaben[p]["pfad"])) for p in self.offene_freigaben()]
+            text = self._freigabe_offen_text(offen) if offen else ""
+        except Exception:
+            try:
+                dateien.fehler_protokollieren(*sys.exc_info())
+            except Exception:
+                pass
+            return True
+        if not offen:
+            return True
+        self._beenden_frage_offen = True
+        try:
+            return self._frage(FREIGABE_OFFEN_TITEL, text, warnung=True, standard_nein=True)
+        finally:
+            self._beenden_frage_offen = False
+
+    def _freigabe_offen_teile(self, offen: list) -> tuple[str, str]:
+        """(die wartenden Ausgaben, was nach dem Beenden noch geht) – für beide Rückfragen beim Beenden. offen: Paare
+        (Datei, Ausgabe)."""
+        einzahl = len(offen) == 1
+        zeilen = [f"  • {self._anzeigename(p)} → {Path(ausgabe).name}" for p, ausgabe in offen[:5]]
+        if len(offen) > 5:
+            zeilen.append(f"  … und {len(offen) - 5} weitere")
+        wartet = "Eine Ausgabe wartet" if einzahl else f"{len(offen)} Ausgaben warten"
+        danach = ("Nach dem Beenden lässt sie sich nicht mehr freigeben. Dann bleibt nur, das Original erneut zu "
+                  "analysieren und zu schwärzen – das ergibt eine neue Ausgabe." if einzahl else
+                  "Nach dem Beenden lassen sie sich nicht mehr freigeben. Dann bleibt nur, die Originale erneut zu "
+                  "analysieren und zu schwärzen – das ergibt neue Ausgaben.")
+        return f"{wartet} noch auf Ihre Freigabe:\n" + "\n".join(zeilen), danach
+
+    def _freigabe_offen_text(self, offen: list) -> str:
+        """Text der Rückfrage „Freigabe noch offen“ (kein Lauf aktiv): die betroffenen Dateien – Paare (Datei,
+        Ausgabe) – und was nach dem Beenden noch geht."""
+        liste, danach = self._freigabe_offen_teile(offen)
+        return (f"{liste}\n\n{danach}\n\nTrotzdem beenden?\n\n„Nein“: Das Programm bleibt offen. Prüfen und freigeben "
+                "können Sie in der Vorschau (Doppelklick auf die Datei).")
+
+    def _beenden_trotz_laufendem_lauf(self, freigaben_bestaetigt: bool = False) -> bool:
+        """Rückfrage „Lauf läuft noch“ (True: beenden). Warten Ausgaben noch auf die Freigabe – aus früheren Läufen oder
+        schon fertige des laufenden Schwärzlaufs (_wartende_ausgaben) –, nennt sie sie mit; Voreinstellung dann „Nein“
+        (Befunde Korrekturrunde „Schließen“: während eines Laufs entfiel „Freigabe noch offen“, obwohl sich auch dann
+        nach dem Beenden nichts mehr freigeben lässt; Runde 2: die Ausgaben des laufenden Laufs fehlten). Freigeben geht
+        erst nach dem Ende des Laufs (bis dahin ist die Vorschau gesperrt) – so steht es auch im Text. Ist
+        „Freigabe noch offen“ in diesem Beenden schon mit „Ja“ beantwortet (ein Lauf hat erst während dieser Frage
+        begonnen), nennt sie nur noch Ausgaben dieses Laufs."""
+        try:
+            offen = self._wartende_ausgaben(nur_laufender_lauf=freigaben_bestaetigt)
+        except Exception:                              # nur ein Hinweis – eine gescheiterte Prüfung hält nicht auf
+            try:
+                dateien.fehler_protokollieren(*sys.exc_info())
+            except Exception:
+                pass
+            offen = []
+        text = ("Es läuft noch eine Analyse oder Schwärzung. Wirklich beenden?\n\n"
+                "Bereits fertige Ausgabedateien bleiben erhalten; die aktuelle Datei wird nicht fertig. Das Programm "
+                "bricht den Lauf ab und schließt, sobald seine unfertigen Dateien gelöscht sind.")
+        optionen = {}
+        if offen:
+            liste, danach = self._freigabe_offen_teile(offen)
+            text += (f"\n\n{liste}\n\n{danach}\n\n„Nein“: Das Programm bleibt offen, der Lauf geht weiter. Prüfen "
+                     f"und freigeben können Sie nach dem Ende des Laufs in der Vorschau (Doppelklick auf die Datei).")
+            optionen["default"] = messagebox.NO
+        elif self.laeuft and self.lauf_art == "schwaerzen":
+            # Die Liste entsteht beim Öffnen der Frage; die Schwärzung läuft dahinter weiter. Was sie fertig schreibt,
+            # während die Frage dasteht, fehlte sonst – und „Ja“ war vorgewählt (Gegenprüfung Runde 5)
+            text += ("\n\nAusgaben, die dieser Schwärzlauf noch fertig schreibt, heißen „_PRUEFEN“, solange sie auf "
+                     "die Freigabe warten – nach dem Beenden lassen sie sich nicht mehr freigeben.\n\n„Nein“: Das "
+                     "Programm bleibt offen, der Lauf geht weiter. Prüfen und freigeben können Sie nach dem Ende des "
+                     "Laufs in der Vorschau (Doppelklick auf die Datei).")
+            optionen["default"] = messagebox.NO
+        self._beenden_frage_offen = True
+        try:
+            antwort = messagebox.askyesno(LAUF_LAEUFT_TITEL, _anzeigetext(text), icon="warning", parent=self.root,
+                                          **optionen)
+        except tk.TclError:
+            antwort = False
+        finally:
+            self._beenden_frage_offen = False
+        self.letzter_dialog = ("askyesno", LAUF_LAEUFT_TITEL, str(antwort))
+        return bool(antwort)
+
+    def schliessen(self):
+        """Fenster schließen; Einstellungen sichern, Sperre freigeben. Vorher fragt es nach: ohne laufenden Lauf,
+        solange Ausgaben dieser Sitzung noch auf die Freigabe warten („Freigabe noch offen“), und solange ein Lauf
+        aktiv ist („Lauf läuft noch“ – auch für einen Lauf, der erst während der ersten Frage begonnen hat; warten noch
+        Ausgaben auf die Freigabe, nennt diese Frage sie mit). „Ja“ während eines Laufs bricht ihn ab; das Fenster
+        schließt erst, wenn der Arbeits-Thread aufgeräumt hat (_beenden_nach_dem_lauf) – sonst blieb ein halb
+        geschwärzter Zwischenstand im Ausgabeordner liegen (Befund Korrekturrunde „Schließen“).
+        Wartet gerade eine Auswahl auf eine Rückfrage (Kennwort, Fotos …), wird sie zuerst abgebrochen – erst danach
+        schließt das Fenster, damit keine (entschlüsselte) Arbeitskopie mehr entsteht oder liegen bleibt."""
+        if self.beendet:
+            return
+        if self._beenden_wartet:
+            self._status(BEENDEN_TEXT)                  # erneut geschlossen: das Fenster schließt von selbst
+            return
+        if self._beenden_frage_offen:
+            # erneut geschlossen, während eine Rückfrage offen ist (unter Linux erreicht das X der Titelleiste das
+            # Fenster trotz modaler Meldung): nicht ein zweites Mal fragen – es gilt die Antwort auf die offene Frage
+            return
+        if self._hinzufuegen_laeuft:
+            self._schliessen_angefordert = True
+            dialog = self.kennwort_dialog
+            if dialog is not None:
+                dialog.abbrechen()                      # wie „Überspringen“; _pdfs_hinzufuegen schließt danach
+            return
+        freigaben_bestaetigt = False
+        if not self.laeuft:
+            if not self._beenden_trotz_offener_freigaben():
+                return
+            freigaben_bestaetigt = True
+        if self.laeuft:
+            # auch ein Lauf, der erst während der Rückfrage „Freigabe noch offen“ begonnen hat (unter Windows bleibt ein
+            # Vorschau-Fenster dabei bedienbar: „Markierte nachschwärzen“) – „Ja“ dort bricht ihn nicht ungefragt ab
+            if not self._beenden_trotz_laufendem_lauf(freigaben_bestaetigt):
+                return
+            self._beenden_nach_dem_lauf()
+            return
+        self._beenden_abschliessen()
+
+    def _beenden_nach_dem_lauf(self):
+        """„Lauf läuft noch“ → „Ja“: den Lauf abbrechen und das Fenster erst schließen, wenn der Arbeits-Thread zu Ende
+        ist – sein Aufräumen löscht die unfertigen Dateien (Zwischenstand, Hilfsdatei der Ausgabe). Bis dahin läuft die
+        Ereignisschleife weiter: das Fenster reagiert und sagt in Statuszeile und Protokoll, worauf es wartet; Dialoge
+        öffnet es nicht mehr. Nach BEENDEN_WARTEN_S schließt es trotzdem – dann löscht _aufraeumen die eigenen
+        Zwischendateien in den Ordnern, in die der Lauf schon geschrieben hat, selbst (in Hintergrund-Threads) und nach
+        dem Ende des Laufs noch einmal (_OrdnerAufraeumen, _reste_spaeter_loeschen)."""
+        self._beenden_wartet = True
+        self.abbrechen()
+        self._log("Programm wird beendet: Lauf abgebrochen – unfertige Dateien werden gelöscht …", "warnung",
+                  zaehlen=False)
+        self._status(BEENDEN_TEXT)
+        try:
+            self.root.config(cursor="watch")
+        except tk.TclError:
+            pass
+        self._beenden_frist = time.monotonic() + BEENDEN_WARTEN_S
+        self._beenden_warten()
+
+    def _beenden_warten(self):
+        """Sieht alle BEENDEN_PRUEFEN_MS nach, ob der abgebrochene Lauf zu Ende ist; dann (oder nach der Frist)
+        schließt es das Fenster – über after(0), also erst nach dem Abschluss des Laufs (_schwaerzen_fertig): Den hat
+        der Arbeits-Thread vor seinem Ende per after() eingereiht, er kommt damit vorher dran. Sonst lief er nie, und
+        beim Nachschwärzen blieb neben der neuen Ausgabe auch die alte liegen (Gegenprobe zur Korrekturrunde
+        „Schließen“ 2: mit kurzem Prüfabstand mal so, mal so)."""
+        if self.beendet:
+            return
+        faden = self._lauf_thread
+        if faden is not None and faden.is_alive() and time.monotonic() < self._beenden_frist:
+            try:
+                self.root.after(BEENDEN_PRUEFEN_MS, self._beenden_warten)
+                return
+            except tk.TclError:
+                pass
+        try:
+            self.root.after(0, self._beenden_abschliessen)
+            return
+        except tk.TclError:
+            pass
+        self._beenden_abschliessen()
+
+    def _beenden_abschliessen(self):
+        """Einstellungen sichern, aufräumen, Fenster schließen – das Fenster schließt auch, wenn das Aufräumen scheitert
+        (sonst bliebe es nach „Lauf läuft noch“ → „Ja“ im Zustand „wird beendet“ stehen)."""
+        try:
+            self.einstellungen_speichern()
+        except Exception:
+            pass
+        self.beendet = True
+        try:
+            self._aufraeumen()
+        except Exception:
+            try:
+                dateien.fehler_protokollieren(*sys.exc_info())
+            except Exception:
+                pass
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+
+    def _aufraeumen(self):
+        """Prozessweite Zustände zurückgeben (KQ-10): threading.excepthook, Einzelinstanz-Sperre, ausstehende
+        after()-Aufrufe; Arbeitskopien (Bild als PDF, entschlüsselte PDF) und Zwischenstände dieser Sitzung löschen –
+        endgültig: danach entsteht keine neue Arbeitskopie mehr – und die eigenen Zwischendateien (.anonym_tmp_<PID>_…)
+        in den Ausgabeordnern, auch wenn ein abgebrochener Lauf nicht mehr selbst aufräumen konnte. Läuft nur einmal
+        (beim Beenden ruft es danach noch die <Destroy>-Bindung von main auf).
+
+        Ausgabeordner liest es nur, wo wirklich noch eigene Zwischendateien liegen können
+        (_ordner_mit_moeglichen_resten) – nach einem gewöhnlichen Lauf keinen: dessen Ende hat sie schon gelöscht.
+        Gelesen und gelöscht wird dort in je einem Hintergrund-Thread (_OrdnerAufraeumen): Das Fenster wartet höchstens
+        BEENDEN_ORDNER_WARTEN_S auf den ersten Versuch – ein erreichbarer Ordner ist dann sauber, ein nicht erreichbares
+        Netzlaufwerk hält das Schließen nicht auf (Befund Korrekturrunde „Schließen“ 2: der Hauptthread las jeden
+        Ausgabeordner der Sitzung, zweimal).
+        Was noch offen ist (Ordner nicht erreichbar, Datei noch geöffnet, Lauf läuft noch), erledigt der Nachlauf
+        _reste_spaeter_loeschen; bis dahin bleiben solche Ordner für den nächsten Start vermerkt."""
+        if self._aufgeraeumt:
+            return
+        self._aufgeraeumt = True
+        for kennung in self._nach_start:
+            try:
+                self.root.after_cancel(kennung)
+            except (tk.TclError, ValueError):
+                pass
+        self._nach_start.clear()
+        if threading.excepthook == self._thread_excepthook:
+            threading.excepthook = self._alter_threading_haken
+        try:
+            self._vorschau_dateien_freigeben()
+        except Exception:
+            pass
+        kopien = [Path(e["pfad"]) for e in self.arbeitskopien.values() if e and e.get("pfad")]
+        for pdf in list(self.arbeitskopien):
+            self._arbeitskopie_loeschen(pdf)
+        sitzung = dateien.aktuelle_sitzung()
+        lauf = self._lauf_thread
+        lauf_lebt = lauf is not None and lauf.is_alive()
+        frist = time.monotonic() + RESTE_WARTEN_S
+        helfer = [_OrdnerAufraeumen(o, lauf if lauf_lebt else None, frist)
+                  for o in self._ordner_mit_moeglichen_resten(lauf_lebt)]
+        if helfer:
+            try:
+                self.status_label.config(text=BEENDEN_TEXT if lauf_lebt else BEENDEN_RESTE_TEXT)
+                self.root.update_idletasks()
+            except tk.TclError:
+                pass
+            bis = time.monotonic() + BEENDEN_ORDNER_WARTEN_S
+            for h in helfer:
+                h.erster_versuch.wait(max(0.0, bis - time.monotonic()))
+        sitzung_weg = dateien.sitzung_aufraeumen(endgueltig=True)
+        offen = [h.ordner for h in helfer if not h.erledigt()]
+        if offen:
+            # der Vermerk lag im eben gelöschten Sitzungsordner: Bleibt etwas offen, findet der nächste Start den Ordner
+            # so wieder (der Nachlauf löscht den Vermerk, wenn er alles erledigt)
+            sitzung = sitzung or dateien.temp_basis() / f"sitzung_{os.getpid()}_vermerk"
+            dateien.ausgabeordner_vermerk_schreiben(sitzung, offen)
+        if helfer or lauf_lebt or (not sitzung_weg and sitzung is not None):
+            self._reste_spaeter_loeschen(sitzung, kopien, helfer, frist)
+        if self.instanz_sperre is not None:
+            self.instanz_sperre.freigeben()
+            self.instanz_sperre = None
+
+    def _ordner_mit_moeglichen_resten(self, lauf_lebt: bool) -> list[Path]:
+        """Ausgabeordner, in denen beim Beenden noch eigene Zwischendateien liegen können: die, in denen nach einem Lauf
+        eine liegen blieb, und – solange der Schwärzlauf noch lebt – die, in die er schon geschrieben hat. Nach einem
+        gewöhnlichen Lauf ist die Liste leer (dessen Ende hat seine Zwischendateien gelöscht)."""
+        with self._reste_sperre:
+            ordner = set(self._ordner_mit_resten)
+            if lauf_lebt:
+                ordner |= self._lauf_beruehrt
+        return sorted(ordner)
+
+    def _reste_spaeter_loeschen(self, sitzung: Path | None, kopien: list, helfer=(), frist: float | None = None):
+        """Nachlauf beim Beenden – was noch nicht gelöscht werden konnte oder ein noch laufender Lauf noch anlegen
+        könnte, nach dem Ende des Arbeits-Threads löschen: Arbeitskopien (Windows löscht keine offene Datei; der
+        Analyse- bzw. Schwärz-Thread liest sie noch) und den Sitzungsordner mit den Zwischenständen; die eigenen
+        Zwischendateien in den Ausgabeordnern löschen die Hilfs-Threads (helfer, _OrdnerAufraeumen), auf die er wartet.
+        Ein eigener, nicht im Hintergrund laufender Thread hält das Programm so lange am Leben – höchstens bis zur Frist
+        (RESTE_WARTEN_S nach dem Schließen), auch wenn ein Netzlaufwerk nicht antwortet: Die Hilfs-Threads laufen im
+        Hintergrund und halten das Programmende nicht auf. Bleibt etwas übrig, steht das in fehler.log, und die
+        betroffenen Ausgabeordner bleiben im Sitzungsordner vermerkt – der nächste Programmstart löscht dort."""
+        schluessel = str(sitzung) if sitzung is not None else "ausgabeordner"
+        if any(faden.is_alive() for faden in self._reste_threads.values()):
+            return                      # schon ein Nachlauf unterwegs: einer genügt
+        lauf = self._lauf_thread
+        helfer = list(helfer)
+        frist = frist if frist is not None else time.monotonic() + RESTE_WARTEN_S
+
+        def spaeter():
+            if lauf is not None and lauf.is_alive():
+                lauf.join(max(0.1, frist - time.monotonic()))
+            while True:
+                for kopie in kopien:
+                    dateien.arbeitskopie_entfernen(kopie)
+                sitzung_weg = sitzung is None or dateien.ordner_loeschen(sitzung)
+                if sitzung_weg or time.monotonic() >= frist:
+                    break
+                time.sleep(0.25)
+            offen = [h.ordner for h in helfer if not h.erledigt()]
+            if offen and sitzung is not None:
+                dateien.ausgabeordner_vermerk_schreiben(sitzung, offen)      # gleich wieder vermerken
+            for h in helfer:
+                h.faden.join(max(0.0, frist - time.monotonic()))
+            lauf_lebt = lauf is not None and lauf.is_alive()
+            offen = [h.ordner for h in helfer if lauf_lebt or not h.erledigt()]
+            if not sitzung_weg:
+                hinweis = RuntimeError(f"Arbeitskopien im Ordner für Zwischendateien (%LOCALAPPDATA%\\"
+                                       f"PDF-Anonymisierer\\temp\\{Path(sitzung).name}) konnten beim Beenden nicht "
+                                       f"gelöscht werden (Datei noch geöffnet?) – sie werden beim nächsten "
+                                       f"Programmstart gelöscht.")
+                dateien.fehler_protokollieren(type(hinweis), hinweis, None)
+            if offen:
+                if sitzung is not None:
+                    dateien.ausgabeordner_vermerk_schreiben(sitzung, offen)
+                hinweis = RuntimeError(f"In {len(offen)} Ausgabeordner(n) konnten unfertige Zwischendateien "
+                                       f"(.anonym_tmp_…) beim Beenden nicht gelöscht oder nicht geprüft werden (Ordner "
+                                       f"nicht erreichbar, Datei noch geöffnet oder Lauf noch nicht zu Ende?) – sie "
+                                       f"werden beim nächsten Programmstart bzw. Schwärzen gelöscht. Bis dahin NICHT "
+                                       f"weitergeben.")
+                dateien.fehler_protokollieren(type(hinweis), hinweis, None)
+            elif sitzung_weg and sitzung is not None:
+                dateien.ordner_loeschen(sitzung)              # nur der Vermerk war noch da: alles erledigt
+
+        faden = threading.Thread(target=spaeter, daemon=False, name="Arbeitskopien-loeschen")
+        self._reste_threads[schluessel] = faden
+        faden.start()
+
+    # ------------------------------------------------------------------
+    # Namenserkennung vorladen (PERF-09)
+    # ------------------------------------------------------------------
+    def modell_vorladen(self):
+        """Lädt das spaCy-Modell kurz nach dem Start im Hintergrund, damit der erste Klick auf „Analysieren“
+        nicht hängt. Nur wenn Namen erkannt werden sollen und kein Lauf aktiv ist."""
+        if self.beendet or self.laeuft or self.vorladen_thread is not None:
+            return
+        var = self.kategorie_vars.get("namen")
+        if var is not None and not var.get():
+            return
+        vorher = self.status_label.cget("text")
+        self.status_label.config(text="Namenserkennung wird vorbereitet …")
+
+        def laden():
+            try:
+                with self._ner_sperre:
+                    lade_ner()
+            except Exception:
+                dateien.fehler_protokollieren(*sys.exc_info())
+            finally:
+                self._im_hauptthread(self._vorladen_fertig, vorher)
+
+        self.vorladen_thread = threading.Thread(target=laden, daemon=True, name="Modell-Vorladen")
+        self.vorladen_thread.start()
+
+    def _vorladen_fertig(self, vorher):
+        if not self.laeuft and self.status_label.cget("text") == "Namenserkennung wird vorbereitet …":
+            self.status_label.config(text=vorher if vorher and vorher != "Bereit." else "Bereit – Namenserkennung "
+                                                                                       "geladen.")
+
+    # ------------------------------------------------------------------
+    # Analyse
+    # ------------------------------------------------------------------
+    def _analyse_zusatz(self) -> dict:
+        """Optionale Vertragsparameter (Phase 2), soweit analysiere_pdf sie kennt."""
+        zusatz = {}
+        if kann(analysiere_pdf, "profil"):
+            zusatz["profil"] = self.basis_profil
+        if self.kundenliste is not None and kann(analysiere_pdf, "kundenliste"):
+            zusatz["kundenliste"] = self.kundenliste
+        return zusatz
+
+    def analysieren(self):
+        if self.laeuft:
+            self._laeuft_hinweis()
+            return
+        if not self.dateien:
+            self._dialog("warning", "Keine Dateien", "Bitte zuerst PDF-Dateien auswählen (Schritt 1).")
+            return
+        self.einstellungen_speichern()
+        aktive = self._aktive_kategorien()
+        immer = self._zeilen_aus(self.immer_feld)
+        nie = self._zeilen_aus(self.nie_feld)
+        pdfs = list(self.dateien)                       # Kopie: der Thread arbeitet nie auf der Live-Liste
+        immer_je_datei = {pdf: immer + [b for b in self.lauf_immer.get(pdf, []) if b not in immer] for pdf in pdfs}
+        zusatz = self._analyse_zusatz()
+        arbeit = {pdf: self._arbeitsdatei(pdf) for pdf in pdfs}
+        self._lauf_kontext = {"aktive": sorted(aktive), "nie": len(nie), "immer": len(immer),
+                              "profil": self.profil_var.get(), "basis_profil": self.basis_profil,
+                              "kundenliste": "kundenliste" in zusatz}
+
+        markierungen = sum(len(m) for m in self.manuell.values())
+        self._vorschauen_schliessen()
+        self.manuell.clear()
+        self.analyse_ergebnisse = {}
+        self.analyse_veraltet = False
+        for iid in self.zeilen:
+            self.baum.delete(*self.baum.get_children(iid))
+            self.baum.set(iid, "kategorie", "wird analysiert …")
+            self.baum.set(iid, "anzahl", "")
+            self._zustand_setzen(iid, "aus")
+        self._lauf_starten("analyse")
+        if markierungen:
+            self._log(f"ℹ {markierungen} manuelle Markierung(en) der letzten Vorschau wurden verworfen (neue "
+                      f"Analyse) – bitte in der Vorschau erneut setzen.", "hinweis")
+        if self.kundenliste is not None and "kundenliste" not in zusatz:
+            self._log("ℹ Die Kundenliste wird von dieser Programmversion noch nicht beim Analysieren genutzt.",
+                      "hinweis")
+        self._status("Analyse startet …")
+        self._lauf_thread = threading.Thread(target=self._analyse_lauf,
+                                             args=(pdfs, aktive, nie, immer_je_datei, zusatz, self.abbruch, arbeit),
+                                             daemon=True, name="Analyse")
+        self._lauf_thread.start()
+
+    @staticmethod
+    def _keine_pdf_ergebnis(pdf: Path, art: str) -> dict:
+        """R-01: Datei ist (inzwischen) keine PDF – nie an PyMuPDFs Seitenfunktionen geben (Absturz im C-Code)."""
+        text = (f"Die Datei ist keine PDF, sondern {dateien.art_beschreibung(art)} – sie wurde NICHT geprüft. Bitte im "
+                f"Ursprungsprogramm als PDF speichern (bei einem Foto: aus der Liste entfernen und erneut hinzufügen, "
+                f"dann wird es als PDF übernommen).")
+        ergebnis = _fehler_ergebnis(pdf, text)
+        ergebnis["meldungen"] = [{"art": "fehler", "code": "KEIN_PDF", "text": text, "seite": None}]
+        return ergebnis
+
+    def _analyse_lauf(self, pdfs, aktive, nie, immer_je_datei, zusatz, abbruch, arbeit=None):
+        ergebnisse: dict[Path, dict] = {}
+        fehler_intern = None
+        erster_fehler = None
+        weitergabe_neu = 0
+        ocr = None
+        arbeit = dict(arbeit or {})
+        try:
+            ocr = self._ocr_dienst_anlegen()
+            self.ocr = ocr
+            seiten = {pdf: _seitenzahl(arbeit.get(pdf, pdf)) for pdf in pdfs}
+            gesamt_seiten = max(1, sum(seiten.values()))
+            self._fortschritt_maximum(gesamt_seiten)
+            if "namen" in aktive:
+                self._status("Lade Namenserkennungs-Modell …")
+                try:
+                    with self._ner_sperre:              # wartet ggf. auf das Vorladen (PERF-09)
+                        lade_ner()
+                except Exception as fehler:
+                    dateien.fehler_protokollieren(*sys.exc_info())
+                    self._log(f"✖ Namenserkennung konnte nicht geladen werden ({type(fehler).__name__}: {fehler}) "
+                              f"– Namen werden in diesem Lauf NICHT erkannt!", "fehler")
+            lauf = None
+            if LaufWissen is not None and kann(analysiere_pdf, "lauf"):
+                try:
+                    lauf = LaufWissen()
+                except Exception:
+                    dateien.fehler_protokollieren(*sys.exc_info())
+            if lauf is not None:
+                zusatz = dict(zusatz, lauf=lauf)
+            basis = 0
+            for nr, pdf in enumerate(pdfs, 1):
+                if abbruch.is_set():
+                    break
+                name = self._anzeigename(pdf)
+                self._status(f"Analyse: Datei {nr}/{len(pdfs)} – {name}")
+
+                def fortschritt(seite, gesamt, _basis=basis, _nr=nr, _pdf=pdf, _name=name):
+                    self._fortschritt_setzen(_basis + min(int(seite), seiten[_pdf]))
+                    self._status(f"Analyse: Datei {_nr}/{len(pdfs)}, Seite {seite}/{gesamt} – {_name}")
+
+                datei = arbeit.get(pdf, pdf)
+                try:                                        # jede Datei für sich (KQ-03)
+                    art = dateien.datei_art(datei)
+                    if not dateien.fuer_engine_erlaubt(art):
+                        ergebnis = self._keine_pdf_ergebnis(pdf, art)
+                    else:
+                        ergebnis = analysiere_pdf(datei, aktive, nie, immer_je_datei[pdf],
+                                                  melde=lambda t: self._log(t, "grau"), fortschritt=fortschritt,
+                                                  abbruch=abbruch, ocr=ocr, **zusatz)
+                        ergebnis = _analyse_ergebnis_pruefen(ergebnis, pdf)
+                    if ergebnis["fehler"] and ergebnis["fehler"] != "Abgebrochen":
+                        ergebnis["fehler"] = _fehlertext_verstaendlich(ergebnis["fehler"])
+                except Exception as fehler:
+                    log = dateien.fehler_protokollieren(*sys.exc_info())
+                    if erster_fehler is None:
+                        erster_fehler = (log, fehler)
+                    ergebnis = _fehler_ergebnis(pdf, _verstaendliche_fehlermeldung(fehler, pdf))
+                ergebnisse[pdf] = ergebnis
+                self._analyse_protokollieren(name, ergebnis)
+                self._im_hauptthread(self._datei_ergebnis_uebernehmen, pdf, ergebnis)
+                basis += seiten[pdf]
+                self._fortschritt_setzen(basis)
+            if weitergabe_anwenden is not None and not abbruch.is_set():
+                gute = [e for e in ergebnisse.values() if not e["fehler"]]
+                if len(gute) > 1:
+                    try:
+                        weitergabe_neu = int(weitergabe_anwenden(gute) or 0)
+                    except Exception:
+                        dateien.fehler_protokollieren(*sys.exc_info())
+                        self._log("⚠ Dokumentübergreifende Suche (Namen aus anderen Dateien dieses Laufs) ist "
+                                  "fehlgeschlagen – Details in fehler.log. Die Funde je Datei bleiben gültig.",
+                                  "warnung")
+        except Exception:
+            fehler_intern = sys.exc_info()
+        finally:
+            self._ocr_schliessen(ocr)
+            self._im_hauptthread(self._analyse_fertig, pdfs, ergebnisse, abbruch.is_set(), fehler_intern,
+                                 erster_fehler, weitergabe_neu)
+
+    def _datei_ergebnis_uebernehmen(self, pdf: Path, ergebnis: dict):
+        """Im Hauptthread: Ergebnis einer Datei übernehmen und ihre Funde eintragen."""
+        self.analyse_ergebnisse[pdf] = ergebnis
+        self._baum_datei_fuellen(pdf, ergebnis)
+
+    def _analyse_protokollieren(self, name: str, ergebnis: dict):
+        codes = meldungs_codes(ergebnis)
+        abgebrochen = "ABGEBROCHEN" in codes
+        if ergebnis["fehler"]:
+            self._log(f"✖ {name}: {ergebnis['fehler']}", "fehler", zaehlen=not abgebrochen)
+        for w in ergebnis["warnungen"]:
+            if abgebrochen and w.strip() == "Abgebrochen":
+                continue                                    # Abbruch nicht doppelt melden (GR-07)
+            self._log(f"⚠ {name}: {w}", "warnung")
+        for h in ergebnis["hinweise"]:
+            self._log(f"ℹ {name}: {h}", "hinweis")
+        if not abgebrochen:
+            zusatz = f", {ergebnis['seiten']} Seite(n)" if ergebnis["seiten"] else ""
+            if ergebnis["ocr_seiten"]:
+                zusatz += f", davon {ergebnis['ocr_seiten']} per OCR"
+            self._log(f"{name}: {len(ergebnis['funde'])} Fund(e){zusatz}", "grau")
+
+    def _analyse_fertig(self, pdfs, ergebnisse, abgebrochen, fehler_intern, erster_fehler=None, weitergabe_neu=0):
+        if self._beenden_wartet:
+            return                  # das Programm wird beendet (Lauf abgebrochen): keine Fundliste, kein Dialog mehr
+        self.analyse_ergebnisse.update(ergebnisse)
+        for pdf in pdfs:
+            if pdf not in ergebnisse and str(pdf) in self.zeilen and self.baum.exists(str(pdf)):
+                self.baum.set(str(pdf), "kategorie", "nicht analysiert (abgebrochen)" if abgebrochen
+                              else "nicht analysiert")
+        if weitergabe_neu:
+            for pdf, ergebnis in ergebnisse.items():
+                self._baum_datei_fuellen(pdf, ergebnis)
+        self._lauf_beenden()
+        if erster_fehler is not None:
+            self._fehler_dialog(*erster_fehler)
+        if fehler_intern:
+            self._fehler_melden(*fehler_intern)
+        self._protokoll_analyse(pdfs, ergebnisse, abgebrochen)
+        if abgebrochen:
+            self.analyse_veraltet = True
+            self._start_knopf_aktualisieren()
+            self._log("Analyse abgebrochen – Fundliste unvollständig. Bitte erneut analysieren.", "fehler",
+                      zaehlen=False)
+            self._status("Analyse abgebrochen – bitte erneut analysieren.")
+            return
+        if weitergabe_neu:
+            self._log(f"ℹ Dokumentübergreifende Suche: {weitergabe_neu} weitere Stelle(n) mit Namen/Kennungen aus "
+                      f"anderen Dateien dieses Laufs ergänzt.", "hinweis")
+
+        gesamt = sum(len(e["funde"]) for e in ergebnisse.values())
+        # „nur angeboten“ = alle Stellen abgewählt (Gesundheitsdaten in „Hoch“); angehakt zählt wie der Schwärzen-Knopf
+        # (Funde und manuelle Markierungen dieser Dateien, auch teilweise angehakt)
+        angeboten_funde = [e["funde"][i] for pdf, e in ergebnisse.items() for i in range(len(e["funde"]))
+                           if self.fund_zustand(pdf, i) == "aus"]
+        angehakt = sum(1 for pdf in ergebnisse if self.baum.exists(str(pdf)) for k in self.baum.get_children(str(pdf))
+                       if self._zustand(k) in ("an", "teil"))
+        nur_gesundheit = bool(angeboten_funde) and all(f.get("kategorie") in GESUNDHEIT_KATEGORIEN
+                                                       for f in angeboten_funde)
+        codes = {pdf: meldungs_codes(e) for pdf, e in ergebnisse.items()}
+        ohne_text = [pdf for pdf, e in ergebnisse.items() if not e["funde"]
+                     and codes[pdf] & {"KEIN_TEXT", "KAUM_LESBAR"}]
+        gesundheit = [pdf for pdf in ergebnisse if "GESUNDHEITSDATEN" in codes[pdf]]
+        vermutet = [pdf for pdf in gesundheit if self._gesundheit_nur_vermutet(ergebnisse[pdf])]
+        gesundheit_sicher = [pdf for pdf in gesundheit if pdf not in vermutet]
+        mit_fehler = [(pdf, e["fehler"]) for pdf, e in ergebnisse.items() if e["fehler"]]
+        mit_warnung = [(pdf, e["warnungen"]) for pdf, e in ergebnisse.items() if e["warnungen"]]
+        # R-04 (Paket analyse-status): Personendaten nur in Metadaten, Lesezeichen, Anhängen oder XFA – nie
+        # „keine personenbezogenen Daten“ sagen; „Schwärzen starten“ erzeugt eine bereinigte Ausgabe
+        nebenkanal = [(pdf, nk) for pdf, e in ergebnisse.items() if not e["fehler"]
+                      for nk in [_nebenkanal_bezug(e)] if nk is not None]
+        nebenkanal_block = []
+        if nebenkanal:
+            nebenkanal_block = (["Personenbezogene Daten in versteckten Teilen der Datei (Metadaten, Lesezeichen, "
+                                 "Anhänge, Formulardaten) – ein KI-Dienst bekäme sie mit dem Original mit:"]
+                                + [f"  • {self._anzeigename(p)}: {_nebenkanal_text(nk)}" for p, nk in nebenkanal[:10]]
+                                + ["„Schwärzen starten“ erzeugt eine bereinigte Ausgabe ohne diese Teile. Das "
+                                   "Original NICHT weitergeben."])
+
+        # Dateien der Auswahl, die gar nicht geprüft wurden (keine PDF, Foto nicht übernommen, ohne Kennwort, nicht
+        # lesbar) oder nicht analysiert werden konnten: dann gilt kein Satz wie „keine personenbezogenen Daten“ für
+        # die ganze Auswahl – er hieße für den Makler „der Ordner ist sauber“ (Befund Runde 2)
+        ungeprueft = list(self.nicht_geprueft.items())
+        alles_geprueft = not ungeprueft and not mit_fehler
+        geprueft = [p for p, e in ergebnisse.items() if not e["fehler"]]
+        nicht_zahl = len(ungeprueft) + len(mit_fehler)
+
+        if gesamt == 0 and nebenkanal:
+            self._log(f"Analyse fertig: auf den Seiten keine Funde, aber Personendaten in Metadaten/Anhängen von "
+                      f"{len(nebenkanal)} Datei(en) – „Schwärzen starten“ erzeugt eine bereinigte Ausgabe.",
+                      "warnung", zaehlen=False)
+            status = "Personendaten in Metadaten/Anhängen – bitte „Schwärzen starten“: die Ausgabe wird bereinigt."
+        elif gesamt and angehakt:
+            davon = f", davon {len(angeboten_funde)} nur angeboten (nicht angehakt)" if angeboten_funde else ""
+            self._log(f"Analyse fertig: {gesamt} Fund(e) in {len(ergebnisse)} Datei(en){davon}. "
+                      f"Bitte Liste prüfen (Doppelklick = Vorschau), dann schwärzen.", "ok")
+            status = (f"{gesamt} Fund(e) in {len(ergebnisse)} Datei(en){davon} – Liste prüfen (Doppelklick auf "
+                      f"eine Datei = Vorschau), dann schwärzen.")
+        elif gesamt:
+            was = "mögliche Gesundheitsangaben" if nur_gesundheit else "Funde"
+            folge = ("Wegen der Personendaten in Metadaten/Anhängen erzeugt „Schwärzen starten“ trotzdem eine "
+                     "bereinigte Ausgabe." if nebenkanal else
+                     "„Schwärzen starten“ erzeugt eine bereinigte Ausgabe – nicht angehakte Stellen bleiben darin lesbar.")
+            wo = f"{len(ergebnisse)} Datei(en)" if alles_geprueft else f"den {len(geprueft)} geprüften Datei(en)"
+            self._log(f"Analyse fertig: keine Personendaten zum Schwärzen in {wo} – nur "
+                      f"{gesamt} {was} angeboten (nicht angehakt). {folge}",
+                      "ok" if alles_geprueft else "warnung", zaehlen=False)
+            status = (f"Keine Personendaten zum Schwärzen – nur {was} angeboten (nicht angehakt). Bitte prüfen; "
+                      f"zum Schwärzen anhaken.")
+        elif alles_geprueft and ohne_text:
+            # Befund Runde 3a: für eine Datei ohne lesbaren Text (heller oder unlesbarer Scan) gilt kein „nichts zu
+            # schwärzen“ – dort wurde nichts geprüft, ihre Ausgabe wird _PRUEFEN
+            self._log(f"Analyse fertig: 0 Funde in {len(ergebnisse)} Datei(en) – soweit Text lesbar war, gibt es auf "
+                      f"den Seiten nichts zu schwärzen; in {len(ohne_text)} Datei(en) war KEIN Text lesbar – dort wurde "
+                      f"nichts geprüft, ihre bereinigte Ausgabe wird „_PRUEFEN“. „Schwärzen starten“ erzeugt je Datei "
+                      f"eine bereinigte Ausgabe (ohne versteckte Teile) – nur diese weitergeben.", "warnung",
+                      zaehlen=False)
+            status = (f"Keine Funde – aber in {len(ohne_text)} Datei(en) war kein Text lesbar: dort wurde nichts "
+                      f"geprüft (Ausgabe als „_PRUEFEN“). Bitte Hinweise im Protokoll lesen.")
+        elif alles_geprueft:
+            self._log(f"Analyse fertig: 0 Funde in {len(ergebnisse)} Datei(en) – auf den Seiten gibt es nichts zu "
+                      f"schwärzen. „Schwärzen starten“ erzeugt trotzdem je Datei eine bereinigte Ausgabe (ohne "
+                      f"versteckte Teile) – nur diese weitergeben.", "ok", zaehlen=False)
+            status = ("Keine Funde – nichts zu schwärzen. „Schwärzen starten“ erzeugt eine bereinigte Ausgabe; bitte "
+                      "Hinweise im Protokoll lesen.")
+        else:
+            self._log(f"Analyse fertig: 0 Funde in den {len(geprueft)} geprüften Datei(en) – {nicht_zahl} Datei(en) "
+                      f"der Auswahl wurden NICHT geprüft bzw. nicht analysiert (siehe unten).", "warnung",
+                      zaehlen=False)
+            status = (f"Keine Funde in den geprüften Dateien – {nicht_zahl} Datei(en) wurden NICHT geprüft "
+                      f"(siehe Protokoll).")
+        if ungeprueft:
+            # als LETZTE Protokollzeile und VORN in der (immer sichtbaren) Statuszeile
+            self._log(f"⚠ NICHT geprüft: {len(ungeprueft)} Datei(en) der Auswahl – "
+                      f"{self._nicht_geprueft_text(ungeprueft)}. Diese Dateien nicht ungeprüft weitergeben.",
+                      "warnung", zaehlen=False)
+            if not (gesamt == 0 and not nebenkanal):
+                status = f"⚠ {len(ungeprueft)} Datei(en) NICHT geprüft (siehe Protokoll) · " + status
+        self._status(status)
+
+        # Abschlussdialog aus Blöcken (je Überschrift mit ihren Punkten), durch Leerzeilen getrennt
+        bloecke: list[list[str]] = []
+        art = "info" if alles_geprueft else "warning"
+        nicht_block = self._nicht_geprueft_block()
+        ohne_text_block = (["ACHTUNG – in diesen Dateien war kein Text lesbar (z. B. unlesbarer Scan). "
+                            "Dort konnte NICHTS geprüft werden; ihre bereinigte Ausgabe wird als „_PRUEFEN“ "
+                            "abgelegt – bitte selbst ansehen, diese Dateien nicht ungeprüft weitergeben:"]
+                           + [f"  • {self._anzeigename(p)}" for p in ohne_text[:10]])
+        if gesamt == 0 and nebenkanal:
+            art = "warning"
+            bloecke.append(nebenkanal_block)
+            ohne = [p for p, e in ergebnisse.items() if not e["fehler"] and p not in dict(nebenkanal)
+                    and p not in ohne_text]
+            if ohne:
+                bloecke.append([f"In {len(ohne)} weiteren Datei(en) wurde nichts gefunden – bitte selbst durchsehen "
+                                f"(Doppelklick = Vorschau):"] + [f"  • {self._anzeigename(p)}" for p in ohne[:10]])
+            if ohne_text:                                  # auch hier: dort wurde nichts geprüft (Befund Runde 3a)
+                bloecke.append(ohne_text_block)
+        elif gesamt == 0:
+            # Dateien ohne lesbaren Text (Befund Runde 3a, heller oder unlesbarer Scan): für sie gilt kein „keine
+            # personenbezogenen Daten erkannt – nichts zu schwärzen“ – dort wurde nichts geprüft (Block ACHTUNG unten)
+            lesbar = [p for p in geprueft if p not in ohne_text]
+            if alles_geprueft and not ohne_text:
+                bloecke.append(["Es wurden keine personenbezogenen Daten erkannt – auf den Seiten gibt es nichts zu "
+                                "schwärzen. „Schwärzen starten“ erzeugt trotzdem für jede Datei eine bereinigte Ausgabe "
+                                "(ohne Dateieigenschaften, Anhänge, Formulardaten und andere versteckte Teile). "
+                                "Hochladen bitte nur diese Ausgabe, nicht das Original."])
+            elif alles_geprueft and lesbar:
+                bloecke.append([f"In den {len(lesbar)} Datei(en) mit lesbarem Text wurden keine personenbezogenen "
+                                f"Daten erkannt – dort gibt es nichts zu schwärzen. „Schwärzen starten“ erzeugt trotzdem "
+                                f"für jede Datei eine bereinigte Ausgabe (ohne Dateieigenschaften, Anhänge, Formulardaten "
+                                f"und andere versteckte Teile). Hochladen bitte nur diese Ausgabe, nicht das Original."])
+            elif alles_geprueft:
+                bloecke.append(["In keiner Datei war Text lesbar – auf personenbezogene Daten konnte NICHTS geprüft "
+                                "werden. „Schwärzen starten“ erzeugt trotzdem für jede Datei eine bereinigte Ausgabe "
+                                "(ohne Dateieigenschaften, Anhänge, Formulardaten und andere versteckte Teile), abgelegt "
+                                "als „_PRUEFEN“: erst selbst ansehen, dann in der Vorschau freigeben."])
+            elif geprueft and ohne_text:
+                bloecke.append([(f"In den {len(lesbar)} geprüften Datei(en) mit lesbarem Text wurde nichts gefunden – "
+                                 f"dort gibt es nichts zu schwärzen. " if lesbar else
+                                 "In keiner geprüften Datei war Text lesbar (siehe unten). ")
+                                + f"„Schwärzen starten“ erzeugt für die geprüften Dateien trotzdem eine bereinigte "
+                                  f"Ausgabe (ohne versteckte Teile). Das gilt NICHT für die {nicht_zahl} Datei(en), die "
+                                  f"nicht geprüft werden konnten (siehe unten) – für sie entsteht keine Ausgabe."])
+            elif geprueft:
+                bloecke.append(["In den geprüften Dateien wurde nichts gefunden – dort gibt es nichts zu schwärzen. "
+                                "„Schwärzen starten“ erzeugt für sie trotzdem eine bereinigte Ausgabe (ohne versteckte "
+                                f"Teile). Das gilt NICHT für die {nicht_zahl} Datei(en), die nicht geprüft werden "
+                                f"konnten (siehe unten) – für sie entsteht keine Ausgabe."])
+            else:
+                bloecke.append([f"Keine Datei der Auswahl konnte geprüft werden ({nicht_zahl} Datei(en), siehe "
+                                f"unten) – es wird keine Ausgabedatei erzeugt."])
+            if ohne_text:
+                art = "warning"
+                bloecke.append(ohne_text_block)
+            elif geprueft:
+                bloecke.append(["Mögliche Gründe: Das Dokument enthält keine Namen, IBANs, Adressen usw. "
+                                "(z. B. ein Bedingungswerk), oder die Daten stehen in Bildern oder Handschrift. "
+                                "Bitte das Dokument selbst durchsehen (Doppelklick = Vorschau)."])
+        elif not angehakt and nebenkanal:
+            art = "warning"
+            bloecke.append(nebenkanal_block)
+            bloecke.append(["Auf den Seiten stehen nur angebotene, NICHT angehakte Stellen – sie bleiben lesbar, "
+                            "wenn sie nicht angehakt werden."])
+        elif not angehakt:
+            satz = ("Keine Personendaten zum Schwärzen erkannt" if alles_geprueft else
+                    "In den geprüften Dateien wurden keine Personendaten zum Schwärzen erkannt")
+            bloecke.append([f"{satz} (keine Namen, Anschriften, IBANs, Nummern …). In der Fundliste stehen nur "
+                            f"angebotene, NICHT angehakte Stellen – sie bleiben lesbar, wenn sie nicht angehakt werden. "
+                            f"„Schwärzen starten“ erzeugt trotzdem eine bereinigte Ausgabe (ohne versteckte Teile)."])
+        elif nebenkanal:
+            art = "warning"
+            bloecke.append(nebenkanal_block)
+        elif ungeprueft and not self.warnungen_anzahl:
+            bloecke.append([f"Die Analyse hat {gesamt} Fund(e) in {len(geprueft)} geprüften Datei(en) ergeben – "
+                            f"bitte die Fundliste prüfen (Doppelklick = Vorschau), dann schwärzen."])
+        if self.warnungen_anzahl and gesamt:
+            art = "warning"
+            kopf = (f"Die Analyse hat {gesamt} Fund(e) ergeben und {self.warnungen_anzahl} Warnung(en)/Fehler "
+                    f"gemeldet (Details im Protokoll)" if angehakt else
+                    f"Die Analyse hat {self.warnungen_anzahl} Warnung(en)/Fehler gemeldet (Details im Protokoll)")
+            punkte = [f"  • {self._anzeigename(p)}: {ws[0]}" + (f" (+{len(ws) - 1})" if len(ws) > 1 else "")
+                      for p, ws in mit_warnung[:10]]
+            # Überschrift und ihre Punkte als EIN Block – vorne, wenn etwas angehakt ist
+            bloecke.insert(0 if angehakt else len(bloecke), [kopf + (":" if punkte else ".")] + punkte)
+        if nicht_block:
+            # gleich nach der ersten Aussage (bzw. den Warnungen) – nicht erst unter allen anderen Hinweisen
+            art = "warning"
+            bloecke.insert(min(1, len(bloecke)), nicht_block)
+        if mit_fehler:
+            art = "warning"
+            bloecke.append(["Nicht analysierbar:"] + [f"  • {self._anzeigename(p)}: {f}" for p, f in mit_fehler[:10]])
+        if gesundheit_sicher:
+            # die Engine meldet GESUNDHEITSDATEN nur, wenn sie Funde abgewählt anbietet (Hinweis-Kategorien der
+            # Schutzstufe) – in „Maximal“ sind sie angehakt und es gibt keine Meldung. Erkennungszeichen ist ⚕ (nur
+            # an angebotenen Gesundheitsdaten), nicht ⚑ (steht auch an angehakten Kennungen)
+            art = "warning"
+            bloecke.append([f"Gesundheitsdaten (Art. 9 DSGVO) erkannt – sie stehen in der Fundliste, sind aber NICHT "
+                            f"angehakt und bleiben deshalb lesbar. Zum Schwärzen bitte die nicht angehakten Zeilen "
+                            f"mit {MARKE_GESUNDHEIT.strip()} („Diagnosen …“, „Medikamente …“) anhaken – schneller per "
+                            f"Rechtsklick auf eine solche Zeile → „Kategorie … überall anhaken“ – oder die Schutzstufe "
+                            f"„Maximal“ wählen:"]
+                           + [f"  • {self._anzeigename(p)}" for p in gesundheit_sicher[:10]])
+        if vermutet:
+            bloecke.append([f"Möglicherweise Gesundheitsdaten (Art. 9 DSGVO): erkannt wurden nur Fachbegriffe ohne "
+                            f"Etikett wie „Diagnose:“, ohne ICD-Code und ohne Bezug zu einer Person – in Tarif- und "
+                            f"Leistungsübersichten sind das meist nur Leistungen. Sie stehen NICHT angehakt in der "
+                            f"Fundliste ({MARKE_GESUNDHEIT.strip()}) und bleiben lesbar. Sind es Angaben über eine "
+                            f"Person, bitte anhaken oder die Schutzstufe „Maximal“ wählen:"]
+                           + [f"  • {self._anzeigename(p)}{self._beispiele(ergebnisse[p])}" for p in vermutet[:10]])
+        if self.warnungen_anzahl and not gesamt and mit_warnung and not ohne_text:
+            art = "warning"
+            bloecke.append([f"{self.warnungen_anzahl} Warnung(en) – Details im Protokoll."])
+        if bloecke:
+            zeilen = []
+            for block in bloecke:
+                if zeilen:
+                    zeilen.append("")
+                zeilen += block
+            titel = "Analyse abgeschlossen" if gesamt else ("Personendaten in Metadaten/Anhängen" if nebenkanal
+                                                             else "Keine Funde")
+            # der Titel nennt, dass nicht alles geprüft wurde – ein bloßes „Keine Funde“ sah genauso aus wie
+            # „alles geprüft, nichts gefunden“
+            if ungeprueft or (not gesamt and not nebenkanal and not alles_geprueft):
+                titel += f" – {nicht_zahl} Datei(en) NICHT geprüft"
+            self._dialog(art, titel, "\n".join(zeilen))
+
+    @staticmethod
+    def _gesundheit_nur_vermutet(ergebnis: dict) -> bool:
+        """Beruhen alle angebotenen Gesundheitsfunde einer Datei nur auf allgemeinen Fachbegriffen (Engine:
+        analyse.gesundheit_nur_vermutet)? Ohne diese Funktion (ältere Engine) gilt die Meldung als sicher."""
+        if gesundheit_nur_vermutet is None:
+            return False
+        funde = [f for f in ergebnis.get("funde", []) if f.get("kategorie") in GESUNDHEIT_KATEGORIEN
+                 and f.get("hinweis")]
+        return bool(funde) and all(gesundheit_nur_vermutet(f) for f in funde)
+
+    @staticmethod
+    def _beispiele(ergebnis: dict, anzahl: int = 3) -> str:
+        """„ („Psychotherapie“, „Zahnersatz“ …)“ – die ersten angebotenen Gesundheitsbegriffe einer Datei."""
+        texte = list(dict.fromkeys(str(f.get("text", "")).replace("\n", " ") for f in ergebnis.get("funde", [])
+                                   if f.get("kategorie") in GESUNDHEIT_KATEGORIEN and f.get("hinweis")))
+        if not texte:
+            return ""
+        return " (" + ", ".join(f"„{x}“" for x in texte[:anzahl]) + (" …" if len(texte) > anzahl else "") + ")"
+
+    # ------------------------------------------------------------------
+    # Schwärzen
+    # ------------------------------------------------------------------
+    def _zielordner(self):
+        """(ok, Pfad|None): gewählter gemeinsamer Zielordner oder None (= neben dem Original)."""
+        if not self.zielordner_aktiv.get():
+            return True, None
+        text = self.zielordner_var.get().strip()
+        if not text:
+            self._dialog("warning", "Zielordner fehlt",
+                         "Bitte einen gemeinsamen Zielordner wählen oder die Option abschalten.")
+            return False, None
+        ziel = Path(text)
+        try:
+            ziel.mkdir(parents=True, exist_ok=True)
+        except OSError as fehler:
+            self._dialog("error", "Zielordner nicht nutzbar",
+                         f"Der Zielordner kann nicht angelegt werden:\n{ziel}\n\n"
+                         f"{_verstaendliche_fehlermeldung(fehler, ziel)}")
+            return False, None
+        return True, ziel
+
+    def _auftrag(self, pdf: Path) -> dict | None:
+        """Schwärz-Auftrag einer Datei aus den Häkchen: Funde (mit Stellen-Zuständen), manuelle Markierungen. Jede
+        fehlerfrei analysierte Datei bekommt einen Auftrag – auch ohne angehakten Fund entsteht eine bereinigte Ausgabe
+        (Runde 3). None nur für Dateien, die nicht analysiert werden konnten (keine Ausgabe möglich). Welche Funde und
+        Stellen mitgehen, entscheidet auftrag.auftrag_bauen – derselbe Weg, den der Benchmark (--weg oberflaeche)
+        misst: ganz abgewählte Funde bleiben weg, abgewählte Bildfunde gehen mit allen Bereichen abgewählt mit."""
+        ergebnis = self.analyse_ergebnisse.get(pdf)
+        if not ergebnis or ergebnis.get("fehler"):
+            return None
+        bereiche: dict[int, list] = {}
+        stellen: dict[int, list] = {}
+        for eintrag in self.manuell.get(pdf, {}).values():
+            if not eintrag.get("an", True):
+                continue
+            if eintrag["art"] == "bereich":
+                bereiche.setdefault(eintrag["seite"], []).extend(fitz.Rect(r) for r in eintrag["rechtecke"])
+            else:
+                stellen.setdefault(eintrag["seite"], []).append(
+                    (int(eintrag["start"]), int(eintrag["ende"]), PLATZHALTER_MANUELL))
+        zustaende = [self.fund_zustand(pdf, index) for index in range(len(ergebnis["funde"]))]
+        # Funde (angehakte, dahinter abgewählte Bildfunde – sie verlangen die Freigabe, zählen aber nicht als Haken),
+        # ocr_cache, modell, bereiche, stellen, nebenkanaele; „ohne_haken“: nichts angehakt, die Ausgabe ist nur
+        # bereinigt; „gefunden“ unterscheidet „keine Personendaten gefunden“ von „Funde nicht angehakt“ (Status)
+        auftrag = _auftrag_modul.auftrag_bauen(ergebnis, zustaende, self.einzelstellen_moeglich(pdf), bereiche, stellen)
+        kopie = self.arbeitskopien.get(pdf)
+        auftrag.update({
+            "pdf": pdf,
+            # die Engine liest die Arbeitskopie; die Ausgabe gehört neben das ORIGINAL (nie in den Temp-Ordner)
+            "datei": Path(kopie["pfad"]) if kopie else pdf,
+            "ziel_ordner": Path(pdf).parent / dateien.AUSGABE_ORDNER if kopie else None,
+            "nur_nebenkanal": auftrag["ohne_haken"] and _nebenkanal_bezug(ergebnis) is not None,
+            # Foto/Ausweiskopie: Gesicht, Unterschrift und Handschrift bleiben stehen – die Ausgabe braucht
+            # IMMER eine Freigabe in der Vorschau, auch wenn das Häkchen „Freigabe …“ aus ist (Befund Runde 2)
+            "foto": self._ist_foto(pdf)})
+        return auftrag
+
+    def _ist_foto(self, pdf: Path) -> bool:
+        """Wurde die Datei aus einem Foto oder Bild-Scan in eine PDF umgewandelt?"""
+        return (self.arbeitskopien.get(pdf) or {}).get("art") == "bild"
+
+    def schwaerzen(self, nur: list | None = None, ersetzt: Path | None = None) -> bool:
+        """Schwärzt alle angehakten Funde (bzw. nur die Dateien in „nur“, z. B. zum Nachschwärzen; die Ausgabe
+        „ersetzt“ wird nach Erfolg verworfen). Liefert True, wenn ein Lauf gestartet wurde."""
+        if self.laeuft:
+            self._laeuft_hinweis()
+            return False
+        dateiliste = list(nur) if nur is not None else list(self.dateien)
+        # dieselbe Regel wie die Statuszeile (_status_dateien): veraltet, abgebrochen, fehlend
+        veraltet, nicht_analysiert = self._analyse_luecken(dateiliste)
+        if veraltet:
+            self._dialog("info", "Erneut analysieren",
+                         "Die letzte Analyse wurde abgebrochen, oder Schutzstufe, Kategorien, Listen oder Dateien "
+                         "wurden seitdem geändert. Bitte zuerst erneut analysieren.")
+            return False
+        if nicht_analysiert:
+            self._dialog("info", "Erst analysieren",
+                         f"{len(nicht_analysiert)} Datei(en) sind noch nicht analysiert "
+                         f"(z. B. {nicht_analysiert[0].name}). Bitte zuerst „Analysieren“ drücken.")
+            return False
+        auftraege = [a for a in (self._auftrag(p) for p in dateiliste) if a]
+        # Dateien, deren Analyse scheiterte (keine PDF, Kennwort, beschädigt …): für sie entsteht keine Ausgabe – der
+        # Abschlussdialog nennt sie unter „OHNE Ausgabedatei“
+        self._ohne_auftrag = [(p, self.analyse_ergebnisse[p].get("fehler")) for p in dateiliste
+                              if p in self.analyse_ergebnisse and self.analyse_ergebnisse[p].get("fehler")]
+        if not auftraege:
+            self._dialog("warning", "Nichts zu schwärzen",
+                         "Keine der Dateien konnte analysiert werden – es kann keine Ausgabe entstehen. Die Gründe "
+                         "stehen im Protokoll. Diese Dateien nicht ungeprüft weitergeben.")
+            return False
+        fehlt = []
+        if any(a["bereiche"] for a in auftraege) and not self.kann_manuelle_bereiche():
+            fehlt.append("Rahmen-Bereiche")
+        if any(a["stellen"] for a in auftraege) and not self.kann_manuelle_stellen():
+            fehlt.append("einzelne Stellen")
+        if fehlt:
+            self._dialog("error", "Nicht möglich", f"Diese Programmversion kann {' und '.join(fehlt)} aus der Vorschau "
+                                                   f"nicht schwärzen. Bitte diese Markierungen entfernen oder als "
+                                                   f"IMMER-Begriff eintragen.")
+            return False
+        if ersetzt is not None:
+            ok, ziel_ordner = True, Path(ersetzt).parent
+        else:
+            ok, ziel_ordner = self._zielordner()
+        if not ok:
+            return False
+        self.einstellungen_speichern()
+        if nur is None:
+            self.letzte_ausgabeordner = []
+        freigabe = bool(self.freigabe_var.get())
+        self._schwaerz_kontext = {"freigabe": freigabe, "profil": self.profil_var.get(),
+                                  "basis_profil": self.basis_profil, "nachschwaerzen": ersetzt is not None,
+                                  "gemeinsamer_zielordner": ziel_ordner is not None and ersetzt is None,
+                                  "fotos": sum(1 for a in auftraege if a.get("foto"))}
+        zwischen = self._ausgabeordner_vermerken(auftraege, ziel_ordner)
+        ergebnisse: list[tuple[Path, dict]] = []
+        self._lauf_ergebnisse = ergebnisse              # die Rückfrage beim Beenden sieht die fertigen Ausgaben
+        with self._reste_sperre:
+            self._lauf_beruehrt = set()
+        self._lauf_starten("schwaerzen")
+        self._status("Schwärzung startet …")
+        self._lauf_thread = threading.Thread(target=self._schwaerz_lauf,
+                                             args=(auftraege, ziel_ordner, self.abbruch, freigabe, self.basis_profil,
+                                                   ersetzt, zwischen, ergebnisse),
+                                             daemon=True, name="Schwaerzung")
+        self._lauf_thread.start()
+        return True
+
+    @staticmethod
+    def _ausgabeordner_des_auftrags(auftrag: dict, ziel_ordner) -> Path:
+        """Ordner, in den die Schwärzung die Ausgabe dieses Auftrags (und ihre Hilfsdatei) schreibt."""
+        return Path(ziel_ordner or auftrag.get("ziel_ordner") or Path(auftrag["pdf"]).parent / dateien.AUSGABE_ORDNER)
+
+    def _ausgabeordner_vermerken(self, auftraege, ziel_ordner) -> Path | None:
+        """Vor dem Schwärzen: die Ausgabeordner dieses Laufs (und die, in denen von früher noch eine eigene
+        Zwischendatei liegt) im Sitzungsordner vermerken – nach einem Absturz findet der nächste Start dort liegen
+        gebliebene Zwischendateien. Liefert den Sitzungsordner: dort legt die Schwärzung ihre Zwischenstände ab (nur
+        teilweise geschwärzt – nie im Ausgabeordner); None, wenn er nicht anzulegen ist."""
+        ordner = list(dict.fromkeys(self._ausgabeordner_des_auftrags(a, ziel_ordner) for a in auftraege))
+        with self._reste_sperre:
+            ordner += sorted(o for o in self._ordner_mit_resten if o not in ordner)
+        return dateien.ausgabeordner_vermerken(ordner)
+
+    def _schwaerz_lauf(self, auftraege, ziel_ordner, abbruch, freigabe=True, profil="hoch", ersetzt=None,
+                       zwischen_ordner=None, ergebnisse: list | None = None):
+        ergebnisse = [] if ergebnisse is None else ergebnisse
+        fehler_intern = None
+        erster_fehler = None
+        ocr = None
+        ordner = {self._ausgabeordner_des_auftrags(a, ziel_ordner) for a in auftraege}
+        try:
+            ocr = self._ocr_dienst_anlegen()
+            self.ocr = ocr
+            seiten = {a["pdf"]: _seitenzahl(a.get("datei", a["pdf"])) for a in auftraege}
+            self._fortschritt_maximum(max(1, sum(seiten.values())))
+            for o in sorted(ordner):
+                entfernt = dateien.zwischendateien_aufraeumen(o)
+                if entfernt:
+                    self._log(f"ℹ {len(entfernt)} verwaiste Zwischendatei(en) einer abgebrochenen Schwärzung in "
+                              f"{o} gelöscht.", "hinweis")
+            basis = 0
+            for nr, auftrag in enumerate(auftraege, 1):
+                if abbruch.is_set():
+                    break
+                pdf = auftrag["pdf"]
+                name = self._anzeigename(pdf)
+                self._status(f"Schwärzung: Datei {nr}/{len(auftraege)} – {name}")
+
+                def fortschritt(seite, gesamt, _basis=basis, _nr=nr, _pdf=pdf, _name=name):
+                    self._fortschritt_setzen(_basis + min(int(seite), seiten[_pdf]))
+                    self._status(f"Schwärzung: Datei {_nr}/{len(auftraege)}, Seite {seite}/{gesamt} – {_name}")
+
+                with self._reste_sperre:                # hier kann gleich eine Hilfsdatei entstehen (beim Beenden)
+                    self._lauf_beruehrt.add(self._ausgabeordner_des_auftrags(auftrag, ziel_ordner))
+                kwargs = {"melde": lambda t: self._log(t, "grau"), "fortschritt": fortschritt, "abbruch": abbruch,
+                          "ocr": ocr, "ziel_ordner": ziel_ordner or auftrag.get("ziel_ordner")}
+                if zwischen_ordner is not None and kann(schwaerze_pdf, "zwischen_ordner"):
+                    kwargs["zwischen_ordner"] = zwischen_ordner     # Zwischenstände nie in den Ausgabeordner
+                # ocr_cache, Modell, Nebenkanäle, manuelle Markierungen, Freigabe, Schutzstufe (wie im Benchmark)
+                kwargs.update(_auftrag_modul.schwaerz_parameter(auftrag, freigabe, profil, schwaerze_pdf))
+                freigabe_engine = kann(schwaerze_pdf, "freigabe_erforderlich")
+                freigabe_hier = _auftrag_modul.freigabe_noetig(auftrag, freigabe)    # Fotos immer erst nach Freigabe
+                datei = auftrag.get("datei", pdf)
+                art = dateien.datei_art(datei)
+                try:
+                    if not dateien.fuer_engine_erlaubt(art):      # R-01: nie eine Nicht-PDF an die Schwärzung
+                        keine = self._keine_pdf_ergebnis(pdf, art)
+                        ergebnis = {"original": pdf, "ausgabe": None, "treffer": 0, "uebersprungen": 0,
+                                    "warnungen": [], "hinweise": [], "reste": [], "fehler": keine["fehler"],
+                                    "meldungen": keine["meldungen"]}
+                    else:
+                        ergebnis = _schwaerz_ergebnis_pruefen(schwaerze_pdf(datei, auftrag["funde"], **kwargs), pdf)
+                    if ergebnis["fehler"] and ergebnis["fehler"] != "Abgebrochen":
+                        ergebnis["fehler"] = _fehlertext_verstaendlich(ergebnis["fehler"])
+                    if freigabe_hier and not freigabe_engine:
+                        self._freigabe_emulieren(ergebnis)
+                    self._reste_verorten(ergebnis)
+                except Exception as fehler:
+                    log = dateien.fehler_protokollieren(*sys.exc_info())
+                    if erster_fehler is None and not isinstance(fehler, OSError):
+                        erster_fehler = (log, fehler)
+                    ergebnis = {"original": pdf, "ausgabe": None, "treffer": 0, "uebersprungen": 0,
+                                "warnungen": [], "hinweise": [], "reste": [],
+                                "fehler": _verstaendliche_fehlermeldung(fehler, pdf)}
+                ergebnis["_status"] = self._ausgabe_status(ergebnis)
+                ergebnisse.append((pdf, ergebnis))
+                self._schwaerz_protokollieren(name, ergebnis)
+                basis += seiten[pdf]
+                self._fortschritt_setzen(basis)
+        except Exception:
+            fehler_intern = sys.exc_info()
+        finally:
+            self._ocr_schliessen(ocr)
+            self._zwischendateien_nach_dem_lauf()
+            self._im_hauptthread(self._schwaerzen_fertig, auftraege, ergebnisse, abbruch.is_set(), fehler_intern,
+                                 erster_fehler, ersetzt)
+
+    def _zwischendateien_nach_dem_lauf(self):
+        """Ende einer Schwärzung (im Arbeits-Thread, auch nach einem Abbruch): Zwischendateien gibt es nur während eines
+        Laufs. Eigene, die die Schwärzung nicht selbst löschen konnte, jetzt löschen – in den Ausgabeordnern, in die
+        sie geschrieben hat, und in denen, wo von früher noch eine liegt (nicht in den übrigen: das Beenden und jeder
+        Lauf läsen sonst jeden Ausgabeordner, Befund Korrekturrunde „Schließen“ 2). Wo sich eine nicht löschen lässt
+        oder der Ordner nicht zu lesen ist (Netzlaufwerk getrennt), merkt es sich den Ordner (_ordner_mit_resten, dort
+        löscht das Beenden noch einmal); ist keine mehr übrig, braucht es den Vermerk der Ausgabeordner (für einen
+        Absturz) nicht mehr."""
+        try:
+            with self._reste_sperre:
+                ordner = sorted(self._lauf_beruehrt | self._ordner_mit_resten)
+            mit_resten: set[Path] = set()
+            for o in ordner:
+                try:
+                    if dateien.eigene_zwischendateien_loeschen(o, lesefehler=True):
+                        mit_resten.add(Path(o))
+                except OSError:
+                    mit_resten.add(Path(o))           # nicht lesbar: offen, ob dort noch eine liegt
+            with self._reste_sperre:
+                self._ordner_mit_resten = mit_resten
+                self._lauf_beruehrt = set()
+            if not mit_resten:
+                dateien.ausgabeordner_vermerk_loeschen()
+        except Exception:
+            dateien.fehler_protokollieren(*sys.exc_info())
+
+    @staticmethod
+    def _reste_verorten(ergebnis: dict):
+        """Reste der Selbstkontrolle (nur Text) in der Ausgabe suchen: die Vorschau zeigt sie dann orange wie einen
+        Verdacht und „Nachschwärzen“ erfasst sie (läuft im Arbeits-Thread)."""
+        ausgabe = ergebnis.get("ausgabe")
+        if not ergebnis["reste"] or ergebnis["fehler"] or ausgabe is None or not Path(ausgabe).exists():
+            return
+        try:
+            ergebnis["_reste_verdacht"] = attrappen.reste_als_verdacht(ausgabe, ergebnis["reste"],
+                                                                       ergebnis.get("verdacht") or [])
+        except Exception:
+            dateien.fehler_protokollieren(*sys.exc_info())
+
+    @staticmethod
+    def _freigabe_emulieren(ergebnis: dict):
+        """Engine ohne freigabe_erforderlich: fertige Ausgabe selbst als _PRUEFEN markieren (Attrappe)."""
+        ausgabe = ergebnis.get("ausgabe")
+        if ergebnis["fehler"] or ausgabe is None or not Path(ausgabe).exists():
+            return
+        ergebnis["status"] = "pruefen"
+        ergebnis["_freigabe_emuliert"] = True
+        try:
+            ergebnis["ausgabe"] = attrappen.als_pruefen_markieren(ausgabe)
+        except OSError as fehler:
+            ergebnis["warnungen"].append(f"Die Ausgabe konnte nicht als „_PRUEFEN“ markiert werden ({fehler}) – "
+                                         f"sie ist trotzdem erst nach Prüfung in der Vorschau weiterzugeben.")
+
+    @staticmethod
+    def _ausgabe_status(ergebnis: dict) -> str:
+        """fertig | pruefen | fehler | keine – die Engine meldet „status“ (Vertrag 5), sonst aus dem Namen."""
+        return _auftrag_modul.ausgabe_status(ergebnis)
+
+    def _schwaerz_protokollieren(self, name: str, ergebnis: dict):
+        codes = meldungs_codes(ergebnis)
+        abgebrochen = "ABGEBROCHEN" in codes
+        if (ergebnis["treffer"] == 0 and not ergebnis["fehler"] and ergebnis["ausgabe"] is None
+                and "KEIN_TREFFER" not in codes):
+            ergebnis["warnungen"].append(WARNUNG_KEIN_TREFFER)
+        if ergebnis["fehler"]:
+            self._log(f"✖ {name}: {ergebnis['fehler']}", "fehler", zaehlen=not abgebrochen)
+        elif ergebnis["ausgabe"] is not None:
+            zusatz = " – zu prüfen, dann in der Vorschau freigeben" if ergebnis["_status"] == "pruefen" else ""
+            stellen = (f"{ergebnis['treffer']} Stelle(n) ersetzt" if ergebnis["treffer"]
+                       else "nichts geschwärzt, versteckte Teile entfernt")
+            self._log(f"✔ {name}  →  {ergebnis['ausgabe']}  ({stellen}){zusatz}", "ok")
+        else:
+            self._log(f"⚠ {name}: keine Ausgabedatei erzeugt.", "warnung", zaehlen=False)
+        for w in ergebnis["warnungen"]:
+            if abgebrochen and w.strip() == "Abgebrochen":
+                continue
+            self._log(f"⚠ {name}: {w}", "warnung")
+        for h in ergebnis["hinweise"]:
+            self._log(f"ℹ {name}: {h}", "hinweis")
+        if ergebnis["reste"]:
+            self._log(f"⚠ {name}: noch auffindbar: {', '.join(ergebnis['reste'][:5])} – Ausgabe prüfen!", "warnung",
+                      zaehlen=False)
+        verdacht = ergebnis.get("verdacht") or []
+        if verdacht:
+            self._log(f"⚠ {name}: {len(verdacht)} Verdachtsstelle(n) in der Ausgabe – in der Vorschau prüfen "
+                      f"(nachschwärzen oder freigeben).", "warnung", zaehlen="VERDACHT" not in codes)
+        nicht_lokalisiert = int(ergebnis.get("stellen_nicht_lokalisiert") or 0)
+        if nicht_lokalisiert:
+            self._log(f"✖ {name}: {nicht_lokalisiert} Fundstelle(n) konnten nicht lokalisiert werden – Ausgabe "
+                      f"unbedingt prüfen!", "fehler", zaehlen="NICHT_LOKALISIERT" not in codes)
+
+    def _grund(self, ergebnis: dict, status: str, pdf: Path | None = None, auftrag: dict | None = None) -> str:
+        """Kurzer Grund zum Status einer Ausgabe (Spalte neben der Datei, Abschlussdialog): bei _PRUEFEN die Gründe der
+        Engine („pruefen_gruende“), bei „fertig“ ohne Schwärzung, ob nichts gefunden oder nichts angehakt war."""
+        if status == "fehler":
+            return ergebnis["fehler"] or ""
+        if status == "keine":
+            return ergebnis["warnungen"][0] if ergebnis["warnungen"] else "kein Treffer"
+        teile = []
+        verdacht = ergebnis.get("verdacht") or []
+        if status == "pruefen" and ergebnis.get("pruefen_gruende"):
+            teile += [str(g) for g in ergebnis["pruefen_gruende"] if str(g) != "Freigabe ausstehend"]
+        else:
+            if verdacht:
+                teile.append(f"{len(verdacht)} Verdachtsstelle(n)")
+            if ergebnis["reste"]:
+                teile.append(f"{len(ergebnis['reste'])} Fundtext(e) noch auffindbar")
+            if int(ergebnis.get("stellen_nicht_lokalisiert") or 0):
+                teile.append("Stellen nicht lokalisiert")
+        if status == "pruefen" and pdf is not None and self._ist_foto(pdf):
+            teile.append("Foto: Gesicht, Unterschrift und Handschrift selbst prüfen")
+        if status == "pruefen" and any("Lichtbild" in str(g) for g in ergebnis.get("pruefen_gruende") or ()):
+            teile.append("Ausweis: Lichtbild nicht abgedeckt bzw. nicht sicher gefunden – selbst prüfen")
+        # ohne Schwärzung (Runde 3): bereinigte Ausgabe – so klar wie möglich sagen, was das heißt; auch wenn sie nur
+        # wegen „Freigabe vor Weitergabe“ (Standard) noch _PRUEFEN heißt (Befund Runde 3: dort stand nur „Freigabe
+        # ausstehend“, und die Maklerin sah in der Vorschau keine einzige Schwärzung ohne Erklärung)
+        ohne_schwaerzung = None
+        if not teile and not int(ergebnis.get("treffer") or 0):
+            ohne_schwaerzung = ("nichts angehakt – nur versteckte Teile entfernt"
+                                if auftrag is not None and auftrag.get("gefunden") and auftrag.get("ohne_haken")
+                                else "keine personenbezogenen Daten gefunden")
+        if status == "pruefen" and not teile:
+            teile.append(f"{ohne_schwaerzung} – Freigabe ausstehend" if ohne_schwaerzung else "Freigabe ausstehend")
+        if status == "fertig" and not teile and ohne_schwaerzung:
+            teile.append(ohne_schwaerzung)
+        return " · ".join(teile)
+
+    @staticmethod
+    def _nur_freigabe_offen(ergebnis: dict, status: str) -> bool:
+        """„fertig“, oder _PRUEFEN allein wegen „Freigabe vor Weitergabe“ – kein Grund der Engine, kein Verdacht."""
+        return _auftrag_modul.nur_freigabe_offen(ergebnis, status)
+
+    def _schwaerzen_fertig(self, auftraege, ergebnisse, abgebrochen, fehler_intern, erster_fehler=None,
+                           ersetzt=None):
+        if self._beenden_wartet:
+            # das Programm wird beendet (Lauf abgebrochen): kein Abschlussdialog mehr. Wurde beim Nachschwärzen die
+            # neue Ausgabe doch noch fertig, die alte wie sonst verwerfen – sonst lägen beide im Ausgabeordner
+            if ersetzt is not None and any(e.get("ausgabe") is not None and Path(e["ausgabe"]).exists()
+                                           and not e.get("fehler") for _, e in ergebnisse):
+                try:
+                    self._vorschau_dateien_freigeben(ersetzt)
+                    verwerfen(ersetzt)
+                except Exception:
+                    dateien.fehler_protokollieren(*sys.exc_info())
+            return
+        auftrag_je_pdf = {a["pdf"]: a for a in auftraege}
+        for pdf, e in ergebnisse:
+            status = e.get("_status") or self._ausgabe_status(e)
+            if status in ("fehler", "keine") and ersetzt is not None:
+                continue                                  # Nachschwärzen gescheitert: alte Ausgabe bleibt gültig
+            verdacht = list(e.get("verdacht") or []) + list(e.get("_reste_verdacht") or [])
+            self.ausgaben[pdf] = {"pfad": e["ausgabe"], "status": status, "verdacht": verdacht,
+                                  "ergebnis": e, "grund": self._grund(e, status, pdf, auftrag_je_pdf.get(pdf))}
+            self._ausgabe_zeile_setzen(pdf)
+        geschrieben = [(pdf, e) for pdf, e in ergebnisse
+                       if e["ausgabe"] is not None and Path(e["ausgabe"]).exists()]
+        ohne_ausgabe = [(pdf, e) for pdf, e in ergebnisse
+                        if not (e["ausgabe"] is not None and Path(e["ausgabe"]).exists())]
+        verarbeitet = {pdf for pdf, _ in ergebnisse}
+        nicht_verarbeitet = [a["pdf"] for a in auftraege if a["pdf"] not in verarbeitet]
+        pruefen = [pdf for pdf, e in geschrieben if self.ausgaben.get(pdf, {}).get("status") == "pruefen"]
+        ordner: list[Path] = list(self.letzte_ausgabeordner) if ersetzt is not None else []
+        for _, e in geschrieben:
+            if e["ausgabe"].parent not in ordner:
+                ordner.append(e["ausgabe"].parent)
+        self.letzte_ausgabeordner = ordner
+        stellen = sum(e["treffer"] for _, e in geschrieben)
+        try:
+            self._protokoll_schwaerzung(auftraege, ergebnisse, abgebrochen)
+        except Exception:                                 # das Laufprotokoll darf den Abschluss nie verhindern
+            dateien.fehler_protokollieren(*sys.exc_info())
+        self._lauf_beenden()
+        if erster_fehler is not None:
+            self._fehler_dialog(*erster_fehler)
+        if fehler_intern:
+            self._fehler_melden(*fehler_intern)
+        if ersetzt is not None:
+            if abgebrochen and not ergebnisse:
+                self._status(f"Nachschwärzen abgebrochen – die bisherige Ausgabe {ersetzt.name} bleibt zu prüfen.")
+            self._nachschwaerzen_fertig(ergebnisse, ersetzt, abgebrochen)
+            return
+
+        # Dateien, die gar nicht bearbeitet werden konnten (Analyse gescheitert): keine Ausgabe (Runde 3: nur sie und
+        # Dateien, an denen die Schwärzung scheiterte, stehen unter „OHNE Ausgabedatei“)
+        ohne_auftrag = [(p, f) for p, f in getattr(self, "_ohne_auftrag", None) or () if p not in verarbeitet]
+        # ohne Schwärzung und ohne Grund – „fertig“ oder nur noch freizugeben (Befund Runde 3: gezählt wurden nur
+        # „fertig“-Ausgaben, mit „Freigabe vor Weitergabe“ (Standard) stand die Zeile also nie da)
+        nur_bereinigt = [pdf for pdf, e in geschrieben if not int(e.get("treffer") or 0)
+                         and self._nur_freigabe_offen(e, self.ausgaben.get(pdf, {}).get("status"))]
+        noch_freizugeben = [pdf for pdf in nur_bereinigt if self.ausgaben.get(pdf, {}).get("status") == "pruefen"]
+        zuordnung_warnungen = [m.get("text", "") for _, e in geschrieben for m in e.get("meldungen") or ()
+                               if isinstance(m, dict) and m.get("code") == "ZUORDNUNG" and m.get("art") == "warnung"]
+        alles_gut = (not ohne_ausgabe and not nicht_verarbeitet and not pruefen and not abgebrochen
+                     and not self.nicht_geprueft and not ohne_auftrag and not zuordnung_warnungen)
+        if abgebrochen:
+            self._log("Schwärzung abgebrochen.", "fehler", zaehlen=False)
+        self._log(f"Fertig: {len(geschrieben)} von {len(auftraege) + len(ohne_auftrag)} Datei(en) geschrieben, "
+                  f"{stellen} Stelle(n) ersetzt.", "ok" if alles_gut else "warnung", zaehlen=False)
+        for o in ordner:
+            self._log(f"Ausgabeordner: {o}", "ok")
+            if dateien.ist_cloud_ordner(o):
+                self._log("ℹ Dieser Ordner wird von einem Cloud-Dienst synchronisiert – die Ausgabe landet "
+                          "ebenfalls in der Cloud.", "hinweis")
+        if pruefen:
+            self._log(f"⚠ {len(pruefen)} Ausgabedatei(en) tragen „_PRUEFEN“ im Namen: in der Vorschau prüfen und "
+                      f"freigeben (Doppelklick auf die Datei).", "warnung", zaehlen=False)
+        self._log("Bitte jede Ausgabedatei prüfen, bevor sie an einen KI-Dienst geht – "
+                  "das Programm pseudonymisiert nur direkte Identifikatoren.", "hinweis")
+        gesamt = len(auftraege) + len(ohne_auftrag)
+        self._status(f"Fertig: {len(geschrieben)} von {gesamt} Datei(en) geschrieben, "
+                     f"{stellen} Stelle(n) ersetzt." + ("" if alles_gut else " Bitte Hinweise beachten."))
+        for pdf, fenster in list(self.vorschauen.items()):
+            if self.ausgabe_vorhanden(pdf):
+                fenster.modus_wechseln("nachher")
+
+        zeilen = [f"{len(geschrieben)} von {gesamt} Datei(en) geschrieben, {stellen} Stelle(n) ersetzt.",
+                  "Hochladen nur aus dem Ausgabeordner – nie das Original" +
+                  ("; „_PRUEFEN“-Dateien erst nach der Freigabe." if pruefen else ".")]
+        if nur_bereinigt and not noch_freizugeben:
+            zeilen.append(f"Davon {len(nur_bereinigt)} ohne Schwärzung („fertig“): auf den Seiten war nichts angehakt "
+                          f"bzw. nichts gefunden – versteckte Teile (Metadaten, Anhänge …) sind entfernt.")
+        elif nur_bereinigt:
+            # „Freigabe vor Weitergabe“ (Standard) oder ein Foto (immer mit Freigabe): ohne Fund heißen sie _PRUEFEN
+            zeilen.append(f"Davon {len(nur_bereinigt)} ohne Schwärzung: auf den Seiten war nichts angehakt bzw. nichts "
+                          f"gefunden – versteckte Teile (Metadaten, Anhänge …) sind entfernt. "
+                          f"{len(noch_freizugeben)} davon noch freizugeben („_PRUEFEN“): in der Vorschau ansehen und "
+                          f"„Freigeben“ drücken.")
+        if abgebrochen:
+            zeilen.append("Der Lauf wurde abgebrochen.")
+        if ohne_ausgabe or nicht_verarbeitet or ohne_auftrag:
+            zeilen.append("")
+            zeilen.append("OHNE Ausgabedatei – konnte nicht bearbeitet werden (Original nicht weitergeben!):")
+            for pdf, e in ohne_ausgabe[:10]:
+                grund = e["fehler"] or (e["warnungen"][0] if e["warnungen"] else "kein Treffer")
+                zeilen.append(f"  • {self._anzeigename(pdf)}: {grund}")
+            for pdf in nicht_verarbeitet[:10]:
+                zeilen.append(f"  • {self._anzeigename(pdf)}: nicht verarbeitet (abgebrochen)")
+            for pdf, grund in ohne_auftrag[:10]:
+                zeilen.append(f"  • {self._anzeigename(pdf)}: nicht analysierbar – {grund}")
+        if zuordnung_warnungen:
+            # M-25: die Zuordnungsdatei (Original-Dateinamen) liegt doch im Ausgabeordner – nicht mit hochladen
+            zeilen.append("")
+            zeilen.append("ACHTUNG Zuordnungsdatei: " + zuordnung_warnungen[0])
+        if self.nicht_geprueft:
+            zeilen.append("")
+            zeilen += self._nicht_geprueft_block()
+        if pruefen:
+            zeilen.append("")
+            zeilen.append(f"Zu prüfen: {len(pruefen)} Datei(en). {PRUEFEN_ERKLAERUNG}")
+            for pdf in pruefen[:10]:
+                eintrag = self.ausgaben[pdf]
+                grund = eintrag.get("grund")
+                zeilen.append(f"  • {self._anzeigename(pdf)} → {eintrag['pfad'].name}" + (f" ({grund})" if grund else ""))
+            if len(pruefen) > 10:
+                zeilen.append(f"  … und {len(pruefen) - 10} weitere")
+        if self.warnungen_anzahl:
+            zeilen.append("")
+            zeilen.append(f"{self.warnungen_anzahl} Warnung(en)/Fehler – Details stehen im Protokoll.")
+        if ordner:
+            zeilen.append("")
+            stamm = dateien.gemeinsamer_stamm(ordner) if len(ordner) > 3 else None
+            if stamm is not None:
+                zeilen.append(f"{len(ordner)} Ausgabeordner unterhalb von {stamm} (vollständige Liste im Protokoll).")
+            else:
+                zeilen.append("Ausgabeordner:")
+                zeilen += [f"  {o}" for o in ordner[:5]]
+                if len(ordner) > 5:
+                    zeilen.append(f"  … und {len(ordner) - 5} weitere (siehe Protokoll)")
+        zeilen.append("")
+        zeilen.append("Bitte jede Ausgabedatei vor der Weitergabe prüfen.")
+        art = "info" if alles_gut and not self.warnungen_anzahl else "warning"
+        self._abschluss_dialog(art, "Schwärzung abgeschlossen", "\n".join(zeilen), ordner, pruefen)
+
+    def _nachschwaerzen_fertig(self, ergebnisse, ersetzt: Path, abgebrochen: bool):
+        """Ende eines Nachschwärz-Laufs: alte Ausgabe verwerfen, Vorschau auf die neue Ausgabe umstellen."""
+        for pdf, e in ergebnisse:
+            fenster = self.vorschauen.get(pdf)
+            if e["ausgabe"] is not None and Path(e["ausgabe"]).exists() and not e["fehler"]:
+                try:
+                    self._vorschau_dateien_freigeben(ersetzt)
+                    verwerfen(ersetzt)
+                    self._ereignis(f"{ersetzt.name} nachgeschwärzt → {e['ausgabe'].name} (alte Ausgabe verworfen)")
+                    self._log(f"ℹ {self._anzeigename(pdf)}: nachgeschwärzt → {e['ausgabe'].name} "
+                              f"(alte Ausgabe {ersetzt.name} verworfen).", "ok")
+                except Exception:
+                    dateien.fehler_protokollieren(*sys.exc_info())
+                    self._log(f"⚠ {self._anzeigename(pdf)}: alte Ausgabe {ersetzt.name} konnte nicht gelöscht "
+                              f"werden – bitte von Hand löschen, sie ist NICHT nachgeschwärzt.", "warnung")
+                self._status(f"Nachgeschwärzt: {e['ausgabe'].name} – bitte erneut prüfen.")
+                if fenster is not None:
+                    fenster.modus_wechseln("nachher")
+            else:
+                grund = e["fehler"] or (e["warnungen"][0] if e["warnungen"] else "keine Ausgabe")
+                self._dialog("warning", "Nachschwärzen fehlgeschlagen",
+                             f"„{self._anzeigename(pdf)}“ konnte nicht nachgeschwärzt werden: {grund}\n\n"
+                             f"Die bisherige Ausgabe {ersetzt.name} bleibt unverändert und zu prüfen.")
+                if fenster is not None:
+                    fenster.neu_zeichnen()
+
+    def _abschluss_dialog(self, art, titel, text, ordner, pruefen=()):
+        self.letzter_dialog = (art, titel, text)
+        if pruefen:
+            erste = pruefen[0]
+            frage = f"Vorschau von „{self._anzeigename(erste)}“ jetzt öffnen und prüfen?"
+            if self._frage(titel, text + "\n\n" + frage, warnung=True):
+                self.vorschau_oeffnen(erste, modus="nachher")
+        elif ordner:
+            if self._frage(titel, text + "\n\nErgebnisordner jetzt öffnen?", warnung=art == "warning"):
+                self.ergebnisordner_oeffnen()
+        else:
+            self._dialog(art, titel, text)
+
+    def ergebnisordner_oeffnen(self):
+        ordner = list(self.letzte_ausgabeordner)
+        if not ordner:
+            self._dialog("info", "Kein Ergebnis", "Es wurde in dieser Sitzung noch keine Ausgabedatei erzeugt.")
+            return
+        if len(ordner) > 3:                                   # GR-12: nicht still nur die ersten drei
+            stamm = dateien.gemeinsamer_stamm(ordner)
+            if stamm is not None and dateien.oeffne_ordner(stamm):
+                self._log(f"ℹ {len(ordner)} Ausgabeordner unterhalb von {stamm} – geöffnet wurde der gemeinsame "
+                          f"Ordner (jeweils Unterordner „{dateien.AUSGABE_ORDNER}“).", "hinweis")
+                return
+            self._log(f"⚠ Geöffnet werden nur die ersten drei von {len(ordner)} Ausgabeordnern – alle stehen "
+                      f"oben im Protokoll.", "warnung", zaehlen=False)
+        for o in ordner[:3]:
+            if not dateien.oeffne_ordner(o):
+                self._log(f"⚠ Ordner konnte nicht geöffnet werden: {o}", "warnung", zaehlen=False)
+
+    # ------------------------------------------------------------------
+    # Hilfe
+    # ------------------------------------------------------------------
+    def hilfe_grenzen(self):
+        self._dialog("info", "Was wird nicht erkannt?", GRENZEN_TEXT)
+
+    def hilfe_hinweis(self):
+        """Hilfe → „Hinweise vor der Nutzung …“: der Hinweis vom ersten Start (M-19)."""
+        self.hinweis_zeigen()
+
+    def hinweis_zeigen(self):
+        if self.hinweis_dialog is not None:
+            try:
+                if self.hinweis_dialog.fenster.winfo_exists():
+                    self.hinweis_dialog.fenster.lift()
+                    return self.hinweis_dialog
+            except tk.TclError:
+                pass
+        self.letzter_dialog = ("hinweis", ERSTSTART_TITEL, ERSTSTART_TEXT)
+        self.hinweis_dialog = HinweisDialog(self)
+        return self.hinweis_dialog
+
+    def erststart_hinweis(self):
+        """Beim Start (aus main()): den Hinweis zeigen, solange „Nicht mehr anzeigen“ nicht bestätigt wurde."""
+        if self.beendet or self.hinweis_gelesen:
+            return None
+        try:
+            return self.hinweis_zeigen()
+        except tk.TclError:
+            return None
+
+    def hinweis_bestaetigt(self, nicht_mehr_anzeigen: bool):
+        self.hinweis_dialog = None
+        if bool(nicht_mehr_anzeigen) != self.hinweis_gelesen:
+            self.hinweis_gelesen = bool(nicht_mehr_anzeigen)
+            try:
+                self.einstellungen_speichern()
+            except Exception:
+                dateien.fehler_protokollieren(*sys.exc_info())
+
+    def hilfe_ueber(self):
+        versionen = self._versionen()
+        self._dialog("info", "Über PDF-Anonymisierer",
+                     f"PDF-Anonymisierer {__version__}\n\nPseudonymisiert PDFs lokal auf diesem Rechner. Es werden "
+                     f"keine Daten ins Internet übertragen.\n"
+                     f"PyMuPDF {versionen['pymupdf']} · spaCy {versionen['spacy']} · Sprachmodell "
+                     f"{versionen['modell']}\n\n"
+                     f"Tastenkürzel: Alt+A = Analysieren, Alt+S = Schwärzen starten, Alt+V = Vorschau\n\n"
+                     f"Fehlerprotokoll: {dateien.fehlerlog_pfad()}\n(enthält Dateinamen, aber keine Ordner und "
+                     f"keine Dokumentinhalte)\nEinstellungen: {dateien.einstellungen_pfad()}")
+
+    # ------------------------------------------------------------------
+    # Laufprotokoll ohne Personendaten (M-61)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _versionen() -> dict:
+        """Programm-, PyMuPDF-, spaCy- und Modellversion (ohne das Modell zu laden)."""
+        def paket(name):
+            try:
+                return importlib.metadata.version(name)
+            except Exception:
+                return "nicht installiert"
+        pymupdf = str(getattr(fitz, "VersionBind", None) or getattr(fitz, "__version__", None) or paket("pymupdf"))
+        mupdf = getattr(fitz, "VersionFitz", None)
+        modell = None
+        try:
+            from . import namen as _namen
+            nlp = getattr(_namen, "_NLP", None)
+            if nlp is not None:
+                meta = getattr(nlp, "meta", {}) or {}
+                modell = f"{meta.get('lang', 'de')}_{meta.get('name', '?')} {meta.get('version', '')}".strip()
+        except Exception:
+            modell = None
+        if modell is None:
+            installiert = paket("de_core_news_md")
+            modell = (f"de_core_news_md {installiert} (noch nicht geladen)" if installiert != "nicht installiert"
+                      else "nicht installiert")
+        return {"programm": __version__, "pymupdf": pymupdf + (f" (MuPDF {mupdf})" if mupdf else ""),
+                "spacy": paket("spacy"), "modell": modell}
+
+    def _ereignis(self, text: str):
+        self.ereignisse.append((datetime.now().strftime("%d.%m.%Y %H:%M:%S"), text))
+
+    def _dokument_nr(self, pdf: Path) -> int:
+        return self.dateien.index(pdf) + 1 if pdf in self.dateien else 0
+
+    def _kategorie_namen(self) -> dict:
+        namen = {e[0]: e[1] for e in KATEGORIEN}
+        namen.update({"begriff": "Begriffe (IMMER-Liste)", "manuell": "manuell markiert",
+                      "lichtbild": "Lichtbilder (Ausweis)", "bild": "Bilder", "foto": "Fotobereiche"})
+        return namen
+
+    def _protokoll_analyse(self, pdfs, ergebnisse: dict, abgebrochen: bool):
+        """Zusammenfassung einer Analyse fürs Laufprotokoll: Zahlen, Kategorien und Meldungs-Codes – keine Texte,
+        keine Dateinamen."""
+        kontext = dict(self._lauf_kontext or {})
+        dokumente = []
+        for pdf in pdfs:
+            e = ergebnisse.get(pdf)
+            eintrag = {"nr": self._dokument_nr(pdf), "art": (self.arbeitskopien.get(pdf) or {}).get("art")}
+            if e is None:
+                eintrag["status"] = "nicht analysiert"
+            else:
+                angehakt, angeboten = {}, {}
+                for i, fund in enumerate(e["funde"]):
+                    ziel = angeboten if self.fund_zustand(pdf, i) == "aus" else angehakt
+                    ziel[fund.get("kategorie", "?")] = ziel.get(fund.get("kategorie", "?"), 0) + 1
+                nk = _nebenkanal_bezug(e)
+                eintrag.update(status="Fehler" if e["fehler"] else "analysiert", seiten=e.get("seiten") or 0,
+                               ocr_seiten=e.get("ocr_seiten") or 0, angehakt=angehakt, angeboten=angeboten,
+                               codes=sorted(meldungs_codes(e)), nebenkanal=_nebenkanal_text(nk) if nk else None)
+            dokumente.append(eintrag)
+        self.laufprotokoll.append({"art": "Analyse", "zeit": datetime.now(), "abgebrochen": abgebrochen,
+                                   "kontext": kontext, "dokumente": dokumente})
+
+    def _protokoll_schwaerzung(self, auftraege, ergebnisse, abgebrochen: bool):
+        kontext = dict(getattr(self, "_schwaerz_kontext", None) or {})
+        nach_pdf = dict(ergebnisse)
+        dokumente = []
+        for auftrag in auftraege:
+            pdf = auftrag["pdf"]
+            e = nach_pdf.get(pdf)
+            kategorien: dict[str, int] = {}
+            for fund in auftrag["funde"]:
+                kategorien[fund.get("kategorie", "?")] = kategorien.get(fund.get("kategorie", "?"), 0) + 1
+            manuell = sum(len(v) for v in auftrag["bereiche"].values()) + sum(len(v) for v in auftrag["stellen"].values())
+            if manuell:
+                kategorien["manuell"] = manuell
+            eintrag = {"nr": self._dokument_nr(pdf), "kategorien": kategorien,
+                       "art": (self.arbeitskopien.get(pdf) or {}).get("art"),
+                       "nur_nebenkanal": bool(auftrag.get("nur_nebenkanal"))}
+            if e is None:
+                eintrag.update(ausgabe=None, status="nicht verarbeitet", stellen=0, codes=[])
+            else:
+                analyse = self.analyse_ergebnisse.get(pdf) or {}
+                codes = sorted(meldungs_codes(e) | (meldungs_codes(analyse) if analyse else set()))
+                ausgabe = e.get("ausgabe")
+                eintrag.update(ausgabe=Path(ausgabe).name if ausgabe is not None else None,
+                               status=STATUS_TEXT.get(e.get("_status"), e.get("_status") or "?"),
+                               stellen=int(e.get("treffer") or 0), verdacht=len(e.get("verdacht") or []),
+                               codes=codes)
+            dokumente.append(eintrag)
+        self.laufprotokoll.append({"art": "Schwärzung", "zeit": datetime.now(), "abgebrochen": abgebrochen,
+                                   "kontext": kontext, "dokumente": dokumente})
+
+    def laufprotokoll_text(self) -> str:
+        """Laufprotokoll als Text: Datum, Versionen, Schutzstufe, aktive Kategorien, ANZAHL der NIE-/IMMER-Einträge,
+        je Dokument Ausgabename, Status, Anzahl je Kategorie und Meldungs-Codes. Bewusst OHNE Dokumenttext, ohne
+        Originaldateinamen und ohne Ordner (die enthalten oft Kundennamen) – das Protokoll kann aufbewahrt werden."""
+        v = self._versionen()
+        namen = self._kategorie_namen()
+        art_text = {"bild": "Bild → PDF", "entschluesselt": "Kennwort entfernt", "kopie": "PDF ohne Endung"}
+        zeilen = ["PDF-Anonymisierer – Laufprotokoll",
+                  f"Erstellt: {datetime.now():%d.%m.%Y %H:%M:%S}",
+                  f"Programmversion: {v['programm']}",
+                  f"PyMuPDF: {v['pymupdf']}",
+                  f"spaCy: {v['spacy']} · Sprachmodell: {v['modell']}",
+                  "Hinweis: Dieses Protokoll enthält keine Dokumentinhalte, keine Originaldateinamen und keine "
+                  "Ordner. Dokumente sind nach ihrer Position in der Liste nummeriert.", ""]
+
+        def kategorien_text(zahlen: dict) -> str:
+            return ", ".join(f"{namen.get(k, k)} {n}" for k, n in sorted(zahlen.items())) or "keine"
+
+        for nr, lauf in enumerate(self.laufprotokoll, 1):
+            k = lauf["kontext"]
+            kopf = f"──────── Lauf {nr}: {lauf['art']} · {lauf['zeit']:%d.%m.%Y %H:%M:%S}"
+            zeilen.append(kopf + (" · ABGEBROCHEN" if lauf["abgebrochen"] else "") + " ────────")
+            stufe = _profil_name(k.get("profil", ""))
+            if k.get("profil") == attrappen.BENUTZERDEFINIERT:
+                stufe += f" (Erkennungsregeln der Stufe „{_profil_name(k.get('basis_profil', ''))}“)"
+            if stufe:
+                zeilen.append(f"Schutzstufe: {stufe}")
+            if lauf["art"] == "Analyse":
+                zeilen.append("Aktive Kategorien: " + (", ".join(namen.get(a, a) for a in k.get("aktive", []))
+                                                       or "keine"))
+                zeilen.append(f"NIE-Liste: {k.get('nie', 0)} Eintrag/Einträge · IMMER-Liste: {k.get('immer', 0)} "
+                              f"Eintrag/Einträge · Kundenliste: {'genutzt' if k.get('kundenliste') else 'nicht genutzt'}")
+                for d in lauf["dokumente"]:
+                    teile = [f"Dokument {d['nr']}"]
+                    if d.get("art"):
+                        teile.append(f"({art_text.get(d['art'], d['art'])})")
+                    if d["status"] != "analysiert":
+                        teile.append(f"– {d['status']}")
+                    if "seiten" in d:
+                        teile.append(f"– {d['seiten']} Seite(n)" + (f", {d['ocr_seiten']} per OCR"
+                                                                     if d.get("ocr_seiten") else ""))
+                        teile.append(f"– angehakt: {kategorien_text(d['angehakt'])}")
+                        if d["angeboten"]:
+                            teile.append(f"– nur angeboten: {kategorien_text(d['angeboten'])}")
+                        if d.get("nebenkanal"):
+                            teile.append(f"– Personendaten in {d['nebenkanal']}")
+                        if d["codes"]:
+                            teile.append(f"– Meldungen: {', '.join(d['codes'])}")
+                    zeilen.append("  " + " ".join(teile))
+            else:
+                zeilen.append(f"Freigabe vor Weitergabe: {'an' if k.get('freigabe') else 'aus'}"
+                              + (" (für Fotos immer)" if k.get("fotos") and not k.get("freigabe") else "")
+                              + (" · Nachschwärzen" if k.get("nachschwaerzen") else "")
+                              + (" · gemeinsamer Zielordner" if k.get("gemeinsamer_zielordner") else ""))
+                for d in lauf["dokumente"]:
+                    name = d["ausgabe"] or f"Dokument {d['nr']} (keine Ausgabe)"
+                    teile = [f"{name} (Dokument {d['nr']})" if d["ausgabe"] else name, f"– {d['status']}"]
+                    if d.get("art"):
+                        teile.append(f"– {art_text.get(d['art'], d['art'])}")
+                    teile.append(f"– {d['stellen']} Stelle(n) ersetzt")
+                    teile.append(f"– geschwärzt: {kategorien_text(d['kategorien'])}")
+                    if d.get("nur_nebenkanal"):
+                        teile.append("– nur Metadaten/Anhänge bereinigt")
+                    if d.get("verdacht"):
+                        teile.append(f"– {d['verdacht']} Verdachtsstelle(n)")
+                    if d["codes"]:
+                        teile.append(f"– Meldungen: {', '.join(d['codes'])}")
+                    zeilen.append("  " + " ".join(teile))
+            zeilen.append("")
+        if self.ereignisse:
+            zeilen.append("──────── Ereignisse (Freigabe, Verwerfen, Nachschwärzen) ────────")
+            zeilen += [f"  {zeit}  {text}" for zeit, text in self.ereignisse]
+            zeilen.append("")
+        if self.nicht_geprueft:
+            zeilen.append(f"Nicht geprüft (keine PDF, nicht lesbar oder ohne Kennwort): {len(self.nicht_geprueft)} "
+                          f"Datei(en) – Namen bewusst nicht im Protokoll.")
+        return "\n".join(zeilen).rstrip() + "\n"
+
+    def protokoll_speichern(self, pfad=None) -> Path | None:
+        """Menü Datei → „Protokoll speichern …“: Laufprotokoll dieser Sitzung als Textdatei (M-61)."""
+        if not self.laufprotokoll:
+            self._dialog("info", "Protokoll speichern", "In dieser Sitzung gab es noch keinen Lauf – bitte zuerst "
+                                                        "analysieren bzw. schwärzen.")
+            return None
+        if pfad is None:
+            vorschlag = f"{dateien.PROTOKOLL_PRAEFIX}{datetime.now():%Y-%m-%d_%H-%M}.txt"
+            ordner = self.letzte_ausgabeordner[0].parent if self.letzte_ausgabeordner else Path.home()
+            pfad = filedialog.asksaveasfilename(title="Laufprotokoll speichern", parent=self.root,
+                                                initialfile=vorschlag, initialdir=str(ordner),
+                                                defaultextension=".txt", filetypes=[("Textdateien", "*.txt")])
+            if not pfad:
+                return None
+        pfad = Path(pfad)
+        try:
+            pfad.write_text(self.laufprotokoll_text(), encoding="utf-8-sig")
+        except OSError as fehler:
+            self._dialog("error", "Protokoll nicht gespeichert", _verstaendliche_fehlermeldung(fehler, pfad))
+            return None
+        self._log(f"✔ Laufprotokoll gespeichert: {pfad.name} (ohne Dokumentinhalte und Originaldateinamen).", "ok")
+        return pfad
+
+    def fehlerlog_oeffnen(self):
+        pfad = dateien.fehlerlog_pfad()
+        try:
+            pfad.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        if not dateien.oeffne_ordner(pfad.parent):
+            self._dialog("info", "Fehlerprotokoll", f"Das Fehlerprotokoll liegt hier:\n{pfad}")
+
+    # ------------------------------------------------------------------
+    # Fehler, Dialoge, Protokoll (thread-sicher)
+    # ------------------------------------------------------------------
+    def _dialog(self, art, titel, text, eltern=None):
+        """Zeigt einen Hinweis (nur im Hauptthread aufrufen) und merkt ihn sich für Tests. Während das Fenster auf das
+        Ende eines abgebrochenen Laufs wartet, um zu schließen, öffnet es keinen Dialog mehr (er stünde im Weg)."""
+        text = _anzeigetext(text)
+        self.letzter_dialog = (art, titel, text)
+        if self._beenden_wartet:
+            return
+        zeiger = {"info": messagebox.showinfo, "warning": messagebox.showwarning,
+                  "error": messagebox.showerror}[art]
+        try:
+            zeiger(titel, text, parent=eltern or self.root)
+        except tk.TclError:
+            pass
+
+    def _frage(self, titel, text, warnung=False, eltern=None, standard_nein=False) -> bool:
+        """Ja/Nein-Frage (nur im Hauptthread); merkt sich den Text für Tests. standard_nein: Enter = „Nein“."""
+        text = _anzeigetext(text)
+        self.letzter_dialog = ("askyesno", titel, text)
+        if self._beenden_wartet:
+            return False                                # das Programm wird beendet (siehe _dialog)
+        optionen = {"default": messagebox.NO} if standard_nein else {}
+        try:
+            return bool(messagebox.askyesno(titel, text, icon="warning" if warnung else "question",
+                                            parent=eltern or self.root, **optionen))
+        except tk.TclError:
+            return False
+
+    def _fehler_melden(self, typ, wert, tb):
+        """Unerwartete Ausnahme (Tk-Callback oder Arbeits-Thread): fehler.log + Protokoll + Dialog."""
+        try:
+            pfad = dateien.fehler_protokollieren(typ, wert, tb)
+        except Exception:
+            pfad = None
+        try:
+            self._fehler_dialog(pfad, wert)
+        except Exception:
+            pass
+
+    def _fehler_dialog(self, pfad, wert):
+        ort = str(pfad) if pfad else "(das Fehlerprotokoll konnte nicht geschrieben werden)"
+        self._log(f"✖ Unerwarteter Fehler: {type(wert).__name__}: {str(wert)[:200]} – Details: {ort}", "fehler")
+        self._dialog("error", "Unerwarteter Fehler",
+                     f"Es ist ein unerwarteter Fehler aufgetreten:\n{type(wert).__name__}: {str(wert)[:300]}\n\n"
+                     f"Details stehen in:\n{ort}")
+
+    def _thread_excepthook(self, args):
+        """Sicherheitsnetz für Threads ohne eigene Fehlerbehandlung."""
+        pfad = dateien.fehler_protokollieren(args.exc_type, args.exc_value, args.exc_traceback)
+        self._im_hauptthread(self._fehler_dialog, pfad, args.exc_value)
+        self._im_hauptthread(self._lauf_notfall_freigeben)
+
+    def _lauf_notfall_freigeben(self):
+        if self.laeuft:
+            self._lauf_beenden()
+            self._status("Lauf nach Fehler beendet.")
+
+    def _im_hauptthread(self, funktion, *args):
+        """Führt eine Funktion im Tk-Hauptthread aus (aus Arbeits-Threads aufrufbar; im Hauptthread sofort)."""
+        if self.beendet:
+            return                                      # Fenster wird geschlossen, Nachzügler verwerfen
+        if threading.current_thread() is threading.main_thread():
+            try:
+                funktion(*args)
+            except tk.TclError:
+                pass                                    # Fenster bereits geschlossen
+            return
+        try:
+            self.root.after(0, funktion, *args)
+        except tk.TclError:
+            pass                                        # Fenster bereits geschlossen
+        except RuntimeError:
+            # Hauptthread verarbeitet keine Ereignisse (kein mainloop): nicht still verschlucken, aber nur einmal melden
+            if not self._hauptthread_fehler_gemeldet and not self.beendet:
+                self._hauptthread_fehler_gemeldet = True
+                dateien.fehler_protokollieren(*sys.exc_info())
+
+    def _log(self, text, stil=None, zaehlen=True):
+        """Protokollzeile; Stil „warnung“/„fehler“ zählt als Warnung einer Datei – außer zaehlen=False für
+        eigene Statuszeilen (Abbruch, Fertig-Zeile, Zusammenfassungen; GR-07)."""
+        if not text:
+            return
+        text = _anzeigetext(text)
+
+        def einfuegen():
+            if zaehlen and stil in ("warnung", "fehler"):
+                self.warnungen_anzahl += 1
+                self._warnzaehler_anzeigen()
+            self.protokoll.config(state="normal")
+            self.protokoll.insert("end", text + "\n", stil or ())
+            zeilen = int(self.protokoll.index("end-1c").split(".")[0])
+            if zeilen > PROTOKOLL_MAX_ZEILEN:
+                self.protokoll.delete("1.0", f"{zeilen - PROTOKOLL_MAX_ZEILEN}.0")
+            self.protokoll.see("end")
+            self.protokoll.config(state="disabled")
+
+        self._im_hauptthread(einfuegen)
+
+    def _trenner(self, titel):
+        self._log(f"──────── {titel} ────────", "trenner")
+
+    def _warnzaehler_anzeigen(self):
+        self.warn_label.config(text=f"⚠ {self.warnungen_anzahl} Warnung(en)/Fehler" if self.warnungen_anzahl else "")
+
+    def _status(self, text):
+        self._im_hauptthread(lambda: self.status_label.config(text=text))
+
+    def _fortschritt_setzen(self, wert):
+        self._im_hauptthread(lambda: self.fortschritt.config(value=wert))
+
+    def _fortschritt_maximum(self, maximum):
+        self._im_hauptthread(lambda: self.fortschritt.config(maximum=maximum, value=0))
+
+    def protokoll_text(self) -> str:
+        return self.protokoll.get("1.0", "end").rstrip("\n")
+
+
+def _bereits_gestartet_melden():
+    """Zweiter Start (GR-10): Hinweis statt eines zweiten Fensters."""
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        messagebox.showinfo("PDF-Anonymisierer läuft bereits",
+                            "Das Programm ist bereits geöffnet – bitte das vorhandene Fenster verwenden "
+                            "(Taskleiste). Zwei gleichzeitige Fenster würden sich Einstellungen und "
+                            "Ausgabenummern gegenseitig überschreiben.", parent=root)
+    except tk.TclError:
+        pass
+    finally:
+        root.destroy()
+
+
+def main(ereignisschleife: bool = True):
+    """Startet die Oberfläche (eine Instanz je Benutzer); ohne Drag & Drop, wenn die tkdnd-Bibliothek nicht
+    lädt. Liefert die App bzw. None, wenn bereits eine Instanz läuft."""
+    global DND_VERFUEGBAR
+    sperre = dateien.instanz_sperren()
+    if sperre is None:
+        _bereits_gestartet_melden()
+        return None
+    root = None
+    if DND_VERFUEGBAR and TkinterDnD is not None:
+        try:
+            root = TkinterDnD.Tk()
+        except Exception as fehler:          # z. B. tkdnd-DLL fehlt oder vom Virenscanner blockiert
+            DND_VERFUEGBAR = False
+            dateien.fehler_protokollieren(type(fehler), fehler, fehler.__traceback__)
+    if root is None:
+        root = tk.Tk()
+    # Arbeitskopien und Zwischenstände früherer Sitzungen (z. B. nach einem Absturz) löschen – unter der
+    # Einzelinstanz-Sperre läuft keine andere Sitzung dieses Benutzers. Vorher die Ausgabeordner lesen, die sie
+    # vermerkt haben, und ihre PIDs: dort kann eine unfertige Zwischendatei liegen (gelöscht im Hintergrund, siehe
+    # unten; als Rest eines eigenen Absturzes gemeldet wird nur, was eine dieser PIDs trägt)
+    reste_ordner: list = []
+    reste_pids: set = set()
+    try:
+        reste_ordner = dateien.ausgabeordner_frueherer_sitzungen()
+        reste_pids = dateien.pids_frueherer_sitzungen()
+    except Exception:
+        dateien.fehler_protokollieren(*sys.exc_info())
+    try:
+        dateien.alte_sitzungen_aufraeumen()
+    except Exception:
+        dateien.fehler_protokollieren(*sys.exc_info())
+    app = AnonymisiererApp(root, modell_vorladen=True)
+    app.instanz_sperre = sperre
+    app._nach_start.append(root.after(ERSTSTART_NACH_MS, app.erststart_hinweis))
+    # erst, wenn die Ereignisschleife läuft: der Hintergrund-Thread meldet über root.after()
+    app._nach_start.append(root.after(RESTE_PRUEFEN_NACH_MS, app.reste_beim_start_aufraeumen, reste_ordner,
+                                      reste_pids))
+
+    def zerstoert(ereignis):
+        if ereignis.widget is root:
+            app._aufraeumen()                   # nach schliessen() schon erledigt: läuft nur einmal
+
+    root.bind("<Destroy>", zerstoert, add="+")
+    if ereignisschleife:
+        root.mainloop()
+    return app

@@ -1,0 +1,111 @@
+# Namenspartikel und Adelsbestandteile, die vor einem Familiennamen stehen können.
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+abu
+ad-
+af
+al
+al-
+ar-
+as-
+ash-
+at-
+auf dem
+auf der
+aus dem
+aus der
+az-
+Baron von
+Baronin von
+ben
+bin
+bint
+d'
+da
+dal
+dall'
+dalla
+dalle
+das
+de
+de l'
+de la
+de las
+de los
+degli
+dei
+del
+dell'
+della
+delle
+dello
+den
+der
+des
+di
+do
+dos
+du
+e
+Edle von
+Edler von
+el
+el-
+Freifrau
+Freifrau von
+Freiherr
+Freiherr von
+Freiherrn von
+Freiin
+Freiin von
+Fürst von
+Fürst zu
+Fürstin von
+Fürstin zu
+Graf von
+Graf zu
+Gräfin von
+Gräfin zu
+Herzog von
+Herzogin von
+ibn
+in 't
+la
+Landgraf von
+le
+les
+lo
+Markgraf von
+op de
+op den
+Prinz von
+Prinz zu
+Prinzessin von
+Prinzessin zu
+Reichsfreiherr
+Reichsfreiherr von
+Ritter von
+te
+ten
+ter
+ud-
+uit de
+uit den
+ul
+van
+van 't
+van de
+van den
+van der
+van het
+vom
+von
+von dem
+von den
+von der
+von und zu
+y
+zu
+zum
+zur
