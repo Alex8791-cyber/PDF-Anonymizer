@@ -112,6 +112,11 @@ Buchungscode
 Buchungsnr.
 Buchungsnummer
 Buchungszeichen
+CAV
+CVC
+CVC2
+CVV
+CVV2
 Darlehens Nr.
 Darlehens-Nr.
 Darlehens-Nummer
@@ -128,6 +133,9 @@ Depotnr.
 Depotnummer
 Dienstnummer
 eGK-Nummer
+eVB
+eVB-Nr.
+eVB-Nummer
 Fahrgestell Nr.
 Fahrgestell-Nr
 Fahrgestell-Nr.
@@ -220,6 +228,7 @@ Karten-Nummer
 Kartennr.
 Kartennummer
 Kartennummer der eGK
+Kartenprüfnummer
 Kassenzeichen
 Kd-Nr.
 Kd.-Nr.
@@ -530,6 +539,11 @@ Transaktions-Nr.
 Transaktions-Nummer
 Transaktionsnr.
 Transaktionsnummer
+Transfer-Ticket
+Transferticket
+Transferticket-Nr.
+Transferticket-Nummer
+Transferticketnummer
 Umsatzsteuer-Identifikationsnummer
 Unfall Nr.
 Unfall-Nr.
@@ -548,6 +562,7 @@ USt-ID-Nr.
 USt-IdNr.
 USt.-IdNr.
 UStIdNr
+VB-Nummer
 Verfahrens Nr.
 Verfahrens-Nr.
 Verfahrens-Nummer
@@ -575,6 +590,8 @@ Versicherungs Nr.
 Versicherungs-Nr
 Versicherungs-Nr.
 Versicherungs-Nummer
+Versicherungsbestätigungs-Nr.
+Versicherungsbestätigungsnummer
 Versicherungskonto
 Versicherungskontonummer
 Versicherungsnr.

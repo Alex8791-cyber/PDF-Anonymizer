@@ -1735,6 +1735,10 @@ _FLIESSTEXT_DAVOR_RE = re.compile(r"(?:^|[\s(])[a-zäöüß][^\W\d_]*[ \t]+$")
 _ETIKETT_DANACH_RE = re.compile(r"[ \t]*(?::|[\-\s]?(?:nr|nummer)\b)", re.IGNORECASE)
 _ZEILENWORT_RE = re.compile(r"[^\W\d_]{2,}")
 _ZEILENANFANG_RE = re.compile(r"[\s:;,.|*()\[\]-]*")
+# "geb." vor einem großgeschriebenen Wort ("Anna Weber geb. Quarnstedt"): ist das Wort geschwärzt, war es ein
+# Geburtsname (namen.geburtsnamen) – "geb." ist dort kein Etikett eines Geburtsdatums
+_GEB_KUERZEL_RE = re.compile(r"(?i)geb\.")
+_NAME_DAHINTER_RE = re.compile(r"[ \t]*:?[ \t]*(?=[A-ZÄÖÜ])")
 
 
 def _schluesselwoerter_pruefen(lauf, nr, m, kategorien_mit_treffer: set):
@@ -1788,7 +1792,12 @@ def _schluesselwoerter_pruefen(lauf, nr, m, kategorien_mit_treffer: set):
 
     def warnen(t, i: int, kategorie: str) -> bool:
         """Warnung für das Schlüsselwort `t` in Zeile i? Ein Wert dahinter entscheidet (geschwärzt: nein, sonst ja);
-        ohne Wert: nein nur im Fließtext, sonst ja (Etikett ohne erkennbaren Wert)."""
+        ohne Wert: nein nur im Fließtext, sonst ja (Etikett ohne erkennbaren Wert). "geb." vor einem geschwärzten
+        Namen (Geburtsname) ist kein Etikett eines Geburtsdatums: nein."""
+        if kategorie == "geburt" and _GEB_KUERZEL_RE.fullmatch(t.group(0)):
+            n = _NAME_DAHINTER_RE.match(m.text, t.end())
+            if n is not None and geschwaerzt(n.end()):
+                return False
         zeile = zeilen[i]
         rest = m.text[t.end():zeile.ende]
         pos = wert_in_zeile(t.end(), zeile.ende, kategorie)

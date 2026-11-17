@@ -384,7 +384,7 @@ _KENNUNG_KATEGORIE = [
                 r"renten ?zeichen|\bahv"), "svnr"),
     (re.compile(r"kindergeld|\bkg nummer"), "kindergeld"),
     (re.compile(r"mandat"), "mandat"),
-    (re.compile(r"kreditkarte|karten ?n|kartennr"), "kreditkarte"),
+    (re.compile(r"kreditkarte|karten ?n|kartennr|karten ?pruf|\bcv[cv]\d?\b|\bcav\d?\b"), "kreditkarte"),
 ]
 # Kennungs-Etiketten, deren Wert NICHT zur Person gehört (Kennung des Gläubigers/Versicherers)
 _KENNUNG_FREMD_RE = re.compile(r"glaubiger|bankleitzahl|\bblz\b|\bust\b|umsatzsteuer|wirtschafts ?ident|\bw idnr\b|"
@@ -645,6 +645,12 @@ _SPERRE = frozenset({"EUR", "USD", "CHF", "GBP", "IBAN", "BIC", "BLZ", "NR", "TE
                      "SE", "GMBH", "VVG", "SGB", "BGB", "AVB", "PS", "KW", "CM", "MM", "QM", "ST", "STK", "MIO",
                      "MRD", "TSD", "CO", "BZW", "UND", "VON", "VOM", "BIS", "AB", "AM", "IM", "IN", "ZU", "DE",
                      "DM", "PDF", "ID", "NO", "ABS", "NRN", "SEITE"})
+
+
+def _versalien(text: str) -> bool:
+    """Überwiegend Großbuchstaben (oder gar keine Buchstaben)?"""
+    buchstaben = [c for c in text if c.isalpha()]
+    return not buchstaben or sum(c.isupper() for c in buchstaben) > 0.7 * len(buchstaben)
 
 
 def ist_betrag(tok: str) -> bool:
@@ -1292,11 +1298,36 @@ _AUSWEIS_RE = re.compile(r"(?=[A-Z0-9]*\d)[A-Z0-9]{6,12}(?![\w])")
 NR_VORSATZ_RE = re.compile(r"[ \t]*(?:Nr\.?|NR\.?|No\.?|Nº|Nummer|NUMMER)[ \t]*:?[ \t]*")
 
 
-def _kennungs_wert(text: str, s: int, e: int, kategorie: str, streng: bool) -> list:
+def eigene_wertform(eintrag: str) -> str | None:
+    """Art der eigenen Wertform eines Etiketts (muster.eigene_wertform: eVB-Nummer, Transferticket, Kartenprüfnummer)
+    oder None. Deren Werte haben eine feste Form, oft mit weniger als drei Ziffern (kennung_spanne): "A1BCDEF",
+    "123"."""
+    if not eintrag or _muster is None:
+        return None
+    return _muster.eigene_wertform(eintrag)
+
+
+def eigener_wert(text: str, s: int, e: int, art: str, kategorie: str | None, versalien: bool = True,
+                 darunter: bool = False) -> list:
+    """Wert der eigenen Form `art` am Anfang von [s, e) (muster.eigener_wert; leer, wenn keiner passt). versalien:
+    das Etikett steht in Großbuchstaben bzw. ist nicht bekannt (dann zählen eVB/Transferticket nur mit Ziffer).
+    darunter: der Wert steht nicht in der Zeile des Etiketts (Zelle darunter, Spalte, Folgezeile) – dann zählen
+    eVB/Transferticket nur mit Ziffer ("ERTEILT" unter "eVB-Nummer") und eine Kartenprüfnummer nur als ganze Zelle."""
+    while s < e and text[s] in " \t:":
+        s += 1
+    sp = _muster.eigener_wert(art, text, s, e, versalien, darunter) if _muster is not None else None
+    return [Wert(sp[0], sp[1], kategorie or "vertrag")] if sp else []
+
+
+def _kennungs_wert(text: str, s: int, e: int, kategorie: str, streng: bool, eintrag: str = "",
+                   etikett_text: str = "", darunter: bool = False) -> list:
     # "Nr." vor dem Wert gehört zum Etikett ("Versicherungsschein-" / "Nr. KH 0815 4471 2")
     m = NR_VORSATZ_RE.match(text, s, e)
     if m and m.end() < e:
         s = m.end()
+    art = eigene_wertform(eintrag)
+    if art is not None:                              # eVB, Transferticket, Kartenprüfnummer: nur ihre eigene Form
+        return eigener_wert(text, s, e, art, kategorie, _versalien(etikett_text or eintrag), darunter)
     # Kennungsarten mit eigener Form (wenige oder keine Ziffern): Kennzeichen, BIC, Ausweis
     for kat, regel in (("kfz", _KFZ_RE), ("bic", _BIC_RE), ("ausweis", _AUSWEIS_RE)):
         if kategorie == kat:
@@ -1334,7 +1365,9 @@ def werte_lesen(text: str, s: int, e: int, et: Etikett, mit_trenner: bool, eintr
     if i >= e:
         return aus
     if "kennung" in arten:
-        aus = _kennungs_wert(text, i, e, et.kategorie, streng=not mit_trenner)
+        aus = _kennungs_wert(text, i, e, et.kategorie, streng=not mit_trenner, eintrag=et.eintrag,
+                             etikett_text=text[et.start:et.ende] if et.ende > et.start else "",
+                             darunter=0 <= et.ende <= i and "\n" in text[et.ende:i])
         if aus:
             return aus
     if "datum_geburt" in arten:
@@ -1811,7 +1844,10 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
             return None                                 # Firma als Zahlungsempfänger/Versicherer
         if not _rohwert_passt(sauber, kat):
             return None
+        if art is not None and not _muster.eigener_rohwert(art, sauber):
+            return None                                 # eVB, Transferticket, CVC: "gültig bis 12/2025" ist keine
         return s, e
+    art = eigene_wertform(et.eintrag)
     b = bereich(anfang, zeile.ende)
     if b is not None:
         return [Wert(b[0], b[1], kat)]
@@ -1887,6 +1923,14 @@ def kennung_folgezeile(seite, lg: Lage, et: Etikett) -> list:
     folge = seite.zeile_von(nach) if nach < len(text) else None
     if folge is None or folge.start != nach:
         return []
+    art = eigene_wertform(et.eintrag)
+    if art is not None:
+        # eVB, Transferticket, Kartenprüfnummer: nur ihre eigene Form, ganz vorn in der Folgezeile – eVB/Transferticket
+        # mit Ziffer ("… das Transferticket" ⏎ "BEITRAGSRECHNUNG …"), eine Kartenprüfnummer nur, wenn die Zeile des
+        # Etiketts eine Etikettzeile ist und der Wert die Folgezeile beendet ("… die CVC" ⏎ "1500 EUR …")
+        if art == "cvc" and not _muster.etikett_zeile(text, et.start, et.ende):
+            return []
+        return eigener_wert(text, folge.start, folge.ende, art, et.kategorie, True, darunter=True)
     m = re.match(r"[ \t]*(?:\S{1,2}[ \t]+)?", text[folge.start:folge.ende])
     for anfang in (folge.start, folge.start + (m.end() if m else 0)):
         sp = kennung_spanne(text, anfang, folge.ende, 3)

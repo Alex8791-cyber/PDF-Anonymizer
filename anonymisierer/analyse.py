@@ -77,7 +77,7 @@ from . import ocr as _ocr
 from .detektoren import Kontext
 from .muster import KATEGORIE_PRIORITAET, KATEGORIEN
 from .namen import (ANREDEN, NAMEN_STOPPLISTE, PARTIKEL, TITEL, finde_personen,  # noqa: F401
-                    lade_ner, ner_fehler)
+                    geburtsname_teilen, lade_ner, ner_fehler)
 from .seitenmodell import (Abgebrochen, dokument_aufbauen, dokument_aus_text, dokument_vorbereiten,
                            fund_schluessel, ganzwort_stellen, ganzwort_stellen_viele, hat_xfa, modus_fuer,
                            woerter_zu_zeilen)
@@ -313,10 +313,18 @@ def _alle_abgewaehlt(fund: dict) -> bool:
     return bool(stellen) and not any(st.get("an", True) for st in stellen)
 
 
+def _kartenpruefnummer(kategorie: str, text: str) -> bool:
+    """Kurze Kartenprüfnummer (CVC/CVV, Kategorie kreditkarte, höchstens vier Zeichen)? Sie gilt nur hinter ihrem
+    Etikett: dieselben drei oder vier Ziffern anderswo sind Beträge, Seitenzahlen, Flächen oder Tarife ("250 EUR",
+    "Seite 2 von 250") – sie wird weder im Dokument noch in andere Dokumente weitergegeben."""
+    return kategorie == "kreditkarte" and sum(c.isalnum() for c in text or "") <= 4
+
+
 def _nicht_weitergeben(fund: dict) -> bool:
-    """Funde, die nie in andere Dokumente wandern: Titel ohne Namen (gehören zu keiner Person) und angebotene
-    Firmenanschriften (sonst würden sie dort zu angehakten Stellen)."""
-    return fund.get("anzeige") == ANZEIGE_TITEL or QUELLE_FIRMENANSCHRIFT in (fund.get("quellen") or ())
+    """Funde, die nie in andere Dokumente wandern: Titel ohne Namen (gehören zu keiner Person), angebotene
+    Firmenanschriften (sonst würden sie dort zu angehakten Stellen) und kurze Kartenprüfnummern (_kartenpruefnummer)."""
+    return (fund.get("anzeige") == ANZEIGE_TITEL or QUELLE_FIRMENANSCHRIFT in (fund.get("quellen") or ())
+            or _kartenpruefnummer(fund.get("kategorie", ""), fund.get("text", "")))
 
 
 class LaufWissen:
@@ -440,7 +448,9 @@ def _titelwort_ist_name(roh: str, pos: int, anzahl: int) -> bool:
 
 def _name_zerlegen(name: str) -> tuple:
     """(vornamen, nachname) aus einem Namen: Titel/Anreden/Partikel/Suffixe entfernt, 'Nachname, Vorname'
-    erkannt. Bei einem einzelnen Wort ist nachname None und das Wort steht in vornamen (Rolle offen)."""
+    erkannt, ein Geburtsname dahinter abgetrennt ("Anna Weber geb. Schulz" -> Anna, Weber). Bei einem einzelnen
+    Wort ist nachname None und das Wort steht in vornamen (Rolle offen)."""
+    name = geburtsname_teilen(name)[0]
     def tokens(teil):
         aus = []
         liste = teil.split()
@@ -502,6 +512,11 @@ def _bestandteile(name: str) -> list:
     return aus
 
 
+def _neue_person(pos: int) -> dict:
+    """Eintrag einer Person in _Personen: Varianten (Schlüssel -> erste Position), Vornamen, Geburtsnamen."""
+    return {"varianten": {}, "vor": set(), "pos": pos, "texte": {}, "geburt": set()}
+
+
 def _pseudonym(nummer: int) -> str:
     return f"[PERSON {chr(65 + nummer)}]" if nummer < 26 else f"[PERSON {nummer + 1}]"
 
@@ -519,7 +534,9 @@ class _Personen:
     - Buchstaben in der Reihenfolge des ersten Auftretens.
     - Einzelne Wörter: eindeutiger Nachname (auch als Teil genau eines Doppelnamens) -> diese Person;
       Nachname mehrerer Personen (Familie) -> [FAMILIE A]; Vorname -> erste Person damit; sonst eigene Person.
-    - Bestandteile erben das Pseudonym ihrer Person (Nachname einer Familie -> [FAMILIE X])."""
+    - Bestandteile erben das Pseudonym ihrer Person (Nachname einer Familie -> [FAMILIE X]).
+    - Geburtsname (Gruppe "Anna Weber geb. Schulz"): weiterer Nachname dieser Person – allein stehend ihr Pseudonym,
+      trägt ihn auch eine andere Person (als Nach- oder Geburtsnamen), ist er ein Familienname ([FAMILIE X])."""
 
     def __init__(self, varianten: list):
         # varianten: [(schluessel, text, pos, gruppe)] nach Position sortiert
@@ -528,20 +545,27 @@ class _Personen:
         self.namensteile: set = set()       # _schluessel aller Vor-/Nachnamen (Personenkontext)
         personen: dict = {}
         einzel: list = []
+        geburt_von: dict = {}               # Geburtsname -> einzelner Name davor ("Frau Weber geb. Schulz")
         for key, text, pos, gruppe in varianten:
             basis = gruppe or text
+            name_davor, geburtsname = geburtsname_teilen(basis)
             vor, nach = _name_zerlegen(basis)
             if nach is None and gruppe:
                 vor, nach = _name_zerlegen(text)
+                if geburtsname and fund_schluessel(geburtsname, "name") == key and name_davor:
+                    geburt_von[key] = fund_schluessel(name_davor, "name")
+                geburtsname = None
             if nach is None:
                 einzel.append((key, text, pos))
                 continue
             schl = (_schluessel(vor[0]) if vor else "", _schluessel(nach))
-            p = personen.setdefault(schl, {"varianten": {}, "vor": set(), "pos": pos, "texte": {}})
+            p = personen.setdefault(schl, _neue_person(pos))
             p["varianten"][key] = min(p["varianten"].get(key, pos), pos)
             p["texte"].setdefault(key, text)
             p["vor"].update(_schluessel(v) for v in vor)
             p["pos"] = min(p["pos"], pos)
+            if geburtsname:
+                p["geburt"].update(_schluessel(g) for g in geburtsname.split() if g.casefold() not in PARTIKEL)
         # Genitiv-Varianten ("Max Mustermanns Vertrag") mit der Grundform zusammenführen
         for schl in list(personen):
             vor, nach = schl
@@ -552,16 +576,29 @@ class _Personen:
                     ziel["varianten"][k] = min(ziel["varianten"].get(k, pos), pos)
                     ziel["texte"].setdefault(k, quelle["texte"][k])
                 ziel["vor"] |= quelle["vor"]
+                ziel["geburt"] |= quelle["geburt"]
                 ziel["pos"] = min(ziel["pos"], quelle["pos"])
         nach_index: dict = {}
         vor_index: dict = {}
         for schl, p in personen.items():
             nach_index.setdefault(schl[1], set()).add(schl)
+            for g in p["geburt"]:
+                nach_index.setdefault(g, set()).add(schl)     # Geburtsname: weiterer Nachname der Person
             for v in p["vor"]:
                 vor_index.setdefault(v, set()).add(schl)
         einzel_zuordnung: dict = {}          # key -> ("person", schl) | ("familie", nachname)
         for key, text, pos in einzel:
             s = _schluessel(text.strip(".,;:()"))
+            ziel = einzel_zuordnung.get(geburt_von.get(key, ""))
+            if ziel is not None and ziel[0] == "person" and s not in nach_index:
+                # Geburtsname hinter einem einzelnen Namen ("Frau Weber geb. Schulz"): dieselbe Person
+                schl = ziel[1]
+                personen[schl]["varianten"].setdefault(key, pos)
+                personen[schl]["texte"].setdefault(key, text)
+                personen[schl]["geburt"].add(s)
+                nach_index.setdefault(s, set()).add(schl)
+                einzel_zuordnung[key] = ("person", schl)
+                continue
             if s not in nach_index and s.endswith("s") and s[:-1] in nach_index:
                 s = s[:-1]                    # Genitiv eines bekannten Nachnamens
             if s not in nach_index:
@@ -586,14 +623,14 @@ class _Personen:
                 einzel_zuordnung[key] = ("person", schl)
             else:
                 schl = ("", s)
-                p = personen.setdefault(schl, {"varianten": {}, "vor": set(), "pos": pos, "texte": {}})
+                p = personen.setdefault(schl, _neue_person(pos))
                 p["varianten"].setdefault(key, pos)
                 p["texte"].setdefault(key, text)
                 p["pos"] = min(p["pos"], pos)
                 nach_index.setdefault(s, set()).add(schl)
                 einzel_zuordnung[key] = ("person", schl)
         reihenfolge = sorted(personen, key=lambda schl: personen[schl]["pos"])
-        familien_namen = {schl[1] for schl in reihenfolge if schl[1] and len(nach_index.get(schl[1], ())) > 1}
+        familien_namen = {n for n, traeger in nach_index.items() if n and len(traeger) > 1}
         # Zuordnung Namensschlüssel -> ("person", schl) | ("familie", nachname)
         self.zuordnung: dict = {}
         for key, (art, wert) in einzel_zuordnung.items():
@@ -610,7 +647,7 @@ class _Personen:
                 else:
                     self.zuordnung[key] = ("person", schl)
             self.namensteile.add(schl[1])
-            self.namensteile |= p["vor"]
+            self.namensteile |= p["vor"] | p["geburt"]
         # Bestandteile (Personen in Reihenfolge des Auftretens; erster Träger gewinnt)
         for schl in reihenfolge:
             p = personen[schl]
@@ -628,8 +665,9 @@ class _Personen:
         self._pos = {schl: personen[schl]["pos"] for schl in personen}
         self._familie_pos = {}
         for schl in reihenfolge:
-            if schl[1] in familien_namen:
-                self._familie_pos.setdefault(schl[1], personen[schl]["pos"])
+            for n in (schl[1], *sorted(personen[schl]["geburt"])):
+                if n in familien_namen:
+                    self._familie_pos.setdefault(n, personen[schl]["pos"])
 
     def pseudonyme(self, schluessel: list) -> dict:
         """Pseudonyme für die tatsächlich verwendeten Namensschlüssel: Buchstaben nur für Personen, die
@@ -741,6 +779,7 @@ GRUND_NIE = "NIE-Liste"
 GRUND_SATZANFANG = "mehrdeutiges Wort am Satzanfang"
 GRUND_KOMPOSITUM = "Teil eines fremden Bindestrich-Worts"
 GRUND_TITEL = "derselbe Titel bei einer anderen Person"
+GRUND_KARTENPRUEFNUMMER = "dieselben Ziffern wie eine Kartenprüfnummer, aber ohne ihr Etikett (Betrag, Seitenzahl …)"
 
 
 # ----------------------------------------------------------------------
@@ -1187,9 +1226,15 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
         modus = modus_fuer(kategorie)
         schl = schluessel_je_treffer[(kategorie, roh)]
         einzelwort = modus == "name" and len(roh.split()) == 1 and "," not in roh
+        kurz = _kartenpruefnummer(kategorie, roh)
         for s, e in vorkommen[modus].get(roh, ()):
             if kategorie != "begriff" and nie.umhuellt(s, e):
                 ausgelassen.append((s, e, schl, GRUND_NIE))
+                continue
+            if kurz:
+                # Kartenprüfnummer: nur hinter ihrem Etikett (Detektor-Treffer); gleiche Ziffern anderswo bleiben als
+                # abgewählte Stelle bekannt – die Selbstkontrolle meldet sie dann nicht als Rest
+                ausgelassen.append((s, e, schl, GRUND_KARTENPRUEFNUMMER))
                 continue
             grund = ausschluss(s, e, roh) if einzelwort else None
             if grund:
@@ -1197,7 +1242,8 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
                 continue
             kandidaten.append(_Kandidat(s, e, kategorie, schl, "weitergabe", sicherheit, 1))
     # Auf OCR-Seiten auch leicht verlesene Vorkommen ('Birkanallea 40' für 'Birkenallee 40')
-    aehnlich = _aehnliche_stellen(dok, [((kategorie, roh), roh) for kategorie, roh in gesucht])
+    aehnlich = _aehnliche_stellen(dok, [((kategorie, roh), roh) for kategorie, roh in gesucht
+                                        if not _kartenpruefnummer(kategorie, roh)])
     for (kategorie, roh), spannen in aehnlich.items():
         for s, e in spannen:
             if kategorie == "begriff" or not nie.umhuellt(s, e):

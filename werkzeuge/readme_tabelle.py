@@ -55,18 +55,23 @@ BEISPIELE = {
     "datum": "15.03.2024",
 }
 ERLAEUTERUNG = {
-    "namen": "KI-Modell (spaCy), Namenslisten und Regeln; gleiche Person = gleicher Platzhalter im Dokument",
+    "namen": "KI-Modell (spaCy), Namenslisten und Regeln; gleiche Person = gleicher Platzhalter im Dokument – auch "
+             "für den Geburtsnamen hinter „geb.“/„geborene“ („Anna Weber geb. Schulz“)",
     "iban": "auch mit falscher Prüfziffer, wenn sie eindeutig wie eine IBAN aussieht (Hinweis „Lesefehler?“)",
     "geburt": "hinter „geb.“, „Geburtsdatum“ … oder hinter einem Namen mit Komma, Stern oder Klammer („Max "
               "Mustermann, 02.09.1983“); in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre "
               "zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“",
-    "vertrag": "Nummer hinter einem Etikett wie „Vertrags-Nr.“",
+    "vertrag": "Nummer hinter einem Etikett wie „Vertrags-Nr.“; auch eVB-Nummer (elektronische "
+               "Versicherungsbestätigung) und Transferticket der Kfz-Versicherung",
     "steuerid": "ohne Beschriftung nur mit gültiger Prüfziffer",
     "steuernr": "ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma",
     "ausweis": "mit Etikett; Ausweis- und Passnummern auch ohne Etikett, wenn die Prüfziffer stimmt; auf "
                "Ausweiskopien auch die maschinenlesbare Zone",
     "mandat": "nur hinter einem Etikett",
     "bic": "hinter „BIC“, neben einer IBAN oder in eindeutiger Form (11 Zeichen auf „XXX“ oder mit Ziffer im Ortscode)",
+    "kreditkarte": "auch die Kartenprüfnummer (CVC/CVV, „CVC-Code“) hinter ihrem Etikett – nur dort, nicht dieselben "
+                   "Ziffern an anderer Stelle; „Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder "
+                   "Gutachten-Prüfnummer)",
     "ort": "Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“",
     "beruf": "hinter „Beruf:“ oder im Satz („arbeitet als …“)",
     "arbeitgeber": "hinter „Arbeitgeber:“ oder im Satz; bekannte Versicherer, Banken und Behörden bleiben stehen",
