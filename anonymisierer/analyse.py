@@ -906,6 +906,32 @@ _ABSENDER_ZEILEN_DARUEBER = 3
 # Mustermann“) sind erlaubt, Rollen in einer Firma nicht („Vorstand Dr. Hans Müller“, „Ansprechpartner Max Schmidt“)
 _ROLLEN_RE = re.compile(r"(?i)vorstand|aufsicht|geschäftsf|vorsitz|ansprech|sachbearb|bearbeit|berater|prokur|"
                         r"direkt|leiter|kontakt|vertret|vermittl|makler|mitarbeit|team|abteilung|referent|sekretar")
+# Befunde 8/58 der Domänen-Durchsicht: ein Personen-Etikett der Wissensbasis („Tierhalter:“, „Vermieter:“,
+# „Geschädigte:“, „Rechnungsempfänger:“) oder ein Kunden-Anschrift-Etikett („Rechnungsanschrift:“) vor dem Namen
+# macht die Zeile zur Kundenzeile wie die Absender-Etiketten – nicht aber Rollen des Ausstellers, eines Betriebs oder
+# einer Behörde („Rechnungssteller:“, „Praxisanschrift:“, „Behandelnder Arzt:“, „Gutachter:“)
+_ETIKETT_VOR_NAME_RE = re.compile(r"\W*(?P<etikett>[^\W\d_][^:\t\n]{2,60}?)[ \t]*:[ \t]*"
+                                  r"(?:(?:herrn?|frau|dr\.|prof\.)[ \t]+)*", re.IGNORECASE)
+_ANBIETER_ROLLE_RE = re.compile(r"(?i)aussteller|rechnungsstell|leistungserbring|arbeitgeber|auftragnehm|arzt|ärzt|"
+                                r"praxis|klinik|therapeut|behandl|gutacht|sachverständig|werkstatt|händler|kanzlei|"
+                                r"anwalt|anwält|notar|steuerberat|verwalt|bank|versicherer|gesellschaft|firm|"
+                                r"unternehm|betrieb|geschäft|rücksend|behörde|amt\b|gericht|polizei")
+
+
+def _kunden_etikett_davor(davor: str, wissen) -> bool:
+    """Steht vor dem Namen nur ein Personen-Etikett der Wissensbasis oder ein Kunden-Anschrift-Etikett mit
+    Doppelpunkt („Tierhalter: “, „Rechnungsanschrift: “), das keine Rolle des Ausstellers oder einer Firma ist?"""
+    m = _ETIKETT_VOR_NAME_RE.fullmatch(davor)
+    if m is None or wissen is None:
+        return False
+    etikett = m.group("etikett").strip()
+    if _ROLLEN_RE.search(etikett) or _ANBIETER_ROLLE_RE.search(etikett):
+        return False
+    try:
+        return bool(wissen.index("etiketten_person").eintrag_fuer(etikett)
+                    or wissen.index("etiketten_adresse").eintrag_fuer(etikett))
+    except Exception:
+        return False
 
 
 def _firmenbeleg(text: str) -> bool:
@@ -932,7 +958,7 @@ def _person_vorn(seite, zeile, namen: list) -> bool:
         davor = text[zeile.start:s]
         if _SEGMENT_TRENNER_RE.search(davor):
             continue                      # der Name steht nicht im ersten Segment
-        if not _ABSENDER_ETIKETT_RE.match(davor):
+        if not _ABSENDER_ETIKETT_RE.match(davor) and not _kunden_etikett_davor(davor, wissen):
             woerter = davor.split()
             if (len(woerter) > 3 or any(c.isdigit() or c == ":" for c in davor) or _ROLLEN_RE.search(davor)
                     or not all(w[:1].isupper() for w in woerter)):

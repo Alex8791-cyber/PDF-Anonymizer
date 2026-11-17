@@ -14,7 +14,7 @@ Toleranz für OCR-Lesefehler gehört nicht hierher (detektoren/ocr_lesart.py pr�
 import functools
 import re
 
-from . import kennungsformen
+from . import kennungsformen, personenkontext
 
 _NLP = None          # das geladene Sprachmodell (oder None)
 _NLP_FEHLER = None   # Begründung, falls nicht verfügbar
@@ -218,6 +218,10 @@ _SACHWORT_ENDUNGEN = (
     "apotheke", "praxis", "klinik", "tag", "ort", "termin", "wert", "werte", "fall", "berechtigt",
     "pflichtig", "stand", "gebiet", "amt",
     "straße", "strasse", "str", "weg", "platz", "allee", "gasse",      # Straßennamen ohne Hausnummer (Hauptstr)
+    # Domänen-Durchsicht Runde 5: Berichte, Konten, Bögen, Reise, Geräte ("Durchgangsarztbericht", "Zweitkonto",
+    # "Bruttoarbeitslohn", "Kundenbogen", "Doppelzimmer", "Rückflug", "Meerblick", "Gasgrill", "Krankenzusatz")
+    "bericht", "konto", "lohn", "bogen", "zimmer", "flug", "blick", "plakette", "schilderung", "jahr", "grill",
+    "zusatz", "grafie", "graphie", "vermietung", "anzeige",
 )
 # Adjektiv-/Partizipstämme, die großgeschrieben vor Rollenwörtern stehen ("Betreuender Vermittler",
 # "Mitversichertes Kind", "Fälliger Beitrag", "Erstattungsfähig")
@@ -260,37 +264,44 @@ def _sachwerte(text: str) -> set:
 
 @functools.lru_cache(maxsize=32768)
 def _wissen_art(wort: str) -> tuple:
-    """(bekannter Name?, Allerweltswort?, Diagnose/Beruf?) aus der Wissensbasis (ohne Wissensbasis: alles False)."""
+    """(bekannter Name?, Allerweltswort?, Diagnose/Beruf?, Etikett?) aus der Wissensbasis (ohne Wissensbasis: alles
+    False). Etikett: das Wort ist selbst ein Feldbezeichner einer Etikett-Liste ("Hauptfahrer", "Sozius",
+    "Stammversicherter") – ein Etikett ist nie ein Name."""
     try:
         from . import wissen
     except Exception:  # pragma: no cover
-        return False, False, False
+        return False, False, False, False
     w = wort.strip(".,;:()[]\"'")
     if not w:
-        return False, False, False
+        return False, False, False, False
     try:
         name = wissen.ist_vorname(w) or wissen.ist_nachname(w)
         allerwelt = len(w) >= 4 and wissen.ist_allerweltswort(w)
         sache = bool(wissen.index("diagnosen").eintrag_fuer(w) or wissen.index("berufe").eintrag_fuer(w))
+        etikett = len(w) >= 4 and any(wissen.index(f"etiketten_{art}").eintrag_fuer(w) is not None
+                                      for art in wissen.ETIKETTEN_ARTEN)
     except Exception:  # pragma: no cover - Wissensbasis beschädigt
-        return False, False, False
-    return name, allerwelt, sache
+        return False, False, False, False
+    return name, allerwelt, sache, etikett
 
 
 def _ist_sachwort(wort: str) -> bool:
     """Großgeschriebenes Nicht-Namenswort: Stopplisten-Eintrag (auch gebeugt: Mitversichertes, Kunden),
-    Allerweltswort der Wissensbasis, Kompositum mit Sachwort-Endung (Schadenanzeige, Hundehalter) oder
-    Adjektiv/Partizip (Betreuender, Gedruckt). Bei Bindestrich-Wörtern genügt ein Sachwort-Teil
-    (Kraftfahrt-Haftpflicht, Kfz-Versicherungsschein). Bekannte Vor-/Nachnamen sind nie Sachwörter."""
+    Allerweltswort der Wissensbasis, Etikett der Wissensbasis (Hauptfahrer, Sozius), Kompositum mit Sachwort-Endung
+    (Schadenanzeige, Hundehalter), Adjektiv/Partizip (Betreuender, Gedruckt) oder gängige Abkürzung (Kfz, Pkw). Bei
+    Bindestrich-Wörtern genügt ein Sachwort-Teil (Kraftfahrt-Haftpflicht, Kfz-Versicherungsschein). Bekannte
+    Vor-/Nachnamen sind nie Sachwörter."""
     w = wort.lower().strip(".,;:()[]\"'")
-    name, allerwelt, sache = _wissen_art(wort)
+    name, allerwelt, sache, etikett = _wissen_art(wort)
     if name and "-" not in w:
         return False
-    if allerwelt or (sache and not name):
+    if allerwelt or ((sache or etikett) and not name):
         return True
     for teil in (t for t in w.split("-") if t):
         if teil in NAMEN_STOPPLISTE or teil in _NAMENSENDE or teil in _FIRMENWOERTER or teil in _SACHWORT_STAEMME:
             return True
+        if teil.upper() in _ABKUERZUNGEN_GROSS:
+            return True                       # "Kfz", "Pkw", "AVB": Abkürzungen, keine Namen
         for n in (1, 2):                      # Beugung abstreifen: Mitversichertes -> mitversicherte
             stamm = teil[:-n]
             if len(stamm) >= 4 and (stamm in NAMEN_STOPPLISTE or stamm in _SACHWORT_STAEMME):
@@ -302,6 +313,139 @@ def _ist_sachwort(wort: str) -> bool:
     # Kein Abgleich mit verlesenen Etiketten: _ist_sachwort gilt für jeden Text, auch für die Textebene eines PDFs,
     # und ein unbekannter Nachname ("Ehmann", "Wohnert") liegt oft nur einen Buchstaben neben einem Feldbezeichner
     # ("Ehemann", "Wohnort"). Verlesene Etiketten prüft verlesenes_etikett_statt_name – nur für OCR-Text.
+    return False
+
+
+# Partizip II ("Ausgefertigt", "Beglaubigt", "Festgesetzt", "Gezeichnet", "Legitimiert") und Adjektiv auf -isch
+# ("Gegnerischer", "Medizinische"): keine Namen
+_PARTIZIP_RE = re.compile(r"(?:[A-ZÄÖÜ][a-zäöü]{1,6}ge|Ge)[a-zäöüß]{3,}t|(?:Be|Ver|Ent|Er|Zer)[a-zäöüß]{3,}igt|"
+                          r"[A-ZÄÖÜ][a-zäöüß]{3,}iert")
+_ISCH_RE = re.compile(r"[A-ZÄÖÜ][a-zäöüß]{4,}isch(?:e|er|es|en|em)")
+# medizinische Wendungen: "Morbus …", Adjektive vor Diagnosen und Endungen von Fachwörtern ("Chronische Lumbalgie")
+_MEDIZIN_ANFANG = frozenset({"morbus", "m.", "chronisch", "chronische", "chronischer", "chronisches", "akut", "akute",
+                             "akuter", "akutes", "rezidivierend", "rezidivierende", "rezidivierender", "distal",
+                             "distale",
+                             "distaler", "proximal", "proximale", "proximaler", "arteriell", "arterielle", "essentiell",
+                             "essentielle", "essenzielle", "beidseitig", "beidseitige", "degenerativ", "degenerative",
+                             "posttraumatisch", "posttraumatische", "idiopathisch", "idiopathische", "obstruktive",
+                             "obstruktiver", "diabetische", "allergische", "allergisches"})
+_MEDIZIN_ENDUNG_RE = re.compile(r"(?i)(?:itis|algie|algien|ose|osen|fraktur|pathie|ektomie|ämie|zyste|syndrom|demenz|"
+                                r"karzinom|plasie|sklerose|ischialgie)$")
+# Organisationswörter in einer Firmenbezeichnung ("Europcar Autovermietung", "Stadtwerke Rosenheim", "Spedition
+# Wimmer", "Rosenheimer Verkehrsbetriebe", "Buchbinder Rent-a-Car") – Namen darin findet R4 (wissen.namen)
+_ORG_TEIL_RE = re.compile(r"(?i)(?:vermietung|spedition|stadtwerke|verkehrsbetriebe|betriebe|automobile?|leasing|"
+                          r"rent-a-car|autohaus|logistik|transporte|kanzlei|rechtsanwälte|partnerschaft)$")
+# Rechtsform direkt dahinter (auch hinter mehreren Wörtern): "Sixt GmbH & Co Autovermietung KG"
+_RECHTSFORM_DANACH_RE = re.compile(r"[ \t,]*(?:GmbH|gGmbH|mbH|AG|SE|KG|KGaA|OHG|UG|e\.[ \t]?V\.|eG|VVaG|Ltd\.?|Inc\.?|"
+                                   r"&[ \t]*Co\.?)(?![\wäöüß])")
+# Modellcode bzw. Typnummer direkt dahinter ("Tabbert Rossini 540", "Fronius Symo 10.0-3-M", "Bosch GSR 18V-55")
+_MODELL_DANACH_RE = re.compile(r"[ \t]+(?:[A-Z]{1,5}-?\d|\d+[A-Za-z]{1,3}(?![\wäöüß])|\d{1,4}(?:[.,\-/]\d+)+|"
+                               r"\d{3,4}(?![\d.,])|[A-Z]{2,5}(?:[ \t]|$))")
+_DATEI_DANACH_RE = re.compile(r"(?i)\.(?:pdf|docx?|xlsx?|pptx?|jpe?g|png|tiff?|txt|msg|eml|zip|odt)(?![\w])")
+_DATEI_ENDE_RE = re.compile(r"(?i)\.(?:pdf|docx?|xlsx?|pptx?|jpe?g|png|tiff?|txt|msg|eml|zip|odt)$")
+_GRUSS_DANACH_RE = re.compile(r"[ \t]+(?i:regards|wishes|greetings)(?![\w])")
+
+
+def _sachname_stellen(zeile: str) -> list:
+    """(start, ende) der Eigennamen von Sachen und Tieren (Wissensbasis "sachnamen") in einer Zeile."""
+    try:
+        from . import wissen
+        return [(v.start, v.ende) for v in wissen.finde(zeile, "sachnamen")]
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return []
+
+
+def _personen_paar(teile: list) -> bool:
+    """Vorname + Nachname der Wissensbasis (beide eindeutig) – ein Personenbeleg."""
+    if len(teile) < 2:
+        return False
+    return (_wissen_wort("ist_vorname", teile[0]) and not _wissen_wort("ist_vorname_mehrdeutig", teile[0])
+            and _wissen_wort("ist_nachname", teile[-1]) and not _wissen_wort("ist_mehrdeutig", teile[-1]))
+
+
+def _code_wort(wort: str) -> bool:
+    """Modell- oder Typkürzel in Versalien ("TPV", "MCV", "GSR", "DDLE"), kein Name und keine Wortgestalt."""
+    if not re.fullmatch(r"[A-Z]{2,5}", wort) or _wissen_art(wort.title())[0]:
+        return False
+    return not _wissen_wort("ist_wortgestalt", wort)
+
+
+def _ner_sachtreffer(text: str, start: int, ende: int, teile: list) -> bool:
+    """Ist ein reiner Treffer der KI (ohne Anrede) eine Sache statt einer Person: eine Marke, ein Modell oder eine
+    Tierrasse der Wissensbasis ("Kalkhoff", "Jack Russell" in "Jack Russell Terrier", "Junghans Max Bill"), ein
+    Modellcode im oder hinter dem Treffer ("Böckmann TPV", "Tabbert Rossini 540"), eine Firma (Rechtsform dahinter,
+    Organisationswort darin), eine medizinische Wendung ("Morbus Scheuermann", "Chronische Lumbalgie"), ein Partizip
+    oder Adjektiv ("Ausgefertigt", "Gegnerischer"), ein Dateiname ("Bescheid.pdf") oder eine englische Grußformel?
+    Ein Personenbeleg aus Vor- und Nachnamen der Wissensbasis bleibt ein Name, außer eine Sache umfasst ihn ganz und
+    reicht über ihn hinaus ("Jack Russell Terrier")."""
+    paar = _personen_paar(teile)
+    zeilenanfang = text.rfind("\n", 0, start) + 1
+    zeilenende = text.find("\n", ende)
+    zeilenende = len(text) if zeilenende < 0 else zeilenende
+    zeile = text[zeilenanfang:zeilenende]
+    s, e = start - zeilenanfang, ende - zeilenanfang
+    for a, b in _sachname_stellen(zeile):
+        if a <= s and e <= b and (not paar or b - a > e - s):
+            return True                                   # ganz in einer Marke, einem Modell, einer Rasse
+        if a < e and s < b and not paar:
+            rest = [t for t in teile if not (a <= zeile.find(t, s) < b)]
+            if all(not _wissen_art(t)[0] or _code_wort(t) for t in rest):
+                return True                               # "Mofa Simson", "AEG DDLE"
+    if len(teile) >= 2 and any(_code_wort(t) for t in teile[1:]):
+        return True                                       # "Böckmann TPV", "Logan MCV", "Bosch GSR"
+    if not paar and _MODELL_DANACH_RE.match(text, ende):
+        return True                                       # "Tabbert Rossini 540", "Fronius Symo 10.0-3-M"
+    if _RECHTSFORM_DANACH_RE.match(text, ende) or any(_ORG_TEIL_RE.search(t) for t in teile):
+        return True                                       # "Sixt GmbH …", "Stadtwerke Rosenheim"
+    if _DATEI_DANACH_RE.match(text, ende) or _DATEI_ENDE_RE.search(text[start:ende]) \
+            or _GRUSS_DANACH_RE.match(text, ende):
+        return True                                       # "Bescheid.pdf", "Best regards"
+    if personenkontext.tierangabe(text, start):
+        return True                                       # "Abstammung: v. Gribaldi", "Name des Pferdes:"
+    namen = [t for t in teile if _wissen_art(t)[0]]
+    if teile[0].casefold() in _MEDIZIN_ANFANG and len(namen) < len(teile):
+        return True                                       # "Morbus Scheuermann", "Chronische Lumbalgie"
+    if any(_MEDIZIN_ENDUNG_RE.search(t) and not _wissen_art(t)[0] for t in teile):
+        return True                                       # "Rezidivierende Lumboischialgie"
+    if not namen and any(_PARTIZIP_RE.fullmatch(t) or _ISCH_RE.fullmatch(t) for t in teile):
+        return True                                       # "Ausgefertigt", "Beglaubigt", "Gegnerischer"
+    return False
+
+
+def _feld_etikett_stellung(text: str, start: int, ende: int) -> bool:
+    """Steht die Stelle allein am Anfang ihrer Zeile oder Zelle (höchstens eine Laufnummer davor) und direkt dahinter
+    ein Doppelpunkt ("Hergang: …", "1. Unfallschilderung:")? So steht ein Feldbezeichner, kein Name."""
+    if not re.match(r"[ \t]*(?:\([^()\n]{0,25}\)[ \t]*)?:", text[ende:ende + 30]):
+        return False
+    zeilenanfang = text.rfind("\n", 0, start) + 1
+    davor = text[zeilenanfang:start]
+    if "\t" in davor:
+        davor = davor[davor.rfind("\t") + 1:]
+    return not davor.strip(" \t0123456789.)(-–•*")
+
+
+def _im_etikett(text: str, start: int, ende: int) -> bool:
+    """Liegt die Stelle ganz in einem Feldbezeichner der Wissensbasis (Etikett-Listen), der in ihrer Zeile steht –
+    "Einweisender" in "Einweisender Arzt: Dr. Petra Ullrich", "Sozius" in "Sozius:"? Ein Etikett ist nie ein Name;
+    nur die Zeile der Stelle wird durchsucht."""
+    try:
+        from . import wissen
+    except Exception:  # pragma: no cover
+        return False
+    a = text.rfind("\n", 0, start) + 1
+    b = text.find("\n", ende)
+    b = len(text) if b < 0 else b
+    if b - a > 400:
+        a, b = max(a, start - 200), min(b, ende + 200)
+    zeile = text[a:b]
+    s, e = start - a, ende - a
+    try:
+        for art in wissen.ETIKETTEN_ARTEN:
+            for v in wissen.finde(zeile, f"etiketten_{art}"):
+                if v.start <= s and e <= v.ende and v.ende - v.start >= 4:
+                    return True
+    except Exception:  # pragma: no cover - Wissensbasis beschädigt
+        return False
     return False
 
 
@@ -528,7 +672,7 @@ def _bereinigen(text: str, start: int, ende: int):
         voll = m.group(1).lower()
         if (wort in ANREDEN or voll in ANREDEN or wort in TITEL or voll in TITEL
                 or (wort in NAMEN_STOPPLISTE and not _kalendername(text, start, wort))
-                or (voll in _VERSICHERER_EINZELWORT and not mit_anrede)):
+                or (voll in _VERSICHERER_EINZELWORT and not mit_anrede) or _rang_kuerzel(m.group(1))):
             start += m.end()
             mit_anrede = wort in ANREDEN or voll in ANREDEN
         else:
@@ -542,13 +686,27 @@ def _bereinigen(text: str, start: int, ende: int):
                 and _nachname_hinter_vorname(text, start, start + m.start(), m.group(1))):
             break                                    # "Eckhard Freitag", "Erika Mai": Nachname, kein Wochentag
         if (wort in _NAMENSENDE or wort in NAMEN_STOPPLISTE or wort in _FIRMENWOERTER
-                or _STRASSENSUFFIX_RE.search(wort) or any(c.isdigit() for c in wort)):
+                or _STRASSENSUFFIX_RE.search(wort) or any(c.isdigit() for c in wort) or _rang_kuerzel(m.group(1))):
             ende = start + m.start()
         else:
             break
     while ende > start and text[ende - 1] in " \t\n\r,.;:()[]\"'*":
         ende -= 1
     return (start, ende) if ende > start else None
+
+
+@functools.lru_cache(maxsize=8192)
+def _rang_kuerzel(wort: str) -> bool:
+    """Kürzel einer Amts- oder Dienstbezeichnung der Wissensbasis ("KOK", "PHKin", "JAng", "JOSin", "RA"): gehört nicht
+    zum Namen ("KOK Unterholzner", "Eibl, JAng")."""
+    w = wort.strip(".,;:()")
+    if not (2 <= len(w) <= 8) or sum(c.isupper() for c in w) < 2 or not re.fullmatch(r"[A-Za-zÄÖÜäöü'’]+", w):
+        return False
+    try:
+        from . import wissen
+        return wissen.ist_anrede_titel(w)
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return False
 
 
 _TEILWORT_RE = re.compile(r"[^\s,;]+[,;]?")
@@ -737,6 +895,14 @@ def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
             return False                      # OCR-Reste ("IE EEESTEUER", "ee BEER", "i= SEE")
         if all(_ist_sachwort(t) for t in teile):
             return False                      # "Schadenanzeige Kraftfahrt-Haftpflicht", "Familientarif"
+        if _im_etikett(text, start, ende):
+            return False                      # "Einweisender" in "Einweisender Arzt:": ein Etikett ist nie ein Name
+        if len(teile) == 1 and _rang_kuerzel(teile[0]):
+            return False                      # "JAng", "KOK": Amts- und Dienstbezeichnungen
+        if len(teile) <= 2 and _feld_etikett_stellung(text, start, ende) and not any(_wissen_art(t)[0] for t in teile):
+            return False                      # "Hergang:", "Unfallschilderung:" am Zeilenanfang: ein Feldbezeichner
+        if _ner_sachtreffer(text, start, ende, teile):
+            return False                      # Marke, Modell, Tierrasse, Firma, Fachwort, Partizip, Dateiname
         if len(teile) == 1 and teile[0].isupper() and len(teile[0]) <= 4:
             return False                      # Kürzel wie RLV, BU, KFZ (Versalien-Namen kommen über die Regeln)
         zeilenanfang = text.rfind("\n", 0, start) + 1
@@ -824,8 +990,10 @@ def _kandidat(kandidaten, text, start, ende, gruppe=None, regel=False):
         # "Anna Weber geb. Schulz" als eine Stelle (KI): Name und Geburtsname getrennt, das Etikett bleibt stehen
         links = _kandidat(kandidaten, text, start, geb.start(), gruppe, regel)
         return _kandidat(kandidaten, text, geb.end(), ende, gruppe, regel) or links
-    # mehrere Personen ohne Komma ("Jörg Ziegler Ursula Frank") werden getrennte Kandidaten
-    teile = personen_teilen(text, start, ende) if gruppe is None else [(start, ende)]
+    # mehrere Personen ohne Komma ("Jörg Ziegler Ursula Frank") werden getrennte Kandidaten; eine Spanne der KI endet an
+    # einem kleingeschriebenen Wort, das kein Namenspartikel ist ("Lukas den Ball", "Kranzbühler, Josef gegen …")
+    stuecke = _an_kleinwoertern_teilen(text, start, ende) if not regel and gruppe is None else [(start, ende)]
+    teile = [t for a, b in stuecke for t in personen_teilen(text, a, b)] if gruppe is None else stuecke
     gefunden = False
     for s, e in teile:
         bereich = _bereinigen(text, s, e)
@@ -834,6 +1002,37 @@ def _kandidat(kandidaten, text, start, ende, gruppe=None, regel=False):
                                "ende": bereich[1], "gruppe": gruppe})
             gefunden = True
     return gefunden
+
+
+# Artikel gehören nur hinter einem anderen Partikel zum Namen ("van den Berg", "von der Leyen"), nie allein ("Lukas den
+# Ball"); die übrigen Partikel ("von", "de", "ter", "zu") auch allein ("Jan ter Horst")
+_ARTIKEL_PARTIKEL = frozenset({"der", "den", "dem", "des", "die", "das", "und", "auf", "vor", "unter", "ober",
+                               "nieder"})
+_KLEINWORT_RE = re.compile(r"[a-zäöüß][\wäöüß'’\-]*")
+
+
+def _an_kleinwoertern_teilen(text: str, start: int, ende: int) -> list:
+    """Spanne der KI an kleingeschriebenen Wörtern teilen, die hier kein Namenspartikel sind: "Kranzbühler, Josef
+    gegen Felsberger" -> [Kranzbühler, Josef], [Felsberger]; "Lukas den Ball" -> [Lukas], [Ball]. Liefert die Stücke
+    (start, ende), ohne leere."""
+    stuecke, anfang, vorher = [], start, None
+    for m in re.finditer(r"\S+", text[start:ende]):
+        wort = m.group(0).strip(",;()")
+        s0 = start + m.start()
+        if _KLEINWORT_RE.fullmatch(wort):
+            k = wort.casefold()
+            partikel = k in PARTIKEL and (k not in _ARTIKEL_PARTIKEL
+                                          or (vorher is not None and vorher in PARTIKEL))
+            if not partikel:
+                if s0 > anfang:
+                    stuecke.append((anfang, s0))
+                anfang = start + m.end()
+            vorher = k
+        else:
+            vorher = None
+    if ende > anfang:
+        stuecke.append((anfang, ende))
+    return [(a, b) for a, b in stuecke if text[a:b].strip()] or [(start, ende)]
 
 
 def _name_kuerzen(text: str, start: int, ende: int):
@@ -861,6 +1060,11 @@ def _regel_kandidaten(text: str) -> list:
     for m in _ROLLE_RE.finditer(text):
         s, e = _name_kuerzen(text, m.start(1), m.end(1))
         name = text[s:e]
+        if _RECHTSFORM_DANACH_RE.match(text, e) or any(_ORG_TEIL_RE.search(t) for t in name.split()):
+            continue                                 # "Vermieter: Sixt GmbH & Co …": eine Firma, keine Person
+        za, ze = text.rfind("\n", 0, s) + 1, text.find("\n", e)
+        if any(a <= s - za and e - za <= b for a, b in _sachname_stellen(text[za:len(text) if ze < 0 else ze])):
+            continue                                 # "Kontakt: Instagram @…": eine Plattform, keine Person
         if "," in name:
             links, rechts = name.split(",", 1)
             if len(_namensteile(links)) != 1 or len(_namensteile(rechts)) > 2:
@@ -1205,6 +1409,7 @@ def finde_personen(text: str) -> list:
                 continue
             m = _KOMMA_VORNAME_RE.match(text, k["ende"])
             if (m and _plausibel(text, m.start(1), m.end(1)) and m.group(1).lower() not in _NAMENSENDE
+                    and not _rang_kuerzel(m.group(1))
                     and not _VORHER_ANREDE_RE.search(text[max(0, k["start"] - 12):k["start"]])):
                 # (hinter "Frau Krüger," beginnt ein Satz, keine Nachname-Vorname-Folge)
                 voll = text[k["start"]:m.end(1)]

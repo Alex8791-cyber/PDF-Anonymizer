@@ -34,6 +34,7 @@ from collections import Counter
 from typing import NamedTuple
 
 from . import kennungsformen
+from . import personenkontext
 
 
 def _suche(muster, text, flags=0):
@@ -433,17 +434,29 @@ _DATUM_RE = re.compile(
 _GEB_STICHWORT_RE = re.compile(
     r"(?<![\wäöüßÄÖÜ])(?:(?i:geb\.-?dat(?:um|\.)?|geburts-?[ \t]?datum|geb\.|geboren|geburtsdatum|geburtsdaten|"
     r"geburtstag|date[ \t]of[ \t]birth|né(?:e)?[ \t]le|nat[oa][ \t]il)"
+    # das Geburtsereignis: "Geburt des Kindes am …", "die Geburt unserer Tochter am …", "Entbindung am …" (nur das
+    # eigene Wort, kein Kompositum wie "Geburtsvorbereitungskurs"; ein künftiges Datum – Geburtstermin – zählt nicht)
+    r"|[Gg]eburt|GEBURT|[Ee]ntbindung|ENTBINDUNG|entbunden"
     r"|geb(?=[ \t]))(?![\wäöüß])"
     r"|\*(?=[ \t]?\d)")
+# "Geb." als Gebühr: "Geb.-Nr.", "Geb.-Ziffer", "Geb. Ziff." (Spaltenköpfe ärztlicher Rechnungen) – kein
+# Geburts-Stichwort
+_GEB_GEBUEHR_RE = re.compile(r"-?[ \t]?(?i:nr\.?|nummer|ziff(?:er|ern|\.)?|satz|ordnung|ord\.)(?![\wäöüß])")
+# Stichwort hinter dem Datum: "… wurde am 14.09.2026 geboren", "14.09.2026 in Traunstein geboren"
+_GEBOREN_DANACH_RE = re.compile(r"[ \t]+(?:(?:in|im|zu)[ \t]+[^\W\d_][\w\-]*(?:[ \t]+[^\W\d_][\w\-]*)?[ \t]+)?"
+                                r"(?i:geboren)(?![\wäöüß])")
 # Vertragsvokabular zwischen Stichwort und Datum -> kein Geburtsdatum
 _GEB_STOPP_ZEILE_RE = re.compile(
     r"(?<![\wäöüß])(?:vom|ab|zum|seit|bis|am Ende)(?![\wäöüß])"
     r"|(?i:beginn|ablauf|fällig|gültig|kündig|datum|stand(?![\wäöüß])|rechnung|angebot|zahlung)")
 _GEB_STOPP_FOLGE_RE = re.compile(
     r"(?<![\wäöüß])(?:vom|ab|zum|seit|bis|Beginn|Ablauf|Stand|Datum|fällig|gültig|Fälligkeit)(?![\wäöüß])")
-# Jahrgang ("Jg. 1961", "Jahrgang 1961", "geb. 1961")
+# Jahrgang ("Jg. 1961", "Jahrgang 1961", "geb. 1961") und Geburtsjahr als Feld ("Geburtsjahr: 1983", "Geb.-Jahr 1983",
+# "Geburtsjahr der versicherten Person: 1979" – auch mit Zwischenwörtern bis zum Doppelpunkt)
 _JAHRGANG_RE = re.compile(
-    r"(?<![\wäöüß])(?:(?i:jg\.|jahrgang|geb\.|geboren)[ \t]*(?:im[ \t]+jahr[ \t]+|in[ \t]+)?)"
+    r"(?<![\wäöüß])(?:(?i:jg\.|jahrgang|geb\.|geboren)[ \t]*(?:im[ \t]+jahr[ \t]+|in[ \t]+)?"
+    r"|(?i:geburtsjahr(?:gang)?|geb\.-?[ \t]?jahr)(?:[ \t]+(?:des|der)[ \t]+[^\W\d_]+(?:[ \t]+[^\W\d_]+)?)?"
+    r"[ \t]*:?[ \t]*)"
     r"((?:19|20)\d{2})(?![\d/\-]|[.,]\d)")
 
 
@@ -539,6 +552,8 @@ def _geburt_spannen(text: str) -> list:
             davor = text[:m.start()].rstrip()
             if davor and davor[-1].isdigit():
                 continue                      # "5 * 14.03.2025" ist eine Multiplikation
+        if m.group(0).casefold() == "geb." and _GEB_GEBUEHR_RE.match(text, m.end()):
+            continue                          # "Geb.-Nr.", "Geb.-Ziffer": Gebührennummer einer Rechnung
         fenster = text[m.end():m.end() + 100]
         d = _DATUM_RE.search(fenster)
         if not d:
@@ -555,6 +570,10 @@ def _geburt_spannen(text: str) -> list:
         jahr = int(m.group(1))
         if _heute().year - 110 <= jahr <= _heute().year and not _DATUM_RE.match(text, m.start(1)):
             ergebnisse.append(Stelle(m.start(1), m.end(1), 0.7))
+    if re.search(r"(?i)geboren", text):
+        for d in _DATUM_RE.finditer(text):
+            if _GEBOREN_DANACH_RE.match(text, d.end()) and _geburtsdatum_plausibel(d.group(0)):
+                ergebnisse.append(Stelle(d.start(), d.end()))     # "wurde am 14.09.2026 geboren"
     ergebnisse.extend(_geburtsdaten_spalten(text))
     ergebnisse.sort()
     return ergebnisse
@@ -1290,11 +1309,7 @@ _STEUERNR_ETIKETT_RE = re.compile(
     r"(\d{10,13}|\d{2,5}(?:[ \t]{0,2}/[ \t]{0,2}\d{1,5}){1,3}|\d{2,5}(?:[ \t]\d{3,5}){1,2})(?![\d/])")
 _UST_ID_RE = re.compile(r"(?i:USt[-\s]?Id(?:Nr)?\.?|Umsatzsteuer-?(?:Identifikationsnummer|ID|IdNr\.?))"
                         r"[ \t]*:?[ \t]*(DE[ \t]?\d{9})(?!\d)")
-# Firmenzusammenhang einer USt-IdNr. (Fußzeile des Versicherers, Gutachten EQ-16): dann keine Person
-_FIRMEN_KONTEXT_RE = re.compile(
-    r"(?<![\wäöüß])(?:GmbH|AG|SE|KG|KGaA|OHG|mbH|e\.\s?V\.|eG|VVaG|a\.\s?G\.|gAG|Versicherung\w*|"
-    r"Versicherer|Bank|Sparkasse|HRB|HRA|Registergericht|Amtsgericht|Handelsregister|Vorstand|Aufsichtsrat\w*|"
-    r"Geschäftsführ\w*|Sitz(?:[ \t]+der[ \t]+Gesellschaft)?)(?![\wäöüß])|·")
+# Firmenzusammenhang einer USt-IdNr. (Fußzeile des Versicherers, Gutachten EQ-16): personenkontext.ust_id_der_firma
 
 
 def _steuernr_spannen(text: str) -> list:
@@ -1303,16 +1318,9 @@ def _steuernr_spannen(text: str) -> list:
         if 10 <= sum(c.isdigit() for c in m.group(1)) <= 13:
             aus.append(Stelle(m.start(1), m.end(1)))
     for m in _UST_ID_RE.finditer(text):
-        # Zeile der Nummer und die zwei Zeilen davor: Firmenangaben -> USt-IdNr. der Firma, kein Personenbezug
-        anfang = m.start()
-        for _ in range(3):
-            anfang = text.rfind("\n", 0, max(0, anfang - 1))
-            if anfang < 0:
-                anfang = 0
-                break
-        ende = text.find("\n", m.end())
-        umgebung = text[anfang:ende if ende >= 0 else len(text)]
-        if _FIRMEN_KONTEXT_RE.search(umgebung):
+        # Zeile der Nummer und die zwei Zeilen davor: Firmenangaben -> USt-IdNr. der Firma, kein Personenbezug; bei
+        # Einzelkaufleuten, Inhabern und Freiberuflern eine Angabe der Person (personenkontext.ust_id_der_firma)
+        if personenkontext.ust_id_der_firma(personenkontext.ust_umgebung(text, m.start())):
             continue
         aus.append(Stelle(m.start(1), m.end(1)))
     return sorted(set(aus))

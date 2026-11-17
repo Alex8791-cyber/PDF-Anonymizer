@@ -4,6 +4,8 @@
 # Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
 # Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
 a. D.
+Amtsanwalt
+Amtsanwältin
 Amtsrat
 An
 apl. Prof.
@@ -75,6 +77,7 @@ Dipl.-Volksw.
 Dipl.-Vw.
 Dipl.-Wirt.-Ing.
 Dipl.-Wirtsch.-Ing.
+DirAG
 Don
 Dona
 Doña
@@ -109,8 +112,20 @@ Edle
 Edler
 Eheleute
 Ehepaar
+EKHK
+EKHK'in
+EKHK’in
+EKHKin
 EMBA
+EPHK
+EPHK'in
+EPHK’in
+EPHKin
 Erbprinz
+Erste Kriminalhauptkommissarin
+Erste Polizeihauptkommissarin
+Erster Kriminalhauptkommissar
+Erster Polizeihauptkommissar
 Fa.
 Fachanwalt für
 Fachanwältin für
@@ -129,6 +144,8 @@ Freundliche Grüße
 Frl.
 Fürst
 Fürstin
+Gerichtsvollzieher
+Gerichtsvollzieherin
 gez.
 gezeichnet
 Gospođa
@@ -165,12 +182,79 @@ Imam
 in Vertretung
 Ing.
 iV
+JAI
+JAIin
+JAng
+JAnge
+JAngest.
+JAR
+JARin
+JHS
+JHSin
+JOAR
+JOARin
+JOI
+JOIin
+JOS
+JOSin
+JS
+JSin
 jun.
 Junior
+Justizamtsinspektor
+Justizamtsinspektorin
+Justizamtsrat
+Justizamtsrätin
+Justizangestellte
+Justizangestellter
+Justizbeschäftigte
+Justizbeschäftigter
+Justizhauptsekretär
+Justizhauptsekretärin
+Justizinspektor
+Justizinspektorin
+Justizoberinspektor
+Justizoberinspektorin
+Justizobersekretär
+Justizobersekretärin
 Justizrat
+Justizsekretär
+Justizsekretärin
 Kaplan
+KD
+KD'in
+KD’in
+KDin
+KHK
+KHK'in
+KHK’in
+KHKin
+KK
+KK'in
+KK’in
+KKin
+KOK
+KOK'in
+KOK’in
+KOKin
 Kommerzialrat
+KOR
+KOR'in
+KOR’in
+KORin
 KR
+Kriminaldirektor
+Kriminaldirektorin
+Kriminalhauptkommissar
+Kriminalhauptkommissarin
+Kriminalkommissar
+Kriminalkommissarin
+Kriminaloberkommissar
+Kriminaloberkommissarin
+Kriminaloberrat
+Kriminaloberrätin
+Kriminalrat
+Kriminalrätin
 Lady
 Landgraf
 Liebe
@@ -219,9 +303,13 @@ Ms.
 Mx.
 Notar
 Notarin
+Oberstaatsanwalt
+Oberstaatsanwältin
 Oberstudienrat
 Ökonomierat
 ORR
+OStA
+OStAin
 OStD
 OStR
 p. p.
@@ -238,6 +326,52 @@ Pfarrer
 Pfarrerin
 Ph.D.
 PhD
+PHK
+PHK'in
+PHK’in
+PHKin
+PHM
+PHM'in
+PHM’in
+PHMin
+PK
+PK'in
+PK’in
+PKin
+PM
+PM'in
+PM’in
+PMin
+POK
+POK'in
+POK’in
+POKin
+Polizeidirektor
+Polizeidirektorin
+Polizeihauptkommissar
+Polizeihauptkommissarin
+Polizeihauptmeister
+Polizeihauptmeisterin
+Polizeikommissar
+Polizeikommissarin
+Polizeimeister
+Polizeimeisterin
+Polizeioberkommissar
+Polizeioberkommissarin
+Polizeiobermeister
+Polizeiobermeisterin
+Polizeioberrat
+Polizeioberrätin
+Polizeirat
+Polizeirätin
+POM
+POM'in
+POM’in
+POMin
+POR
+POR'in
+POR’in
+PORin
 pp.
 ppa.
 Prinz
@@ -258,9 +392,15 @@ RAin
 RD
 Rechtsanwalt
 Rechtsanwältin
+Rechtspfleger
+Rechtspflegerin
 Regierungsrat
 Reichsfreiherr
 Reichsgraf
+RiAG
+RiArbG
+RiLG
+RiOLG
 Ritter
 RR
 Sanitätsrat
@@ -288,9 +428,13 @@ Signorina
 Sir
 Sr.
 Sra.
+StA
 Staatl. gepr.
 staatlich anerkannt
 staatlich geprüft
+Staatsanwalt
+Staatsanwältin
+StAin
 StB
 StBin
 StD
@@ -300,8 +444,12 @@ StR
 Studienrat
 Syndikusrechtsanwalt
 Univ.-Prof.
+Urkundsbeamter
+Urkundsbeamtin
 vBP
 Viele Grüße
+VRiLG
+VRiOLG
 WP
 z. Hd.
 z.Hd.

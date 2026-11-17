@@ -4,6 +4,7 @@
 # Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
 # Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
 # Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+A.T.U
 Aachener Bausparkasse
 Abgabenordnung
 ACE Auto Club Europa
@@ -22,6 +23,7 @@ AHB
 AHV
 AIG
 AKB
+ALD Automotive
 Allgemeine Unfallversicherungsanstalt
 Allgemeine Versicherungsbedingungen
 Allianz
@@ -38,6 +40,7 @@ Allianz Suisse
 Allianz Versicherungs-AG
 Allrecht
 AllSecur
+Alphabet Fuhrparkmanagement
 Alte Leipziger
 Alte Leipziger – Hallesche Konzern
 Alte Leipziger Bauspar AG
@@ -90,20 +93,24 @@ Arbeitsagentur
 Arbeitsgericht
 Arbeitslosengeld
 Architektenkammer
+Arval
 Ärztekammer
 Ärzteversorgung
 Assekurata
 Asstel
 Assura
 Atlas BKK ahlmann
+ATU
 Atupri
 AUB
+Audi Bank
 Audi BKK
 Augenoptiker Ausgleichskasse
 Augsburger Aktienbank
 Ausgleichskasse
 Ausländerbehörde
 Auslandsreisekrankenversicherung
+Auto-Teile-Unger
 Autoschutzbrief
 Autoversicherung
 AUVA
@@ -112,6 +119,7 @@ Auxilia Rechtsschutz
 AVB
 AvD
 Avenir
+Avis Budget
 AWD
 AWP
 AXA
@@ -119,6 +127,7 @@ AXA Krankenversicherung AG
 AXA Lebensversicherung AG
 AXA Schweiz
 AXA Versicherung AG
+Ayvens
 Baader Bank
 Badenia
 Badische Rechtsschutzversicherung
@@ -263,6 +272,7 @@ BKK Würth
 BKK ZF & Partner
 BKK24
 blau direkt
+BMW Bank
 BMW BKK
 BNP Paribas
 Bonnfinanz
@@ -271,6 +281,7 @@ BSG
 BtG
 BU
 BU-Versicherung
+Buchbinder Rent-a-Car
 Bund der Versicherten
 Bundesagentur für Arbeit
 Bundesamt für Justiz
@@ -467,6 +478,7 @@ Elementarschadenversicherung
 Elementarversicherung
 Elterngeld
 Energie-BKK
+Enterprise Rent-A-Car
 Entgeltpunkte
 Entgeltumwandlung
 Envivas
@@ -502,6 +514,7 @@ Europace
 Europäische Reiseversicherung
 Europäische Zentralbank
 Europäischer Gerichtshof
+Europcar
 Evangelische Bank
 EWR
 Exklusiv
@@ -539,6 +552,7 @@ fondsgebundene Lebensversicherung
 fondsgebundene Rentenversicherung
 Fondspolice
 Fondssparplan
+Ford Bank
 Formaxx
 Franke und Bornberg
 Frankfurter Sparkasse
@@ -654,6 +668,7 @@ Helvetia Schweiz
 Helvetia Versicherungen
 Helvetia Versicherungen AG
 Hepster
+Hertz Autovermietung
 HGB
 Hinterbliebenenrente
 Hinzuverdienstgrenze
@@ -675,6 +690,7 @@ Hypo NOE
 Hypo Tirol
 Hypoport
 HypoVereinsbank
+Hyundai Capital Bank
 ICD-10
 ICD-10-GM
 IDD
@@ -800,6 +816,7 @@ Landgericht
 Landwirtschaftliche Krankenkasse
 LBBW
 LBS
+LeasePlan
 Lebensversicherung
 Lebensversicherung von 1871 a.G. München
 Leistungsdynamik
@@ -836,7 +853,9 @@ Medien-Versicherung
 Medizinischer Dienst
 Medizinischer Dienst der Krankenversicherung
 Meldebehörde
+Mercedes-Benz Bank
 Mercedes-Benz BKK
+Mercedes-Benz Leasing
 Merck BKK
 Merck Finck
 Merkur Versicherung
@@ -905,6 +924,7 @@ Oldenburgische Landesbank
 Ombudsmann Private Kranken- und Pflegeversicherung
 onvista bank
 OÖ Versicherung
+Opel Bank
 OPS
 ÖRAG
 ÖRAG Rechtsschutzversicherungs-AG
@@ -1002,6 +1022,7 @@ Regelaltersrente
 Reiseabbruchversicherung
 Reisegepäckversicherung
 Reiserücktrittsversicherung
+Renault Bank
 Rente Balance
 Rente Chance
 Rente Garantie
@@ -1075,6 +1096,7 @@ Signal Iduna Gruppe
 SIGNAL IDUNA Krankenversicherung a.G.
 Signal Krankenversicherung a.G.
 Single-Tarif
+Sixt
 Skandia
 Skandia Lebensversicherung
 SKD BKK
@@ -1129,6 +1151,7 @@ Standard & Poor's
 Standard Life
 Standardtarif
 Standesamt
+Starcar
 Sterbegeldversicherung
 Sterbekasse
 Steuerberaterkammer
@@ -1181,6 +1204,7 @@ Tierkrankenversicherung
 Tiroler Versicherung
 TK
 Top-Schutz
+Toyota Kreditbank
 Trade Republic
 Transportversicherung
 Triodos Bank
@@ -1272,6 +1296,8 @@ Volks- und Raiffeisenbank
 Volksbank
 Volksbank Raiffeisenbank
 Volksbank Wien
+Volkswagen Bank
+Volkswagen Leasing
 Volkswagen Versicherung
 Volkswohl Bund
 Volkswohl Bund Lebensversicherung a.V.
@@ -1290,6 +1316,7 @@ VVG-InfoV
 VW Versicherung
 W&W
 Waisenrente
+Waldenburger
 Warenkreditversicherung
 Wefox
 Wertpapierdepot

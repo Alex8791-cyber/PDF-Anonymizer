@@ -97,16 +97,17 @@ ersten Aufbau nach festen Regeln erzeugt und stehen ausgeschrieben in den Dateie
 | `berufe.txt` | 2 959 | Berufe und berufliche Stellung, männlich und weiblich (Zahnarzt/Zahnärztin, Polier/Polierin, Beamter/Beamtin, Rentner/Rentnerin, Auszubildende/Auszubildender, Student/Studentin, Hausfrau/Hausmann, selbstständig) | 65,2 % |
 | `diagnosen.txt` | 2 014 | Diagnosen, Krankheits- und Zustandsbezeichnungen, Verletzungen, Eingriffe, Behandlungs- und Pflegestatus (Gesundheitsdaten nach Art. 9 DSGVO) | 73,6 % |
 | `medikamente.txt` | 1 508 | 750 Wirkstoffe und 758 in Deutschland gebräuchliche Handelsnamen | 28,1 % |
-| `versicherer_und_organisationen.txt` | 1 343 | **Erlaubnisliste**: Versicherer, Pools, Maklerverbünde, Behörden, Sozialversicherungsträger, Krankenkassen, Banken, Verbände, Produkt-, Tarif- und Rechtsbegriffe | 88,2 % |
-| `etiketten_person.txt` | 620 | Feldbezeichner und Rollenwörter vor Personen (Versicherungsnehmer, Name, Zeuge) | 92,3 % |
+| `versicherer_und_organisationen.txt` | 1 370 | **Erlaubnisliste**: Versicherer, Pools, Maklerverbünde, Behörden, Sozialversicherungsträger, Krankenkassen, Banken, Verbände, Autovermieter, Leasing- und Herstellerbanken, Werkstattketten, Produkt-, Tarif- und Rechtsbegriffe | 88,2 % |
+| `etiketten_person.txt` | 974 | Feldbezeichner und Rollenwörter vor Personen (Versicherungsnehmer, Name, Zeuge; seit Runde 5 auch Rollen aus Kfz, Miete, Recht, Tier, Familie und Reise wie Leasingnehmerin, Sozius, Gegner, Beklagte, Tierhalter, Rechnungsempfänger) – „Name des/der <Rolle>“ leitet `wissen.py` daraus ab | 92,3 % |
 | `etiketten_kennung.txt` | 582 | Feldbezeichner vor Kennungen (Vertrags-, Kunden-, Schadennummer, Aktenzeichen, Steuer-ID, Kennzeichen) | 66,5 % |
-| `etiketten_datum_geburt.txt` | 64 | Feldbezeichner für Geburts-, Sterbe- und Heiratsdaten | 95,3 % |
+| `etiketten_datum_geburt.txt` | 78 | Feldbezeichner für Geburts-, Sterbe- und Heiratsdaten (auch „Geburt des Kindes“, „Entbindung am“, „Geburtsjahrgang“) | 95,3 % |
 | `etiketten_adresse.txt` | 128 | Feldbezeichner vor Anschriften und Orten einer Person | 85,2 % |
 | `etiketten_kontakt.txt` | 82 | Feldbezeichner für Telefon, Fax, E-Mail, Messenger, Profile | 96,3 % |
 | `etiketten_vertragsdaten.txt` | 213 | Feldbezeichner für Vertrags- und Vorgangsdaten (Beginn, Ablauf, Stand): ein Datum dahinter ist kein Geburtsdatum | 84,0 % |
-| `allerweltswoerter_gross.txt` | 9 296 | Großgeschriebene Wörter aus Versicherungs-, Rechts-, Medizin- und Verwaltungsschreiben, die eine Namenserkennung leicht für Personen hält; enthält **keine** Vor- und Nachnamen, Berufe, Diagnosen und Medikamente (maschinell geprüft) | 92,0 % |
-| `anreden_titel.txt` | 303 | Anreden, Grußformeln, akademische, berufliche und Adelstitel, Rollenkürzel (Herr, Frau, Dr. med., Prof., Dipl.-Ing., RA, i. A., gez.) | 93,4 % |
+| `allerweltswoerter_gross.txt` | 9 333 | Großgeschriebene Wörter aus Versicherungs-, Rechts-, Medizin- und Verwaltungsschreiben, die eine Namenserkennung leicht für Personen hält; enthält **keine** Vor- und Nachnamen, Berufe, Diagnosen und Medikamente (maschinell geprüft) | 92,0 % |
+| `anreden_titel.txt` | 451 | Anreden, Grußformeln, akademische, berufliche und Adelstitel, Rollenkürzel (Herr, Frau, Dr. med., Prof., Dipl.-Ing., RA, i. A., gez.), Dienstgrade der Polizei und Amtsbezeichnungen der Justiz (KHKin, POM, JOSin, Rechtspflegerin) | 93,4 % |
 | `orte.txt` | 843 | Orte (`ist_ort`): Staaten und Länder, historische Staaten und Herkunftsregionen (Polen, Türkei, USA, DDR, Schlesien, Siebenbürgen), Bundesländer, Hauptstädte und große Städte im Ausland in deutscher Schreibweise (Wien, Zürich, Istanbul, Warschau, Breslau), deutsche Mittelstädte (Marburg, Flensburg, Bad Homburg, Sankt Ingbert); dazu kommen die Großstädte aus `wissen.py` | – |
+| `sachnamen.txt` | 261 | Eigennamen von Sachen und Tieren (Domänen-Durchsicht Runde 5): Hersteller, Marken und Modellreihen von Fahrzeugen, Wohnwagen, Fahrrädern, Haushalts- und Heizgeräten, Werkzeug, Uhren und Elektronik, Plattformen (Instagram, WhatsApp), Tierrassen, Tierarten und Tiergeschlechter (Jack Russell Terrier, Trakehner, Wallach, Hündin). Ohne Personenbeleg (Anrede, Personen-Etikett) gilt ein Treffer der Namenserkennung darin nicht als Person; ein einzelnes Wort, das auch Vor- oder Nachname ist, steht nur als Teil einer Wortfolge in der Liste ("Weber Genesis", "Knaus Sun") | – |
 
 ¹ Anteil der Einträge, deren Wörter (ab drei Buchstaben) alle im CC0-Vokabular vorkommen.
 Eine niedrige Quote heißt nicht „falsch“: lange Komposita, Abkürzungen, Handelsnamen und

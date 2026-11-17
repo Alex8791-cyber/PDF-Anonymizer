@@ -58,13 +58,15 @@ ERLAEUTERUNG = {
     "namen": "KI-Modell (spaCy), Namenslisten und Regeln; gleiche Person = gleicher Platzhalter im Dokument – auch "
              "für den Geburtsnamen hinter „geb.“/„geborene“ („Anna Weber geb. Schulz“)",
     "iban": "auch mit falscher Prüfziffer, wenn sie eindeutig wie eine IBAN aussieht (Hinweis „Lesefehler?“)",
-    "geburt": "hinter „geb.“, „Geburtsdatum“ … oder hinter einem Namen mit Komma, Stern oder Klammer („Max "
-              "Mustermann, 02.09.1983“); in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre "
+    "geburt": "hinter „geb.“, „Geburtsdatum“, „Geburt des Kindes am“ … oder hinter einem Namen mit Komma, Stern "
+              "oder Klammer („Max Mustermann, 02.09.1983“) – bei Kindern und Mitversicherten („Kind 2: Lea Brandl, "
+              "30.06.2018“) in jedem Alter; in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre "
               "zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“",
     "vertrag": "Nummer hinter einem Etikett wie „Vertrags-Nr.“; auch eVB-Nummer (elektronische "
                "Versicherungsbestätigung) und Transferticket der Kfz-Versicherung",
     "steuerid": "ohne Beschriftung nur mit gültiger Prüfziffer",
-    "steuernr": "ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma",
+    "steuernr": "ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma (die von "
+                "Einzelkaufleuten, Inhabern und Freiberuflern schon)",
     "ausweis": "mit Etikett; Ausweis- und Passnummern auch ohne Etikett, wenn die Prüfziffer stimmt; auf "
                "Ausweiskopien auch die maschinenlesbare Zone",
     "mandat": "nur hinter einem Etikett",
@@ -73,7 +75,8 @@ ERLAEUTERUNG = {
                    "Kartendaten („…, gültig bis 12/27, 739“) – nur dort, nicht dieselben Ziffern an anderer Stelle; "
                    "„Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder Gutachten-Prüfnummer)",
     "ort": "Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“",
-    "beruf": "hinter „Beruf:“ oder im Satz („arbeitet als …“)",
+    "beruf": "hinter „Beruf:“, im Satz („arbeitet als …“) und in der Spalte „Beruf“/„Tätigkeit“ einer "
+             "Personenliste",
     "arbeitgeber": "hinter „Arbeitgeber:“ oder im Satz; bekannte Versicherer, Banken und Behörden bleiben stehen",
     "diagnose": "nur bekannte Begriffe und ICD-Codes mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten "
                 "(⚕, nicht angehakt)",

@@ -9,12 +9,16 @@ Birth date
 Date de naissance
 Date of birth
 Datum der Eheschließung
+Datum der Entbindung
 Datum der Geburt
 Datum des Todes
 DOB
 Eheschließung am
 eingetragene Lebenspartnerschaft seit
 Eintrittsalter
+Entbindung
+Entbindung am
+Entbindungsdatum
 geb
 geb.
 geb. am
@@ -31,6 +35,9 @@ Gebdatum
 geboren
 geboren am
 geboren in
+Geburt
+Geburt am
+Geburt des Kindes
 Geburtsdat.
 Geburtsdatum
 Geburtsdatum der versicherten Person
@@ -45,6 +52,7 @@ Geburtsdatum VP
 Geburtsdatum, -ort
 Geburtsdatum/-ort
 Geburtsjahr
+Geburtsjahrgang
 Geburtsort
 Geburtsort und -datum
 Geburtstag
@@ -64,6 +72,7 @@ Scheidungsdatum
 Sterbedatum
 Sterbeort
 Tag der Eheschließung
+Tag der Entbindung
 Tag der Geburt
 Tag des Todes
 Todesdatum

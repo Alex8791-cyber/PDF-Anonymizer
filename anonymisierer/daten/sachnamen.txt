@@ -1,0 +1,267 @@
+# Eigennamen von Sachen und Tieren: Hersteller, Marken und Modellreihen (Fahrzeuge, Wohnwagen, Fahrräder,
+# Haushalts- und Heizgeräte, Werkzeug, Uhren, Elektronik), Plattformen, Tierrassen, Tierarten und
+# Tiergeschlechter – ohne Personenbeleg (Anrede, Personen-Etikett) kein Personenname.
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+Adria
+AEG
+AEG DDLE
+Agility
+Aiways
+Akita
+Alfa Romeo
+Alpaka
+Altdeutscher Schäferhund
+American Staffordshire Terrier
+Andalusier
+Appaloosa
+Apple
+Araber
+Arabisches Vollblut
+Australian Shepherd
+Bayerischer Gebirgsschweißhund
+Beagle
+Bengalkatze
+Berner Sennenhund
+Bichon Frisé
+Bobtail
+Böckmann TPV
+Bordeaux-Dogge
+Border Collie
+Bosch GSR
+Brabus
+Bracke
+Breitling
+Briard
+Britisch Kurzhaar
+Brompton
+Buderus
+Bulldogge
+Bulls
+Bullterrier
+Burmese
+Bürstner
+Cane Corso
+Canon
+Canyon
+Carthago
+Cavalier King Charles Spaniel
+Chihuahua
+Cockerspaniel
+Collie
+Connemara-Pony
+Cube
+Cube Kathmandu
+Cupra Born
+Dachshund
+Dacia Duster
+Dacia Logan
+Dacia Logan MCV
+Dacia Sandero
+Dackel
+Dalmatiner
+De'Longhi
+Dell XPS
+Dethleffs
+Deutsch Drahthaar
+Deutsch Kurzhaar
+Deutsche Dogge
+Deutscher Schäferhund
+Deutsches Reitpony
+Dobermann
+Dogge
+Ducato
+Dyson
+Englische Bulldogge
+Eurasier
+Europäisch Kurzhaar
+Facebook
+Fendt Caravan
+Festool
+Fiat Ducato
+Fissler
+Fjordpferd
+Fohlen
+Fossil
+Französische Bulldogge
+Fronius
+Fronius Symo
+Gaggenau
+Galaxy
+Galgo Español
+Gardena
+Gazelle
+Giant
+Golden Retriever
+Golf Variant
+Gorenje
+Grundig
+Haflinger
+Haibike
+Hannoveraner
+Haustier
+Havaneser
+Hengst
+Hercules
+Hilti
+Hobby
+Hobby De Luxe
+Holsteiner
+Hovawart
+Huawei
+Hund
+Hündin
+Husky
+Husqvarna
+Hymer
+Instagram
+iPad
+iPhone
+Irish Setter
+Irish Wolfhound
+Islandpferd
+Jack Russell Terrier
+Junghans Max Bill
+Junkers
+Jura
+Kalkhoff
+Kaltblut
+Kaninchen
+Karthäuser
+Kater
+Katze
+Kätzin
+Knaus Sun
+Kreidler
+Krups
+KTM Duke
+Kymco
+Kymco Agility
+Labrador
+Labrador Retriever
+Lagotto Romagnolo
+Lenovo
+Liebherr
+LinkedIn
+Lipizzaner
+LMC
+Longines
+Löwchen
+MacBook
+Magura
+Maine Coon
+Makita
+Malinois
+Malteser
+Meerschweinchen
+Merida
+Metabo
+Miele
+Mini-Shetlandpony
+Mischling
+Mops
+Mustang
+Neff
+Neufundländer
+Nikon
+Norwegische Waldkatze
+Oldenburger
+Omega Speedmaster
+Papillon
+Pegasus
+Pekinese
+Perserkatze
+Pferd
+Philips
+Piaggio
+Piaggio Ciao
+Pinscher
+Pinterest
+Pitbull
+Pointer
+Pommer
+Pony
+Puch
+Pudel
+Quarter Horse
+Ragdoll
+Raleigh
+Rauhaardackel
+Rhodesian Ridgeback
+Riese & Müller
+Rolex
+Rottweiler
+Rüde
+Russisch Blau
+Samojede
+Samsung
+Schäferhund
+Schnauzer
+Scottish Fold
+Seat Leon
+Seat Leon Sportstourer
+Shetlandpony
+Shih Tzu
+Siamkatze
+Simson
+Skoda Octavia
+SMA Sunny Boy
+Snapchat
+Sony
+Spaniel
+Specialized
+Sphynx
+Sprinter
+Stiebel Eltron
+Stihl
+Stute
+Sunny Boy
+Swatch
+Tabbert
+Tabbert Rossini
+Tag Heuer
+Teckel
+Telefunken
+Telegram
+Terrier
+Thermomix
+Threema
+Tier
+TikTok
+Tissot
+Traber
+Trakehner
+Transporter
+Trek
+Vaillant
+Vespa
+Viessmann
+Vizsla
+Vollblut
+Wallach
+Warmblut
+Weber Genesis
+Weber Spirit
+Weimaraner
+Weinsberg
+Wellensittich
+Welpe
+Welsh-Pony
+West Highland White Terrier
+Westfale
+Westfalia
+WhatsApp
+Whippet
+Whirlpool
+Windhund
+Winora
+WMF
+Wolf Heiztechnik
+Xiaomi
+Xing
+Yorkshire Terrier
+YouTube
+Zündapp
+Zwergpinscher
+Zwergschnauzer

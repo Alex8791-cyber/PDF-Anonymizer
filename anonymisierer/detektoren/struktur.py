@@ -46,7 +46,7 @@ try:
     from .. import muster as _muster
 except Exception:  # pragma: no cover
     _muster = None
-from .. import kennungsformen
+from .. import kennungsformen, personenkontext
 
 try:
     from ..namen import personen_teilen as _personen_teilen
@@ -821,6 +821,8 @@ _TITEL_RE = re.compile(r"(?i)^(?:doktor|doktorin|professor|professorin|kollege|k
 PARTIKEL = frozenset({"von", "van", "de", "der", "den", "dem", "des", "del", "della", "di", "da", "du", "le", "la",
                       "zu", "zum", "zur", "vom", "ten", "ter", "al", "el", "bin", "ibn", "y", "dos", "das", "do",
                       "af", "av", "op"})
+# Artikel unter den Partikeln: Teil eines Namens nur hinter einem anderen Partikel ("van den Berg", "von der Leyen")
+_ARTIKEL_PARTIKEL = frozenset({"der", "den", "dem", "des", "die", "das"})
 # großgeschriebene Funktionswörter (Satzanfang, Anrede, Grußformel), die nie Teil eines Namens sind
 FUNKTIONSWOERTER = frozenset("""
 ihr ihre ihren ihrem ihrer ihres sie wir ich er es der die das den dem des ein eine einen einem einer mit bei
@@ -846,7 +848,8 @@ _FIRMEN_TOKEN = frozenset({"gmbh", "ag", "kg", "mbh", "ohg", "gbr", "se", "eg", 
 # Wortenden von Betrieben und Einrichtungen ("Löwen-Apotheke", "Physiotherapie", "Zahnarztpraxis")
 _BETRIEB_ENDUNG_RE = re.compile(r"(?i)(?:apotheke|praxis|klinik|klinikum|zentrum|therapie|labor|institut|"
                                 r"versicherung|kasse|bank|werkstatt|autohaus|service|gmbh|büro|buero|kanzlei|"
-                                r"handel|bäckerei|metzgerei|gruppe|verwaltung)$")
+                                r"handel|bäckerei|metzgerei|gruppe|verwaltung|spedition|vermietung|stadtwerke|"
+                                r"betriebe|logistik|transporte|leasing)$")
 _NAME_TOKEN_RE = re.compile(r"[^\W\d_][\w'’]*(?:\.?-[\w'’]+|\.[\w'’]+)*\.?")
 
 
@@ -981,6 +984,8 @@ def namen_spanne(text: str, pos: int, grenze: int, komma: bool = True, max_woert
             woerter.append((ts, te, "titel"))
             j = te
         elif k in PARTIKEL and (tok[0].islower() or (tok.isupper() and len(tok) <= 3 and woerter)):
+            if k in _ARTIKEL_PARTIKEL and not (woerter and woerter[-1][2] == "partikel"):
+                break                                # "Lukas den Ball": ein Artikel nur hinter "van", "von", "de"
             woerter.append((ts, te, "partikel"))
             j = te
         elif len(tok) == 2 and tok[1] == "." and tok[0].isupper():
@@ -1013,6 +1018,9 @@ def namen_spanne(text: str, pos: int, grenze: int, komma: bool = True, max_woert
             if j + 2 < grenze and text[j + 1] == " ":
                 n = _NAME_TOKEN_RE.match(text, j + 2, grenze)
                 if n and n.group(0)[0].isupper() and n.group(0).rstrip(".").casefold() not in FUNKTIONSWOERTER \
+                        and not (_STRASSENWORT_RE.search(n.group(0).rstrip("."))
+                                 and not wort_bekannter_name(n.group(0))) \
+                        and not re.match(r"[ ]?\d{1,4}[a-zA-Z]?(?![\d.])", text[n.end():n.end() + 7]) \
                         and (_wort_ist_titel(n.group(0)) or wort_namensartig(n.group(0).rstrip("."))):
                     komma_index = len(woerter)
                     j += 2
@@ -1459,6 +1467,18 @@ _NICHT_ADRESSE_RE = re.compile(r"land|staat|bundesland|kreis|bezirk|kanton|natio
                                r"beschaftigungsort|tatort|unfallstelle|standort|garagenstandort")
 
 
+def _hinter_ortsgattung(text: str, k: int, e: int):
+    """Beginnt die Ortsangabe ab k mit Gattungswörtern ("Skigebiet Sudelfeld", "Turnhalle der Mittelschule Erding"),
+    die Stelle des Eigennamens dahinter; nur Gattungswörter: None. Ein einzelnes Wort bleibt, wie es ist."""
+    if _wissen is None:
+        return k
+    woerter = list(re.finditer(r"[^\s,;()/]+", text[k:e]))
+    if len(woerter) < 2 or "\n" in text[k:k + woerter[1].start()]:
+        return k
+    n = _wissen.ortsname_hinter_gattung([w.group(0) for w in woerter])
+    return None if n is None else k + woerter[n].start()
+
+
 def _adress_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> list:
     v = _vergleichsform(et.eintrag)
     if _NICHT_ADRESSE_RE.search(v) and not _ANSCHRIFT_ETIKETT_RE.search(v):
@@ -1484,6 +1504,10 @@ def _adress_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
     if _ORT_ETIKETT_RE.search(v):
         m = re.match(r"(?:(?:D|DE|A|CH)[-\s])?\d{4,5}[ ]+", text[i:e])
         k = i + (m.end() if m else 0)
+        if not m:
+            k = _hinter_ortsgattung(text, k, e)
+            if k is None:
+                return []                    # nur Gattungswörter ("Unfallort: Turnhalle der Grundschule")
         sp = ort_spanne(text, k, e)
         if sp:
             return [Wert(i if m else sp[0], sp[1], "plzort")]
@@ -1512,10 +1536,19 @@ _ORG_ROLLEN_RE = re.compile(r"(?i)^(?:arbeitgeber|auftraggeber|gläubiger|glaubi
 
 # ein Doppelpunkt direkt hinter einem unbekannten "Namen": ein Feld-Etikett, kein Name ("Geburtsland: Polen")
 _FELD_DAHINTER_RE = re.compile(r"[ \t]*:")
+# Rechtsform einer juristischen Person direkt hinter dem "Namen" ("Gegner: Wohnbau GmbH", "Leasingnehmer: Muster
+# Leasing GmbH"): eine Firma, keine Person. Einzelkaufleute (e.K.) und Gesellschaften bürgerlichen Rechts (GbR) tragen
+# Namen natürlicher Personen und bleiben Namen.
+_JURISTISCH_DAHINTER_RE = re.compile(
+    r"[ \t]*(?:gGmbH|GmbH|mbH|AG|SE|KGaA|KG|OHG|UG|e\.[ \t]?V\.|eG|VVaG|Ltd\.?|Inc\.?|PLC|S\.[ \t]?A\.|B\.[ \t]?V\.|"
+    r"N\.[ \t]?V\.|&[ \t]*Co\.?)(?![\wäöüß])")
 
 
 def _namens_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> list:
-    """Namen hinter einem Personen-Etikett; Gremien-Etiketten (Vorstand …) lesen eine Liste."""
+    """Namen hinter einem Personen-Etikett; Gremien-Etiketten (Vorstand …) lesen eine Liste. In der Abstammung eines
+    Tiers ("Abstammung: Vater: Sandro Hit") steht kein Mensch."""
+    if personenkontext.tierangabe(text, i):
+        return []
     liste = bool(_GREMIUM_RE.search(et.eintrag)) or et.eintrag.casefold() in ("kinder", "erben", "zeugen",
                                                                             "mitversicherte personen")
     org = bool(_ORG_ROLLEN_RE.match(et.eintrag))
@@ -1540,6 +1573,8 @@ def _namens_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
             break
         if not sp.bekannt and _FELD_DAHINTER_RE.match(text, sp.ende, e):
             break                                    # "Geburtsname:" ⏎ "Geburtsland: Polen": das nächste Feld
+        if _JURISTISCH_DAHINTER_RE.match(text, sp.ende, e):
+            break                                    # "Gegner: Wohnbau GmbH": eine Firma
         if liste and sp.woerter == 1 and not sp.bekannt:
             pos = sp.ende                            # einzelnes unbekanntes Wort in einer Liste: OCR-Rest?
             continue

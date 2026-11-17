@@ -8,7 +8,9 @@
                        die genauso in Tarif- und Leistungsübersichten stehen, ist er nur vermutet: Quelle
                        "wissen.gesundheit.vermutet", Sicherheit 0.5 (erkannt wird er trotzdem).
     wissen.beruf       Beruf hinter einem Etikett (Beruf:, ausgeübte Tätigkeit:) oder im Satz (arbeitet als,
-                       ist … von Beruf) -> "beruf"
+                       ist … von Beruf), in der Spalte "Beruf"/"Tätigkeit" einer Personentabelle und unter dem
+                       Etikett eines Kastenformulars ("Beruf (genaue Tätigkeit)" ⏎ "Pflegehelferin") -> "beruf";
+                       die Nachbarzelle einer Kopfzeile ist kein Beruf
     org.arbeitgeber    Organisation hinter "Arbeitgeber:" oder im Satz (beschäftigt bei, arbeitet … bei der …)
                        -> "arbeitgeber"; Versicherer, Banken und Behörden der Erlaubnisliste bleiben IMMER stehen
     ort                Ort ohne PLZ: Ort-Datum-Zeilen ("St. Ingbert, 03.04.2025"), Geburts-/Wohnort hinter einem
@@ -16,8 +18,10 @@
     international      ausländische Anschriften (NL, PL, CZ, IT, FR, ES, HU, TR, DK/SE/NO, UK …) und Kennzeichen
                        hinter einem Etikett -> "international"
     wissen.geburt      Datum ohne Stichwort direkt hinter einem Namen ("Max Mustermann, 02.09.61"), Alter in
-                       Klammern hinter einem Namen ("Anna Berg (54)"); in „maximal“ zusätzlich jedes plausible
-                       Geburtsdatum außerhalb von Vertragsdaten -> "geburt"
+                       Klammern hinter einem Namen ("Anna Berg (54)"); im Familien- und Versichertenkontext
+                       (personenkontext: "Kind 2: Bastian Leutgeb, 30.06.2018", Kinderliste unter "Kinder:") in jedem
+                       Alter, nicht hinter Behandlern; in „maximal“ zusätzlich jedes plausible Geburtsdatum außerhalb
+                       von Vertragsdaten -> "geburt"
 
 Die Text-Funktionen (berufe_stellen, …) arbeiten auf normalisiertem Text und liefern [(start, ende)]; muster.py
 nutzt sie für die Text-Schnittstelle (Formularfelder, Werkzeuge).
@@ -28,7 +32,7 @@ from __future__ import annotations
 import datetime
 import re
 
-from .. import muster, wissen
+from .. import muster, personenkontext, wissen
 from . import ALLE_PROFILE, Treffer, detektor, entfernen
 
 _GROSS = "A-ZÄÖÜÀ-ÖØ-ÞĀĂĄĆČĎĐĒĖĘĚĞĢĪĮİĶĹĻĽŁŃŅŇŌŐŒŔŘŚŞŠŢŤŪŮŰŲŹŻŽ"
@@ -353,6 +357,80 @@ def _beruf_wert(text: str, pos: int, etikett: bool):
     return s, e
 
 
+_ZELLE_RE = re.compile(r"[^\t\n]+")
+# Kopfzeile einer Personentabelle: eine Zelle für den Namen der Person
+_PERSONEN_KOPF_RE = re.compile(r"(?i)(?<![\wäöüß])(?:name|vorname|nachname|versicherte[rn]?|mitarbeiter(?:in)?|"
+                               r"person|teilnehmer(?:in)?)(?![\wäöüß])")
+# Berufsangabe allein auf ihrer Zeile, der Wert in der Zeile darunter (Kastenformular: "Beruf (genaue Tätigkeit)" ⏎
+# "Pflegehelferin")
+_BERUF_KOPF_ZEILE_RE = re.compile(
+    r"(?m)^[ \t]*(?i:(?:ausgeübte[rn]?|derzeitige[rn]?|jetzige[rn]?|erlernte[rn]?|aktuelle[rn]?)[ \t]+)?"
+    r"(?:Beruf|Berufsbezeichnung|(?i:Tätigkeit)|berufliche[ \t]+Tätigkeit)(?:[ \t]*\([^)\n]{1,30}\))?[ \t]*\n"
+    r"[ \t]*(?=[^\W\d_])")
+
+
+def _zellen(zeile: str, versatz: int) -> list:
+    """(start, ende, text) der Zellen einer Zeile (getrennt durch Tabulatoren)."""
+    return [(versatz + z.start(), versatz + z.end(), z.group(0).strip()) for z in _ZELLE_RE.finditer(zeile)
+            if z.group(0).strip()]
+
+
+def _kein_beruf(wert: str) -> bool:
+    """Ziffern, Ankreuzwerte, Feldbezeichner oder mehr als fünf Wörter: kein Beruf."""
+    if not wert or not wert[0].isalpha() or any(c.isdigit() for c in wert) or len(wert.split()) > 5:
+        return True
+    if wert.casefold() in {"ja", "nein", "keine", "keine angabe", "entfällt", "ohne", "k. a.", "k.a.", "-"}:
+        return True
+    try:
+        return any(wissen.index(f"etiketten_{art}").eintrag_fuer(wert) for art in wissen.ETIKETTEN_ARTEN)
+    except Exception:
+        return False
+
+
+def _beruf_spalte(text: str, m):
+    """Steht das Beruf-Etikett als ganze Zelle in der Kopfzeile einer Personentabelle ("Name, Vorname ⇥⇥ Geb.-Datum
+    ⇥⇥ Beruf ⇥⇥ Eintritt")? Dann die Zellen dieser Spalte in den Zeilen darunter (Befund 87 der Domänen-Durchsicht);
+    sonst None. Die Nachbarzelle der Kopfzeile ist kein Beruf."""
+    if ":" in text[m.start():m.end()] or "\t" not in text[m.start():m.end()]:
+        return None
+    za = text.rfind("\n", 0, m.start()) + 1
+    ze = text.find("\n", m.start())
+    ze = len(text) if ze < 0 else ze
+    kopf = _zellen(text[za:ze], za)
+    nr = next((i for i, (a, b, _) in enumerate(kopf) if a <= m.start() < b), None)
+    if nr is None or len(kopf) < 3 or any(c.isdigit() for c in text[za:ze]) \
+            or not any(_PERSONEN_KOPF_RE.search(t) for _, _, t in kopf):
+        return None
+    aus = []
+    pos = ze + 1
+    while pos < len(text):
+        ende = text.find("\n", pos)
+        ende = len(text) if ende < 0 else ende
+        zellen = _zellen(text[pos:ende], pos)
+        if len(zellen) != len(kopf):
+            break
+        a, b, wert = zellen[nr]
+        if not _kein_beruf(wert):
+            s0 = a + (len(text[a:b]) - len(text[a:b].lstrip()))
+            aus.append((s0, s0 + len(wert)))
+        pos = ende + 1
+    return aus
+
+
+def _beruf_unter_etikett(text: str) -> list:
+    """Kastenformular: Beruf-Etikett allein auf seiner Zeile, der Wert als ganze Zeile darunter – ein Eintrag der
+    Berufsliste oder ein kurzer Wert ohne Ziffern, der kein Feldbezeichner ist ("Arbeitgeber" bei leerem Feld)."""
+    aus = []
+    for m in _BERUF_KOPF_ZEILE_RE.finditer(text):
+        ende = text.find("\n", m.end())
+        ende = len(text) if ende < 0 else ende
+        wert = text[m.end():ende].strip()
+        if "\t" in wert or _kein_beruf(wert):
+            continue
+        aus.append((m.end(), m.end() + len(wert)))
+    return aus
+
+
 def berufe_stellen(text: str) -> list:
     """Berufsangaben hinter einem Etikett ("Beruf: Verkäuferin", "Ausgeübter Beruf:⇥⇥Pharmareferentin") oder
     im Satz ("arbeitet als Zahnärztin", "ist von Beruf Schreiner", "Schreiner von Beruf")."""
@@ -360,9 +438,14 @@ def berufe_stellen(text: str) -> list:
         return []
     aus = []
     for m in _BERUF_ETIKETT_RE.finditer(text):
+        spalte = _beruf_spalte(text, m)
+        if spalte is not None:
+            aus += spalte                          # Spaltenkopf einer Tabelle: die Werte stehen darunter
+            continue
         w = _beruf_wert(text, m.end(), True)
         if w:
             aus.append(w)
+    aus += _beruf_unter_etikett(text)
     for m in _BERUF_VOR_RE.finditer(text):
         w = _beruf_wert(text, m.end(), False)
         if w:
@@ -691,6 +774,28 @@ _VERTRAGSDATUM_RE = re.compile(
     r"heute|am|den|zum|per|vertrag|police|leistung|auszahlung|überweisung|buchung|stichtag)(?![\wäöüß])")
 
 
+# Name direkt vor dem Datum: "Vorname Nachname," / "Nachname, Vorname," / "Name (" / "Name *" / "Name ⇥"
+# (Familien-/Versichertenkontext, personenkontext.py)
+_FAMILIE_NAME_RE = re.compile(
+    rf"(?P<name>(?:{_WORT_GROSS},[ \t]*)?{_WORT_GROSS}(?:[ \t]+(?:(?:von|van|de|der|den|zu|vom)[ \t]+)?{_WORT_GROSS})"
+    r"{0,2})(?:[ \t]*(?:,|\(|\*)[ \t]*|[ \t]*\t[ \t]*|[ \t]+[-–][ \t]+)$")
+
+
+def _familien_name(name: str) -> bool:
+    """Kann `name` ("Liv Ostermeier", "Brenner, Lina", "Ben") eine Person sein: keine Allerwelts-, Etikett- oder
+    Rollenwörter, mindestens ein Vor- oder Nachname der Wissensbasis (ein einzelnes Wort: ein Vorname)?"""
+    woerter = [w for w in re.split(r"[ \t,]+", name) if w and w[0].isupper()]
+    if not woerter or len(woerter) > 3:
+        return False
+    for w in woerter:
+        if wissen.ist_allerweltswort(w) or personenkontext.FAMILIE_RE.fullmatch(w) or wissen.ist_anrede_titel(w) \
+                or wissen.ist_allowlist(w) or wissen.index("etiketten_person").eintrag_fuer(w) is not None:
+            return False
+    if len(woerter) == 1:
+        return wissen.ist_vorname(woerter[0]) and not wissen.ist_vorname_mehrdeutig(woerter[0])
+    return any(wissen.ist_vorname(w) or wissen.ist_nachname(w) for w in woerter)
+
+
 def _ist_name(teile: str) -> bool:
     """Mindestens zwei großgeschriebene Wörter, keines ist ein Allerweltswort, und entweder ein Wort ist ein
     eindeutiger Vor-/Nachname der Wissensbasis oder das erste ein (auch mehrdeutiger) Vorname ("Max Mustermann")."""
@@ -735,9 +840,23 @@ def geburt_ohne_stichwort(text: str, alle: bool = False) -> list:
         a = text.rfind("\n", 0, m.start()) + 1
         davor = text[a:m.start()]
         n = _NAME_VOR_RE.search(davor)
+        f = _FAMILIE_NAME_RE.search(davor)
+        name_start = (f.start("name") if f else n.start(1) if n else len(davor))
+        if personenkontext.behandlungsdatum(davor[:name_start], text, m.end()):
+            continue                    # "Dr. Ute Kranzfelder, 03.11.2012: Meniskusoperation" – ein Behandlungsdatum
         if n and jahre >= 10 and _ist_name(n.group(1)) and not _VERTRAGSDATUM_RE.search(davor[n.end(1):]):
             aus.append((m.start(), m.end(), 0.65))
             continue
+        # Familien-/Versichertenkontext: das Datum direkt an einem Namen ist ein Geburtsdatum in jedem Alter ("Kind 2:
+        # Bastian Leutgeb, 30.06.2018", "Kinder: Ben (02.05.2019)", "Brenner, Lina, 05.05.2019", Kinderliste mit
+        # Tabstopps unter "Kinder:") – in einer Liste unter einer Überschrift nur ohne Betrag in der Zeile
+        if f and _familien_name(f.group("name")) and personenkontext.familien_kontext(text, a, a + f.start("name")):
+            gleiche_zeile = personenkontext.familien_rolle_in_zeile(text, a, a + f.start("name"))
+            zeile_ende = text.find("\n", m.end())
+            zeile = text[a:len(text) if zeile_ende < 0 else zeile_ende]
+            if gleiche_zeile or not personenkontext.BETRAG_IN_ZEILE_RE.search(zeile):
+                aus.append((m.start(), m.end(), 0.6))
+                continue
         if alle and jahre >= 14:
             fenster = text[max(a, m.start() - 40):m.start()]
             satz = re.search(r"[.!?;][ \t]+(?=[^.!?;]*$)", fenster)
