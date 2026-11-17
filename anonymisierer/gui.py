@@ -153,16 +153,19 @@ ERSTSTART_TEXT = (
     "Andere Angaben bleiben je nach Schutzstufe lesbar – zum Beispiel Diagnosen, Beruf, Beträge oder Orte. "
     "Daraus kann eine Person unter Umständen noch zu erkennen sein.\n\n"
     "Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt – aber nicht immer gefunden. Andere Gesichter "
-    "und Fotos, Unterschriften und Handschrift werden NICHT geschwärzt (außer in der Schutzstufe „Maximal“, die "
-    "alle Bilder abdeckt) – sie bleiben sichtbar, wenn Sie in der Vorschau keinen Rahmen darüber ziehen.\n\n"
+    "und Fotos deckt nur die Schutzstufe „Maximal“ ab, und auch sie nicht jedes Bild. Unterschriften und "
+    "Handschrift werden nicht erkannt – auf Scans und Fotos bleiben sie auch in „Maximal“ stehen. Was stehen "
+    "bleibt, decken Sie in der Vorschau mit einem Rahmen ab.\n\n"
     "Keine automatische Erkennung ist fehlerfrei. Sehen Sie sich deshalb jedes Ergebnis in der Vorschau an, "
     "bevor Sie es weitergeben.\n\n"
     "Die Verantwortung für die Weitergabe an einen KI-Dienst bleibt bei Ihnen.")
-# Fotos und Ausweiskopien (Befund Runde 2): Gesicht/Lichtbild, Unterschrift und Handschrift bleiben stehen
-FOTO_GRENZEN = ("Gesichter und Lichtbilder: nur Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt – aber "
-                "nicht immer gefunden; andere Gesichter, Unterschriften und Handschrift werden NICHT geschwärzt (außer "
-                "in der Schutzstufe „Maximal“) – in der Vorschau unter „Geplante Schwärzung“ prüfen und einen Rahmen "
-                "darüber ziehen.")
+# Fotos und Ausweiskopien (Befund Runde 2): Gesicht/Lichtbild, Unterschrift und Handschrift bleiben stehen. Ein
+# umgewandeltes Foto ist eine Bildseite: „Maximal“ deckt darauf nur Fotobereiche ab – Striche (Unterschrift,
+# Handschrift) entfernt die Fotoerkennung vorab (fotos.STRICH_MM)
+FOTO_GRENZEN = ("Gesichter und Lichtbilder: Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt – aber nicht "
+                "immer gefunden; andere Gesichter deckt nur die Schutzstufe „Maximal“ ab, wenn sie den Fotobereich "
+                "erkennt. Unterschriften und Handschrift werden NICHT geschwärzt, auch in „Maximal“ nicht – in der "
+                "Vorschau unter „Geplante Schwärzung“ prüfen und einen Rahmen darüber ziehen.")
 KENNWORT_TITEL = "Kennwort erforderlich"
 ANZEIGE_ART = {"bild": " (Bild → PDF)", "entschluesselt": " (Kennwort entfernt)", "kopie": " (als PDF)"}
 # derselbe Hinweis in der Kontextspalte der Dateizeile (dort ist Platz; Wortlaut wie im Laufprotokoll)
@@ -216,19 +219,32 @@ _NEUE_KATEGORIEN = bool(_KATEGORIE_SCHLUESSEL & {"beruf", "arbeitgeber", "diagno
 
 
 def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
-    """Untertitel, Hinweiskasten und Hilfetext – wahrheitsgemäß für den Funktionsumfang der Engine (GR-09)."""
+    """Untertitel, Hinweiskasten und Hilfetext – wahrheitsgemäß für den Funktionsumfang der Engine (GR-09). Eine
+    Engine ohne die neuen Kategorien ist älter als die Bildprüfung (fotos.py): Sie sucht keine Lichtbilder, und ihre
+    Schutzstufen sind gleich (gui_attrappen.PROFILE) – „Maximal“ deckt dort keine Bilder ab."""
     if neue_kategorien:
         lesbar = "je nach Schutzstufe bleiben Diagnosen, Beruf, Arbeitgeber, Beträge und Orte lesbar"
-        kasten = ("Nur je nach Schutzstufe erkannt: Diagnosen, Beruf, Arbeitgeber; „Maximal“ deckt alle Bilder und "
-                  "Fotos ab. Lichtbilder auf Ausweiskopien werden gesucht, aber nicht immer gefunden. Nicht erkannt "
-                  "werden: andere Gesichter, Unterschriften, Handschrift, Freitext; Text in Bildern nur unsicher "
-                  "(OCR).")
+        kasten = ("Je nach Schutzstufe bleiben Diagnosen, Beruf und Arbeitgeber lesbar. Lichtbilder auf "
+                  "Ausweiskopien werden gesucht, aber nicht immer gefunden; andere Gesichter und Bilder deckt nur "
+                  "„Maximal“ ab. Nicht erkannt werden: Unterschriften, Handschrift, Freitext; Text in Bildern nur "
+                  "unsicher (OCR).")
         grenzen_kopf = "NICHT oder nur teilweise erkannt werden:\n"
         grenzen_umfang = ("  • Diagnosen, Krankheiten, Medikamente: nur bekannte Begriffe, angehakt erst in der "
                           "Schutzstufe „Maximal“ (sonst gemeldet und nicht angehakt in der Fundliste angeboten, "
                           "Zeichen ⚕)\n"
                           "  • Beruf, Arbeitgeber: nur mit Etikett oder Personenbezug (ab Schutzstufe „Hoch“); "
                           "Einkommen und Familienstand nicht\n")
+        # „Maximal“ (fotos.seite_pruefen): Rasterbilder auf Textseiten, Fotobereiche auf Scans und Bildseiten – nicht
+        # winzige Bilder (fotos.bild_winzig), Vektorgrafik, Text über einem Bild und ein Bild über die halbe Textseite
+        # (nur die Fotos darin); Striche (Unterschrift, Handschrift, Stempel) entfernt die Fotoerkennung vorab
+        grenzen_bilder = (
+            "  • Gesichter und Fotos: Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt (Fund „Lichtbild“), "
+            "aber nicht immer gefunden; andere deckt nur die Schutzstufe „Maximal“ ab: Bilder auf Textseiten und "
+            "Fotobereiche auf Scans – nicht winzige Bilder und Vektorgrafiken; Text über einem Bild bleibt lesbar, "
+            "und von einem Bild über mindestens die halbe Textseite werden nur die Fotos darin abgedeckt\n"
+            "  • Unterschriften, Stempel, Handschrift – auf Scans und Fotos auch nicht in „Maximal“\n")
+        fotos = ("Gesichter darauf werden nur abgedeckt, wenn sie als Lichtbild oder – in „Maximal“ – als Fotobereich "
+                 "erkannt werden, Unterschriften und Handschrift NICHT:")
     else:
         lesbar = "Diagnosen, Beruf, Arbeitgeber, Beträge und Orte bleiben lesbar"
         kasten = ("Nicht erkannt werden: Diagnosen, Beruf, Arbeitgeber, Gesichter/Lichtbilder (z. B. auf "
@@ -236,6 +252,9 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
         grenzen_kopf = "NICHT erkannt werden:\n"
         grenzen_umfang = ("  • Diagnosen, Krankheiten, ICD-Codes, Medikamente\n"
                           "  • Beruf, Arbeitgeber, Einkommen, Familienstand\n")
+        grenzen_bilder = ("  • Gesichter und Lichtbilder (z. B. auf Ausweiskopien), Fotos und andere Bilder\n"
+                          "  • Unterschriften, Stempel, Handschrift\n")
+        fotos = "Gesichter, Lichtbilder, Unterschriften und Handschrift darauf werden NICHT geschwärzt:"
     untertitel = ("Ersetzt direkte Identifikatoren (Namen, IBAN, Adresse, Telefon …) durch Platzhalter wie "
                   f"[PERSON A] – eine Pseudonymisierung, keine vollständige Anonymisierung: {lesbar}. "
                   "Fundliste und Ergebnis müssen vor jeder Weitergabe geprüft werden.")
@@ -243,30 +262,25 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
                "Mehr: Hilfe → „Was wird nicht erkannt?“")
     grenzen = (
         "Das Programm ersetzt direkte Identifikatoren durch Platzhalter (Pseudonymisierung).\n\n"
-        + grenzen_kopf + grenzen_umfang +
-        "  • Gesichter und Fotos: Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt (Fund „Lichtbild“), "
-        "aber nicht immer gefunden; andere Gesichter bleiben stehen – außer in der Schutzstufe „Maximal“, die alle "
-        "Bilder und Fotos abdeckt (Text über einem Bild bleibt lesbar; ein Bild über mindestens die halbe Seite "
-        "bleibt wie ein Scan stehen, abgedeckt werden die Fotos darin)\n"
-        "  • Unterschriften, Stempel, Handschrift\n"
+        + grenzen_kopf + grenzen_umfang + grenzen_bilder +
         "  • Text in Bildern, Fotos und Logos wird per OCR nur unsicher gelesen (Handyfotos, geringe Auflösung)\n"
         "  • Freitext, aus dem eine Person erkennbar bleibt\n"
-        "  • Dateinamen (die Ausgabe heißt neutral anonym_01.pdf; der Originalname steht in der Zuordnungsdatei "
-        "_zuordnung_anonymisiert.txt NEBEN dem Ausgabeordner – nicht mit hochladen)\n\n"
+        "  • Dateinamen (die Ausgabe heißt neutral anonym_01.pdf; der Originalname steht in der Zuordnungsdatei, "
+        "meist _zuordnung_anonymisiert.txt NEBEN dem Ausgabeordner – den Ort nennt das Protokoll; nicht mit "
+        "hochladen)\n\n"
         "Deshalb: jede Ausgabe in der Vorschau prüfen (Doppelklick auf die Datei). Was dort noch zu sehen ist, "
         "per Klick oder Rahmen nachschwärzen.\n\n"
         "Pseudonymisierte Dokumente bleiben personenbezogene Daten. Für die Weitergabe an einen KI-Dienst "
         "braucht es weiterhin eine Rechtsgrundlage und in der Regel einen Auftragsverarbeitungsvertrag. Die "
         "Verantwortung für die Weitergabe bleibt bei Ihnen (Hilfe → „Hinweise vor der Nutzung …“).\n\n"
-        "Fotos und Bild-Scans (JPEG, PNG, TIFF, BMP, PNM) werden auf Wunsch in eine PDF umgewandelt und per "
-        "Texterkennung gelesen. Gesichter, Unterschriften und Handschrift darauf werden NICHT geschwärzt (ein "
-        "Lichtbild nur, wenn es als solches erkannt wird; in „Maximal“ alle Fotobereiche): in der Vorschau unter "
-        "„Geplante Schwärzung“ prüfen und einen Rahmen darüber ziehen. Die Ausgabe eines "
-        "Fotos muss deshalb immer in der Vorschau freigegeben werden („_PRUEFEN“). "
-        "PDFs mit Kennwort werden nach Eingabe des Kennworts geprüft – die Ausgabe hat "
-        "dann kein Kennwort mehr. Die umgewandelte bzw. entschlüsselte Arbeitskopie liegt nur während der "
-        "Bearbeitung im Programmordner für Zwischendateien und wird beim Entfernen aus der Liste und beim Beenden "
-        "gelöscht. Andere Dateien (Word, Mails …) werden nicht geprüft: zuerst als PDF speichern.\n\n"
+        "Fotos und Bild-Scans (JPEG, PNG, TIFF, BMP) werden auf Wunsch in eine PDF umgewandelt und per "
+        "Texterkennung gelesen. " + fotos + " in der Vorschau unter „Geplante Schwärzung“ prüfen und einen Rahmen "
+        "darüber ziehen. Die Ausgabe eines Fotos muss deshalb immer in der Vorschau freigegeben werden "
+        "(„_PRUEFEN“). PDFs mit Kennwort werden nach Eingabe des Kennworts geprüft – die Ausgabe hat dann kein "
+        "Kennwort mehr. Die umgewandelte bzw. entschlüsselte Arbeitskopie liegt nur während der Bearbeitung in "
+        "%LOCALAPPDATA%\\PDF-Anonymisierer\\temp und wird beim Entfernen aus der Liste und beim Beenden gelöscht. "
+        "Andere Dateien (Word, Mails, HEIC-, WEBP- oder GIF-Bilder …) werden nicht geprüft: zuerst als PDF "
+        "speichern.\n\n"
         "Ausgaben in Ordnern, die mit OneDrive, Dropbox o. Ä. synchronisiert werden, landen ebenfalls in der "
         "Cloud. Per Dateidialog geöffnete Dateien merkt sich Windows unter „Zuletzt verwendet“."
     )
@@ -396,6 +410,22 @@ def _fehlertext_verstaendlich(text: str) -> str:
     return text
 
 
+def _pfad_zu_lang(fehler: BaseException, pfad: Path | None) -> bool:
+    """Liegt es wirklich an einem zu langen Pfad? Lange Pfade öffnet das Programm unter Windows mit „\\\\?\\“ (R-09),
+    ein langer Pfad allein erklärt also keinen Fehler mehr (Befund: bis dahin hieß unter Windows JEDE Ausnahme bei
+    einem Pfad über 240 Zeichen „Dateipfad zu lang“ – auch eine beschädigte PDF oder Speichermangel). Es zählen nur
+    „Name zu lang“ (ENAMETOOLONG, WinError 206) und bei einem langen Pfad OHNE „\\\\?\\“ (Dateidialog, Zielordner)
+    „nicht gefunden“: so meldet Windows einen Pfad über MAX_PATH."""
+    if not isinstance(fehler, OSError):
+        return False
+    winfehler = getattr(fehler, "winerror", None)
+    if fehler.errno == errno.ENAMETOOLONG or winfehler == 206:
+        return True
+    return (sys.platform == "win32" and pfad is not None and len(str(pfad)) > 240
+            and not str(pfad).startswith(_LANGPFAD_PRAEFIX)
+            and (winfehler == 3 or isinstance(fehler, FileNotFoundError)))
+
+
 def _verstaendliche_fehlermeldung(fehler: BaseException, pfad: Path | None = None) -> str:
     """Übersetzt eine Ausnahme in eine Handlungsanweisung."""
     text = str(fehler)
@@ -405,7 +435,7 @@ def _verstaendliche_fehlermeldung(fehler: BaseException, pfad: Path | None = Non
         return _FEHLERTEXT_MUSTER[1][1]
     if isinstance(fehler, OSError) and getattr(fehler, "errno", None) == errno.ENOSPC:
         return _FEHLERTEXT_MUSTER[2][1]
-    if pfad is not None and sys.platform == "win32" and len(str(pfad)) > 240:
+    if _pfad_zu_lang(fehler, pfad):
         return _FEHLERTEXT_MUSTER[3][1]
     uebersetzt = _fehlertext_verstaendlich(text)
     if uebersetzt != text:
@@ -1984,7 +2014,8 @@ class AnonymisiererApp:
         text = (f"{len(bilder)} Foto(s) bzw. Bild-Scan(s) gefunden:\n" + "\n".join(zeilen) + "\n\n"
                 "In PDFs umwandeln und mitprüfen? Der Text wird dann per Texterkennung (OCR) gelesen – das ist "
                 "unsicherer als bei einer echten PDF; das Ergebnis bitte besonders sorgfältig ansehen. Die Umwandlung "
-                "liegt nur vorübergehend im Programmordner, die Ausgabe heißt wie gewohnt anonym_NN.pdf.\n\n"
+                "liegt nur vorübergehend im Ordner für Zwischendateien (%LOCALAPPDATA%\\PDF-Anonymisierer\\temp), die "
+                "Ausgabe heißt wie gewohnt anonym_NN.pdf (bis zur Freigabe anonym_NN_PRUEFEN.pdf).\n\n"
                 f"ACHTUNG: {FOTO_GRENZEN} Die Ausgabe eines Fotos muss deshalb immer in der Vorschau freigegeben "
                 "werden.\n\n"
                 "„Nein“: Die Bilder werden NICHT geprüft und nicht in die Liste aufgenommen.")
@@ -3508,9 +3539,10 @@ class AnonymisiererApp:
                     break
                 time.sleep(0.25)
             if Path(sitzung).exists():
-                hinweis = RuntimeError(f"Arbeitskopien im Programmordner für Zwischendateien ({Path(sitzung).name}) "
-                                       f"konnten beim Beenden nicht gelöscht werden (Datei noch geöffnet?) – sie "
-                                       f"werden beim nächsten Programmstart gelöscht.")
+                hinweis = RuntimeError(f"Arbeitskopien im Ordner für Zwischendateien (%LOCALAPPDATA%\\"
+                                       f"PDF-Anonymisierer\\temp\\{Path(sitzung).name}) konnten beim Beenden nicht "
+                                       f"gelöscht werden (Datei noch geöffnet?) – sie werden beim nächsten "
+                                       f"Programmstart gelöscht.")
                 dateien.fehler_protokollieren(type(hinweis), hinweis, None)
 
         faden = threading.Thread(target=spaeter, daemon=False, name="Arbeitskopien-loeschen")

@@ -8,6 +8,7 @@ und Personendaten nur in Nebenkanälen (Schnittstelle des Pakets analyse-status:
 GUI-Tests laufen unter Xvfb (ohne Display übersprungen), die Dateiprüfungen überall.
 """
 
+import errno
 import importlib.util
 import json
 import os
@@ -297,6 +298,38 @@ def test_lange_windows_pfade_mit_praefix():
     assert str(dateien.pfad_fuer_programm("C:\\Kunden\\a.pdf", "win32")) == "C:\\Kunden\\a.pdf"
     assert str(dateien.pfad_fuer_programm(lang, "win32")).startswith("\\\\?\\C:\\Users")
     assert len(lang) >= dateien.LANGPFAD_AB
+
+
+def test_dateipfad_zu_lang_nur_bei_echtem_laengenfehler(monkeypatch):
+    """Befund (Hilfetexte, B3-11): Unter Windows hieß JEDE Ausnahme bei einer Datei mit über 240 Zeichen Pfad „Der
+    Dateipfad ist zu lang für Windows“ – auch eine beschädigte PDF oder Speichermangel –, obwohl das Programm lange
+    Pfade seit R-09 mit „\\\\?\\“ öffnet. Jetzt nur noch, wenn das System wirklich einen zu langen Pfad meldet."""
+    lang = "C:\\Users\\anna\\OneDrive - Makler GmbH\\Kunden\\" + "Mustermann, Max\\" * 14 + "Police.pdf"
+    mit_praefix = dateien.pfad_fuer_programm(lang, "win32")          # so öffnet das Programm die Datei
+    ohne_praefix = Path(lang)                                         # Dateidialog, Zielordner
+    assert len(lang) > 240 and str(mit_praefix).startswith("\\\\?\\")
+    monkeypatch.setattr(gui.sys, "platform", "win32")
+    zu_lang = gui._FEHLERTEXT_MUSTER[3][1]
+    assert zu_lang.startswith("Der Dateipfad ist zu lang für Windows")
+    # andere Fehler einer Datei mit langem Pfad: der eigentliche Grund, nie „zu lang“
+    for pfad in (mit_praefix, ohne_praefix):
+        meldung = gui._verstaendliche_fehlermeldung(ValueError("Seite 3: kaputtes Objekt"), pfad)
+        assert meldung.startswith("Unerwarteter Fehler (ValueError: Seite 3"), meldung
+        meldung = gui._verstaendliche_fehlermeldung(RuntimeError("code=7: format error: no objects found"), pfad)
+        assert "keine lesbare PDF-Datei" in meldung, meldung
+        assert gui._verstaendliche_fehlermeldung(MemoryError(), pfad).startswith("Unerwarteter Fehler (MemoryError")
+    # „nicht gefunden“ ist mit „\\?\“ kein Längenproblem (Datei verschoben oder gelöscht)
+    fehlt = FileNotFoundError(errno.ENOENT, "No such file or directory")
+    assert gui._verstaendliche_fehlermeldung(fehlt, mit_praefix) != zu_lang
+    assert gui._verstaendliche_fehlermeldung(fehlt, Path("C:\\Kunden\\Police.pdf")) != zu_lang
+    # echte Längenfehler: Name zu lang (WinError 206, ENAMETOOLONG), langer Pfad ohne Präfix „nicht gefunden“
+    name_zu_lang = FileNotFoundError(errno.ENOENT, "Der Dateiname oder die Erweiterung ist zu lang")
+    name_zu_lang.winerror = 206
+    pfad_fehlt = FileNotFoundError(errno.ENOENT, "Das System kann den angegebenen Pfad nicht finden")
+    pfad_fehlt.winerror = 3
+    for fehler, pfad in ((name_zu_lang, mit_praefix), (OSError(errno.ENAMETOOLONG, "File name too long"), None),
+                         (pfad_fehlt, ohne_praefix), (fehlt, ohne_praefix)):
+        assert gui._verstaendliche_fehlermeldung(fehler, pfad) == zu_lang, (fehler, pfad)
 
 
 # ----------------------------------------------------------------------
@@ -1570,6 +1603,34 @@ def test_texte_nennen_gesicht_lichtbild_unterschrift_handschrift():
     assert "„Geplante Schwärzung“" in gui.FOTO_GRENZEN and "Rahmen" in gui.FOTO_GRENZEN
     assert "immer in der Vorschau freigegeben" in gui.GRENZEN_TEXT
     assert vorschau_fenster.HINWEIS_FOTO.startswith("Foto:") and "Gesicht" in vorschau_fenster.HINWEIS_FOTO
+
+
+def test_hilfetexte_zu_maximal_und_ablageorten_stimmen():
+    """Befund (Hilfetexte, B3): „Maximal“ deckt Bilder auf Textseiten und Fotobereiche auf Scans ab – nicht „alle
+    Bilder“: winzige Bilder, Vektorgrafiken und Text über einem Bild bleiben, und Unterschriften und Handschrift auf
+    Scans und Fotos entfernt die Fotoerkennung vorab (fotos.STRICH_MM) – Erststart-Hinweis und Fotorückfrage
+    stellten sie unter „außer in „Maximal““. Arbeitskopien liegen in %LOCALAPPDATA%\\PDF-Anonymisierer\\temp, nicht
+    im Programmordner; angenommen werden JPEG, PNG, TIFF und BMP, nicht HEIC, WEBP und GIF (dateien.BILD_ENDUNGEN)."""
+    from anonymisierer import muster
+    maximal = muster.PROFILE["maximal"]["beschreibung"]
+    texte = (gui.ERSTSTART_TEXT, gui.FOTO_GRENZEN, gui.HINWEISKASTEN, gui.HINWEISKASTEN_KURZ, gui.GRENZEN_TEXT,
+             vorschau_fenster.HINWEIS_FOTO, maximal)
+    for text in texte:
+        assert "alle Bilder" not in text and "alle Fotobereiche" not in text, text
+    # Unterschrift und Handschrift: auch in „Maximal“ nicht (auf Scans und Fotos)
+    assert "auch in „Maximal“" in gui.ERSTSTART_TEXT and "auch in „Maximal“ nicht" in gui.FOTO_GRENZEN
+    assert "Handschrift – auf Scans und Fotos auch nicht in „Maximal“" in gui.GRENZEN_TEXT
+    assert "Bilder und Fotobereiche" in maximal and "Handschrift auf Scans bleiben" in maximal
+    for teil in ("winzige Bilder", "Vektorgrafiken", "halbe Textseite", "%LOCALAPPDATA%\\PDF-Anonymisierer\\temp",
+                 "(JPEG, PNG, TIFF, BMP)", "HEIC", "WEBP", "GIF", "den Ort nennt das Protokoll"):
+        assert teil in gui.GRENZEN_TEXT, teil
+    assert "Programmordner" not in gui.GRENZEN_TEXT and "PNM" not in gui.GRENZEN_TEXT
+    for endung in (".jpg", ".png", ".tif", ".bmp"):
+        assert endung in dateien.BILD_ENDUNGEN
+    assert not {".heic", ".webp", ".gif", ".pnm", ".psd"} & dateien.BILD_ENDUNGEN
+    # eine Engine ohne die neuen Kategorien (ohne Bildprüfung) verspricht weder Lichtbild-Suche noch „Maximal“
+    alt = gui._texte_zur_engine(False)
+    assert "Maximal" not in alt[1] + alt[2] and "gesucht" not in alt[1] + alt[2]
 
 
 @gui_test

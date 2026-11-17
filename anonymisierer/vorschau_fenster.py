@@ -52,9 +52,11 @@ HINWEIS_VORHER = ("Klick auf ein Wort: schwärzen an/aus · Rahmen ziehen: Berei
                   "schwärzen / nicht schwärzen · Bild auf/ab: Seite blättern")
 HINWEIS_NACHHER = ("Ausgabe nach dem Schwärzen. Orange = Verdacht der Restrisiko-Prüfung. Markierte Verdachtsstellen "
                    "nachschwärzen – oder, wenn nichts Persönliches mehr zu sehen ist, „Freigeben“.")
-# Fotos und Ausweiskopien (Befund Runde 2): Gesicht/Lichtbild, Unterschrift und Handschrift erkennt das Programm nicht
-HINWEIS_FOTO = ("Foto: Lichtbilder auf Ausweisen werden gesucht, andere Gesichter, Unterschriften und Handschrift NICHT "
-                "automatisch geschwärzt – unter „Geplante Schwärzung“ prüfen und einen Rahmen darüber ziehen.")
+# Fotos und Ausweiskopien (Befund Runde 2): Gesicht/Lichtbild, Unterschrift und Handschrift erkennt das Programm nicht;
+# „Maximal“ deckt auf einem Foto nur erkannte Fotobereiche ab, nie Unterschrift oder Handschrift (fotos.STRICH_MM)
+HINWEIS_FOTO = ("Foto: Lichtbilder auf Ausweisen werden gesucht, andere Gesichter nur in „Maximal“ abgedeckt, "
+                "Unterschriften und Handschrift NICHT – unter „Geplante Schwärzung“ prüfen und einen Rahmen darüber "
+                "ziehen.")
 GANZE_SEITE_RAND = 3.0        # pt: Rahmen eines Seitenverdachts liegt knapp innerhalb des Seitenrands
 
 

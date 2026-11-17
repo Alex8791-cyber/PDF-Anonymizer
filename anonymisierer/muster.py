@@ -1760,8 +1760,11 @@ PROFILE = {
         "aktive": frozenset(_KERN | {"beruf", "arbeitgeber", "international", "ort"} | GESUNDHEIT),
         # hier aktiv; nur wer sie selbst abwählt (Benutzerdefiniert), bekommt sie gemeldet und abgewählt angeboten
         "hinweis": GESUNDHEIT,
+        # bilder_schwaerzen (fotos.seite_pruefen): Bilder auf Textseiten, Fotobereiche auf Scans – Striche wie
+        # Unterschrift und Handschrift entfernt die Fotoerkennung vorab, sie bleiben auf Scans stehen
         "beschreibung": "Größter Schutz, weniger Zusammenhang für die KI. Zusätzlich: Diagnosen, Medikamente, "
-                        "alle plausiblen Geburtsdaten und unbekannte Eigennamen bei Personen.",
+                        "alle plausiblen Geburtsdaten, unbekannte Eigennamen bei Personen sowie Bilder und "
+                        "Fotobereiche (Unterschriften und Handschrift auf Scans bleiben stehen).",
         "optionen": {"alle_geburtsdaten": True, "unbekannte_eigennamen": True, "bilder_schwaerzen": True},
     },
 }
