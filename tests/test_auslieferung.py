@@ -1677,8 +1677,11 @@ def test_pruefe_installation_vc_laufzeit_aufruf_der_batchdateien(monkeypatch):
         for dll, ort in p.vc_laufzeit().items():
             assert ort and os.path.isabs(ort) and ort.lower().endswith(dll), (dll, ort)
     # main() gibt den Exit-Code der Prüfung unverändert weiter
-    monkeypatch.setattr(p, "vc_laufzeit_exitcode", lambda laden=None: 13)
+    # (seit Runde 5 mit der PyMuPDF-Ladeprobe als Rückfall: main reicht sie an die Prüfung weiter)
+    aufrufe = []
+    monkeypatch.setattr(p, "vc_laufzeit_exitcode", lambda laden=None, **kw: aufrufe.append(kw) or 13)
     assert p.main(["--vc-laufzeit"]) == 13
+    assert aufrufe == [{"pymupdf_laedt": p._pymupdf_laedt}], aufrufe
 
 
 def test_pruefe_installation_meldet_den_benutzten_ocr_ordner(tmp_path, monkeypatch):
@@ -1815,6 +1818,88 @@ def test_startskript_andere_osfehler_kommen_in_die_fehlerlog(tmp_path):
     assert log.is_file(), (lauf.stdout, lauf.stderr[-2000:])
     eintrag = log.read_text(encoding="utf-8")
     assert "Traceback" in eintrag and "PermissionError" in eintrag and "Virenscanner-Sperre" in eintrag, eintrag
+
+
+def test_startskript_gesperrte_mupdf_datei_kommt_in_die_fehlerlog(tmp_path):
+    """Gegenprüfung Runde 5: PyMuPDF fängt einen Fehler beim Laden von pymupdf.mupdf selbst ab und meldet „No module
+    named 'mupdf'“ – der PermissionError (Virenscanner-Sperre) steht dann nur in der Ausnahmekette. Das Startskript
+    meldete dafür „Das Paket 'PyMuPDF' fehlt“ ohne fehler.log; jetzt geht auch dieser Fall mit Traceback in die
+    fehler.log."""
+    programm = tmp_path / "programm"
+    programm.mkdir()
+    shutil.copy2(WURZEL / "pdf_anonymisierer.py", programm)
+    shutil.copytree(WURZEL / "anonymisierer", programm / "anonymisierer",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    gesperrt = ("try:\n"
+                "    raise PermissionError(13, 'Zugriff verweigert (Virenscanner-Sperre)', 'mupdf.py')\n"
+                "except Exception:\n"
+                "    raise ModuleNotFoundError(\"No module named 'mupdf'\")\n")
+    attrappe = tmp_path / "attrappe"
+    for paket, code in (("pymupdf", gesperrt), ("fitz", "from pymupdf import *\n"),
+                        ("tkinter", "raise ImportError('Testattrappe: kein Fehlerdialog')\n")):
+        (attrappe / paket).mkdir(parents=True)
+        (attrappe / paket / "__init__.py").write_text(code, encoding="utf-8")
+    umgebung = dict(os.environ, PYTHONPATH=str(attrappe), DISPLAY="", PYTHONIOENCODING="utf-8")
+    lauf = subprocess.run([sys.executable, "-W", "ignore", str(programm / "pdf_anonymisierer.py")],
+                          capture_output=True, text=True, encoding="utf-8", timeout=120, cwd=str(tmp_path),
+                          env=umgebung)
+    assert lauf.returncode == 1, lauf.stderr[-2000:]
+    assert "fehlt" not in lauf.stdout and "Installieren.bat" not in lauf.stdout, lauf.stdout
+    log = programm / "fehler.log"
+    assert log.is_file(), (lauf.stdout, lauf.stderr[-2000:])
+    eintrag = log.read_text(encoding="utf-8")
+    assert "PermissionError" in eintrag and "Virenscanner-Sperre" in eintrag, eintrag
+
+
+def test_startskript_fremder_oserror_nur_ohne_dll_bezug():
+    """Die Weiche des Startskripts: ein OSError ohne DLL-Bezug irgendwo in der Kette ist ein unerwarteter Fehler; ein
+    DLL-Ladefehler und ein wirklich fehlendes Paket (ohne OSError) bleiben Meldungen."""
+    pa = _startskript()
+    try:
+        try:
+            raise PermissionError(13, "Zugriff verweigert")
+        except PermissionError:
+            raise ModuleNotFoundError("No module named 'mupdf'")
+    except ImportError as e:
+        gesperrt = e
+    assert isinstance(pa._fremder_oserror(gesperrt), PermissionError)
+    assert pa._fremder_oserror(ModuleNotFoundError("No module named 'pymupdf'")) is None
+    assert pa._fremder_oserror(ImportError(DLL_FEHLER)) is None
+    dll = OSError("[WinError 126] Das angegebene Modul wurde nicht gefunden")
+    dll.winerror = 126
+    assert pa._fremder_oserror(dll) is None
+
+
+def test_pruefe_installation_bericht_in_cp1252():
+    """Gegenprüfung Runde 5: Umgeleitete Ausgabe (> bericht.txt, | clip) schreibt unter Windows ohne UTF-8-Modus
+    cp1252 – ein Zeichen wie „→“ brach den Bericht mitten in der Liste der Probleme ab. Alle Texte des Prüfskripts
+    lassen sich in cp1252 schreiben, und main() schreibt ohnehin mit errors="replace"."""
+    quelle = _lies("werkzeuge/pruefe_installation.py")
+    quelle.encode("cp1252")
+    assert 'reconfigure(errors="replace")' in quelle
+    p = _pruefe_installation()
+    for module in (["tkinter"], ["tkinter", "tkinterdnd2"], ["spacy"], ["fitz"], ["tkinterdnd2"]):
+        p._dll_problem(module, []).encode("cp1252")
+
+
+def test_vc_laufzeit_pymupdf_laedt_trotz_fehlgeschlagener_probe():
+    """Gegenprüfung Runde 5: ctypes sucht eine DLL ohne Pfad nicht im Ordner von PyMuPDF, ein Erweiterungsmodul
+    dagegen schon. Liegt msvcp140.dll nur dort, scheiterte die Probe, obwohl PyMuPDF lädt – Installieren.bat brach dann
+    ab. Jetzt zählt in diesem Fall, dass PyMuPDF lädt."""
+    p = _pruefe_installation()
+
+    def laden(dll):
+        if dll == "msvcp140.dll":
+            raise OSError("[WinError 126] Das angegebene Modul wurde nicht gefunden")
+        return "C:\\Python312\\" + dll
+
+    assert p.vc_laufzeit_exitcode(laden, pymupdf_laedt=lambda: True) == p.VC_EXIT_BASIS
+    assert p.vc_laufzeit_exitcode(laden, pymupdf_laedt=lambda: False) == p.VC_EXIT_BASIS + 1
+    assert p.vc_laufzeit_exitcode(laden) == p.VC_EXIT_BASIS + 1          # Lader für Tests: keine echte Probe
+    zeilen, probleme = p.laufzeit_bericht(windows=True, laden=laden, pymupdf_laedt=lambda: True)
+    assert probleme == [] and "PyMuPDF lädt trotzdem" in "\n".join(zeilen), (zeilen, probleme)
+    zeilen, probleme = p.laufzeit_bericht(windows=True, laden=laden, pymupdf_laedt=lambda: False)
+    assert len(probleme) == 1 and "msvcp140.dll" in probleme[0], probleme
 
 
 def _fliesstext(datei: str) -> str:

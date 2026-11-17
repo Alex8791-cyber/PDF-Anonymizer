@@ -147,18 +147,34 @@ def vc_laufzeit_fehlt(laden=None) -> list[str]:
     return [dll for dll, ort in vc_laufzeit(laden).items() if ort is None]
 
 
-def vc_laufzeit_exitcode(laden=None) -> int:
+def _pymupdf_laedt() -> bool:
+    """Lädt PyMuPDF in diesem Python? ctypes sucht eine DLL ohne Pfad nur im Ordner von python.exe, im Systemordner
+    und in Ordnern aus add_dll_directory; ein Erkennungsmodul (.pyd) sucht seine DLLs zusätzlich im eigenen Ordner
+    (site-packages\\pymupdf). Liegt msvcp140.dll nur dort, scheitert die ctypes-Probe, PyMuPDF lädt aber
+    (Gegenprüfung Runde 5) – dann ist die Laufzeit für das Programm da."""
+    try:
+        import pymupdf  # noqa: F401
+    except Exception:  # noqa: BLE001 - jeder Fehler heißt: so lädt PyMuPDF nicht
+        return False
+    return True
+
+
+def vc_laufzeit_exitcode(laden=None, pymupdf_laedt=None) -> int:
     """Exit-Code für die Batch-Dateien: VC_EXIT_BASIS + 1 (msvcp140.dll fehlt) + 2 (vcruntime140_1.dll fehlt).
-    Außerhalb von Windows gibt es ohne eigenen Lader nichts zu prüfen."""
+    Außerhalb von Windows gibt es ohne eigenen Lader nichts zu prüfen. pymupdf_laedt (main: _pymupdf_laedt): Scheitert
+    die Probe, lädt PyMuPDF aber trotzdem (DLL im Ordner von PyMuPDF), fehlt nichts – kein Abbruch, wo PyMuPDF lädt."""
     if laden is None and sys.platform != "win32":
         return VC_EXIT_BASIS
     fehlt = vc_laufzeit_fehlt(laden)
+    if fehlt and pymupdf_laedt is not None and pymupdf_laedt():
+        return VC_EXIT_BASIS
     return VC_EXIT_BASIS + sum(1 << i for i, dll in enumerate(VC_DLLS) if dll in fehlt)
 
 
-def laufzeit_bericht(windows: bool | None = None, laden=None) -> tuple[list[str], list[str]]:
+def laufzeit_bericht(windows: bool | None = None, laden=None, pymupdf_laedt=None) -> tuple[list[str], list[str]]:
     """Visual-C++-Laufzeit (nur unter Windows): Lässt sie sich nicht laden, scheitert jeder Import von PyMuPDF mit
-    „DLL load failed“ – Pakete neu zu installieren hilft dann nicht. Die Zeile nennt, woher Python jede DLL lädt."""
+    „DLL load failed“ – Pakete neu zu installieren hilft dann nicht. Die Zeile nennt, woher Python jede DLL lädt.
+    Lädt PyMuPDF trotz fehlgeschlagener Probe (DLL nur im Ordner von PyMuPDF), ist das kein Problem."""
     if not (sys.platform == "win32" if windows is None else windows):
         return [], []
     orte = vc_laufzeit(laden)
@@ -166,6 +182,9 @@ def laufzeit_bericht(windows: bool | None = None, laden=None) -> tuple[list[str]
     zeilen = [f"Visual C++:    {', '.join(teile)}"]
     fehlt = [dll for dll, ort in orte.items() if ort is None]
     if not fehlt:
+        return zeilen, []
+    if pymupdf_laedt is not None and pymupdf_laedt():
+        zeilen.append("               PyMuPDF lädt trotzdem (die DLL liegt wohl im Ordner von PyMuPDF) – kein Problem.")
         return zeilen, []
     return zeilen, [f"Die Visual-C++-Laufzeit fehlt ({', '.join(fehlt)} lässt sich von diesem Python nicht laden) – "
                     f"ohne sie lässt sich PyMuPDF nicht laden („DLL load failed“). Abhilfe: {VC_ABHILFE}."]
@@ -219,7 +238,7 @@ def _dll_problem(module: list[str], fehlt: list[str] | None) -> str:
         version = f"{sys.version_info.major}.{sys.version_info.minor}"
         teile.append("tkinter gehört zu Python selbst (Tcl/Tk: _tkinter.pyd, tcl86t.dll und tk86t.dll im Ordner DLLs "
                      "der Python-Installation) – an der Visual-C++-Laufzeit liegt das meist nicht. Abhilfe: Python "
-                     f"reparieren (Einstellungen → Apps → „Python {version}“ → Ändern → „Repair“) oder neu "
+                     f"reparieren (Einstellungen > Apps > „Python {version}“ > Ändern > „Repair“) oder neu "
                      "installieren und dabei „tcl/tk and IDLE“ angehakt lassen"
                      + ("; 'tkinterdnd2' braucht tkinter und lädt danach wieder." if "tkinterdnd2" in module else "."))
     elif "tkinterdnd2" in module:
@@ -338,9 +357,16 @@ def fehlerlog_bericht() -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    for strom in (sys.stdout, sys.stderr):
+        # umgeleitete Ausgabe ("> bericht.txt", "| clip") schreibt unter Windows ohne UTF-8-Modus cp1252: ein Zeichen,
+        # das dort fehlt, bräche den Bericht sonst mitten in der Liste der Probleme ab (Gegenprüfung Runde 5)
+        try:
+            strom.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     if argv == ["--vc-laufzeit"]:
         # Nur die Laufzeit-Probe für Installieren.bat und EXE-bauen.bat: Exit-Code statt Bericht (VC_EXIT_BASIS)
-        return vc_laufzeit_exitcode()
+        return vc_laufzeit_exitcode(pymupdf_laedt=_pymupdf_laedt)
     if str(PROGRAMM_ORDNER) not in sys.path:
         sys.path.insert(0, str(PROGRAMM_ORDNER))
     try:
@@ -351,7 +377,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Programmordner: {PROGRAMM_ORDNER}")
     print("-" * 72)
     probleme: list[str] = []
-    for bericht in (python_bericht, laufzeit_bericht, pakete_bericht, tessdata_bericht):
+    for bericht in (python_bericht, lambda: laufzeit_bericht(pymupdf_laedt=_pymupdf_laedt), pakete_bericht,
+                    tessdata_bericht):
         zeilen, neue = bericht()
         if zeilen:                       # laufzeit_bericht hat außerhalb von Windows nichts zu sagen
             print("\n".join(zeilen))

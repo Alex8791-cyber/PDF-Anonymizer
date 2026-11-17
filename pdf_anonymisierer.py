@@ -106,6 +106,21 @@ def _dll_ladefehler(fehler):
     return None
 
 
+def _fremder_oserror(fehler):
+    """Ein OSError der Ausnahmekette ohne DLL-Bezug (z. B. PermissionError durch eine Virenscanner-Sperre), sonst None.
+    PyMuPDF fängt einen Fehler beim Laden von pymupdf.mupdf selbst ab und meldet „No module named 'mupdf'“ – der
+    eigentliche Fehler steht dann nur in der Kette (Gegenprüfung Runde 5)."""
+    if _dll_ladefehler(fehler) is not None:
+        return None
+    gesehen = set()
+    while fehler is not None and id(fehler) not in gesehen:
+        gesehen.add(id(fehler))
+        if isinstance(fehler, OSError):
+            return fehler
+        fehler = fehler.__cause__ or fehler.__context__
+    return None
+
+
 def _meldung_paket_fehlt(fehler=None) -> str:
     """Text, wenn PyMuPDF fehlt oder sich nicht laden lässt – in der EXE gibt es kein Installieren.bat (M-70).
     Scheitert der Import an einer DLL, fehlt in der Skript-Version meist die Visual-C++-Laufzeit von Microsoft:
@@ -136,7 +151,7 @@ def _meldung_paket_fehlt(fehler=None) -> str:
 try:
     _pymupdf_laden()
 except (ImportError, OSError) as _fehler:     # OSError: z. B. WinError 126 beim Laden einer DLL
-    if isinstance(_fehler, OSError) and _dll_ladefehler(_fehler) is None:
+    if _fremder_oserror(_fehler) is not None:
         # Ein OSError ohne DLL-Bezug (z. B. PermissionError, weil ein Virenscanner eine Paketdatei sperrt) ist kein
         # fehlendes Paket: „Paket fehlt“ nennte die falsche Ursache, und die Diagnose ginge verloren. Wie jeder
         # unerwartete Fehler: Traceback in die fehler.log, Dialog „Unerwarteter Fehler“ mit Details (sys.excepthook).
