@@ -2541,9 +2541,9 @@ def _zuordnung_eintragen(lauf: _Lauf, ausgabe: Path) -> None:
                     f"beim Hochladen NICHT mit auswählen, nur die anonym_….pdf-Dateien weitergeben.")
     elif ist_wurzel(lauf.ziel):
         lauf.melden("hinweis", "ZUORDNUNG",
-                    f"Zuordnung Original ↔ Ausgabe steht in {datei} (Programmordner – der Zielordner {lauf.ziel} ist ein "
-                    f"ganzes Laufwerk bzw. eine Freigabe, daneben ist kein Platz). Diese Datei enthält die "
-                    f"Original-Dateinamen (oft mit Kundennamen) – nicht weitergeben.")
+                    f"Zuordnung Original ↔ Ausgabe steht in {datei} (im Programmordner für Einstellungen – der "
+                    f"Zielordner {lauf.ziel} ist ein ganzes Laufwerk bzw. eine Freigabe, daneben ist kein Platz). "
+                    f"Diese Datei enthält die Original-Dateinamen (oft mit Kundennamen) – nicht weitergeben.")
     else:
         lauf.melden("hinweis", "ZUORDNUNG", f"Zuordnung Original ↔ Ausgabe steht in {datei}. Diese Datei enthält "
                                             f"die Original-Dateinamen (oft mit Kundennamen) – nicht mit hochladen, "
@@ -2680,9 +2680,12 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
     for k in lauf.kollateral:
         lauf.melden("hinweis", "NACHBARWORT_BESCHAEDIGT", k)
     if lauf.bild_seiten:
+        # in den Bildern sucht die Analyse auch Lichtbilder (fotos.seite_pruefen, jede Schutzstufe); ganze Bilder
+        # deckt nur „Maximal“ ab
         lauf.melden("hinweis", "BILDER_UNGEPRUEFT",
                     f"Seite(n) {', '.join(map(str, lauf.bild_seiten))}: enthalten Bilder – maschinenlesbarer Text "
-                    f"darin wurde per OCR geprüft, Unterschriften, Fotos und Handschrift nicht.")
+                    f"darin wurde per OCR geprüft und Lichtbilder auf Ausweiskopien wurden gesucht, Unterschriften, "
+                    f"Handschrift und andere Fotos nicht (ganze Bilder deckt nur die Schutzstufe „Maximal“ ab).")
     if lauf.grafik_seiten:
         lauf.melden("hinweis", "VEKTORGRAFIK",
                     f"Seite(n) {', '.join(map(str, lauf.grafik_seiten))}: enthalten Grafiken/Zeichnungen "

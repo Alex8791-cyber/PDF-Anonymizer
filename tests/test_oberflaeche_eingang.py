@@ -8,6 +8,7 @@ und Personendaten nur in Nebenkanälen (Schnittstelle des Pakets analyse-status:
 GUI-Tests laufen unter Xvfb (ohne Display übersprungen), die Dateiprüfungen überall.
 """
 
+import errno
 import importlib.util
 import json
 import os
@@ -297,6 +298,71 @@ def test_lange_windows_pfade_mit_praefix():
     assert str(dateien.pfad_fuer_programm("C:\\Kunden\\a.pdf", "win32")) == "C:\\Kunden\\a.pdf"
     assert str(dateien.pfad_fuer_programm(lang, "win32")).startswith("\\\\?\\C:\\Users")
     assert len(lang) >= dateien.LANGPFAD_AB
+
+
+class _WindowsNichtGefunden(FileNotFoundError):
+    """FileNotFoundError mit dem Wortlaut von Windows: str() = „[WinError N] Text: 'Pfad'“ (unter Linux setzt CPython
+    winerror nicht und schreibt „[Errno 2]“)."""
+
+    def __init__(self, winerror: int, text: str, pfad):
+        super().__init__(errno.ENOENT, text, str(pfad))
+        self.winerror = winerror
+
+    def __str__(self):
+        return f"[WinError {self.winerror}] {self.strerror}: {self.filename!r}"
+
+
+def test_dateipfad_zu_lang_nur_bei_echtem_laengenfehler(monkeypatch):
+    """Befund (Hilfetexte, B3-11): Unter Windows hieß JEDE Ausnahme bei einer Datei mit über 240 Zeichen Pfad „Der
+    Dateipfad ist zu lang für Windows“ – auch eine beschädigte PDF oder Speichermangel –, obwohl das Programm lange
+    Pfade seit R-09 mit „\\\\?\\“ öffnet. Dazu machte das Textmuster „winerror 3]“ aus JEDEM „Pfad nicht gefunden“
+    (WinError 3) „zu lang“ – auch bei einem kurzen Pfad, einem verschobenen Ordner oder einem getrennten Netzlaufwerk
+    (Befund der Gegenprüfung). Jetzt „zu lang“ nur, wenn das System wirklich einen zu langen Pfad meldet: Name zu lang
+    (WinError 206, ENAMETOOLONG) oder „nicht gefunden“ für einen langen Pfad ohne „\\\\?\\“. Jedes andere „nicht
+    gefunden“ heißt „Datei oder Ordner nicht gefunden“."""
+    lang = "C:\\Users\\anna\\OneDrive - Makler GmbH\\Kunden\\" + "Mustermann, Max\\" * 14 + "Police.pdf"
+    mit_praefix = dateien.pfad_fuer_programm(lang, "win32")          # so öffnet das Programm die Datei
+    ohne_praefix = Path(lang)                                         # Dateidialog, Zielordner
+    kurz = Path("C:\\Kunden\\Police.pdf")
+    assert len(lang) > 240 and str(mit_praefix).startswith("\\\\?\\")
+    monkeypatch.setattr(gui.sys, "platform", "win32")
+    zu_lang = gui._FEHLERTEXT_MUSTER[3][1]
+    nicht_gefunden = gui._FEHLERTEXT_MUSTER[5][1]
+    assert zu_lang.startswith("Der Dateipfad ist zu lang für Windows")
+    assert nicht_gefunden.startswith("Datei oder Ordner nicht gefunden") and "Netzlaufwerk" in nicht_gefunden
+    # andere Fehler einer Datei mit langem Pfad: der eigentliche Grund, nie „zu lang“
+    for pfad in (mit_praefix, ohne_praefix):
+        meldung = gui._verstaendliche_fehlermeldung(ValueError("Seite 3: kaputtes Objekt"), pfad)
+        assert meldung.startswith("Unerwarteter Fehler (ValueError: Seite 3"), meldung
+        meldung = gui._verstaendliche_fehlermeldung(RuntimeError("code=7: format error: no objects found"), pfad)
+        assert "keine lesbare PDF-Datei" in meldung, meldung
+        assert gui._verstaendliche_fehlermeldung(MemoryError(), pfad).startswith("Unerwarteter Fehler (MemoryError")
+    # „nicht gefunden“ mit „\\?\“ oder kurzem Pfad ist kein Längenproblem (Datei bzw. Ordner verschoben oder gelöscht,
+    # Netzlaufwerk getrennt) – mit dem Wortlaut der Windows-Meldung („[WinError 3] …“) wie mit „[Errno 2]“
+    fehlt = FileNotFoundError(errno.ENOENT, "No such file or directory")
+    pfad_weg = "Das System kann den angegebenen Pfad nicht finden"
+    for fehler, pfad in ((fehlt, mit_praefix), (fehlt, kurz),
+                         (_WindowsNichtGefunden(3, pfad_weg, mit_praefix), mit_praefix),
+                         (_WindowsNichtGefunden(3, pfad_weg, kurz), kurz),
+                         (_WindowsNichtGefunden(2, "Das System kann die angegebene Datei nicht finden", kurz), kurz)):
+        meldung = gui._verstaendliche_fehlermeldung(fehler, pfad)
+        assert meldung.startswith(nicht_gefunden) and "(Systemmeldung: " in meldung, (str(fehler), meldung)
+    # dasselbe als Text (die Schwärzung meldet einen fehlenden Ordner als Fehlertext); „Name zu lang“ bleibt „zu lang“
+    for text in (f"[WinError 3] {pfad_weg}: 'Z:\\\\Kunden'",
+                 f"Zielordner kann nicht angelegt werden (Z:\\Ausgabe): [WinError 3] {pfad_weg}: 'Z:\\\\'"):
+        assert gui._fehlertext_verstaendlich(text).startswith(nicht_gefunden), text
+        assert gui._verstaendliche_fehlermeldung(OSError(text), kurz).startswith(nicht_gefunden), text
+    assert gui._fehlertext_verstaendlich("[WinError 206] Der Dateiname oder die Erweiterung ist zu lang").startswith(
+        zu_lang)
+    # echte Längenfehler: Name zu lang (WinError 206, ENAMETOOLONG), langer Pfad ohne Präfix „nicht gefunden“
+    name_zu_lang = FileNotFoundError(errno.ENOENT, "Der Dateiname oder die Erweiterung ist zu lang")
+    name_zu_lang.winerror = 206
+    pfad_fehlt = FileNotFoundError(errno.ENOENT, pfad_weg)
+    pfad_fehlt.winerror = 3
+    for fehler, pfad in ((name_zu_lang, mit_praefix), (OSError(errno.ENAMETOOLONG, "File name too long"), None),
+                         (pfad_fehlt, ohne_praefix), (fehlt, ohne_praefix),
+                         (_WindowsNichtGefunden(3, pfad_weg, ohne_praefix), ohne_praefix)):
+        assert gui._verstaendliche_fehlermeldung(fehler, pfad) == zu_lang, (fehler, pfad)
 
 
 # ----------------------------------------------------------------------
@@ -1570,6 +1636,81 @@ def test_texte_nennen_gesicht_lichtbild_unterschrift_handschrift():
     assert "„Geplante Schwärzung“" in gui.FOTO_GRENZEN and "Rahmen" in gui.FOTO_GRENZEN
     assert "immer in der Vorschau freigegeben" in gui.GRENZEN_TEXT
     assert vorschau_fenster.HINWEIS_FOTO.startswith("Foto:") and "Gesicht" in vorschau_fenster.HINWEIS_FOTO
+
+
+def test_hilfetexte_zu_maximal_und_ablageorten_stimmen():
+    """Befund (Hilfetexte, B3): „Maximal“ deckt Rasterbilder auf digitalen PDF-Seiten und erkannte Fotobereiche auf
+    Scans und Fotos ab – nicht „alle Bilder“: winzige Bilder, gezeichnete Grafiken und Text über einem Bild bleiben.
+    Unterschriften und Handschrift deckt es nur als eigenes Bild ab: auf Scans und Fotos entfernt die Fotoerkennung
+    Striche vorab (fotos.STRICH_MM), gezeichnete Linien sieht die Bildprüfung nicht – Erststart-Hinweis und
+    Fotorückfrage stellten sie unter „außer in „Maximal““. Auch die sichtbarsten Texte (Hinweiskasten, Foto-Hinweis
+    der Vorschau) nennen die Grenze: andere Gesichter bleiben stehen, „Maximal“ deckt nur erkannte ab (Befund der
+    Gegenprüfung; dort auch: „Vektorgrafiken“ und „Textseiten“ sind keine Wörter für Makler). Arbeitskopien liegen in
+    %LOCALAPPDATA%\\PDF-Anonymisierer\\temp, nicht im Programmordner; angenommen werden JPEG, PNG, TIFF und BMP, nicht
+    HEIC, WEBP und GIF (dateien.BILD_ENDUNGEN)."""
+    from anonymisierer import muster
+    maximal = muster.PROFILE["maximal"]["beschreibung"]
+    texte = (gui.ERSTSTART_TEXT, gui.FOTO_GRENZEN, gui.HINWEISKASTEN, gui.HINWEISKASTEN_KURZ, gui.GRENZEN_TEXT,
+             vorschau_fenster.HINWEIS_FOTO, maximal)
+    for text in texte:
+        assert "alle Bilder" not in text and "alle Fotobereiche" not in text, text
+        assert "Vektor" not in text and "Textseite" not in text, text
+    # andere Gesichter und Bilder: stehen bleiben sie außer in „Maximal“, und dort nur, wenn erkannt
+    assert "Andere Gesichter und Bilder bleiben, außer „Maximal“ erkennt sie." in gui.HINWEISKASTEN
+    assert "andere Gesichter nur in „Maximal“ (wenn erkannt) abgedeckt" in vorschau_fenster.HINWEIS_FOTO
+    assert "andere bleiben in „Ausgewogen“ und „Hoch“ stehen" in gui.GRENZEN_TEXT
+    # Unterschrift und Handschrift: auch in „Maximal“ nur als eigenes Bild – nicht auf Scans und Fotos, nicht gezeichnet
+    assert "auf Scans, Fotos und als Zeichnung bleiben sie auch in „Maximal“ stehen" in gui.ERSTSTART_TEXT
+    assert "auch in „Maximal“ nicht" in gui.FOTO_GRENZEN
+    assert ("Handschrift – auch in „Maximal“ nur abgedeckt, wenn sie als eigenes Bild eingefügt sind (nicht auf "
+            "Scans und Fotos, nicht als Zeichnung)") in gui.GRENZEN_TEXT
+    assert "Bilder und Fotobereiche (Unterschriften und Handschrift nur, wenn als eigenes Bild eingefügt)" in maximal
+    for teil in ("digitalen PDF-Seiten", "winzige Bilder", "gezeichnete Grafiken", "halbe Seite gilt als Scan",
+                 "%LOCALAPPDATA%\\PDF-Anonymisierer\\temp", "(JPEG, PNG, TIFF, BMP)", "HEIC", "WEBP", "GIF",
+                 "den Ort nennt das Protokoll"):
+        assert teil in gui.GRENZEN_TEXT, teil
+    assert "Programmordner" not in gui.GRENZEN_TEXT and "PNM" not in gui.GRENZEN_TEXT
+    for endung in (".jpg", ".png", ".tif", ".bmp"):
+        assert endung in dateien.BILD_ENDUNGEN
+    assert not {".heic", ".webp", ".gif", ".pnm", ".psd"} & dateien.BILD_ENDUNGEN
+    # eine Engine ohne die neuen Kategorien (ohne Bildprüfung) verspricht weder Lichtbild-Suche noch „Maximal“
+    alt = gui._texte_zur_engine(False)
+    assert "Maximal" not in alt[1] + alt[2] and "gesucht" not in alt[1] + alt[2]
+
+
+def test_maximal_deckt_unterschrift_nur_als_eigenes_bild():
+    """Grundlage der Hilfetexte zu „Maximal“ (Befund der Gegenprüfung): auf einer digitalen Seite deckt „Maximal“ eine
+    Unterschrift ab, die als eigenes Bild eingefügt ist; eine gezeichnete Unterschrift (Linien, z. B. in einem
+    PDF-Programm gezeichnet) und ein winziges Bild bleiben. „Hoch“ deckt keins davon ab. Ändert sich das, müssen
+    Erststart-Hinweis, „Was wird nicht erkannt?“ und die Beschreibung der Stufe mit."""
+    import math
+    from anonymisierer import fotos, seitenmodell
+    doc = fitz.open()
+    seite = doc.new_page(width=595, height=842)
+    seite.insert_text((72, 100), "Schadenmeldung – Max Mustermann, Musterstraße 1, 12345 Musterstadt", fontsize=11)
+    zug = seite.new_shape()                                           # gezeichnete Unterschrift
+    zug.draw_polyline([fitz.Point(80 + i * 4, 730 + 10 * math.sin(i / 3.0)) for i in range(40)])
+    zug.finish(color=(0, 0, 0.5), width=1.2)
+    zug.commit()
+    bild = fitz.Pixmap(fitz.csGRAY, fitz.IRect(0, 0, 200, 60), False)   # Unterschrift als eigenes Bild
+    bild.set_rect(bild.irect, (255,))
+    for x in range(10, 190):
+        y = int(30 + 15 * math.sin(x / 12.0))
+        bild.set_rect(fitz.IRect(x, y, x + 2, y + 3), (0,))
+    unterschrift = fitz.Rect(300, 700, 500, 760)
+    seite.insert_image(unterschrift, pixmap=bild)
+    symbol = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 20, 20), False)   # winziges Bild
+    symbol.set_rect(symbol.irect, (200, 50, 50))
+    seite.insert_image(fitz.Rect(72, 300, 92, 320), pixmap=symbol)
+    modell = seitenmodell.seite_aufbauen(seite, 0)
+    modell.ocr_modus = "nein"                                         # digitale Seite, kein Scan
+    assert seite.get_drawings() and len(seite.get_image_info()) == 2
+    hoch = fotos.seite_pruefen(seite, modell, "hoch")
+    assert not (hoch[fotos.KAT_BILD] or hoch[fotos.KAT_FOTO] or hoch[fotos.KAT_LICHTBILD])
+    maximal = fotos.seite_pruefen(seite, modell, "maximal")
+    assert [fitz.Rect(r).contains(unterschrift) for r, _ in maximal[fotos.KAT_BILD]] == [True], maximal
+    assert not maximal[fotos.KAT_FOTO] and not maximal[fotos.KAT_LICHTBILD]
+    doc.close()
 
 
 @gui_test
