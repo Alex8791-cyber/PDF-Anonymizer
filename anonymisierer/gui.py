@@ -9,7 +9,6 @@ Engine eine Fähigkeit, die der Nutzer anfordert, sagt die Oberfläche das – s
 import base64
 import errno
 import importlib.metadata
-import inspect
 import os
 import re
 import sys
@@ -28,10 +27,12 @@ except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
 
 from . import __version__, dateien
 from . import analyse as _analyse_modul
+from . import auftrag as _auftrag_modul
 from . import gui_attrappen as attrappen
 from . import muster as _muster_modul
 from . import schwaerzung as _schwaerz_modul
 from .analyse import analysiere_pdf
+from .auftrag import kann
 from .muster import KATEGORIEN
 from .namen import lade_ner
 from .ocr import OcrDienst
@@ -51,7 +52,7 @@ gesundheit_nur_vermutet = getattr(_analyse_modul, "gesundheit_nur_vermutet", Non
 freigeben = getattr(_schwaerz_modul, "freigeben", None) or attrappen.freigeben
 verwerfen = getattr(_schwaerz_modul, "verwerfen", None) or attrappen.verwerfen
 WARNUNG_KEIN_TREFFER = getattr(_schwaerz_modul, "WARNUNG_KEIN_TREFFER", attrappen.WARNUNG_KEIN_TREFFER)
-PROFILE = getattr(_muster_modul, "PROFILE", None) or attrappen.PROFILE
+PROFILE = _auftrag_modul.PROFILE
 try:
     from .kundenliste import Kundenliste
 except ImportError:
@@ -184,9 +185,7 @@ STATUS_TEXT = {"fertig": "✔ fertig", "pruefen": "⚠ prüfen", "fehler": "✖ 
 _KATEGORIE_SCHLUESSEL = {eintrag[0] for eintrag in KATEGORIEN}
 
 
-def _ist_bildfund(fund: dict) -> bool:
-    """Bildfund (Lichtbild, Bild, Foto): Stellen sind Bereiche im Bild statt Textstellen."""
-    return any("bereich" in st for st in fund.get("stellen") or ())
+_ist_bildfund = _auftrag_modul.ist_bildfund     # Lichtbild, Bild, Foto: Stellen sind Bereiche im Bild
 
 
 def _fundtext_anzeige(fund: dict) -> str:
@@ -293,26 +292,8 @@ DROP_TEXT_OHNE_DND = "⬇  Drag & Drop nicht verfügbar – klicken zum Auswähl
 
 
 # ----------------------------------------------------------------------
-# Engine-Aufruf: Fähigkeiten, Ergebnisprüfung, Meldungs-Codes
+# Engine-Aufruf: Ergebnisprüfung, Meldungs-Codes (Fähigkeiten: auftrag.kann)
 # ----------------------------------------------------------------------
-def _parameter(funktion) -> set | None:
-    """Parameternamen einer Engine-Funktion; None, wenn sie beliebige Schlüsselwörter annimmt."""
-    try:
-        parameter = inspect.signature(funktion).parameters
-    except (TypeError, ValueError):
-        return None
-    if any(p.kind is p.VAR_KEYWORD for p in parameter.values()):
-        return None
-    return set(parameter)
-
-
-def kann(funktion, name: str) -> bool:
-    """Kennt die Engine-Funktion den (neuen, optionalen) Parameter? Pflichtparameter aus Phase 1 werden
-    immer direkt übergeben – ein umbenannter Parameter führt zu einem sichtbaren Fehler, nie zu Stille."""
-    parameter = _parameter(funktion)
-    return parameter is None or name in parameter
-
-
 class Vertragsfehler(RuntimeError):
     """Die Engine hat ein Ergebnis geliefert, das nicht dem Vertrag entspricht."""
 
@@ -1238,7 +1219,7 @@ class AnonymisiererApp:
         zb.pack(side="left", padx=(6, 0))
         self._sperrbar += [zk, self.zielordner_feld, zb]
 
-        self.freigabe_var = tk.BooleanVar(value=True)
+        self.freigabe_var = tk.BooleanVar(value=_auftrag_modul.STANDARD_FREIGABE)
         fk = tk.Checkbutton(karte1, text="Freigabe vor Weitergabe erforderlich (Ausgaben heißen „_PRUEFEN“, bis "
                                          "sie in der Vorschau freigegeben sind – empfohlen)",
                             variable=self.freigabe_var, font=self.f_normal, bg=FARBE_KARTE,
@@ -2484,7 +2465,7 @@ class AnonymisiererApp:
         """Kann die Engine einzelne Fundstellen schwärzen? (Analyse lieferte ein Seitenmodell, die Schwärzung
         nimmt es an – Vertrag Abschnitt 5). Sonst gilt ein Fund immer an allen seinen Stellen."""
         ergebnis = self.analyse_ergebnisse.get(pdf) if ergebnis is None else ergebnis
-        return bool(ergebnis) and ergebnis.get("modell") is not None and kann(schwaerze_pdf, "modell")
+        return _auftrag_modul.einzelstellen_moeglich(ergebnis, schwaerze_pdf)
 
     def kann_manuelle_bereiche(self) -> bool:
         return kann(schwaerze_pdf, "manuelle_bereiche")
@@ -2493,8 +2474,7 @@ class AnonymisiererApp:
         return kann(schwaerze_pdf, "manuelle_stellen")
 
     def _fund_hat_stellen(self, pdf: Path, fund: dict, ergebnis: dict | None = None) -> bool:
-        return (isinstance(fund.get("stellen"), list) and bool(fund["stellen"])
-                and self.einzelstellen_moeglich(pdf, ergebnis))
+        return _auftrag_modul.hat_einzelstellen(fund, self.einzelstellen_moeglich(pdf, ergebnis))
 
     def fund_zustand(self, pdf: Path, index: int) -> str:
         """an | aus | teil – bei Einzelstellen aus den Stellen abgeleitet, sonst das Häkchen des Funds."""
@@ -2503,8 +2483,7 @@ class AnonymisiererApp:
             return "aus"
         fund = ergebnis["funde"][index]
         if self._fund_hat_stellen(pdf, fund):
-            an = sum(1 for s in fund["stellen"] if s.get("an", True))
-            return "an" if an == len(fund["stellen"]) else ("aus" if an == 0 else "teil")
+            return _auftrag_modul.zustand_aus_stellen(fund["stellen"])
         iid = f"{pdf}::{index}"
         return self._zustand(iid) if self.baum.exists(iid) else "an"
 
@@ -2540,12 +2519,10 @@ class AnonymisiererApp:
         iid = self._datei_zeile_einfuegen(pdf)
         self.baum.delete(*self.baum.get_children(iid))
         funde = ergebnis["funde"]
+        einzelstellen = self.einzelstellen_moeglich(pdf, ergebnis)
         for index, fund in enumerate(funde):
-            zustand = "an"
-            if self._fund_hat_stellen(pdf, fund, ergebnis):
-                an = sum(1 for s in fund["stellen"] if s.get("an", True))
-                zustand = "an" if an == len(fund["stellen"]) else ("aus" if an == 0 else "teil")
-            self._fund_zeile_einfuegen(pdf, index, fund, zustand)
+            # Häkchen nach der Analyse: mit Einzelstellen aus den Stellen (nur angebotene Funde „aus“), sonst „an“
+            self._fund_zeile_einfuegen(pdf, index, fund, _auftrag_modul.standard_zustand(fund, einzelstellen))
         for mid, eintrag in self.manuell.get(pdf, {}).items():
             self._manuell_zeile_einfuegen(pdf, mid, eintrag)
         codes = meldungs_codes(ergebnis)
@@ -3071,11 +3048,7 @@ class AnonymisiererApp:
 
     def profil_kategorien(self, name: str) -> set[str] | None:
         """Aktive Kategorien einer Schutzstufe (muster.PROFILE, sonst Attrappe)."""
-        alle = set(self.kategorie_vars)
-        menge = attrappen.profil_kategorien(PROFILE, name, alle)
-        if menge is None:
-            menge = attrappen.profil_kategorien(attrappen.PROFILE, name, alle)
-        return menge
+        return _auftrag_modul.stufe_kategorien(PROFILE, name, set(self.kategorie_vars))
 
     def _aktive_kategorien(self) -> set[str]:
         return {k for k, v in self.kategorie_vars.items() if v.get()}
@@ -3185,7 +3158,7 @@ class AnonymisiererApp:
             if isinstance(e.get("zielordner"), str):
                 self.zielordner_var.set(e["zielordner"])
             self.zielordner_aktiv.set(bool(e.get("zielordner_aktiv", False)))
-            self.freigabe_var.set(bool(e.get("freigabe_erforderlich", True)))
+            self.freigabe_var.set(bool(e.get("freigabe_erforderlich", _auftrag_modul.STANDARD_FREIGABE)))
         finally:
             self._einstellungen_werden_gesetzt = False
 
@@ -4048,23 +4021,12 @@ class AnonymisiererApp:
     def _auftrag(self, pdf: Path) -> dict | None:
         """Schwärz-Auftrag einer Datei aus den Häkchen: Funde (mit Stellen-Zuständen), manuelle Markierungen. Jede
         fehlerfrei analysierte Datei bekommt einen Auftrag – auch ohne angehakten Fund entsteht eine bereinigte Ausgabe
-        (Runde 3). None nur für Dateien, die nicht analysiert werden konnten (keine Ausgabe möglich)."""
+        (Runde 3). None nur für Dateien, die nicht analysiert werden konnten (keine Ausgabe möglich). Welche Funde und
+        Stellen mitgehen, entscheidet auftrag.auftrag_bauen – derselbe Weg, den der Benchmark (--weg oberflaeche)
+        misst: ganz abgewählte Funde bleiben weg, abgewählte Bildfunde gehen mit allen Bereichen abgewählt mit."""
         ergebnis = self.analyse_ergebnisse.get(pdf)
         if not ergebnis or ergebnis.get("fehler"):
             return None
-        funde, abgewaehlte_bilder = [], []
-        for index, fund in enumerate(ergebnis["funde"]):
-            ziel = funde
-            if self.fund_zustand(pdf, index) == "aus":
-                if not _ist_bildfund(fund):
-                    continue
-                ziel = abgewaehlte_bilder   # gehen mit, wenn geschwärzt wird: ein abgewähltes Lichtbild verlangt die Freigabe
-            kopie = dict(fund)
-            if ziel is abgewaehlte_bilder:      # abgewählt: alle Bereiche bleiben stehen (auch ohne Einzelstellen)
-                kopie["stellen"] = [dict(s, an=False) for s in fund.get("stellen") or ()]
-            elif self._fund_hat_stellen(pdf, fund):
-                kopie["stellen"] = [dict(s) for s in fund["stellen"]]
-            ziel.append(kopie)
         bereiche: dict[int, list] = {}
         stellen: dict[int, list] = {}
         for eintrag in self.manuell.get(pdf, {}).values():
@@ -4075,24 +4037,22 @@ class AnonymisiererApp:
             else:
                 stellen.setdefault(eintrag["seite"], []).append(
                     (int(eintrag["start"]), int(eintrag["ende"]), PLATZHALTER_MANUELL))
-        nebenkanal = _nebenkanal_bezug(ergebnis)
-        ohne_haken = not funde and not bereiche and not stellen
-        funde += abgewaehlte_bilder     # abgewählte Lichtbilder gehen mit (Freigabe), zählen aber nicht als Haken
+        zustaende = [self.fund_zustand(pdf, index) for index in range(len(ergebnis["funde"]))]
+        # Funde (angehakte, dahinter abgewählte Bildfunde – sie verlangen die Freigabe, zählen aber nicht als Haken),
+        # ocr_cache, modell, bereiche, stellen, nebenkanaele; „ohne_haken“: nichts angehakt, die Ausgabe ist nur
+        # bereinigt; „gefunden“ unterscheidet „keine Personendaten gefunden“ von „Funde nicht angehakt“ (Status)
+        auftrag = _auftrag_modul.auftrag_bauen(ergebnis, zustaende, self.einzelstellen_moeglich(pdf), bereiche, stellen)
         kopie = self.arbeitskopien.get(pdf)
-        return {"pdf": pdf, "funde": funde, "ocr_cache": ergebnis.get("ocr_cache"),
-                "modell": ergebnis.get("modell") if self.einzelstellen_moeglich(pdf) else None,
-                "bereiche": bereiche, "stellen": stellen,
-                # die Engine liest die Arbeitskopie; die Ausgabe gehört neben das ORIGINAL (nie in den Temp-Ordner)
-                "datei": Path(kopie["pfad"]) if kopie else pdf,
-                "ziel_ordner": Path(pdf).parent / dateien.AUSGABE_ORDNER if kopie else None,
-                "nebenkanaele": ergebnis.get("nebenkanaele") if isinstance(ergebnis.get("nebenkanaele"), dict) else None,
-                "nur_nebenkanal": ohne_haken and nebenkanal is not None,
-                # nichts angehakt: die Ausgabe ist nur bereinigt; „gefunden“ unterscheidet „keine Personendaten
-                # gefunden“ von „Funde nicht angehakt“ (Status in der Liste)
-                "ohne_haken": ohne_haken, "gefunden": bool(ergebnis.get("funde")),
-                # Foto/Ausweiskopie: Gesicht, Unterschrift und Handschrift bleiben stehen – die Ausgabe braucht
-                # IMMER eine Freigabe in der Vorschau, auch wenn das Häkchen „Freigabe …“ aus ist (Befund Runde 2)
-                "foto": self._ist_foto(pdf)}
+        auftrag.update({
+            "pdf": pdf,
+            # die Engine liest die Arbeitskopie; die Ausgabe gehört neben das ORIGINAL (nie in den Temp-Ordner)
+            "datei": Path(kopie["pfad"]) if kopie else pdf,
+            "ziel_ordner": Path(pdf).parent / dateien.AUSGABE_ORDNER if kopie else None,
+            "nur_nebenkanal": auftrag["ohne_haken"] and _nebenkanal_bezug(ergebnis) is not None,
+            # Foto/Ausweiskopie: Gesicht, Unterschrift und Handschrift bleiben stehen – die Ausgabe braucht
+            # IMMER eine Freigabe in der Vorschau, auch wenn das Häkchen „Freigabe …“ aus ist (Befund Runde 2)
+            "foto": self._ist_foto(pdf)})
+        return auftrag
 
     def _ist_foto(self, pdf: Path) -> bool:
         """Wurde die Datei aus einem Foto oder Bild-Scan in eine PDF umgewandelt?"""
@@ -4189,22 +4149,11 @@ class AnonymisiererApp:
                     self._status(f"Schwärzung: Datei {_nr}/{len(auftraege)}, Seite {seite}/{gesamt} – {_name}")
 
                 kwargs = {"melde": lambda t: self._log(t, "grau"), "fortschritt": fortschritt, "abbruch": abbruch,
-                          "ocr": ocr, "ocr_cache": auftrag["ocr_cache"],
-                          "ziel_ordner": ziel_ordner or auftrag.get("ziel_ordner")}
-                if auftrag.get("nebenkanaele") is not None and kann(schwaerze_pdf, "nebenkanaele"):
-                    kwargs["nebenkanaele"] = auftrag["nebenkanaele"]
-                if auftrag["modell"] is not None:
-                    kwargs["modell"] = auftrag["modell"]
-                if auftrag["bereiche"]:
-                    kwargs["manuelle_bereiche"] = auftrag["bereiche"]
-                if auftrag["stellen"]:
-                    kwargs["manuelle_stellen"] = auftrag["stellen"]
+                          "ocr": ocr, "ziel_ordner": ziel_ordner or auftrag.get("ziel_ordner")}
+                # ocr_cache, Modell, Nebenkanäle, manuelle Markierungen, Freigabe, Schutzstufe (wie im Benchmark)
+                kwargs.update(_auftrag_modul.schwaerz_parameter(auftrag, freigabe, profil, schwaerze_pdf))
                 freigabe_engine = kann(schwaerze_pdf, "freigabe_erforderlich")
-                freigabe_hier = bool(freigabe or auftrag.get("foto"))      # Fotos immer erst nach Freigabe
-                if freigabe_engine:
-                    kwargs["freigabe_erforderlich"] = freigabe_hier
-                if kann(schwaerze_pdf, "profil"):
-                    kwargs["profil"] = profil
+                freigabe_hier = _auftrag_modul.freigabe_noetig(auftrag, freigabe)    # Fotos immer erst nach Freigabe
                 datei = auftrag.get("datei", pdf)
                 art = dateien.datei_art(datei)
                 try:
@@ -4269,16 +4218,7 @@ class AnonymisiererApp:
     @staticmethod
     def _ausgabe_status(ergebnis: dict) -> str:
         """fertig | pruefen | fehler | keine – die Engine meldet „status“ (Vertrag 5), sonst aus dem Namen."""
-        ausgabe = ergebnis.get("ausgabe")
-        if ergebnis["fehler"]:
-            return "fehler"
-        if ausgabe is None:
-            return "keine"
-        status = ergebnis.get("status")
-        if "_PRUEFEN" in Path(ausgabe).name.upper() or ergebnis.get("reste") or ergebnis.get("verdacht") \
-                or int(ergebnis.get("stellen_nicht_lokalisiert") or 0):
-            return "pruefen"                           # im Zweifel prüfen, auch wenn „status“ anderes sagt
-        return status if status in ("fertig", "pruefen") else "fertig"
+        return _auftrag_modul.ausgabe_status(ergebnis)
 
     def _schwaerz_protokollieren(self, name: str, ergebnis: dict):
         codes = meldungs_codes(ergebnis)
@@ -4352,11 +4292,7 @@ class AnonymisiererApp:
     @staticmethod
     def _nur_freigabe_offen(ergebnis: dict, status: str) -> bool:
         """„fertig“, oder _PRUEFEN allein wegen „Freigabe vor Weitergabe“ – kein Grund der Engine, kein Verdacht."""
-        if status == "fertig":
-            return True
-        return (status == "pruefen" and not ergebnis.get("verdacht") and not ergebnis.get("reste")
-                and not int(ergebnis.get("stellen_nicht_lokalisiert") or 0)
-                and all(str(g) == "Freigabe ausstehend" for g in ergebnis.get("pruefen_gruende") or ()))
+        return _auftrag_modul.nur_freigabe_offen(ergebnis, status)
 
     def _schwaerzen_fertig(self, auftraege, ergebnisse, abgebrochen, fehler_intern, erster_fehler=None,
                            ersetzt=None):

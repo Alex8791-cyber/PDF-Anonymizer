@@ -1,9 +1,23 @@
 """Bewertung: Pipeline wie die Oberfläche laufen lassen und die AUSGABE über alle Kanäle prüfen.
 
-Ablauf je Dokument (BENCHMARK_SCHEMA.md):
+Ablauf je Dokument (BENCHMARK_SCHEMA.md) – zwei Wege (weg, werkzeuge/benchmark.py --weg; ein OcrDienst je Lauf):
+  engine (Standard, alle Messungen bis Runde 3a):
     aktive = alle Kategorien mit standard_an=True; NIE-/IMMER-Liste leer; alle Funde angehakt
-    erg = analysiere_pdf(pdf, aktive, [], [], ocr=dienst)          (ein OcrDienst je Lauf)
+    erg = analysiere_pdf(pdf, aktive, [], [], ocr=dienst)
     out = schwaerze_pdf(pdf, erg["funde"], ocr=dienst, ocr_cache=erg["ocr_cache"], ziel_ordner=tmp)
+    Jeder Fund geht unverändert an die Schwärzung – sie schwärzt davon die Stellen mit "an": True; ohne Seitenmodell,
+    Nebenkanäle und Freigabe.
+  oberflaeche (was die Nutzerin mit den Standards der Oberfläche bekommt, ohne selbst etwas anzuklicken):
+    Einstellungen wie beim ersten Start (auftrag.standard_kategorien, STANDARD_PROFIL „hoch“, NIE-/IMMER-Liste leer,
+    keine Kundenliste, „Freigabe vor Weitergabe“ an); jedes Dokument ein eigener Lauf (eigenes LaufWissen, keine
+    dokumentübergreifende Weitergabe – die Korpusdokumente gehören zu verschiedenen Personen)
+    erg = analysiere_pdf(pdf, aktive, [], [], ocr=dienst, profil="hoch", lauf=LaufWissen())
+    auftrag = auftrag_bauen(erg, Häkchen nach der Analyse)  (anonymisierer/auftrag.py, dieselben Funktionen wie
+              gui._auftrag: ganz abgewählte Funde – in „Hoch“ die angebotenen Gesundheitsdaten – bleiben weg,
+              abgewählte Bildfunde gehen mit allen Bereichen abgewählt mit)
+    out = schwaerze_pdf(pdf, auftrag["funde"], ocr=dienst, ziel_ordner=tmp, **schwaerz_parameter(auftrag, …))
+          (Seitenmodell, Nebenkanäle, freigabe_erforderlich, profil – wie gui._schwaerz_lauf)
+    Eine fehlerhaft analysierte Datei bekommt wie in der Oberfläche keinen Auftrag und keine Ausgabe.
 
 Geprüft wird die Ausgabedatei (nicht die Fundliste) über diese Kanäle:
     text        PyMuPDF-Textebene jeder Seite (inkl. unsichtbarem Text)
@@ -34,11 +48,14 @@ Je Eintrag mit erwartung=behalten (Über-Schwärzung): Textseiten – steht der 
 EIGENSTÄNDIG vorkommt (nicht als Teil einer längeren Zeichenfolge: "BU" in einer geschwärzten Kennung
 "BU-2018-848343" ist kein Vorkommen von "BU" – deren Schwärzung ist keine Über-Schwärzung); Scans – Pixel.
 Fehlalarme: nur Funde mit mindestens einer angehakten Stelle ("an": True) – nur angebotene Funde (alle
-Stellen abgewählt) werden nicht geschwärzt.
+Stellen abgewählt) werden nicht geschwärzt; im Weg oberflaeche nur Funde, die im Auftrag stehen.
 Restrisiko (zweite Verteidigungslinie, Vertrag Abschnitt 7) – je Dokument werden der Status der Ausgabe
 ("fertig"/"pruefen" aus schwaerze_pdf, sonst aus dem Namen _PRUEFEN) und die Verdachtsstellen festgehalten:
     stille Lecks          Kern-Einträge mit Status leck/teilweise in Dokumenten, deren Ausgabe NICHT _PRUEFEN ist
-                          (ohne Ausgabe zählt als nicht _PRUEFEN) – diese Zahl muss 0 werden
+                          (ohne Ausgabe zählt als nicht _PRUEFEN) – diese Zahl muss 0 werden. Weg oberflaeche: mit
+                          „Freigabe vor Weitergabe“ heißt jede Ausgabe _PRUEFEN; eine, die es NUR deshalb heißt (die
+                          Oberfläche nennt keinen Grund, nur „Freigabe ausstehend“: auftrag.nur_freigabe_offen), zählt
+                          hier als nicht _PRUEFEN – ein Leck darin zeigt ihr nichts an
     Verdachtsabdeckung    Anteil der Kern-Einträge mit leck/teilweise, die ein Verdacht überdeckt: Rechteck des
                           Verdachts schneidet ein Wortrechteck des Eintrags (gleiche Seite), Verdachtstext und
                           Eintrag überlappen (gefaltet, an Wortgrenzen) oder teilen ein signifikantes Token auf
@@ -145,12 +162,19 @@ class Pipeline:
                                                   "reste_als_verdacht", None)
             except Exception:
                 self.reste_als_verdacht = None
+            try:   # Schwärz-Auftrag der Oberfläche (Weg oberflaeche); ältere Programmversionen haben ihn nicht
+                self.auftrag = importlib.import_module("anonymisierer.auftrag")
+            except ImportError:
+                self.auftrag = None
+            self.lauf_wissen = getattr(self.analyse, "LaufWissen", None)
         except ImportError:                          # ältere Programmversion (eine Datei)
             pa = importlib.import_module("pdf_anonymisierer")
             if not _liegt_in(pa.__file__, self.repo):
                 raise RuntimeError(f"Weder 'anonymisierer' noch 'pdf_anonymisierer.py' in {self.repo} gefunden")
             self.ocr_modul = None
             self.reste_als_verdacht = None
+            self.auftrag = None
+            self.lauf_wissen = None
             self.analysiere_pdf = pa.analysiere_pdf
             self.schwaerze_pdf = pa.schwaerze_pdf
             self.kategorien = pa.KATEGORIEN
@@ -828,23 +852,72 @@ def _am_ort(e: dict, aus: "Kanaele", sichtbar: list, original: "Kanaele | None" 
     return "teil" if any(g.enthaelt(Gefaltet(t_)) for t_ in tokens) else "weg"
 
 
+# ----------------------------------------------------------------------
+# Weg der Schwärzung: engine (jeder Fund) oder oberflaeche (Auftrag wie die Oberfläche ohne Eingriff)
+# ----------------------------------------------------------------------
+WEGE = ("engine", "oberflaeche")
+WEG_TEXT = {
+    "engine": "jeder Fund der Analyse unverändert an die Schwärzung („alle Funde angehakt“ – geschwärzt werden davon "
+              "die Stellen mit „an“), ohne Seitenmodell, Nebenkanäle und Freigabe",
+    "oberflaeche": "Auftrag wie die Oberfläche ohne Eingriff der Nutzerin (anonymisierer/auftrag.py): Häkchen der "
+                   "Fundliste nach der Analyse, Schutzstufe „Hoch“, „Freigabe vor Weitergabe“ an, Seitenmodell und "
+                   "Nebenkanäle der Analyse; jedes Dokument ein eigener Lauf",
+}
+
+
+def _oberflaeche(pipeline):
+    """Schwärz-Auftrag der Oberfläche (anonymisierer/auftrag.py) des gemessenen Programms – ohne ihn lässt sich der Weg
+    oberflaeche nicht messen (ein Nachbau der Auswahl hier könnte still von der Oberfläche abweichen)."""
+    modul = getattr(pipeline, "auftrag", None)
+    if modul is None:
+        raise RuntimeError(f"--weg oberflaeche: das Programm in {getattr(pipeline, 'repo', '?')} hat keinen "
+                           f"Schwärz-Auftrag der Oberfläche (anonymisierer/auftrag.py) – ältere Programmversion?")
+    return modul
+
+
+def _oberflaeche_analyse_parameter(pipeline, modul) -> dict:
+    """Zusätzliche Parameter der Analyse wie in der Oberfläche (gui._analyse_zusatz, _analyse_lauf): Schutzstufe beim
+    ersten Start und ein eigenes LaufWissen je Dokument (jedes Korpusdokument ist ein eigener Lauf)."""
+    zusatz = {"profil": modul.STANDARD_PROFIL}
+    lauf_wissen = getattr(pipeline, "lauf_wissen", None)
+    if lauf_wissen is not None:
+        zusatz["lauf"] = lauf_wissen()
+    return zusatz
+
+
 def bewerte_dokument(pdf: Path, wahrheit: dict, pipeline: Pipeline, dienst, ziel: Path, arbeitsordner: Path,
-                     cli_ocr: bool = True, pixel: bool = True) -> dict:
-    """Pipeline ausführen und die Ausgabe gegen die Wahrheit prüfen."""
+                     cli_ocr: bool = True, pixel: bool = True, weg: str = "engine") -> dict:
+    """Pipeline ausführen und die Ausgabe gegen die Wahrheit prüfen (weg: WEGE, siehe Modulkopf)."""
     ergebnis = {"dokument": wahrheit["dokument"], "typ": wahrheit.get("typ"), "merkmale": wahrheit.get("merkmale", []),
                 "seiten": wahrheit.get("seiten"), "fehler": None, "warnungen": [], "ausgabe": None,
                 "keine_ausgabe": False}
-    aktive = pipeline.aktive()
+    if weg not in WEGE:
+        raise ValueError(f"unbekannter Weg {weg!r} (erlaubt: {', '.join(WEGE)})")
+    oberflaeche = _oberflaeche(pipeline) if weg == "oberflaeche" else None
+    aktive = pipeline.aktive() if oberflaeche is None else oberflaeche.standard_kategorien()
+    zusatz = {} if oberflaeche is None else _oberflaeche_analyse_parameter(pipeline, oberflaeche)
     t0 = time.perf_counter()
     try:
-        erg = _rufe(pipeline.analysiere_pdf, pdf, aktive, [], [], ocr=dienst)
+        erg = _rufe(pipeline.analysiere_pdf, pdf, aktive, [], [], ocr=dienst, **zusatz)
     except Exception as fehler:  # Programmfehler gehören ins Ergebnis, nicht in einen Abbruch
         erg = {"funde": [], "warnungen": [], "fehler": f"Analyse-Ausnahme: {type(fehler).__name__}: {fehler}",
                "ocr_cache": {}}
     t1 = time.perf_counter()
     funde = list(erg.get("funde") or [])
+    auftrag, zustaende = None, None
     try:
-        out = _rufe(pipeline.schwaerze_pdf, pdf, funde, ocr=dienst, ocr_cache=erg.get("ocr_cache"), ziel_ordner=ziel)
+        if oberflaeche is None:
+            out = _rufe(pipeline.schwaerze_pdf, pdf, funde, ocr=dienst, ocr_cache=erg.get("ocr_cache"),
+                        ziel_ordner=ziel)
+        elif erg.get("fehler"):
+            # die Oberfläche schwärzt nur fehlerfrei analysierte Dateien (gui._auftrag: kein Auftrag, keine Ausgabe)
+            out = {"ausgabe": None, "treffer": 0, "warnungen": [], "reste": [], "fehler": None}
+        else:
+            # Häkchen der Fundliste nach der Analyse und daraus der Auftrag – dieselben Funktionen wie die Oberfläche
+            auftrag, zustaende = oberflaeche.standard_auftrag(dict(erg, funde=funde), pipeline.schwaerze_pdf)
+            parameter = oberflaeche.schwaerz_parameter(auftrag, oberflaeche.STANDARD_FREIGABE,
+                                                       oberflaeche.STANDARD_PROFIL, pipeline.schwaerze_pdf)
+            out = _rufe(pipeline.schwaerze_pdf, pdf, auftrag["funde"], ocr=dienst, ziel_ordner=ziel, **parameter)
     except Exception as fehler:
         out = {"ausgabe": None, "treffer": 0, "warnungen": [], "reste": [],
                "fehler": f"Schwärzungs-Ausnahme: {type(fehler).__name__}: {fehler}"}
@@ -856,6 +929,14 @@ def bewerte_dokument(pdf: Path, wahrheit: dict, pipeline: Pipeline, dienst, ziel
         "warnungen": list(erg.get("warnungen") or []) + list(out.get("warnungen") or [])})
     ausgabe = Path(out["ausgabe"]) if out.get("ausgabe") else None
     ergebnis.update(_status_und_verdacht(out, ausgabe, pipeline))
+    if oberflaeche is not None:
+        # Status, wie die Oberfläche ihn zeigt (auftrag.ausgabe_status); mit „Freigabe vor Weitergabe“ heißt jede
+        # Ausgabe _PRUEFEN – „freigabe_ausstehend“: NUR deshalb, ohne Grund der Engine (auftrag.nur_freigabe_offen)
+        status = oberflaeche.ausgabe_status(dict(out, fehler=out.get("fehler")))
+        ergebnis["status_oberflaeche"] = status
+        ergebnis["freigabe_ausstehend"] = (ergebnis["status_ausgabe"] == "pruefen"
+                                           and oberflaeche.nur_freigabe_offen(out, status))
+        ergebnis["auftrag_funde"] = len(auftrag["funde"]) if auftrag is not None else 0
     if ausgabe is None or not ausgabe.exists():
         # Keine Ausgabe = nichts wurde geschwärzt: das Original gilt als „Ausgabe“ (vorsichtige Wertung)
         ergebnis["keine_ausgabe"] = True
@@ -893,7 +974,11 @@ def bewerte_dokument(pdf: Path, wahrheit: dict, pipeline: Pipeline, dienst, ziel
                     bilder[s] = (_graubild(doc_orig[s - 1]), bild_aus)
     eintraege = wahrheit["eintraege"]
     funde_gefaltet = [Gefaltet(f.get("text", "")) for f in funde]
-    aktive_funde = [f for f in funde if fund_aktiv(f)]
+    if oberflaeche is None:
+        aktiv = [fund_aktiv(f) for f in funde]
+    else:   # geschwärzt wird nur, was im Auftrag steht: kein abgewählter Fund, keiner ohne Auftrag
+        aktiv = [zustaende is not None and zustaende[i] != "aus" and fund_aktiv(f) for i, f in enumerate(funde)]
+    aktive_funde = [f for f, a in zip(funde, aktiv) if a]
     kanalnamen = aus.kanalnamen()
     bewertete = []
     for e in eintraege:
@@ -961,9 +1046,13 @@ def bewerte_dokument(pdf: Path, wahrheit: dict, pipeline: Pipeline, dienst, ziel
         schaedlich = any(_ueberlappt(g, b) or (tok & bt) for b, bt in behalten)
         fehlalarme.append({"text": f.get("text"), "kategorie": f.get("kategorie"), "trifft_kontext": schaedlich})
     verdacht_bewerten(ergebnis, bewertete, eintraege)
+    liste = [{"kategorie": f.get("kategorie"), "text": f.get("text"), "seiten": f.get("seiten"), "aktiv": a}
+             for f, a in zip(funde, aktiv)]
+    if zustaende is not None:
+        for eintrag, zustand in zip(liste, zustaende):
+            eintrag["zustand"] = zustand          # Häkchen der Fundliste nach der Analyse: an | aus | teil
     ergebnis.update({"eintraege": bewertete, "fehlalarme": fehlalarme, "dauer_bewertung_s": round(t4 - t3, 2),
-                     "funde": [{"kategorie": f.get("kategorie"), "text": f.get("text"), "seiten": f.get("seiten"),
-                                "aktiv": fund_aktiv(f)} for f in funde],
+                     "funde": liste,
                      "funde_aktiv": len(aktive_funde),
                      "ocr_seiten_bewertung": sorted(aus.ocr), "pixel_seiten": sorted(bilder),
                      "platzhalter_entfernt": {str(s): n for s, n in sorted(platzhalter_entfernt.items())}})
@@ -1354,8 +1443,14 @@ def restrisiko_kennzahlen(dokumente: list) -> dict:
     gezaehlt, abgedeckt, verdacht_n, fehl, nicht_abgedeckt = 0, 0, 0, [], []
     ohne_pixel_n, ohne_pixel_abgedeckt, ohne_pixel_verortet, nicht_verortet = 0, 0, 0, []
     je_kat: dict = defaultdict(lambda: {"n": 0, "abgedeckt": 0})
+    nur_freigabe = 0
     for d in dokumente:
         status = d.get("status_ausgabe")
+        if status == "pruefen" and d.get("freigabe_ausstehend"):
+            # Weg oberflaeche: _PRUEFEN nur wegen „Freigabe vor Weitergabe“ – die Oberfläche nennt keinen Grund, ein
+            # Leck darin ist so still wie in einer fertigen Ausgabe
+            status = "fertig"
+            nur_freigabe += 1
         alle_lecks = [e for e in d.get("eintraege", []) if e.get("erwartung") == "schwaerzen"
                       and e.get("status") in ("leck", "teilweise")]
         kern_lecks = [e for e in alle_lecks if e.get("umfang") == "kern"]
@@ -1396,7 +1491,7 @@ def restrisiko_kennzahlen(dokumente: list) -> dict:
                              "text": v.get("text"), "grund": v.get("grund")})
     dauer = [d["dauer_restrisiko_s"] for d in dokumente if d.get("dauer_restrisiko_s") is not None]
     n = len(dokumente)
-    return {
+    rr = {
         "stille_lecks": stille, "dokumente_mit_stillem_leck": len(docs_still),
         "dokumente_mit_stillem_leck_quote": round(len(docs_still) / n, 4) if n else None,
         "dokumente_still": docs_still,
@@ -1416,24 +1511,40 @@ def restrisiko_kennzahlen(dokumente: list) -> dict:
         "restrisiko_s_gesamt": round(sum(dauer), 2) if dauer else None,
         "restrisiko_s_je_seite": round(sum(dauer) / seiten, 3) if dauer else None,
     }
+    if any("freigabe_ausstehend" in d for d in dokumente):          # nur im Weg oberflaeche
+        rr["ausgaben_nur_freigabe"] = nur_freigabe
+    return rr
 
 
 # ----------------------------------------------------------------------
 # Lauf über einen Korpus
 # ----------------------------------------------------------------------
 def bewerte_korpus(korpus: Path, ausgabe: Path, repo: Path | None = None, cli_ocr: bool = True,
-                   pixel: bool = True, melde=print, nur: list | None = None, pipeline=None) -> dict:
+                   pixel: bool = True, melde=print, nur: list | None = None, pipeline=None,
+                   weg: str = "engine") -> dict:
     """Alle Dokumente eines Korpus bewerten; schreibt ergebnis.json und bericht.md nach `ausgabe`.
     pipeline: statt des Programms aus `repo` ein anderer „Anonymisierer“ mit derselben Schnittstelle (Selbstprüfung:
-    NullAnonymisierer, Orakel)."""
+    NullAnonymisierer, Orakel). weg: engine | oberflaeche (Modulkopf) – steht in ergebnis.json und bericht.md."""
+    if weg not in WEGE:
+        raise ValueError(f"unbekannter Weg {weg!r} (erlaubt: {', '.join(WEGE)})")
     korpus, ausgabe = Path(korpus), Path(ausgabe)
+    pipeline = pipeline if pipeline is not None else Pipeline(repo)
+    if weg == "oberflaeche":
+        modul = _oberflaeche(pipeline)          # vor allem anderen: ältere Programmversionen scheitern sofort
+        einstellungen = {"aktive_kategorien": sorted(modul.standard_kategorien()), "nie_liste": [],
+                         "immer_liste": [], "alle_funde_angehakt": False,
+                         "haekchen": "wie die Fundliste nach der Analyse (auftrag.standard_zustand)",
+                         "schutzstufe": modul.STANDARD_PROFIL, "freigabe_vor_weitergabe": modul.STANDARD_FREIGABE}
+    else:
+        einstellungen = {"aktive_kategorien": sorted(pipeline.aktive()), "nie_liste": [], "immer_liste": [],
+                         "alle_funde_angehakt": True}
+    einstellungen.update({"pixel_schwelle": SICHTBAR_SCHWELLE, "ocr_dpi_bewertung": OCR_DPI})
     ausgabe.mkdir(parents=True, exist_ok=True)
     ziel = ausgabe / "anonymisiert"
     if ziel.exists():
         shutil.rmtree(ziel)
     ziel.mkdir(parents=True)
     arbeits = Path(tempfile.mkdtemp(prefix="bewertung_", dir=ausgabe))
-    pipeline = pipeline if pipeline is not None else Pipeline(repo)
     wahrheiten = lade_wahrheiten(korpus)
     if nur:
         wahrheiten = [w for w in wahrheiten if w["dokument"] in nur]
@@ -1442,7 +1553,8 @@ def bewerte_korpus(korpus: Path, ausgabe: Path, repo: Path | None = None, cli_oc
     dienst = pipeline.ocr_dienst()
     try:
         for i, w in enumerate(wahrheiten, 1):
-            d = bewerte_dokument(w["_pfad"], w, pipeline, dienst, ziel, arbeits, cli_ocr=cli_ocr, pixel=pixel)
+            d = bewerte_dokument(w["_pfad"], w, pipeline, dienst, ziel, arbeits, cli_ocr=cli_ocr, pixel=pixel,
+                                 weg=weg)
             dokumente.append(d)
             if melde:
                 kern = [e for e in d["eintraege"] if e["erwartung"] == "schwaerzen" and e["umfang"] == "kern"]
@@ -1461,11 +1573,9 @@ def bewerte_korpus(korpus: Path, ausgabe: Path, repo: Path | None = None, cli_oc
     werte = kennzahlen(dokumente)
     ergebnis = {
         "schema": "BENCHMARK_SCHEMA.md", "erzeugt": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "korpus": str(korpus), "repo": str(pipeline.repo), "commit": pipeline.commit,
+        "korpus": str(korpus), "repo": str(pipeline.repo), "commit": pipeline.commit, "weg": weg,
         "umgebung": _umgebung(pipeline, cli_ocr),
-        "einstellungen": {"aktive_kategorien": sorted(pipeline.aktive()), "nie_liste": [], "immer_liste": [],
-                          "alle_funde_angehakt": True, "pixel_schwelle": SICHTBAR_SCHWELLE,
-                          "ocr_dpi_bewertung": OCR_DPI},
+        "einstellungen": einstellungen,
         "laufzeit_gesamt_s": round(time.perf_counter() - start, 1),
         **werte,
         "lecks": [{"dokument": d["dokument"], **e} for d in dokumente for e in d["eintraege"]
@@ -1822,9 +1932,12 @@ def _restrisiko_bericht(e: dict) -> list:
     if not rr:
         return []
     g = e["gesamt"]
+    # Weg oberflaeche: _PRUEFEN zählt nur mit Grund – „Freigabe vor Weitergabe“ allein nennt der Nutzerin keinen Grund
+    nur_freigabe = rr.get("ausgaben_nur_freigabe")
     zeilen = ["", "## Restrisiko: Verdacht und _PRUEFEN", ""]
     zeilen += _tabelle(["Kennzahl", "Wert"], [
-        ["**stille Lecks** (Kern leck/teilweise, Ausgabe nicht _PRUEFEN)",
+        ["**stille Lecks** (Kern leck/teilweise, Ausgabe nicht _PRUEFEN"
+         + (" oder nur wegen der Freigabe)" if nur_freigabe is not None else ")"),
          f"**{rr['stille_lecks']}** in {rr['dokumente_mit_stillem_leck']} Dokument(en) "
          f"({_p(rr.get('dokumente_mit_stillem_leck_quote'))} der Dokumente)"],
         ["Verdachtsabdeckung (Kern leck/teilweise mit Verdacht)",
@@ -1837,7 +1950,10 @@ def _restrisiko_bericht(e: dict) -> list:
          f"{rr.get('kern_lecks_ohne_pixelrest')})"],
         ["Fehlverdacht je Seite (Verdacht ohne zu schwärzenden Eintrag)",
          f"{rr['fehlverdacht_je_seite']} ({rr['fehlverdacht']} von {rr['verdacht']} Verdachtsstellen)"],
-        ["Ausgaben _PRUEFEN", f"{rr['ausgaben_pruefen']} von {g['dokumente']} ({_p(rr['ausgaben_pruefen_quote'])})"],
+        ["Ausgaben _PRUEFEN" + (" mit Grund (Verdacht, Reste, Meldungen)" if nur_freigabe is not None else ""),
+         f"{rr['ausgaben_pruefen']} von {g['dokumente']} ({_p(rr['ausgaben_pruefen_quote'])})"],
+        *([["Ausgaben _PRUEFEN nur wegen „Freigabe vor Weitergabe“ (Oberfläche: „Freigabe ausstehend“, ohne Grund)",
+            f"{nur_freigabe} von {g['dokumente']}"]] if nur_freigabe is not None else []),
         ["_PRUEFEN ohne Kern-Leck / ohne jedes Leck", f"{rr['pruefen_ohne_leck']} / {rr['pruefen_ohne_jedes_leck']}"],
         ["Restrisiko-Prüfung (Laufzeit gesamt / je Seite)",
          f"{rr['restrisiko_s_gesamt']} s / {rr['restrisiko_s_je_seite']} s"
@@ -1866,8 +1982,10 @@ def _restrisiko_bericht(e: dict) -> list:
 
 def bericht_markdown(e: dict) -> str:
     g = e["gesamt"]
+    weg = e.get("weg", "engine")
     zeilen = ["# Entwicklungs-Benchmark PDF-Anonymisierer", "",
               f"Erzeugt {e['erzeugt']} · Repository `{e['repo']}` · Commit `{e.get('commit')}` · Korpus `{e['korpus']}`", "",
+              f"Weg der Schwärzung: **{weg}** – {WEG_TEXT.get(weg, '?')}", "",
               "## Gesamtergebnis", ""]
     zeilen += _tabelle(["Kennzahl", "Wert"], [
         ["Dokumente / Seiten", f"{g['dokumente']} / {g['seiten']}"],
