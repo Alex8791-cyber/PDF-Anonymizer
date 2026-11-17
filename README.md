@@ -541,8 +541,9 @@ Tesseract** – nur den entpackten Ordner.
   ohne Namenserkennung wird nicht gebaut. Fehlt nur PyInstaller, wird nur das nachgeladen
   (`requirements-dev.txt`), nicht erneut das Sprachmodell.
 - Alternativ baut die GitHub-Action die EXE mit genau diesem Skript: unter „Actions“ →
-  „Tests“ → „Run workflow“ oder automatisch für jeden Versions-Tag `v…`. Die ZIP liegt dann
-  als Artefakt beim Lauf (vorher geprüft: Sprachmodell, Sprachdatei, Lizenztexte, Probestart).
+  „Tests“ → „Run workflow“ oder automatisch für jeden Pull Request und jeden Versions-Tag `v…`.
+  Die ZIP liegt dann als Artefakt beim Lauf (vorher geprüft: Sprachmodell, Sprachdatei,
+  Lizenztexte, Probestart).
 - Weitergabe über **Netzlaufwerk, OneDrive/SharePoint oder USB**. Per E-Mail geht es
   nicht: Outlook blockiert `.exe`-Dateien, auch in ZIP-Archiven, und die Datei ist für
   Mail-Anhänge ohnehin zu groß (mehrere hundert MB).

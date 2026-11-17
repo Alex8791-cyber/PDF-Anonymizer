@@ -649,6 +649,7 @@ def test_github_action_rechte_zeitlimits_screenshots_und_exe_job():
     exe = daten["jobs"]["exe"]
     assert exe["runs-on"] == "windows-latest" and exe["needs"] == "pytest"
     assert "workflow_dispatch" in exe["if"] and "refs/tags/v" in exe["if"]
+    assert "github.event_name == 'pull_request'" in exe["if"], "Jeder Pull Request baut und startet die EXE"
     lauf = "\n".join(s.get("run", "") for s in exe["steps"])
     assert "call EXE-bauen.bat < NUL" in lauf, "Der EXE-Job soll genau EXE-bauen.bat ausführen (gleiche Flags)"
     assert ".python_pfad.txt" in lauf

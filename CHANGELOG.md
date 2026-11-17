@@ -264,9 +264,9 @@ Auslieferung und Dokumentation nach dem Review „Auslieferung/Doku“ (AD-01 �
 - `permissions: contents: read`, Zeitlimits für Jobs und Schritte, Windows-Bildschirmauflösung
   im Protokoll (Versuch, sie auf 1920×1080 zu stellen), Layout-Screenshots beider Systeme als
   Artefakt, Begründungen übersprungener Tests im Bericht (`-rs`).
-- Neuer Job **`exe`** (windows-latest; von Hand oder für Tags `v*`): führt `EXE-bauen.bat` aus,
-  prüft OCR-Sprachdatei, Sprachmodell, Lizenztexte und ZIP-Inhalt, startet die EXE probeweise
-  (Fenster da, keine `fehler.log`) und lädt die ZIP als Artefakt hoch.
+- Neuer Job **`exe`** (windows-latest; für jeden Pull Request, von Hand oder für Tags `v*`): führt
+  `EXE-bauen.bat` aus, prüft OCR-Sprachdatei, Sprachmodell, Lizenztexte und ZIP-Inhalt, startet die
+  EXE probeweise (Fenster da, keine `fehler.log`) und lädt die ZIP als Artefakt hoch.
 - Layout-Test: Auf Bildschirmen unter 1366×768 (Windows-Runner: oft 1024×768) werden nur die
   Skalierungen übersprungen, die Windows dort gar nicht anbietet (mindestens 720 Bildzeilen
   nach Skalierung); ab 1366×768 und im 1366×768-Szenario prüft der Test unverändert.
