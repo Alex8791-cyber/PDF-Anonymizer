@@ -350,6 +350,8 @@ Auslieferung und Dokumentation nach dem Review „Auslieferung/Doku“ (AD-01 �
 - Layout-Test: Auf Bildschirmen unter 1366×768 (Windows-Runner: oft 1024×768) werden nur die
   Skalierungen übersprungen, die Windows dort gar nicht anbietet (mindestens 720 Bildzeilen
   nach Skalierung); ab 1366×768 und im 1366×768-Szenario prüft der Test unverändert.
+- Actions auf die Node-24-Ausgaben angehoben (`actions/checkout@v5`, `actions/setup-python@v6`,
+  `actions/upload-artifact@v6`); die Node-20-Warnung im Protokoll entfällt.
 
 ### Dokumentation
 - README: „Was NICHT erkannt wird“ behauptete fälschlich, Versicherten-, Fahrzeug-Ident- und

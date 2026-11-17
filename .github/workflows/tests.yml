@@ -30,9 +30,9 @@ jobs:
       # Mitgelieferte deutsche OCR-Sprachdatei aus dem Repository
       TESSDATA_PREFIX: ${{ github.workspace }}/tessdata
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -94,7 +94,7 @@ jobs:
 
       - name: Layout-Screenshots sichern
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: layout-screenshots-${{ matrix.os }}
           path: ${{ runner.temp }}/screenshots/
@@ -103,7 +103,7 @@ jobs:
 
       - name: Benchmark-Bericht sichern
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: benchmark-bericht-${{ matrix.os }}
           path: ${{ runner.temp }}/bericht/
@@ -124,9 +124,9 @@ jobs:
     env:
       PYTHONUTF8: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -209,7 +209,7 @@ jobs:
           }
 
       - name: ZIP als Artefakt hochladen
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.pruefung.outputs.zipname }}
           path: dist/${{ steps.pruefung.outputs.zipname }}.zip
