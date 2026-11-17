@@ -97,16 +97,19 @@ def test_tessdata_suchreihenfolge(tmp_path, monkeypatch):
     monkeypatch.delattr(sys, "_MEIPASS", raising=False)
     assert _tessdata_finden() == str(projekt / "tessdata")
     assert os.environ["TESSDATA_PREFIX"] == str(projekt / "tessdata")
-    # $TESSDATA_PREFIX gewinnt nur, wenn dort Sprachdaten liegen
+    # $TESSDATA_PREFIX ohne Sprachdaten zählt nicht
     leer = tmp_path / "leer"
     leer.mkdir()
     monkeypatch.setenv("TESSDATA_PREFIX", str(leer))
     assert _tessdata_finden() == str(projekt / "tessdata")
+    # Der mitgelieferte Ordner mit deu.traineddata geht vor: Eine fremde Tesseract-Installation, deren
+    # $TESSDATA_PREFIX nur auf eng.traineddata zeigt, ließ früher alle Scans englisch lesen (jede Ausgabe _PRUEFEN)
     voll = tmp_path / "voll"
     voll.mkdir()
     (voll / "eng.traineddata").write_bytes(b"x")
     monkeypatch.setenv("TESSDATA_PREFIX", str(voll))
-    assert _tessdata_finden() == str(voll)
+    assert _tessdata_finden() == str(projekt / "tessdata")
+    assert os.environ["TESSDATA_PREFIX"] == str(projekt / "tessdata")
     # PyInstaller: sys._MEIPASS/tessdata vor den Systempfaden, nach dem Projektordner
     monkeypatch.delenv("TESSDATA_PREFIX", raising=False)
     monkeypatch.setattr(ocr, "PROJEKTWURZEL", tmp_path / "gibt_es_nicht")
@@ -115,6 +118,58 @@ def test_tessdata_suchreihenfolge(tmp_path, monkeypatch):
     (frozen / "tessdata" / "deu.traineddata").write_bytes(b"x")
     monkeypatch.setattr(sys, "_MEIPASS", str(frozen), raising=False)
     assert _tessdata_finden() == str(frozen / "tessdata")
+    # … auch in der EXE gegen eine fremde Installation, die nur Englisch hat
+    monkeypatch.setenv("TESSDATA_PREFIX", str(voll))
+    assert _tessdata_finden() == str(frozen / "tessdata")
+
+
+def test_tessdata_ersatz_nur_ohne_mitgelieferte_sprachdatei(tmp_path, monkeypatch):
+    """$TESSDATA_PREFIX und fremde Tesseract-Ordner sind nur Ersatz: zuerst mit deu.traineddata, erst ganz zuletzt
+    (mit Warnung, siehe _ocr_sprache) ein Ordner, der nur andere Sprachen hat."""
+    projekt = tmp_path / "projekt"
+    (projekt / "tessdata").mkdir(parents=True)
+    mitgeliefert = projekt / "tessdata" / "deu.traineddata"
+    mitgeliefert.write_bytes(b"x")
+    nur_englisch, fremd_deu, system = tmp_path / "nur_englisch", tmp_path / "fremd_deu", tmp_path / "Tesseract-OCR"
+    for ordner, datei in ((nur_englisch, "eng"), (fremd_deu, "deu"), (system, "deu"), (system, "eng")):
+        ordner.mkdir(exist_ok=True)
+        (ordner / f"{datei}.traineddata").write_bytes(b"y")
+    monkeypatch.setattr(ocr, "PROJEKTWURZEL", projekt)
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    monkeypatch.setattr(ocr, "_system_tessdata", lambda: [str(system)])
+    # auch eine fremde deu.traineddata verdrängt die mitgelieferte nicht (nur die ist mit dem Programm gemessen)
+    monkeypatch.setenv("TESSDATA_PREFIX", str(fremd_deu))
+    assert _tessdata_finden() == str(projekt / "tessdata")
+    # mitgelieferte Datei fehlt (z. B. vom Virenscanner entfernt): $TESSDATA_PREFIX mit deu.traineddata hilft aus …
+    mitgeliefert.unlink()
+    monkeypatch.setenv("TESSDATA_PREFIX", str(fremd_deu))
+    assert _tessdata_finden() == str(fremd_deu)
+    # … sonst eine Tesseract-Installation mit deu.traineddata vor $TESSDATA_PREFIX mit nur Englisch …
+    monkeypatch.setenv("TESSDATA_PREFIX", str(nur_englisch))
+    assert _tessdata_finden() == str(system)
+    # … und erst ohne jede deutsche Sprachdatei der erste Ordner mit irgendeiner Sprachdatei
+    monkeypatch.setattr(ocr, "_system_tessdata", lambda: [])
+    monkeypatch.setenv("TESSDATA_PREFIX", str(nur_englisch))
+    assert _tessdata_finden() == str(nur_englisch)
+    assert os.environ["TESSDATA_PREFIX"] == str(nur_englisch)
+    monkeypatch.delenv("TESSDATA_PREFIX")
+    assert _tessdata_finden() is None
+
+
+def test_ocr_sprache_nennt_den_benutzten_ordner(tmp_path, monkeypatch):
+    """Die Warnung nennt den Ordner, aus dem wirklich gelesen wird (vorher nur „nutze Englisch“)."""
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    nur_englisch = tmp_path / "Tesseract-OCR" / "tessdata"
+    nur_englisch.mkdir(parents=True)
+    (nur_englisch / "eng.traineddata").write_bytes(b"x")
+    sprache, warnung = ocr._ocr_sprache(str(nur_englisch))
+    assert sprache == "eng" and str(nur_englisch) in warnung and "Englisch" in warnung
+    (nur_englisch / "eng.traineddata").unlink()
+    (nur_englisch / "fra.traineddata").write_bytes(b"x")
+    sprache, warnung = ocr._ocr_sprache(str(nur_englisch))
+    assert sprache is None and str(nur_englisch) in warnung
+    (nur_englisch / "deu.traineddata").write_bytes(b"x")
+    assert ocr._ocr_sprache(str(nur_englisch)) == ("deu", None)
 
 
 def test_dienst_ohne_sprachdaten_warnt(monkeypatch):

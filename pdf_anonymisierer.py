@@ -92,26 +92,66 @@ def _pymupdf_laden():
     return fitz
 
 
-def _meldung_paket_fehlt() -> str:
-    """Text, wenn PyMuPDF fehlt – in der EXE gibt es kein Installieren.bat (M-70)."""
+def _dll_ladefehler(fehler):
+    """Die Ausnahme der Kette, mit der der Import an einer DLL scheiterte – „DLL load failed“ (Erweiterungsmodul)
+    bzw. WinError 126/127 (Modul/Prozedur nicht gefunden) –, sonst None. Durchsucht die ganze Ausnahmekette: Der
+    Rückfall auf den alten Namen „fitz“ verdeckt sonst die eigentliche Ursache."""
+    gesehen = set()
+    while fehler is not None and id(fehler) not in gesehen:
+        gesehen.add(id(fehler))
+        if isinstance(fehler, (ImportError, OSError)) and (
+                "DLL load failed" in str(fehler) or getattr(fehler, "winerror", None) in (126, 127)):
+            return fehler
+        fehler = fehler.__cause__ or fehler.__context__
+    return None
+
+
+def _meldung_paket_fehlt(fehler=None) -> str:
+    """Text, wenn PyMuPDF fehlt oder sich nicht laden lässt – in der EXE gibt es kein Installieren.bat (M-70).
+    Scheitert der Import an einer DLL, fehlt in der Skript-Version meist die Visual-C++-Laufzeit von Microsoft:
+    PyMuPDF braucht msvcp140.dll und vcruntime140_1.dll. Python bringt vcruntime140_1.dll (ab 3.8.1, im Ordner von
+    python.exe) selbst mit, msvcp140.dll nicht – die legt erst die „Visual C++ Redistributable“ in den
+    Windows-Systemordner. Installieren.bat erneut auszuführen hilft dann nicht (die EXE hat die Laufzeit in ihrem
+    Ordner)."""
     if getattr(sys, "frozen", False):
         return ("Ein Programmbestandteil (PyMuPDF) fehlt oder wurde vom Virenscanner entfernt.\n\n"
                 "Bitte den Programmordner vollständig neu entpacken bzw. eine neue ZIP-Datei anfordern "
                 "(ggf. die Quarantäne des Virenscanners prüfen).")
+    ursache = _dll_ladefehler(fehler)
+    if ursache is not None:
+        return ("Das Paket 'PyMuPDF' ist installiert, lässt sich aber nicht laden (DLL load failed).\n\n"
+                "Meist fehlt auf diesem Rechner die Visual-C++-Laufzeit von Microsoft oder sie ist veraltet: "
+                "„Microsoft Visual C++ 2015-2022 Redistributable (x64)“. Abhilfe (einmalig, mit "
+                "Administratorrechten):\n"
+                "- in einer Eingabeaufforderung: winget install --id Microsoft.VCRedist.2015+.x64 -e\n"
+                "- oder vc_redist.x64.exe von Microsoft laden und ausführen: "
+                "https://aka.ms/vs/17/release/vc_redist.x64.exe\n\n"
+                "Danach das Programm neu starten. Ohne Administratorrechte: die IT fragen oder die EXE-Version "
+                "nutzen (sie bringt die Laufzeit mit).\n\n"
+                f"Technische Meldung: {ursache}")
     return ("Das Paket 'PyMuPDF' fehlt.\n\n"
             "Bitte einmal 'Installieren.bat' ausführen.")
 
 
 try:
     _pymupdf_laden()
-except ImportError:
-    meldung = _meldung_paket_fehlt()
-    print("FEHLER: " + meldung)
+except (ImportError, OSError) as _fehler:     # OSError: z. B. WinError 126 beim Laden einer DLL
+    if isinstance(_fehler, OSError) and _dll_ladefehler(_fehler) is None:
+        # Ein OSError ohne DLL-Bezug (z. B. PermissionError, weil ein Virenscanner eine Paketdatei sperrt) ist kein
+        # fehlendes Paket: „Paket fehlt“ nennte die falsche Ursache, und die Diagnose ginge verloren. Wie jeder
+        # unerwartete Fehler: Traceback in die fehler.log, Dialog „Unerwarteter Fehler“ mit Details (sys.excepthook).
+        raise
+    meldung = _meldung_paket_fehlt(_fehler)
+    try:
+        print("FEHLER: " + meldung)
+    except Exception:                         # Konsole ohne passende Kodierung: der Dialog folgt trotzdem
+        pass
     try:
         import tkinter as _tk
         from tkinter import messagebox as _mb
         _w = _tk.Tk(); _w.withdraw()
-        _mb.showerror("PDF-Anonymisierer — Paket fehlt", meldung)
+        _titel = "PyMuPDF lässt sich nicht laden" if _dll_ladefehler(_fehler) is not None else "Paket fehlt"
+        _mb.showerror(f"PDF-Anonymisierer — {_titel}", meldung)
     except Exception:
         pass
     sys.exit(1)

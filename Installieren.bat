@@ -2,14 +2,18 @@
 chcp 65001 >nul
 title PDF-Anonymisierer - Installation
 setlocal
-cd /d "%~dp0"
+pushd "%~dp0" || goto fehler_ordner
 
 REM ==============================================================
 REM  PDF-Anonymisierer - Einrichtung in EINEM Lauf
 REM  Diese Datei ist absichtlich reines ASCII (ae/oe/ue) mit CRLF.
 REM  Keine verzoegerte Variablenerweiterung: so bleiben "!" in Pfaden erhalten.
-REM  Schritte: 1 Python finden/installieren, 2 Rechner pruefen,
-REM            3 Pakete, 4 Pruefung, 5 Desktop-Verknuepfung.
+REM  Schritte: 1 Python finden/installieren, 2 Rechner pruefen (auch die
+REM            Visual-C++-Laufzeit), 3 Pakete, 4 Pruefung, 5 Desktop-Verknuepfung.
+REM  pushd statt "cd /d": Auf einer per UNC-Pfad geoeffneten Netzwerkfreigabe
+REM  (\\server\freigabe\...) ordnet pushd einen freien Laufwerksbuchstaben zu.
+REM  "cd /d" scheitert dort, und die relativen Pfade zeigten auf C:\Windows.
+REM  popd vor jedem "exit /b" gibt den Laufwerksbuchstaben wieder frei.
 REM ==============================================================
 
 echo ============================================================
@@ -30,6 +34,8 @@ REM requirements.txt (tests\test_auslieferung.py prueft das).
 set "MODELL_WHL=de_core_news_md-3.8.0-py3-none-any.whl"
 set "PY="
 set "UNGEEIGNET="
+set "WINGET_DA="
+set "VC_WINGET_VERSUCHT="
 set "ARCH=%PROCESSOR_ARCHITECTURE%"
 if defined PROCESSOR_ARCHITEW6432 set "ARCH=%PROCESSOR_ARCHITEW6432%"
 
@@ -57,7 +63,7 @@ if not defined PY goto fehler_kein_python
 echo       Verwende: "%PY%"
 
 REM --- Schritt 2: Rechner pruefen -------------------------------
-echo [2/5] Pruefe Rechner ^(64-Bit, Prozessor, pip^) ...
+echo [2/5] Pruefe Rechner ^(64-Bit, Prozessor, Visual-C++-Laufzeit, pip^) ...
 "%PY%" -c "import platform,sys;sys.exit(4 if platform.machine().upper().startswith('ARM') else 0)"
 if errorlevel 4 (
     echo       HINWEIS: ARM64-Prozessor ^(z. B. Snapdragon / Surface Pro X^) erkannt.
@@ -65,6 +71,39 @@ if errorlevel 4 (
     echo       PyMuPDF 1.28^). Getestet ist das Programm auf ARM64 aber nicht - bei
     echo       Problemen die EXE-Version nutzen ^(laeuft unter Windows 11 in der x64-Emulation^).
 )
+REM Visual-C++-Laufzeit: PyMuPDF und spaCy brauchen msvcp140.dll (C++-Standardbibliothek) und
+REM vcruntime140_1.dll. Python bringt vcruntime140.dll und vcruntime140_1.dll selbst mit (ab 3.8.1, im
+REM Ordner von python.exe), msvcp140.dll legt erst die "Visual C++ Redistributable" in den Systemordner.
+REM Laesst sich die Laufzeit nicht laden, scheitert jeder Import ("DLL load failed"): Die Vorab-Pruefung in
+REM Schritt 3 schlug dann bei jedem Lauf fehl, und pip lief jedes Mal vergeblich erneut. Deshalb wird hier
+REM geprueft (:pruefe_vc_laufzeit) und die Installation angeboten. ARM64 ist ungetestet: dort nur ein Hinweis.
+call :pruefe_vc_laufzeit
+if not defined VC_FEHLT goto vc_ok
+if /i "%ARCH%"=="ARM64" goto vc_hinweis_arm64
+echo.
+echo       Es fehlt die Visual-C++-Laufzeit von Microsoft ^(Python kann %VC_FEHLT% nicht laden^).
+echo       Ohne sie laesst sich PyMuPDF nicht laden ^("DLL load failed"^).
+REM WINGET_DA und VC_WINGET_VERSUCHT bestimmen, welche Abhilfe die Fehlermeldung nennt (ohne winget keinen
+REM winget-Befehl).
+where winget >nul 2>&1
+if errorlevel 1 goto fehler_vc_laufzeit
+set "WINGET_DA=1"
+choice /c JN /n /m "      Jetzt mit winget installieren? Windows fragt nach Administratorrechten. [J/N] "
+if errorlevel 2 goto fehler_vc_laufzeit
+if not errorlevel 1 goto fehler_vc_laufzeit
+set "VC_WINGET_VERSUCHT=1"
+winget install --id Microsoft.VCRedist.2015+.x64 -e --accept-source-agreements --accept-package-agreements
+call :pruefe_vc_laufzeit
+if defined VC_FEHLT goto fehler_vc_laufzeit
+echo       Visual-C++-Laufzeit ist installiert.
+goto vc_ok
+
+:vc_hinweis_arm64
+echo       HINWEIS: Python kann die Visual-C++-Laufzeit nicht laden ^(%VC_FEHLT%^) - auf ARM64 ungetestet,
+echo       die Installation laeuft weiter. Erscheint spaeter "DLL load failed": die Laufzeit
+echo       fuer ARM64 installieren ^(https://aka.ms/vs/17/release/vc_redist.arm64.exe^).
+
+:vc_ok
 "%PY%" -m pip --version >nul 2>&1
 if errorlevel 1 "%PY%" -m ensurepip --default-pip >nul 2>&1
 "%PY%" -m pip --version >nul 2>&1
@@ -134,6 +173,10 @@ echo.
 echo   Das Programm wird jetzt einmal gestartet ...
 set "PYW=%PY:python.exe=pythonw.exe%"
 if not exist "%PYW%" set "PYW=%PY%"
+REM Erst den Laufwerksbuchstaben von pushd freigeben, dann starten: sonst laege der Arbeitsordner
+REM des Programms auf einem Laufwerk, das es danach nicht mehr gibt (neue OCR-Prozesse liessen
+REM sich dort nicht mehr starten). Das Startskript bekommt seinen vollen Pfad, auch auf einer Freigabe.
+popd
 start "" "%PYW%" "%~dp0pdf_anonymisierer.py"
 pause
 exit /b 0
@@ -178,6 +221,25 @@ if not exist "%~1" goto :eof
 call :pruefe_kandidat "%~1"
 goto :eof
 
+:pruefe_vc_laufzeit
+REM Setzt VC_FEHLT auf die DLLs der Visual-C++-Laufzeit, die das gefundene Python nicht laden kann (nicht
+REM gesetzt = beide ladbar oder nicht pruefbar). Python laedt sie zur Probe selbst, so wie es spaeter die DLLs
+REM von PyMuPDF sucht: zuerst im Ordner von python.exe, dann im Systemordner - beim 64-Bit-Python im echten
+REM System32, auch wenn dieses cmd ein 32-Bit-cmd ist. Nur in System32 nachzusehen reicht nicht:
+REM vcruntime140_1.dll liegt oft nur neben python.exe (VC++ 2015/2017 bringt sie nicht mit), und conda hat
+REM die ganze Laufzeit im eigenen Ordner. Exit-Code: 10 + 1 (msvcp140.dll fehlt) + 2 (vcruntime140_1.dll
+REM fehlt). Jeder andere Code (Python-Fehler 1, Datei fehlt 2, Absturz) heisst "nicht pruefbar" - dann geht
+REM es weiter wie ohne diese Pruefung, statt einen Rechner abzuweisen, auf dem PyMuPDF laeuft.
+set "VC_FEHLT="
+"%PY%" werkzeuge\pruefe_installation.py --vc-laufzeit >nul 2>&1
+if errorlevel 14 goto :eof
+if errorlevel 13 set "VC_FEHLT=msvcp140.dll, vcruntime140_1.dll"
+if errorlevel 13 goto :eof
+if errorlevel 12 set "VC_FEHLT=vcruntime140_1.dll"
+if errorlevel 12 goto :eof
+if errorlevel 11 set "VC_FEHLT=msvcp140.dll"
+goto :eof
+
 :pruefe_kandidat
 REM Geeignet = Python 3.10 bis 3.15, 64-Bit, mit tkinter. Ein ARM64-Python erst ab 3.11:
 REM fuer ARM64 mit Python 3.10 gibt es kein spaCy-Paket (dann wird 3.12 installiert).
@@ -196,6 +258,48 @@ REM ==============================================================
 REM  Fehlerausgaenge - "Fertig" erscheint hier nie, kein Autostart
 REM ==============================================================
 
+:fehler_ordner
+REM pushd ist gescheitert: kein popd (es wuerde einen Eintrag des Aufrufers entfernen).
+echo.
+echo FEHLER: Der Programmordner laesst sich nicht als Arbeitsordner oeffnen:
+echo   "%~dp0"
+echo Liegt er auf einer Netzwerkfreigabe ^(\\server\freigabe\...^), konnte Windows ihr
+echo keinen freien Laufwerksbuchstaben zuordnen, oder der Zugriff wurde verweigert
+echo ^(die Meldung von Windows steht oben^).
+echo Loesung: den Ordner auf diesen Rechner kopieren ^(z. B. nach Dokumente^) und
+echo Installieren.bat dort starten - oder die Freigabe als Netzlaufwerk verbinden
+echo ^(Explorer: Dieser PC ^> Netzlaufwerk verbinden^) und von dort starten.
+pause
+exit /b 1
+
+:fehler_vc_laufzeit
+REM Erreicht aus Schritt 2: ohne winget (WINGET_DA leer), nach "N" oder nach einem Versuch mit winget
+REM (VC_WINGET_VERSUCHT). Ohne winget steht vc_redist.x64.exe vorn, und winget wird nicht genannt.
+echo.
+echo ============================================================
+echo   FEHLER: Die Visual-C++-Laufzeit von Microsoft fehlt.
+echo ============================================================
+echo   PyMuPDF braucht die "Microsoft Visual C++ 2015-2022 Redistributable (x64)":
+echo   Python bringt vcruntime140.dll und vcruntime140_1.dll selbst mit, msvcp140.dll
+echo   aber nicht - die legt erst dieses Paket in den Windows-Systemordner.
+echo   Python kann auf diesem Rechner nicht laden: %VC_FEHLT%
+echo   Auf frisch eingerichteten Rechnern, in der Windows-Sandbox und auf schlanken
+echo   Firmen-PCs fehlt die Laufzeit. Ohne sie laesst sich PyMuPDF nicht laden
+echo   ^("DLL load failed"^) - die Pakete erneut zu installieren hilft dann nicht.
+if defined VC_WINGET_VERSUCHT echo   Auch nach dem Versuch mit winget laesst sich die Laufzeit nicht laden
+if defined VC_WINGET_VERSUCHT echo   ^(die Meldung von winget steht oben^).
+echo   Abhilfe ^(einmalig, braucht Administratorrechte^):
+if defined WINGET_DA echo   - in einer Eingabeaufforderung: winget install --id Microsoft.VCRedist.2015+.x64 -e
+if defined WINGET_DA echo   - oder die Datei vc_redist.x64.exe von Microsoft laden und ausfuehren:
+if not defined WINGET_DA echo   - die Datei vc_redist.x64.exe von Microsoft laden und ausfuehren:
+echo     https://aka.ms/vs/17/release/vc_redist.x64.exe
+echo   - ohne Administratorrechte: die IT bitten, das Paket zu installieren, oder die
+echo     EXE-Version nutzen ^(sie bringt die Laufzeit mit, siehe README^).
+echo   Danach Installieren.bat erneut starten.
+pause
+popd
+exit /b 1
+
 :fehler_unvollstaendig
 echo.
 echo FEHLER: Dateien fehlen ^(werkzeuge\verknuepfung.py, requirements.txt,
@@ -203,6 +307,7 @@ echo tessdata\deu.traineddata oder pdf_anonymisierer.py^).
 echo Bitte die ZIP-Datei komplett entpacken ^(Rechtsklick ^> "Alle extrahieren"^)
 echo und Installieren.bat aus dem entpackten Ordner starten - nicht aus der ZIP heraus.
 pause
+popd
 exit /b 1
 
 :fehler_kein_winget
@@ -214,6 +319,7 @@ echo Loesung: Python 3.12 ^(64-Bit^) von https://www.python.org/downloads/window
 echo laden ^("Windows installer (64-bit)"^), installieren - dabei den Haken
 echo "Add python.exe to PATH" setzen - und danach Installieren.bat erneut starten.
 pause
+popd
 exit /b 1
 
 :fehler_kein_python
@@ -231,6 +337,7 @@ echo Loesung: Python 3.12 ^(64-Bit^) von https://www.python.org/downloads/window
 echo laden ^("Windows installer (64-bit)"^), installieren - dabei den Haken
 echo "Add python.exe to PATH" setzen - und danach Installieren.bat erneut starten.
 pause
+popd
 exit /b 1
 
 :fehler_kein_pip
@@ -239,6 +346,7 @@ echo FEHLER: Zu diesem Python gehoert kein "pip" ^(Paketverwaltung^).
 echo Python von https://www.python.org/downloads/windows/ neu installieren
 echo ^(Standardeinstellungen, Haken "Add python.exe to PATH"^) und erneut starten.
 pause
+popd
 exit /b 1
 
 :fehler_pakete
@@ -262,6 +370,7 @@ echo     -^> Ordner z. B. nach Dokumente verschieben und erneut starten.
 echo   Fuer Rueckfragen: "%PY%" werkzeuge\pruefe_installation.py ausfuehren
 echo   und die Ausgabe mitschicken.
 pause
+popd
 exit /b 1
 
 :fehler_modell
@@ -283,15 +392,23 @@ echo   Firmen-Proxy / TLS-Pruefung ^("CERTIFICATE_VERIFY_FAILED"^)
 echo     -^> IT fragen oder die fertige EXE-Version nutzen ^(siehe README^).
 echo   Bereits installierte Pakete bleiben erhalten und werden nicht neu geladen.
 pause
+popd
 exit /b 1
 
 :fehler_pruefung
 echo.
 echo FEHLER: Die Pakete wurden installiert, lassen sich aber nicht laden.
-echo Die Meldung steht oben. Typische Ursache: zwei Python-Installationen
-echo durcheinander oder ein Virenscanner hat Dateien entfernt.
+echo Die Meldung steht oben.
+echo - Steht dort "DLL load failed": Meist fehlt die Visual-C++-Laufzeit von Microsoft
+echo   oder sie ist veraltet - die Pakete erneut zu installieren hilft dann nicht.
+echo   Die aktuelle Laufzeit installieren ^(braucht Administratorrechte^):
+echo     winget install --id Microsoft.VCRedist.2015+.x64 -e
+echo   oder vc_redist.x64.exe von https://aka.ms/vs/17/release/vc_redist.x64.exe
+echo - Sonst: zwei Python-Installationen durcheinander, oder ein Virenscanner hat
+echo   Dateien entfernt.
 echo Fuer Rueckfragen: "%PY%" werkzeuge\pruefe_installation.py ausfuehren.
 pause
+popd
 exit /b 1
 
 :fehler_verknuepfung
@@ -302,6 +419,9 @@ echo ============================================================
 echo   Das Programm selbst ist einsatzbereit. Starten ueber Doppelklick auf
 echo   "Starten.bat" in diesem Ordner ^(Rechtsklick darauf ^> "Senden an" ^>
 echo   "Desktop (Verknuepfung erstellen)" legt eine eigene Verknuepfung an^).
-echo   Ursache ist meist PowerShell, das durch Firmenrichtlinien eingeschraenkt ist.
+echo   Die Ursache steht oben in der Zeile "FEHLER:" - meist ist PowerShell durch
+echo   Firmenrichtlinien eingeschraenkt, seltener fehlt der Desktop-Ordner oder ist
+echo   nicht beschreibbar.
 pause
+popd
 exit /b 1

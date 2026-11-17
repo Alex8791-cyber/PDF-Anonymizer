@@ -1,14 +1,16 @@
 @echo off
 chcp 65001 >nul
 title PDF-Anonymisierer
-cd /d "%~dp0"
 
 REM Startet den PDF-Anonymisierer ohne Konsolenfenster (pythonw.exe).
 REM Den Interpreter hat Installieren.bat in .python_pfad.txt hinterlegt;
 REM fehlt die Datei, werden die ueblichen Installationsordner durchsucht.
+REM Alle Pfade sind absolut (Ordner dieser Datei), es gibt kein "cd": Auf einer per UNC-Pfad
+REM geoeffneten Netzwerkfreigabe (\\server\freigabe\...) kann cmd den Ordner nicht zum aktuellen
+REM Verzeichnis machen - "cd" scheiterte dort, und .python_pfad.txt wurde nicht gefunden.
 
 set "PYW="
-if exist ".python_pfad.txt" set /p PYW=<".python_pfad.txt"
+if exist "%~dp0.python_pfad.txt" set /p PYW=<"%~dp0.python_pfad.txt"
 if defined PYW if exist "%PYW%" goto start
 
 set "PYW="

@@ -149,14 +149,17 @@ jobs:
           call EXE-bauen.bat < NUL
           if errorlevel 1 exit /b 1
 
-      - name: Bundle und ZIP pruefen (OCR-Sprachdatei, Sprachmodell, Lizenztexte)
+      # Die Visual-C++-Laufzeit gehoert in den Ordner: Die EXE soll auch ohne installierte
+      # "Visual C++ Redistributable" starten (die Skript-Version braucht sie, die EXE nicht).
+      - name: Bundle und ZIP pruefen (OCR-Sprachdatei, Sprachmodell, VC-Laufzeit, Lizenztexte)
         id: pruefung
         shell: pwsh
         timeout-minutes: 5
         run: |
           $ordner = "dist\PDF-Anonymisierer"
           $pflicht = "PDF-Anonymisierer.exe", "_internal\tessdata\deu.traineddata", "LICENSE.txt",
-                     "THIRD_PARTY_NOTICES.md", "README.md", "licenses\AGPL-3.0.txt"
+                     "THIRD_PARTY_NOTICES.md", "README.md", "licenses\AGPL-3.0.txt",
+                     "_internal\msvcp140.dll", "_internal\vcruntime140_1.dll"
           foreach ($datei in $pflicht) {
             if (-not (Test-Path (Join-Path $ordner $datei))) { throw "Fehlt im Programmordner: $datei" }
           }
