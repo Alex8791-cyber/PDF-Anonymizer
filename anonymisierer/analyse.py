@@ -30,7 +30,9 @@ Ablauf:
   Wissensbasis als Vor- oder Nachnamen kennt („Graf“, „Ritter“, „Kaplan“, „Pastor“: das bleibt eine Person).
   Firmenanschriften, die die Strukturregeln stehen lassen, werden abgewählt angeboten („vermutlich
   Firmenanschrift“) – außer im Absender einer Person (eigener Briefkopf von Selbständigen, Fußzeile eines
-  Privatbriefs) oder wenn ein anderes Dokument des Laufs dieselbe Anschrift als Kundenanschrift angehakt hat.
+  Privatbriefs: ein angehakter Name, den die Wortlisten als Vor- oder Nachnamen kennen, vorn in der Zeile oder im
+  Block darüber, _absender_einer_person) oder wenn ein anderes Dokument des Laufs dieselbe Anschrift als
+  Kundenanschrift angehakt hat.
   Vor dem Seitenmodell: keine PDF (Bild/Webseite mit Endung .pdf) -> klare Meldung statt Absturz (R-01); jedes Objekt
   einmal geladen, damit MuPDF eine nötige Reparatur JETZT ausführt und nicht erst nach Änderungen -> DATEI_REPARIERT
   (R-11); beschädigte Bilder (abgebrochenes JPEG) -> BILD_BESCHAEDIGT (R-07); Nebenkanäle mit denselben Detektoren
@@ -936,7 +938,10 @@ def _absender_einer_person(dok, s: int, e: int, namen_je_seite: dict) -> bool:
 def _firmenanschriften(dok, funde: list, aktive: set) -> list:
     """Firmenanschriften, die die Strukturregeln stehen lassen (dok.struktur_vorschlaege: Briefkopf, Fußzeile einer
     unbekannten Firma), als Funde mit lauter abgewählten Stellen: die Nutzerin sieht sie in der Liste und kann sie
-    anhaken; die Restrisiko-Prüfung meldet abgewählte Stellen nicht als Verdacht. Vorschläge, die eine vorhandene
+    anhaken. Bleibt ein solcher Fund ganz abgewählt, gibt die Oberfläche ihn nicht an die Schwärzung
+    (auftrag.auftrag_funde) – sieht die Anschrift nach Personendaten aus, meldet die Restrisiko-Prüfung sie deshalb
+    weiter als Verdacht. Gewollt: bei Selbständigen ist das in der Ausgabe der einzige Hinweis auf eine lesbare
+    Privatanschrift. Nur abgewählte Stellen eines angehakten Funds meldet sie nicht. Vorschläge, die eine vorhandene
     Stelle berühren, entfallen. Steht eine solche Anschrift im Absender einer Person (siehe _absender_einer_person),
     ist es die Anschrift der Kundin bzw. des Kunden: dann ein normaler, angehakter Fund (HINWEIS_ABSENDER)."""
     vorschlaege = getattr(dok, "struktur_vorschlaege", None) or []

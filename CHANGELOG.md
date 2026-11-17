@@ -62,8 +62,10 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   kleiner, ist aber nicht pixelgleich mit dem Original.
 - **Nur ein Programmfenster:** Ein zweiter Start meldet „PDF-Anonymisierer läuft bereits“.
 - **Kleine Bildschirme:** Auf 1366×768 und auf 1920×1080 ab 125 % Skalierung startet das Fenster maximiert.
-  Im kleinen Fenster entfallen großer Titel, Untertitel und Bedienhinweis; bei Platzmangel wird der
-  Hinweiskasten einzeilig (ein Klick zeigt alle Grenzen), und die Knöpfe werden flacher. Die Grenzen der
+  Im kleinen Fenster entfallen großer Titel, Untertitel und Bedienhinweis. Reicht der Platz für die Fundliste
+  dann nicht, rücken der Reihe nach – nur so weit wie nötig – Titel „1 · PDF-Dateien“ und Ablagefläche in eine
+  Zeile (wenn beide nebeneinander passen), die Knöpfe werden flacher, und zuletzt zeigt der Hinweiskasten eine
+  Kurzfassung in höchstens zwei Zeilen mit den Kernaussagen (ein Klick zeigt alle Grenzen). Die Grenzen der
   Erkennung stehen weiter unter Hilfe → „Was wird nicht erkannt?“ und „Hinweise vor der Nutzung …“; den
   Bedienhinweis über der Fundliste (Leertaste, Doppelklick, Rechtsklick) gibt es nur im normal großen Fenster.
 - **Rechenzeit und Arbeitsspeicher:** Restrisiko-Prüfung und Fotoerkennung kosten zusätzlich Zeit. Auf dem
@@ -93,9 +95,11 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - **Restrisiko-Prüfung:** Eine zweite, von der Erkennung unabhängige Prüfung liest jede Ausgabe noch einmal
   (bei Scans per Texterkennung) und meldet, was noch nach Personendaten aussieht – Nummern, Namen,
   Anschriften, Geburtsdaten, auf Scans ungelesene Tinte in Unterschriftsblöcken sowie Scan-Seiten, die sich
-  nicht verlässlich lesen lassen. Jeder Verdacht macht die Ausgabe `_PRUEFEN`. Was in der Fundliste
-  abgewählt ist (z. B. „vermutlich Firmenanschrift“), meldet sie nicht; nach Gesundheitsdaten, Beruf und
-  Arbeitgeber sucht sie nicht.
+  nicht verlässlich lesen lassen. Jeder Verdacht macht die Ausgabe `_PRUEFEN`. Einzelne abgewählte Stellen
+  eines angehakten Funds meldet sie nicht. Einen ganz abgewählten Fund (z. B. „vermutlich Firmenanschrift“) gibt
+  die Oberfläche dagegen gar nicht an die Schwärzung; sieht er nach Personendaten aus, meldet die Prüfung ihn
+  deshalb weiter als Verdacht – so fällt bei Selbständigen eine lesbare Privatanschrift im Briefkopf noch in der
+  Ausgabe auf. Nach Gesundheitsdaten, Beruf und Arbeitgeber sucht sie nicht.
 - **Kundenliste** (Menü „Kundenliste“): Import einer CSV-Datei mit Kundendaten. Gespeichert werden nur nicht
   umkehrbare Prüfwerte, kein Klartext. Passt ein starkes Merkmal (voller Name, Kunden- oder Vertragsnummer,
   IBAN, E-Mail), sucht das Programm alle Angaben dieses Kunden.
@@ -206,7 +210,9 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - Neuer Aufbau: ein Seitenmodell für Analyse, Schwärzung und Selbstkontrolle (`seitenmodell.py`),
   Erkennungsregeln als Module mit Register und Rückfallliste für die EXE (`anonymisierer/detektoren/`),
   Wissensbasis (`wissen.py`, 17 Wortlisten in `anonymisierer/daten/`), dazu `kundenliste.py`,
-  `restrisiko.py`, `nebenkanaele.py`, `bilder.py`, `fotos.py`, `vorschau.py` und `vorschau_fenster.py`.
+  `restrisiko.py`, `nebenkanaele.py`, `bilder.py`, `fotos.py`, `vorschau.py`, `vorschau_fenster.py` und
+  `auftrag.py` (welche Funde und Stellen die Oberfläche an die Schwärzung gibt; auch für
+  `werkzeuge/benchmark.py --weg oberflaeche`).
 - Technik hinter den Korrekturen: Seiten werden ohne Strukturbaum gerendert (ein Zyklus darin ließ MuPDF 1.28
   über zehn Minuten hängen); scheitert `apply_redactions` an einer Seite (z. B. zyklische Form-XObjects),
   wird sie mit 200 dpi als Bild geschwärzt (`SEITE_ALS_BILD`); `analyse.reparatur_erzwingen` lässt MuPDF vor

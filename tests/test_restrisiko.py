@@ -492,6 +492,47 @@ def test_status_und_seitenverdacht_messen_leere_scan_seiten_gleich(tmp_path, rue
         assert seitenverdacht == [], e["verdacht"]
 
 
+def _handschrift_scan(pfad, zeilen, dpi=150):
+    """Scan-Seite mit ein paar gedruckten Zeilen und darunter vierzehn Zeilen „Handschrift“ (zittrige Linienzüge, wie
+    eine handschriftliche Schadenschilderung); liefert die Wortkästen der gedruckten Wörter – so liest die OCR eine
+    solche Seite: nur den Druck."""
+    vorlage = fitz.open()
+    seite = vorlage.new_page()
+    for i, z in enumerate(zeilen):
+        seite.insert_text((60, 100 + 22 * i), z, fontsize=11, fontname="helv")
+    zufall = random.Random(7)
+    for zeile in range(14):
+        y, x, punkte = 260 + 30 * zeile, 60.0, []
+        while x < 520:
+            punkte.append(fitz.Point(x, y + zufall.uniform(-9, 9)))
+            x += zufall.uniform(3, 7)
+        for a, b in zip(punkte, punkte[1:]):
+            seite.draw_line(a, b, color=(0.1, 0.1, 0.3), width=1.6)
+    woerter = [tuple(w[:5]) for w in seite.get_text("words")]
+    pix = seite.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY)
+    doc = fitz.open()
+    p = doc.new_page(width=seite.rect.width, height=seite.rect.height)
+    p.insert_image(p.rect, stream=pix.tobytes("png"))
+    vorlage.close()
+    doc.save(pfad)
+    doc.close()
+    return Path(pfad), woerter
+
+
+def test_kaum_lesbare_seite_mit_einigen_woertern_ohne_seitenrahmen(tmp_path):
+    """Durchsicht der Doku, Befund 3: Die README nannte als Seite ohne Rahmen „sehr helle Scans“ – die sind seit
+    Runde 3b ein Seitenverdacht (test_hell_gedruckte_ungelesene_scan_seite_ist_seitenverdacht, oben Ende zu Ende).
+    Den Rahmen der Vorschau (Seitenverdacht ohne Lage) bekommt eine Scan-Seite, auf der die OCR (fast) nichts gelesen
+    hat, die verrauscht oder unplausibel gelesen ist. Liest die OCR auf einer Seite mit viel Handschrift ein paar
+    gedruckte Wörter, heißt die Ausgabe _PRUEFEN („Scan kaum lesbar“), bleibt aber ohne Rahmen – das Beispiel der
+    README („Was NICHT erkannt wird“, „Prüfen und freigeben“). Ändert sich das, die README mit anpassen."""
+    pdf, woerter = _handschrift_scan(tmp_path / "schilderung.pdf", ["Schadenmeldung vom 12.03.2024", "Seite 1 von 2"])
+    assert restrisiko.SCAN_MIN_WOERTER <= len(woerter) < analyse.KAUM_LESBAR_WOERTER
+    e = schwaerze_pdf(pdf, [], ocr=OcrAttrappe({0: woerter}), ziel_ordner=tmp_path / "aus")
+    assert e["status"] == "pruefen" and "Seite 1: Scan kaum lesbar" in e["pruefen_gruende"], e["pruefen_gruende"]
+    assert [v for v in e["verdacht"] if not v.rechtecke] == [], e["verdacht"]
+
+
 def test_unplausible_lesung_einer_scan_seite_ist_seitenverdacht(tmp_path):
     """Eine verdrehte Seite liest die OCR als wortähnlichen Buchstabensalat. Liest die Kontroll-OCR mit derselben
     (falschen) Ausrichtung wie die Analyse, greift keine Regel verlässlich – dann ist die Seite selbst der

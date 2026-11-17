@@ -162,9 +162,13 @@ Weitere Regeln:
   Programm auch in den anderen Dokumenten derselben Analyse (Hinweis „aus einem anderen
   Dokument dieses Laufs übernommen“). Was Sie abgewählt haben, bleibt abgewählt.
 - **Firmenanschriften** in Briefköpfen und Fußzeilen (z. B. des Versicherers) bleiben stehen;
-  sie stehen als nicht angehakter Fund „vermutlich Firmenanschrift – nicht geschwärzt, bitte
-  prüfen“ in der Liste. Die Anschrift einer Person im eigenen Briefkopf (z. B. Selbständige)
-  wird geschwärzt.
+  die einer dem Programm unbekannten Firma steht als nicht angehakter Fund „vermutlich
+  Firmenanschrift – nicht geschwärzt, bitte prüfen“ in der Liste. Die Anschrift einer Person
+  im eigenen Briefkopf wird geschwärzt – wirkt der Briefkopf aber wie der einer Firma (z. B. mit
+  Webadresse, Bankverbindung oder USt-IdNr., wie oft bei Selbständigen), nur dann, wenn davor
+  ein Name steht, den die Namenslisten des Programms als Vor- oder Nachnamen kennen. Sonst
+  steht auch sie nicht angehakt als „vermutlich Firmenanschrift“ in der Liste: bei
+  Selbständigen also bitte prüfen und anhaken.
 - **Versteckte Teile** der Datei – Dateieigenschaften, Lesezeichen, Anhänge, Formulardaten,
   Skripte – prüft die Analyse mit denselben Regeln. Die Ausgabe enthält sie nicht mehr.
 - **Scans und Fotos** liest die eingebaute Texterkennung (OCR); schräge Scans werden gerade
@@ -263,8 +267,10 @@ Bitte vor dem Einsatz lesen – das sind die Grenzen des Werkzeugs:
 Kaum lesbare, unplausibel gelesene oder ganz ungelesene Scan-Seiten werden nicht still
 übersprungen: Die Ausgabe heißt dann `_PRUEFEN`, und der Grund (z. B. „Seite 2: kein Text
 erkannt bzw. Texterkennung fehlgeschlagen“) steht in der Liste und im Abschlussdialog. Meist
-umrahmt die Vorschau die ganze Seite als Verdacht, aber nicht immer – zum Beispiel nicht bei
-sehr hellen Scans (blasser Druck, Bleistift). Deshalb jede Seite selbst ansehen.
+umrahmt die Vorschau die ganze Seite als Verdacht – auch einen hellen Scan (blasser Druck,
+Bleistift), auf dem die Texterkennung (fast) nichts gelesen hat. Aber nicht immer: Liest die
+Texterkennung auf einer Seite mit viel Handschrift nur ein paar gedruckte Wörter (Grund „Scan
+kaum lesbar“), kann der Rahmen fehlen. Deshalb jede Seite selbst ansehen.
 
 ## Voraussetzungen
 
@@ -400,8 +406,9 @@ scheint.
    Schwärzen zeigt die Vorschau das „Ergebnis (Ausgabe)“.
 2. **Jede Seite ansehen.** Graue Kästen mit Platzhalter sind geschwärzt. Orange markiert sind
    Verdachtsstellen der Restrisiko-Prüfung. Konnte eine Seite nicht verlässlich gelesen
-   werden, ist sie meist ganz umrahmt. Der Rahmen kann aber fehlen (z. B. bei sehr hellen
-   Scans); der Grund steht dann nur in der Liste und im Abschlussdialog.
+   werden, ist sie meist ganz umrahmt. Der Rahmen kann aber fehlen, z. B. bei einer Seite mit
+   viel Handschrift, auf der die Texterkennung nur ein paar gedruckte Wörter liest; der Grund
+   („Scan kaum lesbar“) steht dann nur in der Liste und im Abschlussdialog.
 3. **Steht noch etwas Persönliches da und ist es als Verdacht markiert:** in der Liste
    markieren und „Markierte nachschwärzen“. Es entsteht eine neue Ausgabe mit der nächsten
    freien Nummer; die alte wird gelöscht. Das geht nicht bei einer ganz umrahmten Seite (dafür
@@ -632,14 +639,16 @@ Tesseract** – nur den entpackten Ordner.
   Windows-Konto kann es entschlüsseln).
 - **Kleine Bildschirme** (`gui.py`): Unter 760 Pixel Fensterhöhe (bei 100 %) entfallen Titel,
   Untertitel und Bedienhinweis, das Protokoll zeigt 3 statt 5 Zeilen. Reicht der Platz für die
-  Fundliste dann noch nicht, greifen der Reihe nach die Kompaktstufen (`KOMPAKT_STUFEN`):
-  Hinweiskasten einzeilig, Dateikopf und Ablagefläche in einer Zeile, flachere Knöpfe.
+  Fundliste dann noch nicht, greifen der Reihe nach und nur so weit wie nötig die Kompaktstufen
+  (`KOMPAKT_STUFEN`): Titel „1 · PDF-Dateien“ und Ablagefläche in einer Zeile (nur, wenn beide
+  nebeneinander passen), flachere Knöpfe, zuletzt eine Kurzfassung des Hinweiskastens –
+  höchstens zwei Zeilen mit den Kernaussagen; ein Klick zeigt alle Grenzen.
 - Code und Oberfläche sind deutsch. Paketaufbau `anonymisierer/`: `analyse.py`,
   `schwaerzung.py`, `seitenmodell.py`, `detektoren/`, `muster.py` (Kategorien, Muster,
   Schutzstufen), `namen.py` (spaCy), `wissen.py` + `daten/`, `kundenliste.py`,
   `restrisiko.py`, `ocr.py`, `fotos.py`, `bilder.py`, `nebenkanaele.py`, `vorschau.py`,
-  `vorschau_fenster.py`, `gui.py`, `gui_attrappen.py`, `dateien.py`; Startskript
-  `pdf_anonymisierer.py`.
+  `vorschau_fenster.py`, `gui.py`, `gui_attrappen.py`, `auftrag.py` (welche Funde und Stellen
+  die Oberfläche an die Schwärzung gibt), `dateien.py`; Startskript `pdf_anonymisierer.py`.
 - Kommentare im Code verweisen teils auf interne Entwicklerunterlagen („Vertrag Abschnitt …“,
   `CONTRACT_V2.md`, `BENCHMARK_SCHEMA.md`), die nicht im Repository liegen.
 
@@ -655,8 +664,9 @@ die Layout-Tests starten für die geprüften Bildschirmgrößen bei Bedarf eigen
 (Paket `xvfb`). Die OCR findet die Sprachdatei im Ordner `tessdata` selbst. Die GitHub-Action
 `.github/workflows/tests.yml` führt die Tests auf Ubuntu und Windows aus (Zeitgrenze 300 s je
 Test, dafür `pytest-timeout` aus `requirements-dev.txt`), sichert Layout-Screenshots und den
-Bericht des Benchmark-Tests als Artefakte und baut auf Wunsch bzw. für Versions-Tags `v…` die
-Windows-EXE mit `EXE-bauen.bat`.
+Bericht des Benchmark-Tests als Artefakte und baut danach – für jeden Pull Request, auf Wunsch
+und für Versions-Tags `v…` – die Windows-EXE mit `EXE-bauen.bat` samt Probestart (die ZIP liegt
+als Artefakt beim Lauf).
 
 Werkzeuge in `werkzeuge/`:
 

@@ -22,6 +22,7 @@ import pymupdf as fitz
 import pytest
 
 from anonymisierer import analyse, dateien, nebenkanaele, schwaerzung, vorschau
+from anonymisierer import auftrag as auftrag_modul
 from anonymisierer import ocr as ocr_modul
 from anonymisierer.analyse import analysiere_pdf, analysiere_text
 from anonymisierer.muster import KATEGORIEN
@@ -1362,6 +1363,84 @@ def test_firmenanschriften_mit_rollen_bleiben_angeboten():
         funde = analysiere_text(text, STANDARD, [], [], profil="hoch")
         firma = [f for f in funde if f["text"] in ("Hauptstraße 12a", "60311 Frankfurt am Main")]
         assert firma and all(not any(st["an"] for st in f["stellen"]) for f in firma), text
+
+
+# Brieftext unter dem Briefkopf einer Selbständigen (Kündigung an den Versicherer)
+KUENDIGUNG = ["", "", "Muster Versicherung AG", "Kundenservice", "Postfach 10 11 12", "20007 Hamburg", "",
+              "Kündigung meiner Berufshaftpflicht", "", "Sehr geehrte Damen und Herren,",
+              "hiermit kündige ich meine Versicherung zum 31.12.2024.", "", "Mit freundlichen Grüßen"]
+KOPF_UNBEKANNT_WEB = ["Tjorven Quaasdorf · Fotografie", "Hauptstraße 12 · 10115 Berlin",
+                      "Tel. 030 1234567 · www.quaasdorf-foto.de"]
+
+
+@pytest.mark.parametrize("kopf, geschwaerzt", [
+    (["Max Mustermann · Fotografie", "Hauptstraße 12 · 10115 Berlin", "Tel. 030 1234567 · www.mustermann-foto.de"],
+     True),
+    (KOPF_UNBEKANNT_WEB, False),
+    (["Tjorven Quaasdorf · Fotografie", "Hauptstraße 12 · 10115 Berlin", "Bankverbindung: Sparkasse Berlin"], False),
+    (["Tjorven Quaasdorf · Fotografie", "Hauptstraße 12 · 10115 Berlin", "USt-IdNr. DE123456789"], False),
+    (["Tjorven Quaasdorf", "Hauptstraße 12", "10115 Berlin"], True),
+], ids=["bekannter_name_webadresse", "unbekannter_name_webadresse", "unbekannter_name_bankverbindung",
+        "unbekannter_name_ust_idnr", "ohne_firmenbeleg"])
+def test_briefkopf_wie_eine_firma_nur_mit_bekanntem_namen_geschwaerzt(tmp_path, kopf, geschwaerzt):
+    """Durchsicht der Doku, Befund 1 (README „Firmenanschriften“, CHANGELOG): Die Anschrift im eigenen Briefkopf wird
+    geschwärzt – wirkt er aber wie der einer Firma (Webadresse, Bankverbindung, USt-IdNr.), nur mit einem Namen davor,
+    den die Wortlisten als Vor- oder Nachnamen kennen („Max“, analyse._person_vorn); sonst steht sie nicht angehakt als
+    „vermutlich Firmenanschrift“ in der Liste. Ohne Firmenbeleg geht sie wie jede Kundenanschrift weg, auch mit einem
+    unbekannten Namen. Als PDF mit dem Briefkopf oben auf der Seite: erst dort zählen Webadresse, Bankverbindung und
+    USt-IdNr. im selben Block als Firmenbeleg."""
+    wissen = analyse._wissen_modul()
+    assert analyse._bekannter_name("Max", wissen)
+    assert not any(analyse._bekannter_name(w, wissen) for w in ("Tjorven", "Quaasdorf")), "Beispielname ist bekannt"
+    pdf = textseiten(tmp_path / "kuendigung.pdf", kopf + KUENDIGUNG)
+    e = analysiere_pdf(pdf, STANDARD, [], [], profil="hoch")
+    for teil in ("Hauptstraße 12", "10115 Berlin"):
+        f = next(f for f in e["funde"] if f["text"] == teil)
+        assert all(st["an"] for st in f["stellen"]) is geschwaerzt, (teil, f["hinweis"])
+        assert (f["hinweis"] == analyse.HINWEIS_FIRMENANSCHRIFT) is not geschwaerzt, (teil, f["hinweis"])
+
+
+def _schwaerzen_wie_die_oberflaeche(pdf, auftrag, ziel):
+    """Schwärzung mit den Parametern, die die Oberfläche für den Auftrag setzt („Freigabe vor Weitergabe“ an)."""
+    return schwaerze_pdf(pdf, auftrag["funde"], ziel_ordner=ziel,
+                         **auftrag_modul.schwaerz_parameter(auftrag, True, "hoch", schwaerze_pdf))
+
+
+def test_ganz_abgewaehlter_fund_bleibt_verdacht_abgewaehlte_einzelstelle_nicht(tmp_path):
+    """Durchsicht der Doku, Befund 2 (CHANGELOG „Restrisiko-Prüfung“, analyse._firmenanschriften): Die Oberfläche gibt
+    einen ganz abgewählten Text-Fund nicht an die Schwärzung (auftrag.auftrag_funde). Sieht er nach Personendaten aus,
+    meldet die Restrisiko-Prüfung ihn deshalb weiter als Verdacht – gewollt: so fällt bei Selbständigen die
+    Privatanschrift auf, die als „vermutlich Firmenanschrift“ nicht angehakt in der Liste steht. Eine abgewählte
+    EINZELNE Stelle eines angehakten Funds meldet sie nicht (Entscheidung der Nutzerin)."""
+    anschrift = {"Hauptstraße 12", "10115 Berlin"}
+    pdf = textseiten(tmp_path / "kuendigung.pdf", KOPF_UNBEKANNT_WEB + KUENDIGUNG)
+    e = analysiere_pdf(pdf, STANDARD, [], [], profil="hoch")
+    assert anschrift <= {f["text"] for f in e["funde"] if f["hinweis"] == analyse.HINWEIS_FIRMENANSCHRIFT}
+    auftrag, _ = auftrag_modul.standard_auftrag(e, schwaerze_pdf)      # ohne Eingriff der Nutzerin
+    assert anschrift.isdisjoint(f["text"] for f in auftrag["funde"])
+    s = _schwaerzen_wie_die_oberflaeche(pdf, auftrag, tmp_path / "kuendigung")
+    assert s["status"] == "pruefen" and anschrift <= {v.text for v in s["verdacht"]}, s["verdacht"]
+
+    # Telefonnummer an zwei Stellen: eine Stelle abgewählt (Fund teilweise angehakt) – kein Verdacht; der ganze Fund
+    # abgewählt – Verdacht
+    pdf = textseiten(tmp_path / "rueckruf.pdf", ["Muster Versicherung AG", "Kundenservice", "Postfach 10 11 12",
+                                                 "20007 Hamburg", "", "Schadenmeldung", "",
+                                                 f"Versicherungsnehmer: {NAME}", "Telefon: 0171 2345678", "",
+                                                 "Rückruf erbeten unter 0171 2345678 (Mobil)."])
+    e = analysiere_pdf(pdf, STANDARD, [], [], profil="hoch")
+    nr = next(i for i, f in enumerate(e["funde"]) if f["kategorie"] == "telefon")
+    assert len(e["funde"][nr]["stellen"]) == 2
+    einzelstellen = auftrag_modul.einzelstellen_moeglich(e, schwaerze_pdf)
+    assert einzelstellen
+    for zustand, gemeldet in (("teil", False), ("aus", True)):
+        funde = [dict(f, stellen=[dict(st) for st in f["stellen"]]) for f in e["funde"]]
+        for st in funde[nr]["stellen"][-1:] if zustand == "teil" else funde[nr]["stellen"]:
+            st["an"] = False
+        zustaende = [auftrag_modul.standard_zustand(f, einzelstellen) for f in funde]
+        assert zustaende[nr] == zustand
+        auftrag = auftrag_modul.auftrag_bauen(dict(e, funde=funde), zustaende, einzelstellen)
+        s = _schwaerzen_wie_die_oberflaeche(pdf, auftrag, tmp_path / zustand)
+        assert any("0171 2345678" in v.text for v in s["verdacht"]) is gemeldet, (zustand, s["verdacht"])
 
 
 def test_kundenanschrift_aus_anderem_dokument_des_laufs(tmp_path):
