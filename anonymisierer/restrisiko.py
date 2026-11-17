@@ -402,10 +402,6 @@ _OCR_RAND = " \t‚„,.'’`´|;:"           # Krümel der OCR vor/hinter einem
 # Diagnosekontext für Diagnoseschlüssel ohne Buchstaben ("125.11" als OCR-Lesung von "I25.11")
 _DIAGNOSE_RE = re.compile(r"(?i)diagnos|icd|befund|krankheit|erkrankung|syndrom|störung|leiden|beschwerden|"
                           r"hypertonie|insuffizienz|fraktur|arthrose|entzündung|infekt")
-# Modellcode hinter einem Wort ("Böckmann TPV", "Rossini 540", "Genesis II E-315", "GSR 18V-55"): Gruppe 1 ist ein Code
-# in Versalien (nur ohne Wortgestalt ein Modellcode), sonst Ziffern
-_MODELLCODE_DANACH_RE = re.compile(r"[ \t]+(?:([A-Z]{2,5})(?=[ \t,;.]|$)|[A-Z]{1,5}-?\d|\d+[A-Za-z]{1,3}(?![\w])|"
-                                   r"\d{1,4}(?:[.,\-/]\d+)+|\d{3,4}(?![\d.,]))")
 # Geburtsjahr hinter seinem Etikett ("Geburtsjahr: 1983", "Geb.-Jahr 1979", "Geburtsjahr der versicherten Person:
 # 1979", "Jahrgang 1961", "Jg. 1961") – dieselben Etiketten wie die Erkennung (muster._JAHRGANG_RE)
 _GEBURTSJAHR_RE = re.compile(
@@ -1840,15 +1836,10 @@ class _Seitenpruefung:
         """Steht die Ziffernfolge direkt hinter einer Marke oder einem Modell der Wissensbasis (sachnamen: "Dell XPS",
         "Samsung Galaxy") – höchstens ein Modellwort dazwischen ("Dell XPS 13 9340", "Lenovo ThinkPad T14")? Befund 66
         der Domänen-Durchsicht."""
-        index = self.w.index("sachnamen")
-        if index is None:
-            return False
-        try:
-            treffer = index.finde(zeile[max(0, s - 40):s])
-        except Exception:
-            return False
         basis = max(0, s - 40)
-        return any(re.fullmatch(r"[ \t]+(?:[A-Za-z][\w\-]{0,14}[ \t]+)?", zeile[basis + v.ende:s]) for v in treffer)
+        stellen = personenkontext.sachnamen_stellen(zeile[basis:s], self.w.modul)
+        # nur Leerzeichen dazwischen: dieselbe Zelle (eine Nummer in der nächsten Spalte gehört nicht zur Marke)
+        return any(re.fullmatch(r" +(?:[A-Za-z][\w\-]{0,14} +)?", zeile[basis + b:s]) for _, b in stellen)
 
     @staticmethod
     def _hausnummer_plz(zeile: str, s: int, e: int, ns: int, ne: int) -> bool:
@@ -2764,16 +2755,12 @@ class _Seitenpruefung:
             if z is None:
                 return False
             if z.id not in sach_zeilen:
-                index = self.w.index("sachnamen")
-                try:
-                    sach_zeilen[z.id] = [(z.start + v.start, z.start + v.ende)
-                                         for v in (index.finde(self.zeilen_text(z)) if index is not None else ())]
-                except Exception:
-                    sach_zeilen[z.id] = []
+                sach_zeilen[z.id] = [(z.start + a, z.start + b) for a, b in
+                                     personenkontext.sachnamen_stellen(self.zeilen_text(z), self.w.modul)]
             if any(a <= s and e <= b for a, b in sach_zeilen[z.id]):
                 return True
-            if _MODELLCODE_DANACH_RE.match(text, e) and not self.w.wortgestalt(
-                    (_MODELLCODE_DANACH_RE.match(text, e).group(1) or "").strip()):
+            modell = personenkontext.MODELLCODE_DANACH_RE.match(text, e)
+            if modell and not (modell.group("code") and self.w.wortgestalt(modell.group("code"))):
                 return True
             return personenkontext.tierangabe(text, s)
 
@@ -2869,7 +2856,8 @@ class _Seitenpruefung:
             rolle = s in wohn_starts or partei(i) or name_amt(i)
             kontext = (titel or platzhalter or etikett or links_vorname or rechts_nachname or komma_paar or gruss
                        or geboren or rolle)
-            if personenkontext.tierangabe(text, s) or (personenkontext.medizinisch(w, text, s) and not titel):
+            if personenkontext.tierangabe(text, s) or (personenkontext.medizinisch(w, text, s, self.w.modul)
+                                                       and not titel):
                 continue                                # "Abstammung: v. Gribaldi", "Baker-Zyste", "Morbus Scheuermann"
             if sachname(i) and not (titel or etikett):
                 continue                                # "Gasgrill Weber Genesis", "Böckmann TPV", "Jack Russell"

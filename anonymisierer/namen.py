@@ -321,38 +321,41 @@ def _ist_sachwort(wort: str) -> bool:
 _PARTIZIP_RE = re.compile(r"(?:[A-ZÄÖÜ][a-zäöü]{1,6}ge|Ge)[a-zäöüß]{3,}t|(?:Be|Ver|Ent|Er|Zer)[a-zäöüß]{3,}igt|"
                           r"[A-ZÄÖÜ][a-zäöüß]{3,}iert")
 _ISCH_RE = re.compile(r"[A-ZÄÖÜ][a-zäöüß]{4,}isch(?:e|er|es|en|em)")
-# medizinische Wendungen: "Morbus …", Adjektive vor Diagnosen und Endungen von Fachwörtern ("Chronische Lumbalgie")
-_MEDIZIN_ANFANG = frozenset({"morbus", "m.", "chronisch", "chronische", "chronischer", "chronisches", "akut", "akute",
+# medizinische Wendungen: "Morbus …" und Adjektive vor Diagnosen ("Chronische Lumbalgie"); "M." nur vor einer
+# Diagnose ("M. Parkinson", nicht "M. Weber"), Endungen von Fachwörtern in personenkontext.fachwort_medizin
+_MEDIZIN_ANFANG = frozenset({"morbus", "chronisch", "chronische", "chronischer", "chronisches", "akut", "akute",
                              "akuter", "akutes", "rezidivierend", "rezidivierende", "rezidivierender", "distal",
                              "distale",
                              "distaler", "proximal", "proximale", "proximaler", "arteriell", "arterielle", "essentiell",
                              "essentielle", "essenzielle", "beidseitig", "beidseitige", "degenerativ", "degenerative",
                              "posttraumatisch", "posttraumatische", "idiopathisch", "idiopathische", "obstruktive",
                              "obstruktiver", "diabetische", "allergische", "allergisches"})
-_MEDIZIN_ENDUNG_RE = re.compile(r"(?i)(?:itis|algie|algien|ose|osen|fraktur|pathie|ektomie|ämie|zyste|syndrom|demenz|"
-                                r"karzinom|plasie|sklerose|ischialgie)$")
 # Organisationswörter in einer Firmenbezeichnung ("Europcar Autovermietung", "Stadtwerke Rosenheim", "Spedition
 # Wimmer", "Rosenheimer Verkehrsbetriebe", "Buchbinder Rent-a-Car") – Namen darin findet R4 (wissen.namen)
 _ORG_TEIL_RE = re.compile(r"(?i)(?:vermietung|spedition|stadtwerke|verkehrsbetriebe|betriebe|automobile?|leasing|"
                           r"rent-a-car|autohaus|logistik|transporte|kanzlei|rechtsanwälte|partnerschaft)$")
-# Rechtsform direkt dahinter (auch hinter mehreren Wörtern): "Sixt GmbH & Co Autovermietung KG"
-_RECHTSFORM_DANACH_RE = re.compile(r"[ \t,]*(?:GmbH|gGmbH|mbH|AG|SE|KG|KGaA|OHG|UG|e\.[ \t]?V\.|eG|VVaG|Ltd\.?|Inc\.?|"
+# Rechtsform direkt dahinter in derselben Zelle (auch hinter mehreren Wörtern): "Sixt GmbH & Co Autovermietung KG" –
+# nicht in der nächsten Tabellenzelle ("Kranzbühler ./. Felsberger ⇥⇥ AG München": das Amtsgericht)
+_RECHTSFORM_DANACH_RE = re.compile(r"[ ,]*(?:GmbH|gGmbH|mbH|AG|SE|KG|KGaA|OHG|UG|e\.[ \t]?V\.|eG|VVaG|Ltd\.?|Inc\.?|"
                                    r"&[ \t]*Co\.?)(?![\wäöüß])")
-# Modellcode bzw. Typnummer direkt dahinter ("Tabbert Rossini 540", "Fronius Symo 10.0-3-M", "Bosch GSR 18V-55")
-_MODELL_DANACH_RE = re.compile(r"[ \t]+(?:[A-Z]{1,5}-?\d|\d+[A-Za-z]{1,3}(?![\wäöüß])|\d{1,4}(?:[.,\-/]\d+)+|"
-                               r"\d{3,4}(?![\d.,])|[A-Z]{2,5}(?:[ \t]|$))")
 _DATEI_DANACH_RE = re.compile(r"(?i)\.(?:pdf|docx?|xlsx?|pptx?|jpe?g|png|tiff?|txt|msg|eml|zip|odt)(?![\w])")
 _DATEI_ENDE_RE = re.compile(r"(?i)\.(?:pdf|docx?|xlsx?|pptx?|jpe?g|png|tiff?|txt|msg|eml|zip|odt)$")
 _GRUSS_DANACH_RE = re.compile(r"[ \t]+(?i:regards|wishes|greetings)(?![\w])")
 
 
-def _sachname_stellen(zeile: str) -> list:
-    """(start, ende) der Eigennamen von Sachen und Tieren (Wissensbasis "sachnamen") in einer Zeile."""
+def _wissen_modul():
+    """Die Wissensbasis (Modul anonymisierer.wissen) oder None, wenn sie fehlt."""
     try:
         from . import wissen
-        return [(v.start, v.ende) for v in wissen.finde(zeile, "sachnamen")]
+        return wissen
     except Exception:  # pragma: no cover - Wissensbasis fehlt
-        return []
+        return None
+
+
+def _sachname_stellen(zeile: str) -> list:
+    """(start, ende) der Eigennamen von Sachen und Tieren (Wissensbasis "sachnamen") in einer Zeile – je Zelle
+    (personenkontext.sachnamen_stellen, wie die Selbstkontrolle)."""
+    return personenkontext.sachnamen_stellen(zeile, _wissen_modul())
 
 
 def _personen_paar(teile: list) -> bool:
@@ -399,8 +402,10 @@ def _ner_sachtreffer(text: str, start: int, ende: int, teile: list) -> bool:
                 return True                               # "Mofa Simson", "AEG DDLE"
     if len(teile) >= 2 and any(_code_wort(t) for t in teile[1:]) and not paar:
         return True                                       # "Böckmann TPV", "Logan MCV", "Bosch GSR"
-    modell = _MODELL_DANACH_RE.match(text, ende) if not paar else None
-    if modell and (not re.fullmatch(r"[ \t]+[A-Z]{2,5}[ \t]?", modell.group(0)) or _code_wort(modell.group(0).strip())):
+    # Modellcode dahinter in derselben Zelle (personenkontext, wie die Selbstkontrolle) – "PHV" oder "540" in der
+    # nächsten Tabellenspalte gehört nicht zum Namen
+    modell = personenkontext.MODELLCODE_DANACH_RE.match(text, ende) if not paar else None
+    if modell and (modell.group("code") is None or _code_wort(modell.group("code"))):
         return True                                       # "Tabbert Rossini 540", "Fronius Symo 10.0-3-M"; nicht "FAX"
     if _RECHTSFORM_DANACH_RE.match(text, ende) or any(_ORG_TEIL_RE.search(t) for t in teile):
         return True                                       # "Sixt GmbH …", "Stadtwerke Rosenheim"
@@ -412,8 +417,11 @@ def _ner_sachtreffer(text: str, start: int, ende: int, teile: list) -> bool:
     namen = [t for t in teile if _wissen_art(t)[0]]
     if teile[0].casefold() in _MEDIZIN_ANFANG and len(namen) < len(teile):
         return True                                       # "Morbus Scheuermann", "Chronische Lumbalgie"
-    if any(_MEDIZIN_ENDUNG_RE.search(t) and not _wissen_art(t)[0] for t in teile):
-        return True                                       # "Rezidivierende Lumboischialgie"
+    wissen = _wissen_modul()
+    if len(teile) == 2 and teile[0] == "M." and personenkontext.diagnose(teile[1], wissen):
+        return True                                       # "M. Parkinson" – nicht "M. Weber"
+    if any(personenkontext.fachwort_medizin(t, wissen) for t in teile):
+        return True                                       # "Rezidivierende Lumboischialgie"; nicht "Rimas Petraitis"
     if not namen and any(_PARTIZIP_RE.fullmatch(t) or _ISCH_RE.fullmatch(t) for t in teile):
         return True                                       # "Ausgefertigt", "Beglaubigt", "Gegnerischer"
     return False

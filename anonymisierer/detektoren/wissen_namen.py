@@ -124,10 +124,8 @@ def _in_sachnamen(text: str, start: int, ende: int) -> bool:
     a = text.rfind("\n", 0, start) + 1
     b = text.find("\n", ende)
     zeile = text[a:len(text) if b < 0 else b]
-    try:
-        return any(v.start <= start - a and ende - a <= v.ende for v in wissen.finde(zeile, "sachnamen"))
-    except Exception:  # pragma: no cover - Wissensbasis fehlt
-        return False
+    # je Zelle (personenkontext.sachnamen_stellen, wie die Selbstkontrolle): "Seat ⇥⇥ Leon …" ist keine Marke
+    return any(x <= start - a and ende - a <= y for x, y in personenkontext.sachnamen_stellen(zeile, wissen))
 
 
 def _sach_etikett_davor(text: str, start: int) -> bool:
@@ -550,7 +548,7 @@ def _rang_namen(text: str, tokens: list) -> list:
 # ----------------------------------------------------------------------
 _RUBRUM_RE = re.compile(rf"(?P<a>{_W})(?:[ \t]*,[ \t]*(?P<av>{_W}))?[ \t]+\./\.[ \t]+(?P<b>{_W})"
                         rf"(?:[ \t]*,[ \t]*(?P<bv>{_W}))?")
-_RECHTSFORM_DANACH_RE = re.compile(r"[ \t,]*(?:GmbH|mbH|AG|SE|KG|OHG|UG|e\.[ \t]?V\.|eG|VVaG|Versicherungs-AG|"
+_RECHTSFORM_DANACH_RE = re.compile(r"[ ,]*(?:GmbH|mbH|AG|SE|KG|OHG|UG|e\.[ \t]?V\.|eG|VVaG|Versicherungs-AG|"
                                    r"Versicherung|Versicherungen|&)(?![\wäöüß])")
 
 

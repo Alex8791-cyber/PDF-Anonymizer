@@ -731,3 +731,54 @@ def test_ner_kopfzeilenwort_hinter_namen_ist_kein_modellcode():
     """Korpus s9x (Messung Runde 5): In der Faxkopfzeile "PRAXIS DIR. RNGLL FAX …" ist "FAX" kein Modellcode hinter
     einer Marke – der verlesene Name davor bleibt ein Name."""
     assert _deckt(_namen("07.10,25 13:09 PRAXIS DIR. RNGLL FAX OPT3T ASTRO SO"), "RNGLL")
+
+
+# ----------------------------------------------------------------------
+# Gegenproben aus der Korpusmessung (Runde 5): Familiennamen auf -itis/-ose sind keine Diagnosen, "M." vor einem
+# Namen ist eine Initiale, und ein Kürzel, eine Zahl oder eine Rechtsform in der NÄCHSTEN Tabellenzelle gehört nicht
+# zum Namen davor (Korpus s3x/s9x: "Tschernyschow ⇥⇥ PHV" in der Bestandsliste)
+# ----------------------------------------------------------------------
+@braucht_modell
+@pytest.mark.parametrize("zeile, name", [
+    ("Gutachter Rimas Petraitis bestätigt den Schaden.", "Petraitis"),
+    ("Sachbearbeiter Arvydas Jonaitis hat den Schaden aufgenommen.", "Jonaitis"),
+    ("Schadenliste 2025\nGediminas Petraitis\t\tPHV\t\t415,56", "Petraitis"),
+    ("Parteien\t\tGericht\nKranzbühler ./. Felsberger\t\tAG München", "Felsberger"),
+])
+def test_befunde_15_49_gegenprobe_namen_mit_endung_oder_nachbarzelle(zeile, name):
+    assert _deckt(_namen(zeile), name)
+
+
+@pytest.mark.parametrize("zeile, name", [
+    ("Ansprechpartner: Andreas Klose", "Klose"),
+    ("Versicherungsnehmer: Anna Rose", "Rose"),
+    ("Versicherungsnehmer: Jonas Petraitis", "Petraitis"),
+    ("Ihr Ansprechpartner: M. Weber", "Weber"),
+    ("Sachbearbeiter M. Kowalczyk hat den Schaden aufgenommen.", "Kowalczyk"),
+    ("Mit freundlichen Grüßen\nM. Tschernyschow", "Tschernyschow"),
+])
+def test_befund_15_selbstkontrolle_meldet_namen_trotz_endung_oder_initiale(zeile, name):
+    assert _gemeldet(zeile, name)
+
+
+@pytest.mark.parametrize("zeilen, name, platzhalter", [
+    (["4\t\t[PERSON A] Tschernyschow\t\tPHV\t\t415,56"], "Tschernyschow", ["[PERSON A]"]),   # Korpus s3x
+    (["Name\t\tBeitrag", "Szczepanski\t\t540"], "Szczepanski", []),
+    (["Fahrzeug\t\tFahrer", "Seat\t\tLeon Wawrzyniak"], "Leon", []),
+])
+def test_befund_43_selbstkontrolle_nachbarzelle_ist_kein_modell(zeilen, name, platzhalter):
+    assert _gemeldet("\n".join(zeilen), name, platzhalter=platzhalter)
+
+
+@pytest.mark.parametrize("text", [
+    "Behandlung: Baker-Zyste rechts, Dupuytren-Kontraktur links, Morbus Scheuermann",
+    "Chronische Lumbalgie seit 2019",
+    "Rezidivierende Lumboischialgie",
+    "Diagnose: M. Parkinson",
+    "Wohnwagen Tabbert Rossini 540",
+    "Mofa: Böckmann TPV",
+    "Rasse: Jack Russell Terrier",
+    "Notebook: Dell XPS 13 9340",
+])
+def test_befunde_15_43_60_selbstkontrolle_ohne_fehlverdacht(text):
+    assert _verdacht(text) == []

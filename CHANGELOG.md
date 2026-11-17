@@ -282,20 +282,22 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - **Schreibgeschützter Programmordner:** Ließ sich `.python_pfad.txt` nicht schreiben, brach die Einrichtung
   der Desktop-Verknüpfung mit einem Python-Fehler ab, und `Installieren.bat` nannte PowerShell als Ursache.
   Jetzt bleibt es bei einem Hinweis (`Starten.bat` sucht Python selbst), und die Verknüpfung wird angelegt.
-- **Personen und Geburtsdaten (Domänen-Durchsicht, Runde 5):** Geburtsdaten von Kindern und Mitversicherten
-  ohne „geb.“ („Kind 2: Bastian Leutgeb, 30.06.2018“, Kinderlisten mit Tabstopps, „Reisende: Kranich, Detlef,
-  12.04.1969; …“), „Geburt des Kindes am …“, „Entbindung am …“ und das Geburtsjahr werden geschwärzt;
-  Behandlungs-, Rechnungs- und Vertragsdaten hinter Ärzten und Familienrollen bleiben stehen. Namen hinter
-  rund 240 weiteren Rollen (Leasingnehmerin, Sozius, Gegner, Beklagte, Tierhalter, Rechnungsempfänger, „Name des
-  Hundehalters“ …), hinter Dienstgraden und Amtsbezeichnungen („KHKin Sedlmayr“, „Eibl, JAng“), im Kurzrubrum
-  („Kranzbühler ./. Felsberger“), in Nachbarschaftsangaben, als „Nachname, V.“ in Listen, in den Feldern C.1.1/C.1.2
-  der Zulassungsbescheinigung Teil I und vor „GbR“ werden erkannt; die Anschrift in derselben Zeile hinter einem
-  solchen Etikett gilt nicht mehr als Firmenanschrift. Die USt-IdNr. von Einzelkaufleuten und Freiberuflern wird
-  geschwärzt, Berufe auch in der Spalte „Beruf“/„Tätigkeit“ und im Kastenformular. Nicht mehr als Namen
-  geschwärzt werden Marken, Modelle und Tierrassen (neue Wortliste `sachnamen.txt`), medizinische Fachwörter,
-  Firmen hinter Rollen-Etiketten, Partizipien wie „Ausgefertigt“ und Gattungswörter vor einem Unfallort
-  („Turnhalle der Mittelschule Erding“). Die Restrisiko-Prüfung kennt dieselben Regeln und meldet weniger
-  Fehlverdacht (TAN-Komposita, „Die Scheibe …“, Miteigentumsanteile, Modellnummern, „Ihnen“).
+- **Personen und Geburtsdaten (Domänen-Durchsicht, Runde 5):** Geburtsdaten von Kindern und Mitversicherten ohne
+  „geb.“ („Kind 2: Bastian Leutgeb, 30.06.2018“, Kinderlisten mit Tabstopps, „Reisende: Kranich, Detlef, 12.04.1969;
+  …“), „Geburt des Kindes am …“, „Entbindung am …“ und das Geburtsjahr werden geschwärzt; Behandlungs-, Rechnungs-
+  und Vertragsdaten hinter Ärzten und Familienrollen bleiben stehen. Namen hinter rund 240 weiteren Rollen
+  (Leasingnehmerin, Sozius, Gegner, Beklagte, Tierhalter, Rechnungsempfänger, „Name des Hundehalters“ …), hinter
+  Dienstgraden und Amtsbezeichnungen („KHKin Sedlmayr“ samt Kürzel, „Eibl, JAng“), im Kurzrubrum („Kranzbühler ./.
+  Felsberger“), in Nachbarschaftsangaben, als „Nachname, V.“ in Listen, in den Feldern C.1.1/C.1.2 der
+  Zulassungsbescheinigung Teil I und vor „GbR“ werden erkannt; die Anschrift in derselben Zeile hinter einem solchen
+  Etikett gilt nicht mehr als Firmenanschrift. Die USt-IdNr. von Einzelkaufleuten und Freiberuflern wird geschwärzt,
+  Berufe auch in der Spalte „Beruf“/„Tätigkeit“ und im Kastenformular. Nicht mehr als Namen geschwärzt werden
+  Marken, Modelle und Tierrassen (neue Wortliste `sachnamen.txt`), medizinische Fachwörter, Firmen hinter
+  Rollen-Etiketten, Partizipien wie „Ausgefertigt“ und Gattungswörter vor einem Unfallort („Turnhalle der
+  Mittelschule Erding“) – Marke, Modellcode und Rechtsform zählen dabei nur in derselben Tabellenzelle
+  („Tschernyschow ⇥ PHV“ bleibt ein Name), und Familiennamen wie „Petraitis“, „Klose“ oder die Initiale in „M.
+  Weber“ gelten nie als Diagnose. Die Restrisiko-Prüfung kennt dieselben Regeln und meldet weniger Fehlverdacht
+  (TAN-Komposita, „Die Scheibe …“, Miteigentumsanteile, Modellnummern, „Ihnen“).
 
 ### Sicherheit
 - Manche PDFs (z. B. aus LibreOffice) enthielten nach dem Schwärzen das ungeschwärzte Originalbild unsichtbar

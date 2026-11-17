@@ -10,9 +10,10 @@ Geburtsdatum in jedem Alter – aber nur mit einer Familien-/Versichertenrolle i
 Behandlungsdatum) und ohne Behandlungstext hinter dem Datum ("…, 03.11.2012: Meniskusoperation").
 
 Dazu weitere geteilte Personenregeln derselben Durchsicht: Namen in Wohn- und Nachbarschaftsangaben ("unseres
-Nachbarn Felsberger", "EG links (Hackenschmied)"), Tierangaben und medizinische Fachwörter (keine Personen), die
-USt-IdNr. von Einzelkaufleuten und Inhabern (eine Angabe der Person), die Felder C.1.1/C.1.2 der
-Zulassungsbescheinigung Teil I und Familiennamen einer GbR oder Erbengemeinschaft.
+Nachbarn Felsberger", "EG links (Hackenschmied)"), Tierangaben, medizinische Fachwörter, Marken, Modelle und
+Modellcodes (keine Personen – Treffer nur innerhalb einer Tabellenzelle), die USt-IdNr. von Einzelkaufleuten und
+Inhabern (eine Angabe der Person), die Felder C.1.1/C.1.2 der Zulassungsbescheinigung Teil I und Familiennamen einer
+GbR oder Erbengemeinschaft.
 
 Öffentliche Schnittstelle:
     FAMILIE_RE, FAMILIE_KOPF_RE, BEHANDLER_DAVOR_RE, BETRAG_IN_ZEILE_RE
@@ -20,7 +21,9 @@ Zulassungsbescheinigung Teil I und Familiennamen einer GbR oder Erbengemeinschaf
     familien_rolle_in_zeile(text, zeilenanfang, name_start) -> bool
     behandlungsdatum(davor_bis_name, text, datum_ende) -> bool
     wohn_kontext_namen(text) -> [(start, ende)], namensgestalt(wort, wissen) -> bool
-    tierangabe(text, start) -> bool, medizinisch(wort, text, start) -> bool
+    tierangabe(text, start) -> bool, medizinisch(wort, text, start, wissen) -> bool,
+    fachwort_medizin(wort, wissen) -> bool, diagnose(wort, wissen) -> bool
+    MODELLCODE_DANACH_RE, sachnamen_stellen(zeile, wissen) -> [(start, ende)]
     ust_umgebung(text, start) -> str, ust_id_der_firma(umgebung) -> bool, ust_id_einer_person(umgebung) -> bool
     zb1_seite(text) -> bool, zb1_personenfelder(text) -> [(start, ende)]
     gemeinschaft_namen(text, sachwort) -> [(start, ende)]
@@ -184,18 +187,86 @@ def tierangabe(text: str, start: int) -> bool:
 
 
 # Fachwörter der Medizin (Endungen) und Eponyme hinter "Morbus": keine Namen ("Baker-Zyste", "Alzheimer-Demenz",
-# "Morbus Scheuermann", "Lumboischialgie")
-MEDIZIN_ENDUNG_RE = re.compile(r"(?i)(?:itis|algie|algien|ose|osen|fraktur|pathie|ektomie|ämie|zyste|syndrom|demenz|"
-                               r"karzinom|plasie|sklerose|ischialgie|kontraktur|krankheit|erkrankung|tumor|lähmung)$")
-EPONYM_DAVOR_RE = re.compile(r"(?<![\wäöüß])(?:Morbus|M\.)[ \t]+$")
+# "Morbus Scheuermann", "Lumboischialgie"; Befund 15). Diese Endungen tragen keine Familiennamen. "-itis" und "-ose(n)"
+# tragen auch Namen ("Petraitis", "Politis", "Klose", "Rose", "Ambrose"): ein Wort damit ist nur ein Fachwort, wenn es
+# selbst in der Diagnosenliste der Wissensbasis steht ("Gastritis", "Arthrose"). Ein Vor- oder Nachname der
+# Wissensbasis ist nie seiner Endung wegen ein Fachwort (Korpusmessung Runde 5).
+MEDIZIN_ENDUNG_RE = re.compile(r"(?i)(?:algie|algien|fraktur|pathie|ektomie|ämie|zyste|syndrom|demenz|karzinom|plasie|"
+                               r"sklerose|kontraktur|krankheit|erkrankung|tumor|lähmung)$")
+MEDIZIN_ENDUNG_MEHRDEUTIG_RE = re.compile(r"(?i)(?:itis|ose|osen)$")
+# "Morbus" vor dem Eponym; die Abkürzung "M." nur vor einer Diagnose der Liste ("M. Parkinson") – sonst ist "M." die
+# Initiale eines Vornamens ("Ihr Ansprechpartner: M. Weber")
+EPONYM_DAVOR_RE = re.compile(r"(?<![\wäöüß])Morbus[ \t]+$")
+M_PUNKT_DAVOR_RE = re.compile(r"(?<![\wäöüß])M\.[ \t]*$")
 
 
-def medizinisch(wort: str, text: str = "", start: int = 0) -> bool:
-    """Fachwort der Medizin (auch als Teil eines Bindestrich-Worts: "Baker-Zyste") oder Eponym hinter "Morbus"?"""
+def _frage(wissen, frage: str, wort: str):
+    """Frage an die Wissensbasis (Modul anonymisierer.wissen oder None), Versalien in Titelform; Fehler: None."""
+    if wissen is None or not wort:
+        return None
+    try:
+        return getattr(wissen, frage)(wort.title() if wort.isupper() else wort)
+    except Exception:
+        return None
+
+
+def diagnose(wort: str, wissen) -> bool:
+    """Steht das Wort selbst als Eintrag in der Diagnosenliste der Wissensbasis ("Gastritis", "Parkinson")?"""
+    if wissen is None or not wort:
+        return False
+    try:
+        return wissen.index("diagnosen").eintrag_fuer(wort) is not None
+    except Exception:
+        return False
+
+
+def fachwort_medizin(wort: str, wissen=None) -> bool:
+    """Fachwort der Medizin nach seiner Endung, auch als Teil eines Bindestrich-Worts ("Baker-Zyste",
+    "Lumboischialgie"; "Gastritis" nur mit der Diagnosenliste) – nie ein Vor- oder Nachname der Wissensbasis
+    ("Klose", "Schmidt-Rose")?"""
     teile = [t for t in wort.split("-") if t]
-    if any(MEDIZIN_ENDUNG_RE.search(t) for t in teile[1:]) or (len(teile) == 1 and MEDIZIN_ENDUNG_RE.search(wort)):
+    for t in (teile[1:] if len(teile) > 1 else teile):
+        if _frage(wissen, "ist_vorname", t) or _frage(wissen, "ist_nachname", t):
+            continue
+        if MEDIZIN_ENDUNG_RE.search(t) or (MEDIZIN_ENDUNG_MEHRDEUTIG_RE.search(t) and diagnose(t, wissen)):
+            return True
+    return False
+
+
+def medizinisch(wort: str, text: str = "", start: int = 0, wissen=None) -> bool:
+    """Fachwort der Medizin (fachwort_medizin) oder Eponym hinter "Morbus" bzw. Diagnose hinter "M."
+    ("M. Parkinson", nicht "M. Weber")?"""
+    if fachwort_medizin(wort, wissen):
         return True
-    return bool(text) and bool(EPONYM_DAVOR_RE.search(text, max(0, start - 10), start))
+    if not text:
+        return False
+    a = max(0, start - 10)
+    return bool(EPONYM_DAVOR_RE.search(text, a, start)) or (bool(M_PUNKT_DAVOR_RE.search(text, a, start))
+                                                            and diagnose(wort, wissen))
+
+
+# ----------------------------------------------------------------------
+# Sachen: Marken, Modelle und Tierrassen der Wissensbasis und Modellcodes (Befunde 43, 60, 64 der Durchsicht)
+# ----------------------------------------------------------------------
+# Modellcode direkt hinter einem Wort IN DERSELBEN ZELLE ("Böckmann TPV", "Rossini 540", "Symo 10.0-3-M", "GSR 18V-55"):
+# nur Leerzeichen dazwischen – ein Kürzel oder eine Zahl in der nächsten Tabellenzelle ("Tschernyschow ⇥⇥ PHV",
+# "Szczepanski ⇥⇥ 540") gehört nicht zum Wort davor (Korpusmessung Runde 5). Gruppe "code": ein Kürzel in Versalien –
+# ein Modellcode nur ohne Wortgestalt ("FAX" ist keiner; prüft der Aufrufer)
+MODELLCODE_DANACH_RE = re.compile(r" +(?:(?P<code>[A-Z]{2,5})(?=[ \t,;.]|$)|[A-Z]{1,5}-?\d|"
+                                  r"\d+[A-Za-z]{1,3}(?![\wäöüß])|\d{1,4}(?:[.,\-/]\d+)+|\d{3,4}(?![\d.,]))")
+
+
+def sachnamen_stellen(zeile: str, wissen) -> list:
+    """(start, ende) der Marken, Modelle und Tierrassen der Wissensbasis (Liste sachnamen) in einer Zeile – nur
+    innerhalb einer Zelle: ein Treffer über einen Tabulator hinweg ("Seat ⇥⇥ Leon Wawrzyniak": Fahrzeug und Fahrer in
+    zwei Spalten) zählt nicht."""
+    if wissen is None:
+        return []
+    try:
+        treffer = wissen.finde(zeile, "sachnamen")
+    except Exception:
+        return []
+    return [(v.start, v.ende) for v in treffer if "\t" not in zeile[v.start:v.ende]]
 
 
 # USt-IdNr. einer Firma oder einer natürlichen Person (Befund 77): Firmenmerkmale in der Zeile der Nummer und den zwei
