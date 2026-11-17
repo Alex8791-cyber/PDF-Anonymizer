@@ -534,6 +534,36 @@ def test_readme_tabelle_deckt_kategorien_ab():
     assert erzeugt.startswith("| Kategorie |") and erzeugt.count("\n") == len(KATEGORIEN) + 1
 
 
+def test_readme_tabelle_entspricht_dem_werkzeug():
+    """Die Erkennungstabelle der README ist genau die Ausgabe von werkzeuge/readme_tabelle.py: Schutzstufen
+    („Angehakt ab Stufe“ aus muster.PROFILE), Beispiele und Hinweise laufen nicht auseinander."""
+    sys.path.insert(0, str(WURZEL))
+    from werkzeuge.readme_tabelle import ANFANG, ENDE, tabelle
+    text = _lies("README.md")
+    block = text[text.index(ANFANG) + len(ANFANG):text.index(ENDE)]
+    assert block.strip() == tabelle(), "README-Tabelle veraltet: python werkzeuge/readme_tabelle.py --schreiben"
+
+
+def test_readme_tabelle_stufen_und_beispiele():
+    """Jedes Beispiel der README-Tabelle findet die Erkennung seiner Kategorie – die README verspricht nichts, was das
+    Programm nicht erkennt (Personennamen erkennt das Sprachmodell: tests/test_namen.py). „Angehakt ab Stufe“ nennt
+    die mildeste Stufe; hakt keine Stufe die Kategorie an, heißt es „nur von Hand“."""
+    sys.path.insert(0, str(WURZEL))
+    from anonymisierer import muster
+    from werkzeuge.readme_tabelle import BEISPIELE, NUR_VON_HAND, angehakt_ab
+    funktionen = {k: f for k, _a, _p, f, _an in muster.KATEGORIEN if f is not None}
+    assert set(BEISPIELE) <= {k for k, *_ in muster.KATEGORIEN}
+    for schluessel, beispiel in BEISPIELE.items():
+        if schluessel not in funktionen:
+            continue
+        gefunden = list(funktionen[schluessel](beispiel))
+        gefunden += [beispiel[s.start:s.ende] for s in muster.stellen(schluessel, beispiel)]
+        assert gefunden, f"README-Beispiel der Kategorie {schluessel} wird nicht erkannt: {beispiel!r}"
+    profile = {"ausgewogen": {"aktive": {"a", "c"}}, "hoch": {"aktive": {"a", "b"}}, "maximal": {"aktive": {"a", "b"}}}
+    assert [angehakt_ab(k, profile) for k in "abcd"] == ["Ausgewogen", "Hoch", "nur Ausgewogen", NUR_VON_HAND]
+    assert angehakt_ab("datum") == NUR_VON_HAND             # „ALLE Datumsangaben“ hakt keine Stufe an
+
+
 def test_readme_fakten_aus_dem_auslieferungs_review():
     text = _lies("README.md")
     # AD-01: zweiter Lauf ohne Download, Offline-Weg für das Sprachmodell
