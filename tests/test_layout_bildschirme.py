@@ -397,25 +397,27 @@ def fenster_pruefen(root, app, breite, hoehe, mindestzeilen):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Linux-Analogon: unter Windows prüft "
                     "test_hinweiszeile_fundliste_und_knoepfe_ohne_scrollen die echten Knopfmaße")
-@pytest.mark.parametrize("skalierung, prozent, mindestzeilen", [(5 / 3, 125, 4), (2.0, 150, 3)],
-                         ids=["1366x768_125", "1366x768_150"])
+@pytest.mark.parametrize("breite, hoehe, skalierung, prozent, mindestzeilen",
+                         [(1366, 768, 5 / 3, 125, 4), (1366, 768, 2.0, 150, 3), (1920, 1080, 8 / 3, 200, 4)],
+                         ids=["1366x768_125", "1366x768_150", "1920x1080_200"])
 @pytest.mark.parametrize("mehr", [12, 24], ids=["knoepfe+12", "knoepfe+24"])
-def test_fundliste_auch_mit_windows_knopfmassen(mehr, skalierung, prozent, mindestzeilen, umgebung, dialoge,
-                                                 monkeypatch, tmp_path_factory):
+def test_fundliste_auch_mit_windows_knopfmassen(mehr, breite, hoehe, skalierung, prozent, mindestzeilen, umgebung,
+                                                 dialoge, monkeypatch, tmp_path_factory):
     """Befund Runde 3b (Windows-CI, Segoe UI): bei 1366x768 und 150 % zeigte die Fundliste keine einzige ganze
     Zeile – unter Windows sind die Knöpfe gut 10 Pixel höher, unter Linux fiel das nicht auf (dort waren es noch
     zwei, mit dem längeren Hinweiskasten aus „bilder-fotos“). Hier mit um 12 bzw. 24 Pixel höheren Knöpfen
     nachgestellt: die Kompaktstufen (gui.KOMPAKT_STUFEN) halten die Mindestzeilen, alle übrigen Prüfungen des
-    Bildschirms bleiben erfüllt."""
-    with hauptfenster(1366, 768, skalierung, umgebung, dialoge, monkeypatch) as (root, app, display):
+    Bildschirms bleiben erfüllt. Dazu 1920x1080 bei 200 % (Windows-CI): dort endete der Einstellbereich mitten in
+    der Zielordner-Zeile – die Mindesthöhe lag über der letzten Zeilengrenze."""
+    with hauptfenster(breite, hoehe, skalierung, umgebung, dialoge, monkeypatch) as (root, app, display):
         windows_knopfmasse(app, mehr)
         app._anpassung_planen()
         pumpe(root, timeout=0.6)
         root.update_idletasks()
         root.update()
         _screenshot(root, display,
-                    _screenshot_ordner(tmp_path_factory) / f"layout_1366x768_{prozent}_knoepfe+{mehr}.png")
-        fenster_pruefen(root, app, 1366, 768, mindestzeilen)
+                    _screenshot_ordner(tmp_path_factory) / f"layout_{breite}x{hoehe}_{prozent}_knoepfe+{mehr}.png")
+        fenster_pruefen(root, app, breite, hoehe, mindestzeilen)
 
 
 def test_kompaktstufen_nur_so_weit_wie_noetig_und_umkehrbar(umgebung, dialoge, monkeypatch):
@@ -428,9 +430,15 @@ def test_kompaktstufen_nur_so_weit_wie_noetig_und_umkehrbar(umgebung, dialoge, m
         assert stufe >= 1, hoehen(app)
         kasten = app.hinweis_kasten
         assert kasten.cget("text") == gui.HINWEISKASTEN_KURZ
-        einzeilig = (app.zeilenhoehe + 2 * int(kasten.cget("pady")) + 2 * int(kasten.cget("highlightthickness"))
-                     + 2)
-        assert kasten.winfo_height() <= einzeilig, (kasten.winfo_height(), einzeilig)
+        # Höhe einer Zeile in genau diesem Kasten: gemessen an einem gleich eingestellten Label mit einer Zeile (unter
+        # Windows hat ein Label mehr Innenrand, als Schrift und Abstände ergeben – Windows-CI: 33 statt 31 Pixel)
+        probe = tk.Label(kasten.master, text="X", font=kasten.cget("font"), padx=kasten.cget("padx"),
+                         pady=kasten.cget("pady"), bd=kasten.cget("bd"),
+                         highlightthickness=kasten.cget("highlightthickness"))
+        einzeilig = probe.winfo_reqheight()
+        probe.destroy()
+        assert einzeilig < 2 * app.zeilenhoehe
+        assert kasten.winfo_height() <= einzeilig + 1, (kasten.winfo_height(), einzeilig)
         kasten.event_generate("<Button-1>", x=5, y=5)
         pumpe(root, timeout=0.2)
         assert app.letzter_dialog[1] == "Was wird nicht erkannt?" and app.letzter_dialog[2] == gui.GRENZEN_TEXT

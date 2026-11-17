@@ -1614,9 +1614,10 @@ class AnonymisiererApp:
             verfuegbar = rest - baum_soll
             hoehe = max(untergrenze, min(benoetigt, verfuegbar))
             if hoehe < benoetigt:
+                # an einer Zeilengrenze enden; gibt es keine zwischen Mindesthöhe und Wunschhöhe, an der Mindesthöhe
+                # (dort endet die Hinweiszeile) – nie mitten in einer Zeile mit Knöpfen oder Häkchen
                 grenzen = [g for g in self._oben_zeilengrenzen() if untergrenze <= g <= hoehe]
-                if grenzen:
-                    hoehe = max(grenzen)
+                hoehe = max(grenzen) if grenzen else untergrenze
             self.oben_canvas.configure(height=hoehe,
                                        scrollregion=(0, 0, self.oben.winfo_reqwidth(), benoetigt))
             if benoetigt > hoehe + 2:
@@ -1779,18 +1780,25 @@ class AnonymisiererApp:
 
     def _oben_untergrenze(self) -> int:
         """Mindesthöhe des Einstellbereichs: bis unter die Hinweiszeile zur Dateiauswahl (aus den angeforderten
-        Höhen – gilt auch, bevor das Fenster gezeichnet ist und gleich nachdem sich der Text der Zeile geändert hat)."""
+        Höhen – gilt auch, bevor das Fenster gezeichnet ist und gleich nachdem sich der Text der Zeile geändert hat).
+        Der kleine Rand darunter reicht nie in die nächste Zeile – genau wie bei den Zeilengrenzen
+        (_oben_zeilengrenzen): sonst lag ab 200 % (Rand 11 px, Abstand zur Zielordner-Zeile 6 px) keine Zeilengrenze
+        mehr über der Mindesthöhe, und der Einstellbereich endete mitten in der Zielordner-Zeile (Befund Windows-CI)."""
         karte = self.datei_hinweis.master
         try:
             hoehe = int(karte.cget("pady")) + int(karte.cget("highlightthickness")) + int(karte.cget("bd"))
-            for kind in karte.pack_slaves():
+            rand = self._px(4)
+            kinder = karte.pack_slaves()
+            for nr, kind in enumerate(kinder):
                 oben, unten = self._abstand(kind.pack_info().get("pady", 0))
                 hoehe += oben + kind.winfo_reqheight()
                 if kind is self.datei_hinweis:
+                    if nr + 1 < len(kinder):
+                        rand = min(rand, unten + self._abstand(kinder[nr + 1].pack_info().get("pady", 0))[0])
                     break
                 hoehe += unten
             oben_karte, _ = self._abstand(karte.pack_info().get("pady", 0))
-            return max(self._px(OBEN_MINDESTHOEHE), oben_karte + hoehe + self._px(4))
+            return max(self._px(OBEN_MINDESTHOEHE), oben_karte + hoehe + rand)
         except (tk.TclError, ValueError):
             return self._px(OBEN_MINDESTHOEHE)
 
