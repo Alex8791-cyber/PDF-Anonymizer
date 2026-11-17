@@ -90,6 +90,11 @@ except ImportError:  # PyMuPDF 2.x bringt psutil mit; mit älteren Fassungen gel
 from anonymisierer import dateien, gui
 
 WINDOWS = sys.platform == "win32"
+# Zeitlimit für die ganze Sitzung (sie läuft im Aufbau der Fixture des ersten Tests): unter Linux 43-49 s, unter
+# Windows startet jeder der 40 OCR-Pools seine Arbeitsprozesse langsamer (spawn). Die CI bricht mit
+# --timeout-method=thread beim Überschreiten von --timeout=300 den GANZEN Testlauf ab – deshalb hier mehr Luft; ein
+# echter Hänger fällt weiter auf (und _im_thread meldet einen Lauf, der nach 600 s nicht fertig ist).
+pytestmark = pytest.mark.timeout(900)
 ANZAHL = 200                   # Dateien der Sitzung (brief_001.pdf … brief_200.pdf)
 STAPEL = 10                    # Dateien je Lauf: Hinzufügen, Analysieren, Schwärzen, Liste leeren
 AUFWAERMEN = 20                # Grundlinie (Handles, System-Temp) nach so vielen Dateien
