@@ -66,9 +66,9 @@ Installation lädt einmalig Pakete aus dem Internet.
   Ordner sind darin gekürzt, Dateinamen (oft mit Kundennamen) stehen aber drin – vor dem
   Weiterleiten prüfen.
 
-Beim ersten Start zeigt das Programm diese Punkte als „Bitte vor der ersten Nutzung lesen“;
-später jederzeit über Hilfe → „Hinweise vor der Nutzung …“ und Hilfe → „Was wird nicht
-erkannt?“.
+Beim ersten Start zeigt das Programm die wichtigsten Grenzen als „Bitte vor der ersten Nutzung
+lesen“ – nicht alle Punkte dieser Liste. Später finden Sie die Hinweise jederzeit unter Hilfe →
+„Hinweise vor der Nutzung …“ und Hilfe → „Was wird nicht erkannt?“.
 
 ## Was wird erkannt?
 
@@ -81,7 +81,7 @@ die Wahl wird gespeichert.
 |---|---|
 | Ausgewogen | Direkte Kennungen: Namen, Anschriften, Geburtsdaten, IBAN, BIC, E-Mail, Telefon, Vertrags-, Steuer-, Sozialversicherungs-, Krankenversicherten-, Ausweis- und Fahrzeugnummern, Kennzeichen … – mehr Zusammenhang für die KI. |
 | **Hoch (Standard, empfohlen)** | Zusätzlich Beruf, Arbeitgeber, ausländische Anschriften und Orte ohne PLZ. |
-| Maximal | Zusätzlich Diagnosen und Medikamente, jedes Datum, das mindestens 14 Jahre zurückliegt (außer Vertragsdaten), unbekannte Eigennamen bei Personen – und Bilder und Fotos werden abgedeckt (siehe [unten](#bilder-fotos-und-lichtbilder)). Größter Schutz, am wenigsten Zusammenhang für die KI. |
+| Maximal | Zusätzlich Diagnosen und Medikamente, Daten wie „02.09.1983“, die mindestens 14 Jahre zurückliegen (außer kurz hinter Wörtern wie „am“, „vom“ oder „Beginn“), unbekannte Eigennamen bei Personen – und Bilder sowie erkannte Fotos werden abgedeckt (siehe [unten](#bilder-fotos-und-lichtbilder)). Größter Schutz, am wenigsten Zusammenhang für die KI. |
 | Benutzerdefiniert | Erscheint, sobald Ihre Häkchen zu keiner Stufe passen, die mindestens so streng ist wie die zuletzt gewählte. Es gelten dann weiter deren Erkennungsregeln – wer in „Maximal“ die Diagnosen abwählt, behält also z. B. das Abdecken der Bilder. |
 
 **Gesundheitsdaten** (Diagnosen, Medikamente) sucht das Programm in jeder Stufe. In
@@ -95,10 +95,10 @@ Markierungen gehen dabei verloren.
 
 ### Kategorien
 
-Die Tabelle wird aus dem Code erzeugt (`python werkzeuge/readme_tabelle.py --schreiben`),
-damit sie immer zum Programm passt. „Angehakt ab Stufe“ nennt die mildeste Schutzstufe, in
-der die Kategorie angehakt ist („Ausgewogen“ heißt also: in jeder Stufe). Jedes Häkchen lässt
-sich auch einzeln setzen.
+Die Tabelle wird aus dem Programm selbst erzeugt und passt deshalb zu ihm. „Angehakt ab Stufe“
+nennt die mildeste Schutzstufe, in der die Kategorie angehakt ist („Ausgewogen“ heißt also: in
+jeder Stufe). Jedes Häkchen lässt sich auch einzeln setzen. Was die Erkennung nicht leistet,
+steht unter [Was NICHT erkannt wird](#was-nicht-erkannt-wird).
 
 <!-- TABELLE-ANFANG -->
 | Kategorie | Beispiel | Wird ersetzt durch | Angehakt ab Stufe | Hinweis |
@@ -107,7 +107,7 @@ sich auch einzeln setzen.
 | IBANs | DE89 3704 0044 0532 0130 00 | `[IBAN]` | Ausgewogen | auch mit falscher Prüfziffer, wenn sie eindeutig wie eine IBAN aussieht (Hinweis „Lesefehler?“) |
 | E-Mail-Adressen | max.mustermann@example.de | `[E-MAIL]` | Ausgewogen |  |
 | Telefonnummern | 0171 2345678 | `[TELEFON]` | Ausgewogen |  |
-| Geburtsdaten | geb. am 02.09.1983 | `[GEB-DATUM]` | Ausgewogen | hinter „geb.“, „Geburtsdatum“ … oder direkt hinter einem Namen; in „Maximal“ zusätzlich jedes Datum, das mindestens 14 Jahre zurückliegt (außer Vertragsdaten) |
+| Geburtsdaten | geb. am 02.09.1983 | `[GEB-DATUM]` | Ausgewogen | hinter „geb.“, „Geburtsdatum“ … oder hinter einem Namen mit Komma, Stern oder Klammer („Max Mustermann, 02.09.1983“); in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“ |
 | Straße + Hausnummer, Postfach | Hauptstraße 12a | `[ADRESSE]` | Ausgewogen |  |
 | PLZ + Ort | 90402 Nürnberg | `[PLZ ORT]` | Ausgewogen |  |
 | Vertrags-/Kunden-/Schein-/Aktenzeichen | Versicherungsschein-Nr. LV-2024-887766 | `[VERTRAGS-NR]` | Ausgewogen | Nummer hinter einem Etikett wie „Vertrags-Nr.“ |
@@ -118,7 +118,7 @@ sich auch einzeln setzen.
 | Kindergeldnummern | 009FK407160 | `[KINDERGELD-NR]` | Ausgewogen |  |
 | Kfz-Kennzeichen | N-XY 123 | `[KENNZEICHEN]` | Ausgewogen |  |
 | Fahrzeug-Identnummern (FIN) | WVWZZZ1JZXW000001 | `[FIN]` | Ausgewogen |  |
-| Ausweis-/Pass-/Führerscheinnummern | Ausweisnummer: L01X00T47 | `[AUSWEIS-NR]` | Ausgewogen | mit Etikett; Ausweis- und Passnummern auch ohne (Prüfziffer); auf Ausweiskopien auch die maschinenlesbare Zone |
+| Ausweis-/Pass-/Führerscheinnummern | Ausweisnummer: L01X00T47 | `[AUSWEIS-NR]` | Ausgewogen | mit Etikett; Ausweis- und Passnummern auch ohne Etikett, wenn die Prüfziffer stimmt; auf Ausweiskopien auch die maschinenlesbare Zone |
 | SEPA-Mandatsreferenzen | Mandatsreferenz MR-2024-0815 | `[MANDATSREFERENZ]` | Ausgewogen | nur hinter einem Etikett |
 | BIC (bei IBAN oder Etikett) | COBADEFFXXX | `[BIC]` | Ausgewogen | hinter „BIC“, neben einer IBAN oder in eindeutiger Form (11 Zeichen auf „XXX“ oder mit Ziffer im Ortscode) |
 | Kreditkartennummern | 4111 1111 1111 1111 | `[KREDITKARTE]` | Ausgewogen |  |
@@ -141,7 +141,7 @@ Weitere Platzhalter ohne eigenes Häkchen:
 | `[GESCHWÄRZT]` | von Ihnen in der Vorschau angeklicktes Wort oder mit einem Rahmen markierte Fläche |
 | `[LICHTBILD]` | Lichtbild auf einer Ausweiskopie (jede Schutzstufe) |
 | `[BILD]` | eingebettetes Bild auf einer Textseite (nur „Maximal“) |
-| `[FOTO]` | Fotobereich auf einer Scan-Seite oder einem Foto (nur „Maximal“) |
+| `[FOTO]` | erkannter Fotobereich auf einer Scan-Seite oder einem Foto (nur „Maximal“) |
 
 Dazu kommen zwei eigene Listen in der Oberfläche:
 
@@ -165,18 +165,19 @@ Weitere Regeln:
   sie stehen als nicht angehakter Fund „vermutlich Firmenanschrift – nicht geschwärzt, bitte
   prüfen“ in der Liste. Die Anschrift einer Person im eigenen Briefkopf (z. B. Selbständige)
   wird geschwärzt.
-- **Versteckte Teile** der Datei – Metadaten, Lesezeichen, Anhänge, Formulardaten, Skripte –
-  prüft die Analyse mit denselben Regeln. Die Ausgabe enthält sie nicht mehr.
+- **Versteckte Teile** der Datei – Dateieigenschaften, Lesezeichen, Anhänge, Formulardaten,
+  Skripte – prüft die Analyse mit denselben Regeln. Die Ausgabe enthält sie nicht mehr.
 - **Scans und Fotos** liest die eingebaute Texterkennung (OCR); schräge Scans werden gerade
-  gerückt, gedrehte Seiten erkannt. Auf gelesenem Text gleicht das Programm typische
-  Lesefehler aus (O/0, I/1 …); auf der Textebene einer echten PDF nicht.
+  gerückt, gedrehte Seiten erkannt. Auf so gelesenem Text gleicht das Programm typische
+  Lesefehler aus (O/0, I/1 …) – nicht aber bei Text, der in der PDF selbst gespeichert ist (die
+  „Textebene“, z. B. bei am Computer erstellten PDFs); den liest es direkt.
 - **Kundenliste (optional):** Über Menü „Kundenliste“ → „Kundenliste importieren …“ (oder
   „Importieren …“ in Schritt 2) lesen Sie eine CSV-Datei aus Ihrem Verwaltungsprogramm ein.
   Spalten werden möglichst automatisch erkannt, sonst ordnen Sie sie im Dialog zu. Gespeichert
-  werden keine Namen oder Nummern im Klartext, nur Prüfwerte (gesalzene SHA-256-Hashes). Passt
-  in einem Dokument ein starkes Merkmal eines Kunden (voller Name, Kunden-/Vertragsnummer,
-  IBAN oder E-Mail), sucht das Programm alle seine Merkmale – auch Geburtsdatum, Anschrift,
-  Telefon, Kennzeichen sowie Vor- und Nachname einzeln.
+  werden keine Namen oder Nummern im Klartext, nur Prüfwerte, an denen das Programm sie
+  wiedererkennt. Passt in einem Dokument ein starkes Merkmal eines Kunden (voller Name,
+  Kunden-/Vertragsnummer, IBAN oder E-Mail), sucht das Programm alle seine Merkmale – auch
+  Geburtsdatum, Anschrift, Telefon, Kennzeichen sowie Vor- und Nachname einzeln.
 
 ### Bilder, Fotos und Lichtbilder
 
@@ -187,15 +188,20 @@ Weitere Regeln:
 - Ist ein Foto auf einer ausweisartigen Fläche nicht sicher ein Lichtbild (z. B. eine stark
   vergrößerte Kopie), steht es **nicht angehakt** in der Liste: ansehen und anhaken, wenn es
   ein Gesicht zeigt.
-- Bleibt ein Lichtbild sichtbar – abgewählt, unsicher und nicht angehakt, oder eine
-  Ausweiskopie, auf der kein Lichtbild gefunden wurde –, heißt die Ausgabe immer `_PRUEFEN`,
-  auch wenn „Freigabe vor Weitergabe“ ausgeschaltet ist.
+- Bleibt ein gefundenes Lichtbild sichtbar (abgewählt, oder unsicher und nicht angehakt) oder
+  findet das Programm auf einer erkannten Ausweiskopie kein Lichtbild, heißt die Ausgabe immer
+  `_PRUEFEN` – auch ohne „Freigabe vor Weitergabe“. Eine Ausweiskopie erkennt es am Ausweistext
+  auf dem Bild (z. B. der maschinenlesbaren Zone oder der Überschrift „Personalausweis“).
+  Findet es weder Lichtbild noch Ausweistext (etwa auf einem unscharfen Scan), entfällt dieser
+  Schutz – deshalb „Freigabe vor Weitergabe“ eingeschaltet lassen.
 - Andere Gesichter und Fotos (z. B. Schadenfotos) bleiben in „Ausgewogen“ und „Hoch“ stehen.
-- **„Maximal“** deckt zusätzlich jedes Bild auf Textseiten ab (`[BILD]`) und die Fotobereiche
-  auf Scan-Seiten und Fotos (`[FOTO]`). Ausnahmen: winzige Bilder (Symbole, Linien) bleiben;
-  ein Bild, das mindestens die halbe Seite bedeckt (Hintergrund, fotografiertes Blatt), bleibt
-  wie ein Scan stehen – abgedeckt werden nur die Fotos darin; Text, der über einem Bild liegt,
-  bleibt lesbar. Jede Abdeckung lässt sich in Fundliste und Vorschau abwählen.
+- **„Maximal“** deckt zusätzlich jedes Bild auf Textseiten ab (`[BILD]`) und auf Scan-Seiten
+  und Fotos die Fotobereiche, die die Fotoerkennung findet (`[FOTO]`). Ein Foto, das sie nicht
+  als Foto erkennt (z. B. ein sehr blasses Foto oder eines mit viel Text darauf), bleibt stehen.
+  Weitere Ausnahmen: winzige Bilder (Symbole, Linien) bleiben; ein Bild, das mindestens die
+  halbe Seite bedeckt (Hintergrund, fotografiertes Blatt), bleibt wie ein Scan stehen –
+  abgedeckt werden nur die Fotos darin; Text, der über einem Bild liegt, bleibt lesbar. Jede
+  Abdeckung lässt sich in Fundliste und Vorschau abwählen.
 - **Unterschriften und Handschrift auf Scans bleiben auch in „Maximal“ stehen** – die
   Fotoerkennung blendet Striche bewusst aus. Nur eine Unterschrift, die als eigenes Bild in
   einer digitalen PDF steckt, deckt „Maximal“ als `[BILD]` ab.
@@ -212,9 +218,9 @@ Bitte vor dem Einsatz lesen – das sind die Grenzen des Werkzeugs:
   oder Logos in digitalen PDFs nennt nur ein Hinweis („Grafiken/Zeichnungen …, die nicht
   geprüft werden“). Abhilfe: in der Vorschau einen Rahmen darüberziehen.
 - **Gesichter und Fotos** – gesucht werden nur Lichtbilder auf Ausweiskopien, und die nicht
-  immer. Andere Gesichter und Fotos bleiben in „Ausgewogen“ und „Hoch“ stehen; in „Maximal“
+  immer. Andere Gesichter und Fotos bleiben in „Ausgewogen“ und „Hoch“ stehen. In „Maximal“
   bleiben winzige Bilder, Bilder über mindestens die halbe Seite (nur die Fotos darin werden
-  abgedeckt) und gezeichnete Grafiken.
+  abgedeckt), gezeichnete Grafiken sowie Fotos, die die Fotoerkennung nicht als Foto erkennt.
 - **Diagnosen, Krankheiten, Medikamente** – erkannt werden nur bekannte Begriffe aus den
   Wortlisten des Programms und ICD-10-Codes, und nur mit Gesundheitsbezug (z. B. hinter
   „Diagnose:“ oder „leidet an“). In „Ausgewogen“ und „Hoch“ sind sie nur angeboten (⚕, nicht
@@ -223,33 +229,42 @@ Bitte vor dem Einsatz lesen – das sind die Grenzen des Werkzeugs:
   („arbeitet als …“) und erst ab „Hoch“. **Familienstand und Einkommen** werden nicht erkannt.
 - **Nummern ohne Beschriftung** – SEPA-Mandatsreferenzen, USt-IdNr., Führerscheinnummern
   (außerhalb einer Führerscheinkopie), Steuernummern ohne Schrägstriche und BICs, die weder
-  neben einer IBAN stehen noch eindeutig geformt sind (z. B. die kurze 8-Zeichen-Form), werden
+  neben einer IBAN stehen noch eindeutig geformt sind (z. B. „COBADEFF“ ohne Ziffer), werden
   nur hinter einem Etikett gefunden („Mandatsreferenz“, „USt-IdNr.“, „Führerscheinnummer“,
   „Steuernummer“, „BIC“ …). Steht so eine Nummer nur ohne Beschriftung im Dokument, bleibt sie
   stehen – ebenso hausinterne Nummern ohne festes Format (ggf. über „IMMER schwärzen“ oder die
   Kundenliste). Ist sie an einer Stelle mit Etikett erkannt, wird sie auch an allen anderen
   Stellen des Dokuments geschwärzt. An ihrem Aufbau erkannt werden dagegen auch ohne Etikett:
-  IBAN, Steuer-ID und Personalausweis- bzw. Passnummer (mit gültiger Prüfziffer),
-  Krankenversicherten-, Fahrzeug-Ident- und Kreditkartennummern, Steuernummern mit
-  Schrägstrichen, eine BIC in eindeutiger Form sowie auf Ausweiskopien die maschinenlesbare
-  Zone (siehe Tabelle).
-- **Geburtsdaten ohne Etikett** – erkannt hinter „geb.“, „Geburtsdatum“ … oder direkt hinter
-  einem Namen. Das Geburtsdatum eines Kindes ohne Etikett (z. B. „Mitversichert: Tochter
-  14.03.2015“) bleibt stehen, auch in „Maximal“, und die Restrisiko-Prüfung meldet es bewusst
-  nicht (sonst wäre jedes jüngere Rechnungs- oder Schadendatum ein Verdacht). Bitte selbst
-  darauf achten.
+  IBAN (bei eindeutiger Form auch mit falscher Prüfziffer), Steuer-ID und Personalausweis-
+  bzw. Passnummer (nur mit gültiger Prüfziffer), Krankenversicherten-, Fahrzeug-Ident- und
+  Kreditkartennummern, Steuernummern mit Schrägstrichen, eine BIC in eindeutiger Form sowie
+  auf Ausweiskopien die maschinenlesbare Zone (siehe Tabelle).
+- **Geburtsdaten ohne Etikett** – erkannt hinter „geb.“, „Geburtsdatum“ … (auch als
+  Spaltenkopf) und hinter einem Namen mit Komma, Stern oder Klammer („Max Mustermann,
+  02.09.1983“). Ohne ein solches Zeichen („Max Mustermann 02.09.1983“, etwa in einer Tabelle)
+  bleibt das Datum in „Ausgewogen“ und „Hoch“ stehen; die Restrisiko-Prüfung meldet es meist
+  als Verdacht. „Maximal“ schwärzt zusätzlich Daten wie „02.09.1983“ oder „2. September 1983“
+  (nicht „1983-09-02“ oder „02/09/1983“), die mindestens 14 Jahre zurückliegen – außer kurz
+  hinter Wörtern wie „am“, „den“, „vom“, „seit“, „bis“, „Beginn“ oder „Datum“, auch als
+  Wortende („Er kam am 02.09.1983“, „Anna Linden 02.09.1983“). Das Geburtsdatum eines Kindes
+  bleibt ohne Etikett meist stehen, auch in „Maximal“ („Mitversichert: Tochter 14.03.2015“),
+  und die Restrisiko-Prüfung meldet es bewusst nicht (sonst wäre jedes jüngere Rechnungs- oder
+  Schadendatum ein Verdacht). Bitte selbst darauf achten.
 - **Ungewöhnliche Schreibweisen** – seltene oder unbekannte Namen ohne Zusammenhang,
   ausländische Anschriften in ungewohntem Format sowie Text in Bildern, Logos, Handyfotos und
   schlechten Scans können durchrutschen. Die Kundenliste hilft nur für bekannte Kunden – und
   nur, wenn im Dokument ein starkes Merkmal passt.
-- **Unlesbare Textebene, XFA-Formulare** – Ist die Textebene einer PDF unlesbar (Zeichensalat),
-  liest das Programm die Seite per OCR und schwärzt über die gelesenen Wörter; die unlesbare
-  Textebene bleibt aber in der Ausgabe. Inhalte von XFA-Formularen lassen sich nicht prüfen.
+- **Unlesbarer gespeicherter Text, XFA-Formulare** – Ist der in einer PDF gespeicherte Text
+  (die Textebene) unlesbar (Zeichensalat), liest das Programm die Seite per OCR und schwärzt
+  über die gelesenen Wörter; der unlesbare Text bleibt aber in der Ausgabe. Inhalte von
+  XFA-Formularen (einer besonderen Art ausfüllbarer PDF-Formulare) lassen sich nicht prüfen.
   Beides macht die Ausgabe `_PRUEFEN`.
 
 Kaum lesbare, unplausibel gelesene oder ganz ungelesene Scan-Seiten werden nicht still
-übersprungen: Die Ausgabe heißt dann `_PRUEFEN`, und die Vorschau umrahmt die ganze Seite als
-Verdacht – dort muss ein Mensch hinsehen.
+übersprungen: Die Ausgabe heißt dann `_PRUEFEN`, und der Grund (z. B. „Seite 2: kein Text
+erkannt bzw. Texterkennung fehlgeschlagen“) steht in der Liste und im Abschlussdialog. Meist
+umrahmt die Vorschau die ganze Seite als Verdacht, aber nicht immer – zum Beispiel nicht bei
+sehr hellen Scans (blasser Druck, Bleistift). Deshalb jede Seite selbst ansehen.
 
 ## Voraussetzungen
 
@@ -260,8 +275,6 @@ Verdacht – dort muss ein Mensch hinsehen.
   x64-Emulation.
 - Python 3.10 bis 3.15 – wird vom Installationsskript automatisch mitinstalliert
   (Python 3.12, nur für das eigene Benutzerkonto, keine Administratorrechte nötig).
-  Mit Python 3.11 bis 3.14 kommt PyMuPDF 2.x, mit 3.10 und 3.15 PyMuPDF 1.28.x; verlangt wird
-  mindestens PyMuPDF 1.24.10. Die GitHub-Action testet mit Python 3.12, also mit PyMuPDF 2.x.
 - Etwa 1 GB freier Festplattenplatz (Sprachmodell und Bibliotheken), Internet nur während der
   Installation. Große Handyfotos und sehr große Seiten brauchen beim Lesen und Schwärzen
   deutlich mehr Arbeitsspeicher als gewöhnliche PDFs.
@@ -321,9 +334,10 @@ Das Fenster führt in drei Schritten durch die Arbeit; unten stehen die Knöpfe
 öffnen“.
 
 1. **Dateien hinzufügen (Schritt 1):** PDFs, Fotos oder ganze Ordner (inkl. Unterordner) in
-   die blaue Fläche ziehen – oder „Dateien auswählen …“ / „Ordner auswählen …“. Dateien, die
-   das Programm nicht prüfen kann, stehen mit Grund in der Zeile unter den Knöpfen
-   („NICHT geprüft“) – siehe [Welche Dateien gehen?](#welche-dateien-gehen).
+   die blaue Fläche ziehen – oder „Dateien auswählen …“ / „Ordner auswählen …“. Kann das
+   Programm Dateien nicht prüfen, meldet die Zeile unter den Knöpfen ihre Anzahl („… werden
+   NICHT geprüft – Namen im Protokoll“); Namen und Grund stehen im Protokoll und in den
+   Abschlussdialogen – siehe [Welche Dateien gehen?](#welche-dateien-gehen).
 2. **Schutzstufe wählen (Schritt 2)** – Standard ist „Hoch“. Bei Bedarf Begriffe in
    „IMMER schwärzen“ / „NIE schwärzen“ eintragen oder die Kundenliste importieren.
 3. **„Analysieren – Funde anzeigen“** klicken. Die Fundliste zeigt je Datei alle Treffer mit
@@ -359,14 +373,16 @@ bereits“ und öffnet kein zweites Fenster.
   an der Endung.
 - **Fotos und Bild-Scans** (JPEG, PNG, TIFF – auch mehrseitige Faxe –, BMP): Nach einer
   Rückfrage wandelt das Programm sie in eine PDF um und liest sie per Texterkennung. Die
-  Ausgabe heißt wie gewohnt `anonym_NN.pdf` und liegt im Ordner `anonymisiert` neben dem
-  Foto; sie muss **immer** in der Vorschau freigegeben werden.
+  Ausgabe heißt zunächst `anonym_NN_PRUEFEN.pdf` und muss **immer** in der Vorschau
+  freigegeben werden. Sie liegt wie bei PDFs im Ordner `anonymisiert` neben dem Foto bzw. im
+  gemeinsamen Zielordner.
 - **PDFs mit Kennwort:** Das Programm fragt nach dem Kennwort („Überspringen“ ist möglich).
   Das Kennwort wird nicht gespeichert; die Ausgabe hat **kein** Kennwort mehr.
 - **Nicht** verarbeitet werden Word-, Excel- und andere Office-Dateien, E-Mails, iPhone-Fotos
   (HEIC), WEBP- und GIF-Bilder – auch nicht, wenn sie die Endung `.pdf` tragen. Solche
-  Dateien zuerst als PDF speichern (z. B. Drucken → „Microsoft Print to PDF“). Sie stehen als
-  „NICHT geprüft“ in der Hinweiszeile und in den Abschlussdialogen.
+  Dateien zuerst als PDF speichern (z. B. Drucken → „Microsoft Print to PDF“). Die Hinweiszeile
+  zählt sie als „NICHT geprüft“; mit Grund stehen sie im Protokoll und in den
+  Abschlussdialogen.
 - Eine Ausgabe des Programms (`anonym_…` oder Ordner `anonymisiert`) nimmt das Programm nur
   nach Rückfrage auf (Voreinstellung „Nein“) – zum Nachbessern besser das Original nehmen.
 
@@ -383,32 +399,39 @@ scheint.
 1. **Vorschau öffnen:** im Abschlussdialog „Ja“ – oder Doppelklick auf die Datei. Nach dem
    Schwärzen zeigt die Vorschau das „Ergebnis (Ausgabe)“.
 2. **Jede Seite ansehen.** Graue Kästen mit Platzhalter sind geschwärzt. Orange markiert sind
-   Verdachtsstellen der Restrisiko-Prüfung; eine ganze Seite ist umrahmt, wenn sie nicht
-   verlässlich gelesen werden konnte.
+   Verdachtsstellen der Restrisiko-Prüfung. Konnte eine Seite nicht verlässlich gelesen
+   werden, ist sie meist ganz umrahmt. Der Rahmen kann aber fehlen (z. B. bei sehr hellen
+   Scans); der Grund steht dann nur in der Liste und im Abschlussdialog.
 3. **Steht noch etwas Persönliches da und ist es als Verdacht markiert:** in der Liste
    markieren und „Markierte nachschwärzen“. Es entsteht eine neue Ausgabe mit der nächsten
-   freien Nummer; die alte wird gelöscht.
-4. **Ist nichts Persönliches mehr zu sehen: „Freigeben“.** Die Datei heißt dann
+   freien Nummer; die alte wird gelöscht. Das geht nicht bei einer ganz umrahmten Seite (dafür
+   kennt das Programm keine genaue Stelle) – dann wie in Schritt 5 vorgehen.
+4. **Ist nichts Persönliches mehr zu sehen: „Freigeben“.** Vor dem Freigeben fragt das
+   Programm nach, bei offenen Verdachtsstellen mit einer Warnung. Die Datei heißt dann
    `anonym_NN.pdf` (dieselbe Nummer, wenn sie frei ist), die Zuordnungsdatei wird
-   nachgetragen, und die Vorschau springt zur nächsten zu prüfenden Datei. Gibt es noch offene
-   Verdachtsstellen, fragt das Programm vorher nach.
+   nachgetragen, und die Vorschau springt zur nächsten zu prüfenden Datei.
 5. **Fehlt eine Schwärzung, die nicht als Verdacht markiert ist** (z. B. eine Unterschrift
    oder eine ganze unlesbare Seite): „Verwerfen (Ausgabe löschen)“ – die Vorschau zeigt dann
    wieder die geplante Schwärzung –, dort per Klick oder Rahmen nachbessern und erneut
-   „Schwärzen starten“. Das schwärzt alle Dateien der Liste noch einmal (mit neuen Nummern);
-   fertig freigegebene Dateien deshalb vorher mit „Datei aus Liste entfernen“ herausnehmen.
+   „Schwärzen starten“. Das schwärzt **alle** Dateien der Liste noch einmal, jede unter der
+   nächsten freien Nummer. Deshalb vorher die übrigen Ausgaben prüfen und freigeben (oder
+   verwerfen) und diese Dateien mit „Datei aus Liste entfernen“ herausnehmen. Sonst entsteht
+   für jede eine weitere Ausgabe, und eine alte, noch nicht freigegebene `_PRUEFEN`-Datei lässt
+   sich danach nicht mehr freigeben.
 
 **Freigeben geht nur, solange die Datei in dieser Programmsitzung in der Liste steht.** Nach
 einem Neustart, nach „Liste leeren“ oder „Datei aus Liste entfernen“ kann das Programm eine
 ältere `_PRUEFEN`-Ausgabe nicht mehr freigeben. Dann das Original erneut hinzufügen,
 analysieren, schwärzen und die neue Ausgabe prüfen und freigeben; die alte `_PRUEFEN`-Datei
-nicht weitergeben. Beim Beenden warnt das Programm nicht vor Ausgaben, die noch nicht
-freigegeben sind.
+nicht weitergeben. Deshalb vor dem Beenden alle Ausgaben prüfen und freigeben.
 
-Fotos und Bild-Scans brauchen die Freigabe immer, ebenso eine Ausweiskopie mit sichtbarem
-Lichtbild – auch wenn „Freigabe vor Weitergabe“ ausgeschaltet ist. Ohne die Option heißt eine
-Ausgabe sonst nur dann `_PRUEFEN`, wenn das Programm einen Grund findet (siehe
-[Ausgabedateien](#ausgabedateien)); geprüft werden sollte sie trotzdem.
+Fotos und Bild-Scans brauchen die Freigabe immer, ebenso Ausgaben mit einem gefundenen, nicht
+abgedeckten Lichtbild oder einer erkannten Ausweiskopie ohne Lichtbild (eine nicht erkannte
+Ausweiskopie fällt nicht darunter, siehe
+[Bilder, Fotos und Lichtbilder](#bilder-fotos-und-lichtbilder)) – auch wenn „Freigabe vor
+Weitergabe“ ausgeschaltet ist. Ohne die Option heißt eine Ausgabe sonst nur dann `_PRUEFEN`,
+wenn das Programm einen Grund findet (siehe [Ausgabedateien](#ausgabedateien)); geprüft
+werden sollte sie trotzdem.
 
 ## Ausgabedateien
 
@@ -428,12 +451,12 @@ Außerdem heißt eine Ausgabe immer `_PRUEFEN`, wenn mindestens einer dieser Gr�
 
 - Die Restrisiko-Prüfung meldet Verdacht oder ist ausgefallen, die Selbstkontrolle findet
   noch Fundtext, oder ein angehakter Fund war im Dokument nicht auffindbar.
-- Die Datei ist ein umgewandeltes Foto oder ein Bild-Scan, oder ein Lichtbild auf einer
-  Ausweiskopie ist nicht abgedeckt.
+- Die Datei ist ein umgewandeltes Foto oder ein Bild-Scan, ein gefundenes Lichtbild ist nicht
+  abgedeckt, oder auf einer erkannten Ausweiskopie wurde kein Lichtbild gefunden.
 - Eine Scan-Seite ist kaum lesbar, die Texterkennung hat Buchstabensalat gelesen oder auf einer
   Seite, die nicht nachweislich leer ist, nichts gelesen – oder es ist gar kein Text lesbar.
-- Die Textebene ist unlesbar, das Dokument ist ein XFA-Formular, oder eine Seite ist gedreht
-  gespeichert und die Lage der Schwärzungen unsicher.
+- Der in der PDF gespeicherte Text (Textebene) ist unlesbar, das Dokument ist ein
+  XFA-Formular, oder eine Seite ist gedreht gespeichert und die Lage der Schwärzungen unsicher.
 - Die Datei war beschädigt und wurde repariert, oder ein Bild darin ist beschädigt.
 - Personendaten stehen nur in versteckten Teilen (Metadaten, Anhänge …), oder diese ließen
   sich nur teilweise entfernen.
@@ -447,21 +470,25 @@ Außerdem heißt eine Ausgabe immer `_PRUEFEN`, wenn mindestens einer dieser Gr�
 Die Restrisiko-Prüfung meldet lieber zu viel als zu wenig: Viele `_PRUEFEN`-Dateien enthalten
 kein echtes Leck. Umgekehrt heißt „fertig“ nicht fehlerfrei – angesehen wird jede Ausgabe.
 
-**Keine Ausgabe** entsteht nur, wenn sich eine Datei nicht bearbeiten lässt: keine PDF,
-Kennwort nicht eingegeben, Datei lässt sich nicht öffnen, Abbruch, eine Seite lässt sich weder
-schwärzen noch als Bild neu erzeugen, die Datei musste erst beim Schwärzen repariert werden,
-oder die Ausgabe ist nicht schreibbar. Das Programm nennt diese Dateien im Abschlussdialog unter
-„OHNE Ausgabedatei“ – das Original dieser Dateien nicht weitergeben.
+**Keine Ausgabe** bekommen nur Dateien, die das Programm nicht übernimmt oder nicht bearbeiten
+kann. Der Abschlussdialog nennt sie in zwei Blöcken:
+
+- **„NICHT geprüft“** – Dateien, die gar nicht erst in die Liste kommen: keine PDF (z. B. eine
+  Word-Datei), Kennwort nicht eingegeben, Foto nicht übernommen, nicht lesbar …
+- **„OHNE Ausgabedatei“** – Dateien aus der Liste, für die keine Ausgabe entstand: Datei lässt
+  sich nicht öffnen, Abbruch, eine Seite lässt sich weder schwärzen noch als Bild neu erzeugen,
+  die Datei musste erst beim Schwärzen repariert werden, oder die Ausgabe ist nicht
+  schreibbar.
+
+In beiden Fällen das Original nicht weitergeben.
 
 Was jede Ausgabe sonst noch auszeichnet:
 
 - Formularfelder und Anmerkungen werden vor der Analyse in den Seiteninhalt eingebrannt
   (damit auch Feldinhalte geprüft werden).
-- Entfernt werden versteckte Teile: Dateieigenschaften und XMP-Metadaten (auch an Seiten und
-  Bildern), Lesezeichen, Links, eingebettete Dateien und Anhänge, Formular- und XFA-Daten,
-  JavaScript und Aktionen, Seitenbeschriftungen, Strukturbaum und Ersatztexte, Ebenennamen,
-  Miniaturbilder, Inhalte außerhalb des sichtbaren Bereichs, abgeschnittener Text sowie
-  EXIF-/XMP-Daten in eingebetteten Fotos.
+- Versteckte Teile werden entfernt – etwa Dateieigenschaften, Lesezeichen, Links, Anhänge,
+  Formulardaten, Skripte, Miniaturbilder, Inhalte außerhalb des sichtbaren Bereichs und die
+  Aufnahmedaten eingebetteter Fotos (vollständige Liste unter [Technik](#technik)).
 - Bilder, die keine Seite anzeigt (z. B. ein ungeschwärztes Original, das in der Datei noch
   mitgespeichert war), werden in jeder Schutzstufe geleert.
 - Bei Scans werden die Bildpixel unter einer Fundstelle gelöscht, nicht nur übermalt.
@@ -480,8 +507,7 @@ Zielordner ein ganzes Laufwerk oder eine Freigabe (z. B. `E:\` auf einem USB-Sti
 `\\server\freigabe\`), gibt es kein „daneben“: Dann liegt sie im Einstellungsordner des
 Programms, z. B. `%APPDATA%\PDF-Anonymisierer\Zuordnungen\_zuordnung_Laufwerk_E.txt` (der
 genaue Ort steht im Protokoll). Eine `_zuordnung.txt` älterer Versionen im Ausgabeordner wird
-beim nächsten Schwärzen übernommen und dort gelöscht – auch wenn sie im Editor in einer
-anderen Kodierung (ANSI, „Unicode“) gespeichert wurde. Nur wenn nirgends daneben geschrieben
+beim nächsten Schwärzen übernommen und dort gelöscht. Nur wenn nirgends daneben geschrieben
 werden kann (z. B. schreibgeschützter Ordner), landet sie als `_zuordnung.txt` im
 Ausgabeordner – dann warnt das Programm deutlich („ACHTUNG Zuordnungsdatei“), sie beim
 Hochladen nicht mit auszuwählen.
@@ -559,13 +585,15 @@ Tesseract** – nur den entpackten Ordner.
 | Eine `_PRUEFEN`-Datei lässt sich nicht (mehr) freigeben | Freigeben geht nur in der Sitzung, in der geschwärzt wurde, solange die Datei in der Liste steht. Original erneut hinzufügen, analysieren, schwärzen, prüfen und freigeben; die alte `_PRUEFEN`-Datei nicht weitergeben. |
 | Zuordnungsdatei liegt nicht im Ausgabeordner | Sie liegt neben dem Ausgabeordner (`_zuordnung_anonymisiert.txt`), bei einem Laufwerk als Zielordner in `%APPDATA%\PDF-Anonymisierer\Zuordnungen` – siehe [Ausgabedateien](#ausgabedateien). |
 | Geschwärztes Foto ist kleiner als das Original | Geschwärzte Bilder werden neu als JPEG gespeichert, Fotos über 24 Megapixel dabei auf 24 Megapixel verkleinert. |
-| Fenster zu groß für den Bildschirm | Das Fenster passt sich der Bildschirmgröße an und ist ab ca. 640 × 520 Pixel nutzbar. Auf Laptop-Bildschirmen (z. B. 1366 × 768) und bei hoher Windows-Skalierung startet es maximiert. In einem niedrigen Fenster blendet das Programm Titel, Untertitel und den Bedienhinweis über der Fundliste aus, das Protokoll zeigt 3 statt 5 Zeilen; reicht der Platz dann noch nicht, wird der Hinweiskasten einzeilig (ein Klick zeigt alle Grenzen), „1 · PDF-Dateien“ und die blaue Fläche teilen sich eine Zeile und die Knöpfe werden flacher. Die Zeile mit den NICHT geprüften Dateien bleibt sichtbar; alle Hinweise stehen weiter unter Hilfe → „Was wird nicht erkannt?“ und „Hinweise vor der Nutzung …“. |
+| Fenster zu groß für den Bildschirm | Das Fenster passt sich dem Bildschirm an und startet auf kleinen Bildschirmen (z. B. Laptops mit 1366 × 768) und bei hoher Windows-Skalierung maximiert. Wird es eng, blendet das Programm Überschriften und Bedienhinweise aus und rückt zusammen; die Zeile mit den NICHT geprüften Dateien bleibt sichtbar. Alle Hinweise stehen weiter unter Hilfe → „Was wird nicht erkannt?“ und „Hinweise vor der Nutzung …“. |
 | `fehler.log` finden | Skript-Version: neben `pdf_anonymisierer.py`, wenn der Ordner beschreibbar ist, sonst `%LOCALAPPDATA%\PDF-Anonymisierer\fehler.log`. EXE-Version: immer `%LOCALAPPDATA%\PDF-Anonymisierer\fehler.log`, nie neben der EXE. Hilfe → „Ordner des Fehlerprotokolls öffnen“ öffnet den Ordner; der Fehlerdialog und Hilfe → „Über PDF-Anonymisierer“ nennen den genauen Pfad. Ordner sind darin gekürzt, Dateinamen nicht. |
 | Für Rückfragen | Skript-Version: `python werkzeuge\pruefe_installation.py` im Programmordner ausführen und die Ausgabe mitschicken (Python-Version, Pakete und ob ihre Versionen zu `requirements.txt` passen, Sprachdatei, Log-Pfad). EXE-Version: den Text aus Hilfe → „Über PDF-Anonymisierer“ und die `fehler.log` mitschicken. Hilfreich ist auch das Laufprotokoll (Datei → „Protokoll speichern …“) – es enthält keine Dokumentinhalte und keine Original-Dateinamen. |
 
 ## Technik
 
-- **Python 3.10–3.15**, Oberfläche mit tkinter (+ tkinterdnd2 für Drag & Drop).
+- **Python 3.10–3.15**, Oberfläche mit tkinter (+ tkinterdnd2 für Drag & Drop). Mit Python
+  3.11 bis 3.14 kommt PyMuPDF 2.x, mit 3.10 und 3.15 PyMuPDF 1.28.x; verlangt wird mindestens
+  PyMuPDF 1.24.10. Die GitHub-Action testet mit Python 3.12, also mit PyMuPDF 2.x.
 - **PyMuPDF** (MuPDF) für Textextraktion, echte Schwärzung (`apply_redactions` mit
   Bildpixel-Löschung), das Entfernen versteckter Teile und für die eingebaute
   Tesseract-OCR; deutsche Sprachdatei `tessdata/deu.traineddata` (tessdata_fast) liegt im
@@ -591,6 +619,18 @@ Tesseract** – nur den entpackten Ordner.
   Meldung, ob die Ausgabe `_PRUEFEN` heißt.
 - **Bilder:** `fotos.py` (Fotobereiche und Lichtbilder), `bilder.py` (Neukodierung,
   Bildreste), `nebenkanaele.py` (versteckte Teile lesen und entfernen).
+- **Versteckte Teile**, die jede Ausgabe verliert: Dateieigenschaften und XMP-Metadaten (auch
+  an Seiten und Bildern), Lesezeichen, Links, eingebettete Dateien und Anhänge, Formular- und
+  XFA-Daten, JavaScript und Aktionen, Seitenbeschriftungen, Strukturbaum und Ersatztexte
+  (`/ActualText`, `/Alt`), Ebenennamen, Miniaturbilder, Inhalte außerhalb des sichtbaren
+  Bereichs, abgeschnittener Text sowie EXIF-/XMP-Daten in eingebetteten Fotos.
+- **Kundenliste** (`kundenliste.py`): gespeichert werden nur gesalzene SHA-256-Prüfwerte
+  normalisierter Werte; das Salz ist unter Windows mit DPAPI geschützt (nur dieses
+  Windows-Konto kann es entschlüsseln).
+- **Kleine Bildschirme** (`gui.py`): Unter 760 Pixel Fensterhöhe (bei 100 %) entfallen Titel,
+  Untertitel und Bedienhinweis, das Protokoll zeigt 3 statt 5 Zeilen. Reicht der Platz für die
+  Fundliste dann noch nicht, greifen der Reihe nach die Kompaktstufen (`KOMPAKT_STUFEN`):
+  Hinweiskasten einzeilig, Dateikopf und Ablagefläche in einer Zeile, flachere Knöpfe.
 - Code und Oberfläche sind deutsch. Paketaufbau `anonymisierer/`: `analyse.py`,
   `schwaerzung.py`, `seitenmodell.py`, `detektoren/`, `muster.py` (Kategorien, Muster,
   Schutzstufen), `namen.py` (spaCy), `wissen.py` + `daten/`, `kundenliste.py`,
@@ -623,7 +663,9 @@ Werkzeuge in `werkzeuge/`:
   Ordnernamen). Die Ausgaben liegen in einem temporären Ordner und werden danach gelöscht,
   außer mit `--behalten <ordner>`. Aufruf (Schutzstufe wahlweise `ausgewogen`, `hoch` oder
   `maximal`): `python werkzeuge/selbsttest.py <ordner> --profil hoch`.
-- `readme_tabelle.py` – erzeugt die Erkennungstabelle dieser README.
+- `readme_tabelle.py` – erzeugt die Erkennungstabelle dieser README
+  (`python werkzeuge/readme_tabelle.py --schreiben`); Beispiele und Hinweise stehen im
+  Werkzeug, `tests/test_auslieferung.py` vergleicht die Tabelle mit seiner Ausgabe.
 - `benchmark.py` mit dem Paket `benchmark/` – Entwicklungs-Benchmark: erzeugt Testdokumente
   mit bekannter Wahrheit und bewertet die Ausgaben; `tests/test_benchmark.py` nutzt ihn als
   Qualitätstor.

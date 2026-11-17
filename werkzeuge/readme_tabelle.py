@@ -57,13 +57,14 @@ BEISPIELE = {
 ERLAEUTERUNG = {
     "namen": "KI-Modell (spaCy), Namenslisten und Regeln; gleiche Person = gleicher Platzhalter im Dokument",
     "iban": "auch mit falscher Prüfziffer, wenn sie eindeutig wie eine IBAN aussieht (Hinweis „Lesefehler?“)",
-    "geburt": "hinter „geb.“, „Geburtsdatum“ … oder direkt hinter einem Namen; in „Maximal“ zusätzlich jedes Datum, "
-              "das mindestens 14 Jahre zurückliegt (außer Vertragsdaten)",
+    "geburt": "hinter „geb.“, „Geburtsdatum“ … oder hinter einem Namen mit Komma, Stern oder Klammer („Max "
+              "Mustermann, 02.09.1983“); in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre "
+              "zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“",
     "vertrag": "Nummer hinter einem Etikett wie „Vertrags-Nr.“",
     "steuerid": "ohne Beschriftung nur mit gültiger Prüfziffer",
     "steuernr": "ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma",
-    "ausweis": "mit Etikett; Ausweis- und Passnummern auch ohne (Prüfziffer); auf Ausweiskopien auch die "
-               "maschinenlesbare Zone",
+    "ausweis": "mit Etikett; Ausweis- und Passnummern auch ohne Etikett, wenn die Prüfziffer stimmt; auf "
+               "Ausweiskopien auch die maschinenlesbare Zone",
     "mandat": "nur hinter einem Etikett",
     "bic": "hinter „BIC“, neben einer IBAN oder in eindeutiger Form (11 Zeichen auf „XXX“ oder mit Ziffer im Ortscode)",
     "ort": "Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“",
