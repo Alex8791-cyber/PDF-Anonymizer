@@ -864,6 +864,9 @@ def _ocr_rest(name: str) -> bool:
     return False
 
 
+_ANREDE_BINDESTRICH_RE = re.compile(r"(?:Herrn?|Frau)-([A-ZÄÖÜ][a-zäöüß'’]+(?:-[A-ZÄÖÜ][a-zäöüß'’]+)?)")
+
+
 def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
     """Plausibilitätsfilter: keine Ziffern/Kürzel, keine Feldbezeichner, keine Versicherer,
     keine Organisationen, mindestens ein großgeschriebenes Wort mit >= 3 Buchstaben (>= 2 hinter
@@ -875,6 +878,11 @@ def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
     mit_anrede = _VORHER_ANREDE_RE.search(vorher) is not None
     if len(name) < (2 if mit_anrede else 3) or any(c.isdigit() for c in name):
         return False
+    angehaengt = _ANREDE_BINDESTRICH_RE.fullmatch(name)
+    if angehaengt:
+        # Anrede mit Bindestrich am Namen (OCR: "Frau-Kara fährt …"): ein Name, wenn der Rest ein Name der
+        # Wissensbasis ist; geschwärzt wird die ganze Stelle samt Anrede
+        return _wissen_art(angehaengt.group(1))[0]
     if re.search(r"-(?:ID|Nr|No|Id)\.?$", name, re.IGNORECASE) or _KFZ_RE.match(name):
         return False
     norm = re.sub(r"\s+", " ", name.lower()).strip()
@@ -1009,12 +1017,15 @@ def _kandidat(kandidaten, text, start, ende, gruppe=None, regel=False):
 _ARTIKEL_PARTIKEL = frozenset({"der", "den", "dem", "des", "die", "das", "und", "auf", "vor", "unter", "ober",
                                "nieder"})
 _KLEINWORT_RE = re.compile(r"[a-zäöüß][\wäöüß'’\-]*")
+# englische Grußformeln zwischen Namen ("Best regards, Irmtraud Ölschläger")
+_GRUSS_KLEIN = frozenset({"regards", "wishes", "greetings"})
 
 
 def _an_kleinwoertern_teilen(text: str, start: int, ende: int) -> list:
-    """Spanne der KI an kleingeschriebenen Wörtern teilen, die hier kein Namenspartikel sind: "Kranzbühler, Josef
-    gegen Felsberger" -> [Kranzbühler, Josef], [Felsberger]; "Lukas den Ball" -> [Lukas], [Ball]. Liefert die Stücke
-    (start, ende), ohne leere."""
+    """Spanne der KI an kleingeschriebenen Funktionswörtern teilen, die hier kein Namenspartikel sind: "Kranzbühler,
+    Josef gegen Felsberger" -> [Kranzbühler, Josef], [Felsberger]; "Lukas den Ball" -> [Lukas], [Ball]. Andere
+    kleingeschriebene Wörter teilen nicht – auf OCR-Seiten stehen verlesene Namensteile oft klein mitten im Namen
+    ("Dr. Heinz ensmf Näußlenr", "Frau-Kara fahr"). Liefert die Stücke (start, ende), ohne leere."""
     stuecke, anfang, vorher = [], start, None
     for m in re.finditer(r"\S+", text[start:ende]):
         wort = m.group(0).strip(",;()")
@@ -1023,7 +1034,7 @@ def _an_kleinwoertern_teilen(text: str, start: int, ende: int) -> list:
             k = wort.casefold()
             partikel = k in PARTIKEL and (k not in _ARTIKEL_PARTIKEL
                                           or (vorher is not None and vorher in PARTIKEL))
-            if not partikel:
+            if not partikel and (k in kennungsformen.FUNKTIONSWOERTER or k in _GRUSS_KLEIN):
                 if s0 > anfang:
                     stuecke.append((anfang, s0))
                 anfang = start + m.end()

@@ -2309,8 +2309,11 @@ class _Seitenpruefung:
                 if etikett is not None and etikett[0] == "vertragsdaten" and etikett[1].islower() \
                         and len(etikett[1]) <= 4:
                     # "am"/"vom" sind Füllwörter: "die Geburt unserer Tochter am 14.09.2026" – das Geburts-Etikett
-                    # davor zählt, wenn es im selben Satzteil steht (kein Komma dazwischen)
+                    # davor zählt, wenn es im selben Satzteil steht (kein Komma dazwischen) und nicht selbst schon
+                    # sein Datum ankündigt ("geboren am [GEB-DATUM] ist am 31.03.2025 verstorben")
                     geburt = self.etikett_davor(s, e, ("datum_geburt",))
+                    if geburt is not None and re.search(r"(?i)(?<![^\W\d_])(?:am|vom|den)$", geburt[1].strip()):
+                        geburt = None
                     pos = zeile.rfind(geburt[1], 0, ms) if geburt is not None else -1
                     if pos >= 0 and not re.search(r"[,;:]", zeile[pos + len(geburt[1]):ms]):
                         etikett = geburt

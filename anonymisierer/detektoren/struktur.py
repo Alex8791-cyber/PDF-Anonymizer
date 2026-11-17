@@ -1472,11 +1472,15 @@ def _hinter_ortsgattung(text: str, k: int, e: int):
     die Stelle des Eigennamens dahinter; nur Gattungswörter: None. Ein einzelnes Wort bleibt, wie es ist."""
     if _wissen is None:
         return k
-    woerter = list(re.finditer(r"[^\s,;()/]+", text[k:e]))
-    if len(woerter) < 2 or "\n" in text[k:k + woerter[1].start()]:
+    # die ganze Zelle zählt, auch hinter dem nächsten Etikett ("Kreuzung Bamberger Straße": "Straße" ist ein Etikett)
+    zelle = re.match(r"[^\t\n]*", text[k:])
+    woerter = list(re.finditer(r"[^\s,;()/]+", zelle.group(0)))
+    if len(woerter) < 2 or k + woerter[1].start() >= e:
         return k
     n = _wissen.ortsname_hinter_gattung([w.group(0) for w in woerter])
-    return None if n is None else k + woerter[n].start()
+    if n is None or k + woerter[n].start() >= e:
+        return None
+    return k + woerter[n].start()
 
 
 def _adress_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> list:

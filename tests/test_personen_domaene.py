@@ -670,3 +670,12 @@ def test_befunde_66_83_kein_fehlverdacht(text):
 ])
 def test_befunde_66_83_gegenproben_verdacht_bleibt(text, wert):
     assert _gemeldet(text, wert)
+
+
+@braucht_modell
+@pytest.mark.parametrize("zeilen, name", [
+    (["Name, Vorname:\t\tKara, Özlem", "Unfallart: Wildunfall. Frau-Kara fahr stadtauswärts und musste anhalten."],
+     "Frau-Kara"),                                  # OCR klebt die Anrede an den Namen (Korpus s1, Messung Runde 5)
+])
+def test_ner_anrede_mit_bindestrich_bleibt_name(zeilen, name):
+    assert _deckt(_namen("\n".join(zeilen)), name)

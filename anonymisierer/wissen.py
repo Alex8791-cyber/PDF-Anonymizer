@@ -736,8 +736,9 @@ def ortsname_hinter_gattung(woerter: list) -> int | None:
     for n, wort in enumerate(woerter):
         if n > 0 and wort.casefold() in ORTS_VERBINDER or ist_ortsgattung(wort):
             continue
-        if any(ist_ortsgattung(t) for t in wort.split("-") if t) or _STRASSEN_ENDE_RE.search(wort):
-            return None
+        if any(ist_ortsgattung(t) for t in wort.split("-") if t) \
+                or any(_STRASSEN_ENDE_RE.search(w) for w in woerter[n:]):
+            return None                      # Einrichtung oder Straße ("Kreuzung Bamberger Straße / Am Anger")
         return n
     return None
 
