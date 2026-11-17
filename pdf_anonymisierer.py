@@ -9,8 +9,9 @@ findet automatisch unter anderem (vollständige Liste in der README):
 
   • Namen von Personen        (Sprachmodell, Namenslisten, Aufbau von
                                Briefen, Tabellen und Formularen)
-  • Anschriften               (Straße + Hausnummer, PLZ + Ort, Orte ohne
-                               PLZ, ausländische Anschriften)
+  • Anschriften               (Straße + Hausnummer, PLZ + Ort; ab „Hoch“
+                               auch Orte ohne PLZ und ausländische
+                               Anschriften)
   • IBAN, BIC, Telefonnummern, E-Mail-Adressen, Geburtsdaten
   • Vertrags-, Kunden- und Versicherungsscheinnummern, Aktenzeichen
   • Sozialversicherungs-, Steuer-, Krankenversicherten- und
@@ -18,8 +19,8 @@ findet automatisch unter anderem (vollständige Liste in der README):
   • Kfz-Kennzeichen, Fahrzeug-Identnummern
   • Beruf und Arbeitgeber (ab Schutzstufe „Hoch“), Diagnosen und
     Medikamente (angehakt nur in „Maximal“)
-  • Lichtbilder auf Ausweiskopien; in „Maximal“ auch Bilder auf
-    Textseiten und Fotobereiche auf Scans (mit Ausnahmen)
+  • Lichtbilder auf Ausweiskopien (nicht immer gefunden); in „Maximal“
+    auch Bilder auf Textseiten und Fotobereiche auf Scans (mit Ausnahmen)
 
 Ersetzt wird mit lesbaren Platzhaltern wie [PERSON A], [IBAN],
 [ADRESSE] — so bleibt das Dokument für die KI verständlich
@@ -42,8 +43,8 @@ Dieses Skript ist nur der Startpunkt; die eigentliche Logik liegt im
 Paket "anonymisierer": Erkennung (muster, namen, wissen, detektoren,
 kundenliste, analyse), Lesen der Seiten (seitenmodell, ocr), Schwärzen
 und Prüfen der Ausgabe (schwaerzung, bilder, fotos, nebenkanaele,
-restrisiko) sowie Oberfläche und Dateien (gui, vorschau_fenster,
-vorschau, dateien).
+restrisiko) sowie Oberfläche und Dateien (gui, gui_attrappen,
+vorschau_fenster, vorschau, dateien).
 """
 
 import multiprocessing
