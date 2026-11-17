@@ -16,6 +16,15 @@ Optionen:
     --nur-erzeugen     nur den Korpus erzeugen
     --ohne-cli-ocr     Tesseract-Kommandozeile nicht als zweite OCR-Leseart verwenden
     --ohne-pixel       Pixelvergleich an Scan-Wortrechtecken abschalten
+    --weg engine|oberflaeche
+                       Weg der Schwärzung (Standard engine, wie alle Messungen bis Runde 3a): engine gibt jeden Fund
+                       der Analyse unverändert an die Schwärzung („alle Funde angehakt“); oberflaeche schickt den
+                       Auftrag, den die Oberfläche ohne Eingriff der Nutzerin abschickt (anonymisierer/auftrag.py:
+                       Häkchen der Fundliste nach der Analyse – ganz abgewählte Funde wie die in „Hoch“ angebotenen
+                       Gesundheitsdaten gehen nicht mit –, Schutzstufe „Hoch“, „Freigabe vor Weitergabe“ an,
+                       Seitenmodell und Nebenkanäle der Analyse). Der Weg steht in ergebnis.json, bericht.md und in
+                       der Zusammenfassung; im Weg oberflaeche zählt eine Ausgabe, die nur wegen der Freigabe _PRUEFEN
+                       heißt, für die Restrisiko-Kennzahlen als nicht _PRUEFEN (die Oberfläche nennt dort keinen Grund)
     --selbstpruefung   statt des Programms die Bewertung selbst prüfen: Null-Anonymisierer (Ausgabe = Original:
                        jeder zu schwärzende Eintrag muss ein Leck an seiner Stelle sein, alles zu Behaltende
                        erhalten), Orakel aus der Wahrheit, ohne und mit Platzhaltertext im grauen Rechteck
@@ -45,10 +54,16 @@ def main(argv=None) -> int:
     parser.add_argument("--nur-erzeugen", action="store_true", help="nur den Korpus erzeugen")
     parser.add_argument("--ohne-cli-ocr", action="store_true", help="keine Tesseract-Kommandozeile verwenden")
     parser.add_argument("--ohne-pixel", action="store_true", help="keinen Pixelvergleich durchführen")
+    parser.add_argument("--weg", choices=("engine", "oberflaeche"), default="engine",
+                        help="engine: jeder Fund an die Schwärzung (Standard); oberflaeche: Auftrag wie die Oberfläche "
+                             "ohne Eingriff der Nutzerin")
     parser.add_argument("--selbstpruefung", action="store_true",
                         help="Bewertung selbst prüfen (Null-Anonymisierer, Orakel, Teilreste) statt das Programm zu "
                              "messen")
     args = parser.parse_args(argv)
+    if args.selbstpruefung and args.weg != "engine":
+        parser.error("--weg gilt nicht für --selbstpruefung (sie prüft die Bewertung mit Null-Anonymisierer und "
+                     "Orakel)")
 
     warnings.filterwarnings("ignore", category=FutureWarning)   # "fitz" ist in PyMuPDF 2.x veraltet
     if str(WURZEL) not in sys.path:
@@ -75,9 +90,10 @@ def main(argv=None) -> int:
         print(f"Selbstprüfung: {ausgabe / 'selbstpruefung.json'}")
         return 0 if all(v["ok"] for v in ergebnis.values()) else 1
     ergebnis = bewerte_korpus(korpus, ausgabe, repo=args.repo, cli_ocr=not args.ohne_cli_ocr,
-                              pixel=not args.ohne_pixel)
+                              pixel=not args.ohne_pixel, weg=args.weg)
     g = ergebnis["gesamt"]
-    print(f"\nrecall_kern: {g['recall_kern']:.4f} ({g['kern']['entfernt']}/{g['kern']['n']}), "
+    print(f"\nWeg: {ergebnis['weg']}")
+    print(f"recall_kern: {g['recall_kern']:.4f} ({g['kern']['entfernt']}/{g['kern']['n']}), "
           f"teilweise {g['kern']['teilweise']}, Leck {g['kern']['leck']}")
     if g["recall_erweitert"] is not None:
         print(f"recall_erweitert: {g['recall_erweitert']:.4f}")
@@ -100,7 +116,9 @@ def main(argv=None) -> int:
               f"({rr.get('kern_lecks_ohne_pixelrest_verortet')}/{rr.get('kern_lecks_ohne_pixelrest')}), "
               f"Fehlverdacht je Seite "
               f"{rr.get('fehlverdacht_je_seite')}, _PRUEFEN {rr.get('ausgaben_pruefen')} "
-              f"(davon ohne Kern-Leck {rr.get('pruefen_ohne_leck')})")
+              f"(davon ohne Kern-Leck {rr.get('pruefen_ohne_leck')})"
+              + (f", nur Freigabe ausstehend {rr['ausgaben_nur_freigabe']} (ohne Grund, zählen nicht als _PRUEFEN)"
+                 if "ausgaben_nur_freigabe" in rr else ""))
     print(f"Bericht: {ausgabe / 'bericht.md'}")
     return 0
 
