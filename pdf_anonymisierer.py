@@ -109,8 +109,10 @@ def _dll_ladefehler(fehler):
 def _meldung_paket_fehlt(fehler=None) -> str:
     """Text, wenn PyMuPDF fehlt oder sich nicht laden lässt – in der EXE gibt es kein Installieren.bat (M-70).
     Scheitert der Import an einer DLL, fehlt in der Skript-Version meist die Visual-C++-Laufzeit von Microsoft:
-    PyMuPDF lädt msvcp140.dll und vcruntime140_1.dll aus dem Windows-Systemordner, Python bringt sie nicht mit.
-    Installieren.bat erneut auszuführen hilft dann nicht (die EXE hat die Laufzeit in ihrem Ordner)."""
+    PyMuPDF braucht msvcp140.dll und vcruntime140_1.dll. Python bringt vcruntime140_1.dll (ab 3.8.1, im Ordner von
+    python.exe) selbst mit, msvcp140.dll nicht – die legt erst die „Visual C++ Redistributable“ in den
+    Windows-Systemordner. Installieren.bat erneut auszuführen hilft dann nicht (die EXE hat die Laufzeit in ihrem
+    Ordner)."""
     if getattr(sys, "frozen", False):
         return ("Ein Programmbestandteil (PyMuPDF) fehlt oder wurde vom Virenscanner entfernt.\n\n"
                 "Bitte den Programmordner vollständig neu entpacken bzw. eine neue ZIP-Datei anfordern "
@@ -134,6 +136,11 @@ def _meldung_paket_fehlt(fehler=None) -> str:
 try:
     _pymupdf_laden()
 except (ImportError, OSError) as _fehler:     # OSError: z. B. WinError 126 beim Laden einer DLL
+    if isinstance(_fehler, OSError) and _dll_ladefehler(_fehler) is None:
+        # Ein OSError ohne DLL-Bezug (z. B. PermissionError, weil ein Virenscanner eine Paketdatei sperrt) ist kein
+        # fehlendes Paket: „Paket fehlt“ nennte die falsche Ursache, und die Diagnose ginge verloren. Wie jeder
+        # unerwartete Fehler: Traceback in die fehler.log, Dialog „Unerwarteter Fehler“ mit Details (sys.excepthook).
+        raise
     meldung = _meldung_paket_fehlt(_fehler)
     try:
         print("FEHLER: " + meldung)

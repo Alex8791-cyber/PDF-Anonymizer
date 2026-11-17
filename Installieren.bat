@@ -34,6 +34,8 @@ REM requirements.txt (tests\test_auslieferung.py prueft das).
 set "MODELL_WHL=de_core_news_md-3.8.0-py3-none-any.whl"
 set "PY="
 set "UNGEEIGNET="
+set "WINGET_DA="
+set "VC_WINGET_VERSUCHT="
 set "ARCH=%PROCESSOR_ARCHITECTURE%"
 if defined PROCESSOR_ARCHITEW6432 set "ARCH=%PROCESSOR_ARCHITEW6432%"
 
@@ -69,22 +71,27 @@ if errorlevel 4 (
     echo       PyMuPDF 1.28^). Getestet ist das Programm auf ARM64 aber nicht - bei
     echo       Problemen die EXE-Version nutzen ^(laeuft unter Windows 11 in der x64-Emulation^).
 )
-REM Visual-C++-Laufzeit: PyMuPDF und spaCy laden msvcp140.dll und vcruntime140_1.dll aus dem
-REM Windows-Systemordner. Python bringt nur vcruntime140*.dll mit, die Pakete gar keine. Fehlt
-REM die Laufzeit, scheitert jeder Import ("DLL load failed"): Die Vorab-Pruefung in Schritt 3
-REM schlug dann bei jedem Lauf fehl, und pip lief jedes Mal vergeblich erneut. Deshalb wird
-REM hier geprueft und die Installation angeboten. ARM64 ist ungetestet: dort nur ein Hinweis.
+REM Visual-C++-Laufzeit: PyMuPDF und spaCy brauchen msvcp140.dll (C++-Standardbibliothek) und
+REM vcruntime140_1.dll. Python bringt vcruntime140.dll und vcruntime140_1.dll selbst mit (ab 3.8.1, im
+REM Ordner von python.exe), msvcp140.dll legt erst die "Visual C++ Redistributable" in den Systemordner.
+REM Laesst sich die Laufzeit nicht laden, scheitert jeder Import ("DLL load failed"): Die Vorab-Pruefung in
+REM Schritt 3 schlug dann bei jedem Lauf fehl, und pip lief jedes Mal vergeblich erneut. Deshalb wird hier
+REM geprueft (:pruefe_vc_laufzeit) und die Installation angeboten. ARM64 ist ungetestet: dort nur ein Hinweis.
 call :pruefe_vc_laufzeit
 if not defined VC_FEHLT goto vc_ok
 if /i "%ARCH%"=="ARM64" goto vc_hinweis_arm64
 echo.
-echo       Es fehlt die Visual-C++-Laufzeit von Microsoft ^(nicht gefunden: %VC_FEHLT%^).
+echo       Es fehlt die Visual-C++-Laufzeit von Microsoft ^(Python kann %VC_FEHLT% nicht laden^).
 echo       Ohne sie laesst sich PyMuPDF nicht laden ^("DLL load failed"^).
+REM WINGET_DA und VC_WINGET_VERSUCHT bestimmen, welche Abhilfe die Fehlermeldung nennt (ohne winget keinen
+REM winget-Befehl).
 where winget >nul 2>&1
 if errorlevel 1 goto fehler_vc_laufzeit
+set "WINGET_DA=1"
 choice /c JN /n /m "      Jetzt mit winget installieren? Windows fragt nach Administratorrechten. [J/N] "
 if errorlevel 2 goto fehler_vc_laufzeit
 if not errorlevel 1 goto fehler_vc_laufzeit
+set "VC_WINGET_VERSUCHT=1"
 winget install --id Microsoft.VCRedist.2015+.x64 -e --accept-source-agreements --accept-package-agreements
 call :pruefe_vc_laufzeit
 if defined VC_FEHLT goto fehler_vc_laufzeit
@@ -92,7 +99,7 @@ echo       Visual-C++-Laufzeit ist installiert.
 goto vc_ok
 
 :vc_hinweis_arm64
-echo       HINWEIS: Visual-C++-Laufzeit nicht gefunden ^(%VC_FEHLT%^) - auf ARM64 ungetestet,
+echo       HINWEIS: Python kann die Visual-C++-Laufzeit nicht laden ^(%VC_FEHLT%^) - auf ARM64 ungetestet,
 echo       die Installation laeuft weiter. Erscheint spaeter "DLL load failed": die Laufzeit
 echo       fuer ARM64 installieren ^(https://aka.ms/vs/17/release/vc_redist.arm64.exe^).
 
@@ -215,15 +222,22 @@ call :pruefe_kandidat "%~1"
 goto :eof
 
 :pruefe_vc_laufzeit
-REM Setzt VC_FEHLT auf die fehlenden DLLs der Visual-C++-Laufzeit (nicht gesetzt = beide da).
-REM Ein 32-Bit-cmd (aus einem 32-Bit-Programm gestartet) sieht unter System32 die 32-Bit-DLLs
-REM aus SysWOW64 - die 64-Bit-DLLs liegen fuer ihn unter Sysnative.
+REM Setzt VC_FEHLT auf die DLLs der Visual-C++-Laufzeit, die das gefundene Python nicht laden kann (nicht
+REM gesetzt = beide ladbar oder nicht pruefbar). Python laedt sie zur Probe selbst, so wie es spaeter die DLLs
+REM von PyMuPDF sucht: zuerst im Ordner von python.exe, dann im Systemordner - beim 64-Bit-Python im echten
+REM System32, auch wenn dieses cmd ein 32-Bit-cmd ist. Nur in System32 nachzusehen reicht nicht:
+REM vcruntime140_1.dll liegt oft nur neben python.exe (VC++ 2015/2017 bringt sie nicht mit), und conda hat
+REM die ganze Laufzeit im eigenen Ordner. Exit-Code: 10 + 1 (msvcp140.dll fehlt) + 2 (vcruntime140_1.dll
+REM fehlt). Jeder andere Code (Python-Fehler 1, Datei fehlt 2, Absturz) heisst "nicht pruefbar" - dann geht
+REM es weiter wie ohne diese Pruefung, statt einen Rechner abzuweisen, auf dem PyMuPDF laeuft.
 set "VC_FEHLT="
-set "SYSDLL=%SystemRoot%\System32"
-if exist "%SystemRoot%\Sysnative\cmd.exe" set "SYSDLL=%SystemRoot%\Sysnative"
-if not exist "%SYSDLL%\vcruntime140_1.dll" set "VC_FEHLT=vcruntime140_1.dll"
-if not exist "%SYSDLL%\msvcp140.dll" if defined VC_FEHLT set "VC_FEHLT=msvcp140.dll, %VC_FEHLT%"
-if not exist "%SYSDLL%\msvcp140.dll" if not defined VC_FEHLT set "VC_FEHLT=msvcp140.dll"
+"%PY%" werkzeuge\pruefe_installation.py --vc-laufzeit >nul 2>&1
+if errorlevel 14 goto :eof
+if errorlevel 13 set "VC_FEHLT=msvcp140.dll, vcruntime140_1.dll"
+if errorlevel 13 goto :eof
+if errorlevel 12 set "VC_FEHLT=vcruntime140_1.dll"
+if errorlevel 12 goto :eof
+if errorlevel 11 set "VC_FEHLT=msvcp140.dll"
 goto :eof
 
 :pruefe_kandidat
@@ -259,18 +273,25 @@ pause
 exit /b 1
 
 :fehler_vc_laufzeit
+REM Erreicht aus Schritt 2: ohne winget (WINGET_DA leer), nach "N" oder nach einem Versuch mit winget
+REM (VC_WINGET_VERSUCHT). Ohne winget steht vc_redist.x64.exe vorn, und winget wird nicht genannt.
 echo.
 echo ============================================================
 echo   FEHLER: Die Visual-C++-Laufzeit von Microsoft fehlt.
 echo ============================================================
-echo   PyMuPDF braucht die "Microsoft Visual C++ 2015-2022 Redistributable (x64)"
-echo   ^(msvcp140.dll und vcruntime140_1.dll im Windows-Systemordner^). Auf frisch
-echo   eingerichteten Rechnern, in der Windows-Sandbox und auf schlanken Firmen-PCs
-echo   fehlt sie. Ohne sie laesst sich PyMuPDF nicht laden ^("DLL load failed"^) -
-echo   die Pakete erneut zu installieren hilft dann nicht.
+echo   PyMuPDF braucht die "Microsoft Visual C++ 2015-2022 Redistributable (x64)":
+echo   Python bringt vcruntime140.dll und vcruntime140_1.dll selbst mit, msvcp140.dll
+echo   aber nicht - die legt erst dieses Paket in den Windows-Systemordner.
+echo   Python kann auf diesem Rechner nicht laden: %VC_FEHLT%
+echo   Auf frisch eingerichteten Rechnern, in der Windows-Sandbox und auf schlanken
+echo   Firmen-PCs fehlt die Laufzeit. Ohne sie laesst sich PyMuPDF nicht laden
+echo   ^("DLL load failed"^) - die Pakete erneut zu installieren hilft dann nicht.
+if defined VC_WINGET_VERSUCHT echo   Auch nach dem Versuch mit winget laesst sich die Laufzeit nicht laden
+if defined VC_WINGET_VERSUCHT echo   ^(die Meldung von winget steht oben^).
 echo   Abhilfe ^(einmalig, braucht Administratorrechte^):
-echo   - in einer Eingabeaufforderung: winget install --id Microsoft.VCRedist.2015+.x64 -e
-echo   - oder die Datei vc_redist.x64.exe von Microsoft laden und ausfuehren:
+if defined WINGET_DA echo   - in einer Eingabeaufforderung: winget install --id Microsoft.VCRedist.2015+.x64 -e
+if defined WINGET_DA echo   - oder die Datei vc_redist.x64.exe von Microsoft laden und ausfuehren:
+if not defined WINGET_DA echo   - die Datei vc_redist.x64.exe von Microsoft laden und ausfuehren:
 echo     https://aka.ms/vs/17/release/vc_redist.x64.exe
 echo   - ohne Administratorrechte: die IT bitten, das Paket zu installieren, oder die
 echo     EXE-Version nutzen ^(sie bringt die Laufzeit mit, siehe README^).

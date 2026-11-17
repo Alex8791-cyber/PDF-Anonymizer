@@ -179,14 +179,20 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - Statuszeile: Nach dem Hinzufügen von Dateien zu einer schon analysierten Liste blieb dort „Dateien werden
   geprüft …“ stehen. Jetzt steht dort, wie viele Dateien noch nicht analysiert sind; kam keine neue Datei
   hinzu, bleibt die Meldung der Analyse stehen.
-- **Visual-C++-Laufzeit (Skript-Version):** PyMuPDF lädt `msvcp140.dll` und `vcruntime140_1.dll` aus dem
-  Windows-Systemordner, bringt sie aber nicht mit. Fehlte die „Microsoft Visual C++ 2015-2022 Redistributable
-  (x64)“ (frisch eingerichtete Rechner, Windows-Sandbox, schlanke Firmen-Rechner), installierte
+- **Visual-C++-Laufzeit (Skript-Version):** PyMuPDF braucht `msvcp140.dll` aus der „Microsoft Visual C++
+  2015-2022 Redistributable (x64)“; Python bringt nur `vcruntime140.dll` und `vcruntime140_1.dll` selbst mit.
+  Fehlte die Laufzeit (frisch eingerichtete Rechner, Windows-Sandbox, schlanke Firmen-Rechner), installierte
   `Installieren.bat` bei jedem Lauf alles neu und nannte eine falsche Ursache; das Startskript meldete „Paket
-  fehlt“. Jetzt prüft `Installieren.bat` die Laufzeit vor den Paketen und bietet die Installation per winget
-  an (sonst Hinweis auf `vc_redist.x64.exe` von Microsoft), `EXE-bauen.bat` prüft sie vor dem Bau; Startskript
-  und `werkzeuge/pruefe_installation.py` nennen bei „DLL load failed“ die Laufzeit als Ursache. Die EXE bringt
-  die Laufzeit weiterhin mit; `EXE-bauen.bat` und der EXE-Job der GitHub-Action prüfen das jetzt.
+  fehlt“. Jetzt prüft `Installieren.bat` die Laufzeit vor den Paketen – das gefundene Python lädt die DLLs zur
+  Probe selbst, so wie PyMuPDF sie sucht: zuerst im Ordner von python.exe, dann im Systemordner. Ein Rechner,
+  auf dem `vcruntime140_1.dll` nur neben python.exe liegt (VC++ 2015/2017) oder der die Laufzeit im eigenen
+  Ordner hat (conda), wird also nicht abgewiesen. Fehlt sie, bietet `Installieren.bat` die Installation per
+  winget an; ohne winget nennt die Meldung zuerst `vc_redist.x64.exe` von Microsoft. `EXE-bauen.bat`
+  prüft die Laufzeit vor dem Bau ebenso. Startskript und `werkzeuge/pruefe_installation.py` nennen bei „DLL
+  load failed“ die Laufzeit als Ursache; das Prüfskript gibt die Abhilfe je Paket an (PyMuPDF, spaCy, tkinter).
+  Andere Fehler beim Laden von PyMuPDF (z. B. eine vom Virenscanner gesperrte Datei) landen wie jeder
+  unerwartete Fehler mit Details in der `fehler.log`. Die EXE bringt die Laufzeit weiterhin mit;
+  `EXE-bauen.bat` und der EXE-Job der GitHub-Action prüfen das jetzt.
 - **OCR-Sprachdatei:** Die mitgelieferte `deu.traineddata` geht wieder vor (wie seit 0.2.0 beschrieben). Hatte
   der Rechner eine andere Tesseract-Installation, deren `TESSDATA_PREFIX` nur `eng.traineddata` enthielt, las
   das Programm alle Scans englisch, jede Scan-Ausgabe hieß `_PRUEFEN`, und die Warnung riet fälschlich zum

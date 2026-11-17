@@ -13,6 +13,7 @@ import importlib.metadata
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
 import types
@@ -134,20 +135,23 @@ def test_batch_grundgeruest(name):
 # ----------------------------------------------------------------------
 CMD_BEFEHLE = (  # Stichwort in der Zeile -> Name im nachgebauten Ablauf (erstes passendes zählt)
     ("pushd ", "pushd"), ("popd", "popd"), ("where winget", "where_winget"), ("choice ", "choice"),
-    ("winget install --id Microsoft.VCRedist", "winget_vc"),
+    ("winget install --id Microsoft.VCRedist", "winget_vc"), ("pruefe_installation.py --vc-laufzeit", "py_vc"),
 )
 _CMD_IF = re.compile(r'if\s+(/i\s+)?(not\s+)?(?:exist\s+("[^"]*"|\S+)|defined\s+(\w+)|errorlevel\s+(\d+)'
                      r'|("[^"]*")==("[^"]*"))\s+(.+)', re.IGNORECASE)
 
 
 def _cmd(name: str, start: str, ende_labels: set[str], *, variablen: dict | None = None, dateien=(),
-         ergebnisse: dict | None = None, effekte: dict | None = None, ende_zeile: str | None = None):
+         ergebnisse: dict | None = None, effekte: dict | None = None, ende_zeile: str | None = None,
+         ausgabe: list | None = None, variablen_aus: dict | None = None):
     """Spielt einen Abschnitt einer Batch-Datei ab der Zeile `start` durch: Labels, goto, call :label / goto :eof,
     set "X=…" mit %X%-Erweiterung (undefiniert = leer, je Zeile vor der Ausführung wie cmd), if [/i] [not]
-    exist/defined/errorlevel N/"a"=="b" (auch verkettet) und "befehl || anweisung". Befehle aus CMD_BEFEHLE liefern
-    den Errorlevel aus `ergebnisse` (Standard 0); `effekte` legt danach Dateien an (z. B. die DLLs nach winget).
+    exist/defined/errorlevel N/"a"=="b" (auch verkettet), "befehl || anweisung" und exit /b N. Befehle aus
+    CMD_BEFEHLE liefern den Errorlevel aus `ergebnisse` (Standard 0; eine Funktion bekommt die Dateien des
+    nachgebauten Rechners und rechnet ihn daraus aus); `effekte` legt danach Dateien an (z. B. die DLLs nach winget).
+    echo-Zeilen landen ohne Fluchtzeichen ^ in `ausgabe`, die Variablen am Ende in `variablen_aus` (falls übergeben).
     Unbekannte Befehle und Klammerblöcke sind ein Testfehler – der Nachbau soll nichts stillschweigend übergehen.
-    Rückgabe: (ausgeführte Befehle, erreichtes Label | "weiter" an `ende_zeile`)."""
+    Rückgabe: (ausgeführte Befehle, erreichtes Label | "weiter" an `ende_zeile` | "exit N")."""
     zeilen = [z.strip() for z in _lies(name).splitlines()]
     labels = {z[1:].lower(): i for i, z in enumerate(zeilen) if re.fullmatch(r":\w+", z)}
     werte = {k.upper(): v for k, v in (variablen or {}).items()}
@@ -156,18 +160,33 @@ def _cmd(name: str, start: str, ende_labels: set[str], *, variablen: dict | None
     zustand = {"errorlevel": 0, "zeile": ""}
     ausgefuehrt, stapel = [], []
 
+    def fertig(ergebnis):
+        if variablen_aus is not None:
+            variablen_aus.update(werte)
+        return ausgefuehrt, ergebnis
+
     def befehl(text):
         art = next((a for stichwort, a in CMD_BEFEHLE if stichwort.lower() in zustand["zeile"].lower()), None)
         assert art, f"{name}: unbekannter Befehl im nachgebauten Ablauf: {text!r}"
         ausgefuehrt.append(art)
-        zustand["errorlevel"] = ergebnisse.get(art, 0)
+        wert = ergebnisse.get(art, 0)
+        zustand["errorlevel"] = wert(frozenset(vorhanden)) if callable(wert) else wert
         vorhanden.update(d.lower() for d in effekte.get(art, ()))
 
     def anweisung(text):
-        """Führt eine (schon erweiterte) Anweisung aus; Rückgabe None, ("goto", i), ("call", i) oder "eof"."""
+        """Führt eine (schon erweiterte) Anweisung aus; Rückgabe None, ("goto", i), ("call", i), ("exit", N) oder
+        "eof"."""
         text = text.strip()
-        if not text or re.match(r"(rem\b|echo[ .]|echo$|pause$)", text, re.IGNORECASE):
+        m = re.fullmatch(r"echo(?:[ .](.*))?", text, re.IGNORECASE)
+        if m:
+            if ausgabe is not None:
+                ausgabe.append(re.sub(r"\^(.)", r"\1", m.group(1) or "").rstrip())
             return None
+        if not text or re.match(r"(rem\b|pause$)", text, re.IGNORECASE):
+            return None
+        m = re.fullmatch(r"exit\s+/b(?:\s+(\d+))?", text, re.IGNORECASE)
+        if m:
+            return "exit", int(m.group(1) or 0)
         assert not text.endswith("("), f"{name}: Klammerblock im nachgebauten Ablauf: {text!r}"
         m = _CMD_IF.fullmatch(text)
         if m:
@@ -202,9 +221,9 @@ def _cmd(name: str, start: str, ende_labels: set[str], *, variablen: dict | None
     for _ in range(2000):
         z = zeilen[i]
         if re.fullmatch(r":\w+", z) and z[1:].lower() in ende_labels:
-            return ausgefuehrt, z[1:].lower()
+            return fertig(z[1:].lower())
         if z == ende_zeile:
-            return ausgefuehrt, "weiter"
+            return fertig("weiter")
         zustand["zeile"] = z
         if re.fullmatch(r":\w+", z):
             ziel = None
@@ -218,6 +237,9 @@ def _cmd(name: str, start: str, ende_labels: set[str], *, variablen: dict | None
         elif ziel[0] == "call":
             stapel.append(i + 1)
             i = ziel[1]
+        elif ziel[0] == "exit":
+            assert not stapel, f"{name}: exit /b in einem Unterprogramm ist im Nachbau nicht vorgesehen"
+            return fertig(f"exit {ziel[1]}")
         else:
             i = ziel[1]
     raise AssertionError("Endlosschleife im nachgebauten Ablauf")
@@ -302,13 +324,41 @@ def test_starten_bat_braucht_keinen_arbeitsordner():
 
 
 # ----------------------------------------------------------------------
-# Visual-C++-Laufzeit: PyMuPDF lädt msvcp140.dll und vcruntime140_1.dll aus dem Windows-Systemordner
+# Visual-C++-Laufzeit: PyMuPDF braucht msvcp140.dll und vcruntime140_1.dll. Python bringt vcruntime140*.dll selbst
+# mit, msvcp140.dll legt erst die „Visual C++ Redistributable“ in den Systemordner. Deshalb lädt das gefundene Python
+# die DLLs zur Probe selbst (werkzeuge\pruefe_installation.py --vc-laufzeit) – mit der Suchreihenfolge von PyMuPDF.
 # ----------------------------------------------------------------------
 VC_WINGET = "winget install --id Microsoft.VCRedist.2015+.x64 -e"
 VC_LINK = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 VC_NAME = "Microsoft Visual C++ 2015-2022 Redistributable (x64)"
-SYS32, NATIV = "C:\\Windows\\System32\\", "C:\\Windows\\Sysnative\\"
+SYS32, NATIV, WOW64 = "C:\\Windows\\System32\\", "C:\\Windows\\Sysnative\\", "C:\\Windows\\SysWOW64\\"
 VC_DLLS = ("msvcp140.dll", "vcruntime140_1.dll")
+PYDIR = "C:\\Users\\Nutzer\\AppData\\Local\\Programs\\Python\\Python312\\"
+VC_AUFRUF = '"%PY%" werkzeuge\\pruefe_installation.py --vc-laufzeit >nul 2>&1'
+
+
+def _vc(*namen, ordner=SYS32):
+    return {ordner + n for n in namen}
+
+
+# Dateien des nachgebauten Rechners aus Sicht des 64-Bit-Pythons (System32 = das echte, SysWOW64 = 32-Bit-DLLs).
+# Jedes python.org-Python (x64) ab 3.8.1 bringt vcruntime140.dll und vcruntime140_1.dll im eigenen Ordner mit.
+PYTHON_ORG = _vc("python.exe", "vcruntime140.dll", "vcruntime140_1.dll", ordner=PYDIR)
+VC2017 = _vc("msvcp140.dll", "vcruntime140.dll")                    # VC++ 2015/2017: vcruntime140_1.dll erst ab 2019
+VC2022 = _vc("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")
+CONDA = _vc("msvcp140.dll", ordner=PYDIR)                           # app-lokale Laufzeit neben python.exe
+
+
+def _python_vc(vorhanden) -> int:
+    """Errorlevel von VC_AUFRUF auf dem nachgebauten Rechner: die echte Prüfung (vc_laufzeit_exitcode) mit einem Lader,
+    der wie Windows für ein 64-Bit-Python sucht (ctypes, Name ohne Pfad: LOAD_LIBRARY_SEARCH_DEFAULT_DIRS) – zuerst
+    im Ordner von python.exe, dann im echten System32; nicht in SysWOW64 und nicht in PATH."""
+    def laden(dll):
+        for ordner in (PYDIR, SYS32):
+            if (ordner + dll).lower() in vorhanden:
+                return ordner + dll
+        raise FileNotFoundError(2, f"Could not find module '{dll}' (or one of its dependencies)")
+    return _pruefe_installation().vc_laufzeit_exitcode(laden)
 
 
 def _block(name: str, label: str) -> str:
@@ -317,19 +367,32 @@ def _block(name: str, label: str) -> str:
     return block[:block.index("exit /b")]
 
 
+def _ohne_rem(block: str) -> list[str]:
+    return [z.strip() for z in block.splitlines() if z.strip() and not z.strip().upper().startswith("REM")]
+
+
+def _unterprogramm(name: str, label: str) -> list[str]:
+    """Befehlszeilen (ohne REM) eines Unterprogramms, vom Label bis vor das nächste Label."""
+    text = _lies(name)
+    block = text[text.index(f"\n:{label}\n") + len(label) + 2:]
+    naechstes = re.search(r"^:\w+$", block, re.MULTILINE)
+    return _ohne_rem(block[:naechstes.start()] if naechstes else block)
+
+
 def test_installieren_prueft_vc_laufzeit_vor_den_paketen():
     """Befund: Ohne „Visual C++ Redistributable“ scheitert 'import fitz' mit „DLL load failed“ – die Vorab-Prüfung
-    schlug deshalb bei jedem Lauf fehl, pip installierte alles neu, und Schritt 4 nannte eine falsche Ursache."""
+    schlug deshalb bei jedem Lauf fehl, pip installierte alles neu, und Schritt 4 nannte eine falsche Ursache.
+    Geänderte Erwartung (Gegenprüfung, Regression): Verlangt war, dass das Unterprogramm msvcp140.dll und
+    vcruntime140_1.dll als Dateien in System32 bzw. Sysnative sucht. Das brach Rechner mit VC++ 2015/2017
+    (vcruntime140_1.dll liegt dann nur neben python.exe) und mit app-lokaler Laufzeit (conda) ab. Jetzt lädt das
+    gefundene Python die DLLs selbst – mit derselben Suchreihenfolge wie die Erweiterungsmodule von PyMuPDF."""
     text = _lies("Installieren.bat")
     pruefung = text.index("call :pruefe_vc_laufzeit")
     assert text.index("echo [2/5]") < pruefung < text.index("echo [3/5]")
     assert pruefung < text.index('"%PY%" -W ignore -c "import fitz, spacy'), "vor der Vorab-Prüfung der Pakete"
-    unter = text[text.index("\n:pruefe_vc_laufzeit\n"):]
-    unter = unter[:unter.index("goto :eof")]
-    assert 'set "SYSDLL=%SystemRoot%\\System32"' in unter
-    assert 'if exist "%SystemRoot%\\Sysnative\\cmd.exe" set "SYSDLL=%SystemRoot%\\Sysnative"' in unter
-    for dll in VC_DLLS:
-        assert f'if not exist "%SYSDLL%\\{dll}"' in unter
+    unter = _unterprogramm("Installieren.bat", "pruefe_vc_laufzeit")
+    assert unter[:2] == ['set "VC_FEHLT="', VC_AUFRUF], unter
+    assert not any(re.search(r"exist|system32|sysnative|syswow64", z, re.IGNORECASE) for z in unter), unter
     assert VC_WINGET in text and "choice /c JN" in text
     meldung = _block("Installieren.bat", "fehler_vc_laufzeit")
     for begriff in (VC_NAME, VC_WINGET, "vc_redist.x64.exe", VC_LINK, "DLL load failed", "Administratorrechte",
@@ -340,40 +403,111 @@ def test_installieren_prueft_vc_laufzeit_vor_den_paketen():
     assert "DLL load failed" in pruefung and VC_WINGET in pruefung and VC_LINK in pruefung
 
 
-def _vc(*namen, ordner=SYS32):
-    return {ordner + n for n in namen}
+NACH_WINGET = ["py_vc", "where_winget", "choice", "winget_vc", "py_vc"]
 
 
 @pytest.mark.parametrize("arch, dateien, ergebnisse, effekte, erwartet_befehle, erwartet_ende", [
     # alles da: keine Rückfrage, weiter zu pip
-    ("AMD64", _vc(*VC_DLLS), {}, {}, [], "vc_ok"),
-    # eine DLL fehlt und kein winget: Meldung mit Abhilfe, kein Paket-Schritt
-    ("AMD64", _vc("vcruntime140_1.dll"), {"where_winget": 1}, {}, ["where_winget"], "fehler_vc_laufzeit"),
-    ("AMD64", _vc("msvcp140.dll"), {"where_winget": 1}, {}, ["where_winget"], "fehler_vc_laufzeit"),
+    ("AMD64", PYTHON_ORG | VC2022, {}, {}, ["py_vc"], "vc_ok"),
+    # Befund (Regression): nur VC++ 2015/2017 – vcruntime140_1.dll liegt allein neben python.exe, und dort sucht
+    # Windows für Erweiterungsmodule zuerst. PyMuPDF lädt hier; die Installation läuft weiter.
+    ("AMD64", PYTHON_ORG | VC2017, {}, {}, ["py_vc"], "vc_ok"),
+    # app-lokale Laufzeit (conda): msvcp140.dll neben python.exe, im Systemordner nichts
+    ("AMD64", PYTHON_ORG | CONDA, {}, {}, ["py_vc"], "vc_ok"),
+    # msvcp140.dll fehlt (frischer Rechner, Windows-Sandbox) und kein winget: Meldung mit Abhilfe, kein Paket-Schritt
+    ("AMD64", PYTHON_ORG, {"where_winget": 1}, {}, ["py_vc", "where_winget"], "fehler_vc_laufzeit"),
+    # vcruntime140_1.dll nirgends (ein Python ohne die Datei) und nur VC++ 2017: die Laufzeit ab 2019 bringt sie mit
+    ("AMD64", PYTHON_ORG - _vc("vcruntime140_1.dll", ordner=PYDIR) | VC2017, {"where_winget": 1}, {},
+     ["py_vc", "where_winget"], "fehler_vc_laufzeit"),
     # winget da, Installation abgelehnt (N = Errorlevel 2), choice nicht bedienbar (255) oder mit Strg+C
     # unterbrochen, ohne die Batch-Datei abzubrechen (0): nichts installieren
-    ("AMD64", set(), {"choice": 2}, {}, ["where_winget", "choice"], "fehler_vc_laufzeit"),
-    ("AMD64", set(), {"choice": 255}, {}, ["where_winget", "choice"], "fehler_vc_laufzeit"),
-    ("AMD64", set(), {"choice": 0}, {}, ["where_winget", "choice"], "fehler_vc_laufzeit"),
-    # angenommen: winget installiert die Laufzeit, danach geht es weiter
-    ("AMD64", set(), {"choice": 1}, {"winget_vc": _vc(*VC_DLLS)}, ["where_winget", "choice", "winget_vc"], "vc_ok"),
-    # winget scheitert (z. B. keine Administratorrechte) oder meldet Erfolg ohne Dateien: Meldung, keine Schleife
-    ("AMD64", set(), {"choice": 1, "winget_vc": 1}, {}, ["where_winget", "choice", "winget_vc"],
-     "fehler_vc_laufzeit"),
-    ("AMD64", set(), {"choice": 1}, {"winget_vc": _vc("msvcp140.dll")}, ["where_winget", "choice", "winget_vc"],
-     "fehler_vc_laufzeit"),
-    # 32-Bit-cmd auf 64-Bit-Windows: System32 zeigt dort auf SysWOW64 (32-Bit-DLLs) – maßgeblich ist Sysnative
-    ("AMD64", _vc("cmd.exe", *VC_DLLS, ordner=NATIV), {}, {}, [], "vc_ok"),
-    ("AMD64", _vc("cmd.exe", ordner=NATIV) | _vc(*VC_DLLS), {"where_winget": 1}, {}, ["where_winget"],
-     "fehler_vc_laufzeit"),
+    ("AMD64", PYTHON_ORG, {"choice": 2}, {}, ["py_vc", "where_winget", "choice"], "fehler_vc_laufzeit"),
+    ("AMD64", PYTHON_ORG, {"choice": 255}, {}, ["py_vc", "where_winget", "choice"], "fehler_vc_laufzeit"),
+    ("AMD64", PYTHON_ORG, {"choice": 0}, {}, ["py_vc", "where_winget", "choice"], "fehler_vc_laufzeit"),
+    # angenommen: winget installiert die Laufzeit, die zweite Probe lädt sie, danach geht es weiter
+    ("AMD64", PYTHON_ORG, {"choice": 1}, {"winget_vc": VC2022}, NACH_WINGET, "vc_ok"),
+    # winget scheitert (z. B. keine Administratorrechte) oder meldet Erfolg, ohne dass Python die DLL laden kann:
+    # Meldung, keine Schleife
+    ("AMD64", PYTHON_ORG, {"choice": 1, "winget_vc": 1}, {}, NACH_WINGET, "fehler_vc_laufzeit"),
+    ("AMD64", PYTHON_ORG, {"choice": 1}, {"winget_vc": _vc("vcruntime140_1.dll")}, NACH_WINGET, "fehler_vc_laufzeit"),
+    # 32-Bit-cmd auf 64-Bit-Windows (Sysnative vorhanden): Es prüft das 64-Bit-Python, das das echte System32 sieht –
+    # cmd selbst sieht keine DLL an. Nur die 32-Bit-Laufzeit (SysWOW64) reicht diesem Python nicht.
+    ("AMD64", PYTHON_ORG | VC2022 | _vc("cmd.exe", ordner=NATIV), {}, {}, ["py_vc"], "vc_ok"),
+    ("AMD64", PYTHON_ORG | _vc("cmd.exe", ordner=NATIV) | _vc("msvcp140.dll", "vcruntime140.dll", ordner=WOW64),
+     {"where_winget": 1}, {}, ["py_vc", "where_winget"], "fehler_vc_laufzeit"),
     # ARM64 (ungetestet): nur ein Hinweis, die Installation läuft weiter
-    ("ARM64", set(), {}, {}, [], "vc_ok"),
+    ("ARM64", PYTHON_ORG, {}, {}, ["py_vc"], "vc_ok"),
 ])
 def test_installieren_ablauf_vc_laufzeit(arch, dateien, ergebnisse, effekte, erwartet_befehle, erwartet_ende):
+    """Geänderte Erwartung (Gegenprüfung, Regression): Ein Rechner mit msvcp140.dll im Systemordner, aber ohne
+    vcruntime140_1.dll dort (VC++ 2015/2017), galt als „Laufzeit fehlt“ und wurde abgewiesen. Maßgeblich ist, was das
+    gefundene Python laden kann – vcruntime140_1.dll bringt es selbst mit (Modell: _python_vc)."""
     befehle, ende = _cmd("Installieren.bat", "call :pruefe_vc_laufzeit", {"vc_ok", "fehler_vc_laufzeit"},
-                         variablen={"SystemRoot": "C:\\Windows", "ARCH": arch}, dateien=dateien,
-                         ergebnisse=ergebnisse, effekte=effekte)
+                         variablen={"SystemRoot": "C:\\Windows", "ARCH": arch, "PY": PYDIR + "python.exe"},
+                         dateien=dateien, ergebnisse={"py_vc": _python_vc, **ergebnisse}, effekte=effekte)
     assert (befehle, ende) == (erwartet_befehle, erwartet_ende)
+
+
+@pytest.mark.parametrize("ergebnisse, winget_da, versucht", [
+    ({"where_winget": 1}, False, False),            # Befund: kein winget (Sandbox, LTSC, gesperrter App Installer)
+    ({"choice": 2}, True, False),                   # winget da, Installation abgelehnt
+    ({"choice": 1, "winget_vc": 1}, True, True),    # winget versucht und gescheitert (z. B. ohne Administratorrechte)
+])
+def test_installieren_vc_meldung_passt_zur_lage(ergebnisse, winget_da, versucht):
+    """Befund: :fehler_vc_laufzeit nannte als erste Abhilfe den winget-Befehl – auch wenn das Skript dorthin kam, weil
+    winget fehlt. Ohne winget steht jetzt vc_redist.x64.exe von Microsoft vorn, und winget kommt gar nicht vor; hat
+    winget die Installation versucht, verweist die Meldung auf dessen Ausgabe."""
+    ausgabe = []
+    befehle, ende = _cmd("Installieren.bat", "call :pruefe_vc_laufzeit", {"vc_ok"},
+                         variablen={"SystemRoot": "C:\\Windows", "ARCH": "AMD64", "PY": PYDIR + "python.exe"},
+                         dateien=PYTHON_ORG, ergebnisse={"py_vc": _python_vc, **ergebnisse}, ausgabe=ausgabe)
+    assert ende == "exit 1" and befehle[-1] == "popd", (befehle, ende)
+    meldung = ausgabe[next(i for i, z in enumerate(ausgabe) if "FEHLER: Die Visual-C++-Laufzeit" in z):]
+    abhilfen = [z.strip()[2:] for z in meldung if z.strip().startswith("- ")]
+    assert any(VC_LINK in z for z in meldung) and any("msvcp140.dll" in z for z in meldung), meldung
+    if winget_da:
+        assert VC_WINGET in abhilfen[0] and "vc_redist.x64.exe" in abhilfen[1], abhilfen
+    else:
+        assert "vc_redist.x64.exe" in abhilfen[0], abhilfen
+        assert not any("winget" in z for z in ausgabe), ausgabe
+    assert any("Meldung von winget" in z for z in meldung) == versucht, meldung
+    # die Merker starten leer – eine gleichnamige Umgebungsvariable verfälscht die Meldung nicht
+    zeilen = [z.strip() for z in _lies("Installieren.bat").splitlines()]
+    schritt1 = next(i for i, z in enumerate(zeilen) if z.startswith("echo [1/5]"))
+    for merker in ("WINGET_DA", "VC_WINGET_VERSUCHT"):
+        assert f'set "{merker}="' in zeilen[:schritt1], merker
+
+
+def _vc_unterprogramm(name: str, errorlevel: int) -> dict:
+    """Variablen nach ':pruefe_vc_laufzeit', wenn VC_AUFRUF den Errorlevel `errorlevel` liefert."""
+    zeilen = [z.strip() for z in _lies(name).splitlines()]
+    danach = zeilen[zeilen.index("call :pruefe_vc_laufzeit") + 1]
+    variablen = {}
+    befehle, ende = _cmd(name, "call :pruefe_vc_laufzeit", set(), variablen={"VC_FEHLT": "vom letzten Lauf"},
+                         ergebnisse={"py_vc": errorlevel}, ende_zeile=danach, variablen_aus=variablen)
+    assert (befehle, ende) == (["py_vc"], "weiter")
+    return variablen
+
+
+@pytest.mark.parametrize("name", ("Installieren.bat", "EXE-bauen.bat"))
+@pytest.mark.parametrize("nicht_ladbar", [(), ("msvcp140.dll",), ("vcruntime140_1.dll",), VC_DLLS])
+def test_vc_laufzeit_batch_versteht_den_exitcode(name, nicht_ladbar):
+    """Prüfskript und Batch-Dateien verständigen sich über den Exit-Code von '--vc-laufzeit': VC_FEHLT nennt genau die
+    DLLs, die Python nicht laden konnte."""
+    def laden(dll):
+        if dll in nicht_ladbar:
+            raise FileNotFoundError(2, f"Could not find module '{dll}'")
+        return SYS32 + dll
+    errorlevel = _pruefe_installation().vc_laufzeit_exitcode(laden)
+    assert _vc_unterprogramm(name, errorlevel).get("VC_FEHLT", "") == ", ".join(nicht_ladbar)
+
+
+@pytest.mark.parametrize("name", ("Installieren.bat", "EXE-bauen.bat"))
+@pytest.mark.parametrize("errorlevel", [0, 1, 2, 9, 14, 255, -1073741819])
+def test_vc_laufzeit_nicht_pruefbar_haelt_nicht_auf(name, errorlevel):
+    """Läuft die Probe nicht (Python-Fehler: 1, Datei fehlt: 2, Absturz: negativ, sonst Unbekanntes), bleibt VC_FEHLT
+    leer: Die Installation läuft weiter wie ohne die Prüfung, statt einen Rechner abzuweisen, auf dem PyMuPDF lädt."""
+    assert _vc_unterprogramm(name, errorlevel).get("VC_FEHLT", "") == ""
 
 
 def test_installieren_vc_ok_fuehrt_zu_pip_und_paketen():
@@ -403,21 +537,16 @@ def test_exe_bauen_behaelt_die_vc_laufzeit_im_programmordner():
         assert f'"_internal\\{dll}"' in lauf, f"EXE-Job prüft _internal\\{dll} nicht"
 
 
-def _ohne_rem(block: str) -> list[str]:
-    return [z.strip() for z in block.splitlines() if z.strip() and not z.strip().upper().startswith("REM")]
-
-
 def test_exe_bauen_prueft_vc_laufzeit_vor_den_paketen():
     """Dieselbe Vorab-Prüfung der Pakete steht in EXE-bauen.bat: Ohne Laufzeit hätte auch dort jeder Bau vergeblich
-    neu installiert. Geprüft wird mit demselben Unterprogramm wie in Installieren.bat."""
+    neu installiert. Geprüft wird mit demselben Unterprogramm wie in Installieren.bat (verglichen bis zum nächsten
+    Label, nicht nur bis zum ersten 'goto :eof')."""
     text = _lies("EXE-bauen.bat")
     pruefung = text.index("call :pruefe_vc_laufzeit")
     assert text.index("goto fehler_32bit") < pruefung < text.index("echo [1/4]")
     assert pruefung < text.index('"%PY%" -W ignore -c "import fitz, spacy')
-    def unter(name):
-        block = _lies(name)[_lies(name).index("\n:pruefe_vc_laufzeit\n"):]
-        return _ohne_rem(block[:block.index("goto :eof")])
-    assert unter("EXE-bauen.bat") == unter("Installieren.bat")
+    assert (_unterprogramm("EXE-bauen.bat", "pruefe_vc_laufzeit")
+            == _unterprogramm("Installieren.bat", "pruefe_vc_laufzeit"))
     meldung = _block("EXE-bauen.bat", "fehler_vc_laufzeit")
     for begriff in (VC_NAME, VC_WINGET, VC_LINK, "%VC_FEHLT%", "DLL load failed", "Installieren.bat",
                     "Administratorrechte"):
@@ -425,18 +554,24 @@ def test_exe_bauen_prueft_vc_laufzeit_vor_den_paketen():
 
 
 @pytest.mark.parametrize("dateien, erwartet", [
-    (_vc(*VC_DLLS), "weiter"),
-    (_vc("msvcp140.dll"), "fehler_vc_laufzeit"),
+    (PYTHON_ORG | VC2022, "weiter"),
+    (PYTHON_ORG | VC2017, "weiter"),                                            # Befund (Regression): reicht
+    (PYTHON_ORG | CONDA, "weiter"),                                             # app-lokale Laufzeit
+    (PYTHON_ORG, "fehler_vc_laufzeit"),                                         # msvcp140.dll fehlt
+    (PYTHON_ORG - _vc("vcruntime140_1.dll", ordner=PYDIR) | VC2017, "fehler_vc_laufzeit"),   # vcruntime140_1 nirgends
     (set(), "fehler_vc_laufzeit"),
-    (_vc("cmd.exe", *VC_DLLS, ordner=NATIV), "weiter"),                        # 32-Bit-cmd: Sysnative zählt
-    (_vc("cmd.exe", ordner=NATIV) | _vc(*VC_DLLS), "fehler_vc_laufzeit"),
+    (PYTHON_ORG | VC2022 | _vc("cmd.exe", ordner=NATIV), "weiter"),             # 32-Bit-cmd: das 64-Bit-Python prüft
+    (PYTHON_ORG | _vc("cmd.exe", ordner=NATIV) | _vc("msvcp140.dll", ordner=WOW64), "fehler_vc_laufzeit"),
 ])
 def test_exe_bauen_ablauf_vc_laufzeit(dateien, erwartet):
+    """Geänderte Erwartung wie bei test_installieren_ablauf_vc_laufzeit: „msvcp140.dll im Systemordner,
+    vcruntime140_1.dll nur neben python.exe“ verweigerte den Bau, obwohl PyMuPDF auf diesem Rechner lädt."""
     zeilen = [z.strip() for z in _lies("EXE-bauen.bat").splitlines()]
     weiter = next(z for z in zeilen if z.startswith("echo [1/4]"))
     befehle, ende = _cmd("EXE-bauen.bat", "call :pruefe_vc_laufzeit", {"fehler_vc_laufzeit"},
-                         variablen={"SystemRoot": "C:\\Windows"}, dateien=dateien, ende_zeile=weiter)
-    assert (befehle, ende) == ([], erwartet)
+                         variablen={"SystemRoot": "C:\\Windows", "PY": PYDIR + "python.exe"}, dateien=dateien,
+                         ergebnisse={"py_vc": _python_vc}, ende_zeile=weiter)
+    assert (befehle, ende) == (["py_vc"], erwartet)
 
 
 def test_installieren_meldet_fehlende_verknuepfung_passend():
@@ -1180,7 +1315,7 @@ def test_pruefe_installation_nennt_vc_laufzeit_bei_dll_ladefehler(monkeypatch):
                         if modul == "fitz" else (True, "ok"))
     _zeilen, probleme = p.pakete_bericht()
     assert probleme and not any("Visual C++" in pr for pr in probleme)
-    # unter Windows mit Blick in den Systemordner: fehlt die Laufzeit, oder ist sie da und vermutlich veraltet?
+    # unter Windows mit der Ladeprobe: fehlt die Laufzeit, oder lässt sie sich laden und ist vermutlich veraltet?
     fehlt = p._dll_problem(["fitz"], ["msvcp140.dll"])
     assert "'fitz' lässt sich" in fehlt and "fehlt (msvcp140.dll" in fehlt and VC_WINGET in fehlt
     veraltet = p._dll_problem(["fitz", "spacy"], [])
@@ -1190,26 +1325,136 @@ def test_pruefe_installation_nennt_vc_laufzeit_bei_dll_ladefehler(monkeypatch):
     assert "Installieren.bat erneut" not in veraltet
 
 
-def test_pruefe_installation_vc_laufzeit_bericht(tmp_path, monkeypatch):
+def test_pruefe_installation_dll_abhilfe_je_modul():
+    """Befund: War die Laufzeit ladbar, riet die Meldung immer, PyMuPDF neu zu installieren – auch wenn nur spaCy oder
+    tkinter an einer DLL scheiterten. tkinter gehört zu Python selbst (Tcl/Tk); die Visual-C++-Laufzeit ist dort nicht
+    die übliche Ursache. Die Abhilfe richtet sich jetzt nach dem gescheiterten Modul."""
     p = _pruefe_installation()
-    system32 = tmp_path / "System32"
-    system32.mkdir()
-    zeilen, probleme = p.laufzeit_bericht(windows=True, system_ordner=system32)
+    pymupdf_neu = f'--force-reinstall --no-deps --only-binary=:all: "pymupdf{_pins()["pymupdf"]}"'
+    spacy_neu = f'--force-reinstall --only-binary=:all: "spacy{_pins()["spacy"]}"'     # mit thinc, blis, …
+    dnd_neu = f'--force-reinstall --no-deps --only-binary=:all: "tkinterdnd2{_pins()["tkinterdnd2"]}"'
+    spacy = p._dll_problem(["spacy"], [])
+    assert spacy.startswith("'spacy' lässt sich nicht laden („DLL load failed“)."), spacy
+    assert spacy_neu in spacy and "pymupdf" not in spacy.lower(), spacy
+    assert VC_WINGET in spacy and "veraltet" in spacy, spacy        # spaCy (C++) braucht die Laufzeit ebenso
+    assert VC_WINGET in p._dll_problem(["spacy"], ["msvcp140.dll"])
+    for fehlt in ([], ["msvcp140.dll"], None):
+        tk = p._dll_problem(["tkinter"], fehlt)
+        assert "Tcl/Tk" in tk and "reparieren" in tk and "tcl/tk and IDLE" in tk, tk
+        assert "pip install" not in tk and VC_WINGET not in tk and "pymupdf" not in tk.lower(), tk
+    nur_dnd = p._dll_problem(["tkinterdnd2"], [])
+    assert dnd_neu in nur_dnd and "pymupdf" not in nur_dnd.lower() and "Tcl/Tk" not in nur_dnd, nur_dnd
+    # PyMuPDF wie bisher
+    fitz = p._dll_problem(["fitz"], [])
+    assert pymupdf_neu in fitz and spacy_neu not in fitz and "Tcl/Tk" not in fitz, fitz
+    # mehrere Module: jede Abhilfe passt zu ihrem Modul; tkinterdnd2 scheitert dann an tkinter
+    alle = p._dll_problem(["fitz", "spacy", "tkinter", "tkinterdnd2"], [])
+    for teil in (pymupdf_neu, spacy_neu, "Tcl/Tk", VC_WINGET):
+        assert teil in alle, (teil, alle)
+    assert dnd_neu not in alle, alle
+
+
+def _windows_rechner(tmp_path, monkeypatch, system32=(), python_ordner=("vcruntime140.dll", "vcruntime140_1.dll")):
+    """Nachgebauter Windows-Rechner für die Laufzeit-Prüfung: Dateien in %SystemRoot%\\System32 und im Ordner von
+    python.exe (Standard: was jedes python.org-Python mitbringt). ctypes.WinDLL lädt einen Namen ohne Pfad wie Windows
+    für ein 64-Bit-Python (LOAD_LIBRARY_SEARCH_DEFAULT_DIRS): zuerst aus dem Ordner von python.exe, dann aus System32 –
+    nicht aus PATH. GetModuleFileNameW nennt den Pfad der geladenen Datei. Rückgabe: (System32, Ordner von python.exe).
+    """
+    import ctypes
+    system, python = tmp_path / "Windows" / "System32", tmp_path / "Python312"
+    for ordner, dateien in ((system, system32), (python, ("python.exe", *python_ordner))):
+        ordner.mkdir(parents=True)
+        for datei in dateien:
+            (ordner / datei).write_bytes(b"MZ")
+    monkeypatch.setenv("SystemRoot", str(tmp_path / "Windows"))
+    monkeypatch.setattr(sys, "executable", str(python / "python.exe"))
+    geladen = {}
+
+    def modulname(handle, puffer, groesse):
+        puffer.value = geladen[handle]
+        return len(geladen[handle])
+
+    def windll(name, *args, **kwargs):
+        if name.lower() in ("kernel32", "kernel32.dll"):
+            return types.SimpleNamespace(GetModuleFileNameW=modulname)
+        assert "\\" not in name and "/" not in name, f"{name}: mit Pfad gilt die Suchreihenfolge nicht"
+        for ordner in (python, system):
+            if (ordner / name).is_file():
+                geladen[len(geladen) + 1] = str(ordner / name)
+                return types.SimpleNamespace(_name=name, _handle=len(geladen))
+        raise FileNotFoundError(2, f"Could not find module '{name}' (or one of its dependencies). Try using the full "
+                                   "path with constructor syntax.")
+
+    monkeypatch.setattr(ctypes, "WinDLL", windll, raising=False)
+    return system, python
+
+
+def test_pruefe_installation_vc_laufzeit_wie_python_sie_laedt(tmp_path, monkeypatch):
+    """Befund (Regression): Der Bericht verlangte vcruntime140_1.dll im Systemordner. PyMuPDF braucht daraus nur
+    __CxxFrameHandler4, und Python (ab 3.8.1) bringt die Datei im Ordner von python.exe mit – dort sucht Windows für
+    Erweiterungsmodule zuerst. Auf einem Rechner mit VC++ 2015/2017 meldete der Bericht deshalb ein PROBLEM, obwohl
+    „import fitz: ok“ daneben stand; mit app-lokaler Laufzeit (conda) ebenso."""
+    p = _pruefe_installation()
+    system, python = _windows_rechner(tmp_path, monkeypatch, system32=("msvcp140.dll", "vcruntime140.dll"))
+    zeilen, probleme = p.laufzeit_bericht(windows=True)
+    text = "\n".join(zeilen)
+    assert probleme == [] and "FEHLT" not in text, (zeilen, probleme)
+    assert str(system / "msvcp140.dll") in text and str(python / "vcruntime140_1.dll") in text, text
+    # conda: die ganze Laufzeit liegt im Ordner von python.exe, im Systemordner nichts
+    (system / "msvcp140.dll").rename(python / "msvcp140.dll")
+    assert p.laufzeit_bericht(windows=True)[1] == []
+    # fehlt msvcp140.dll wirklich (frischer Rechner), kommt das Problem – mit genau dieser Datei
+    (python / "msvcp140.dll").unlink()
+    zeilen, probleme = p.laufzeit_bericht(windows=True)
+    assert len(probleme) == 1 and "msvcp140.dll" in probleme[0] and "vcruntime140_1.dll" not in probleme[0], probleme
+    assert VC_WINGET in probleme[0] and "FEHLT msvcp140.dll" in "\n".join(zeilen), (zeilen, probleme)
+
+
+def test_pruefe_installation_vc_laufzeit_bericht(tmp_path, monkeypatch):
+    """Geänderte Erwartung (Gegenprüfung, Regression): Verlangt war, dass der Bericht die DLLs als Dateien in
+    %SystemRoot%\\System32 sucht – das meldete Rechner mit VC++ 2015/2017 und mit conda fälschlich. Jetzt zählt, ob
+    dieses Python die DLLs laden kann (Lader austauschbar; ohne Angabe ctypes wie beim Import von PyMuPDF)."""
+    p = _pruefe_installation()
+
+    def lader(*ladbar):
+        def laden(dll):
+            if dll not in ladbar:
+                raise FileNotFoundError(2, f"Could not find module '{dll}'")
+            return SYS32 + dll
+        return laden
+    zeilen, probleme = p.laufzeit_bericht(windows=True, laden=lader())
     assert len(probleme) == 1 and "msvcp140.dll" in probleme[0] and "vcruntime140_1.dll" in probleme[0]
     assert VC_NAME in probleme[0] and VC_WINGET in probleme[0] and VC_LINK in probleme[0]
     assert "FEHLT" in "\n".join(zeilen)
-    (system32 / "msvcp140.dll").write_bytes(b"x")
-    zeilen, probleme = p.laufzeit_bericht(windows=True, system_ordner=system32)
-    assert len(probleme) == 1 and "vcruntime140_1.dll" in probleme[0] and "msvcp140.dll," not in probleme[0]
-    (system32 / "vcruntime140_1.dll").write_bytes(b"x")
-    zeilen, probleme = p.laufzeit_bericht(windows=True, system_ordner=system32)
-    assert probleme == [] and "vorhanden" in "\n".join(zeilen)
+    zeilen, probleme = p.laufzeit_bericht(windows=True, laden=lader("msvcp140.dll"))
+    assert len(probleme) == 1 and "vcruntime140_1.dll" in probleme[0] and "msvcp140.dll" not in probleme[0]
+    zeilen, probleme = p.laufzeit_bericht(windows=True, laden=lader(*VC_DLLS))
+    assert probleme == [] and SYS32 + "msvcp140.dll" in "\n".join(zeilen)
     assert p.laufzeit_bericht(windows=False) == ([], [])
-    # Ohne Angabe: %SystemRoot%\System32, so wie das prüfende Python ihn sieht (es lädt die DLLs ja selbst)
-    monkeypatch.setenv("SystemRoot", str(tmp_path))
+    # Ohne Angabe lädt das prüfende Python die DLLs selbst (ctypes, Name ohne Pfad) – so wie PyMuPDF sie bekommt
+    system, python = _windows_rechner(tmp_path, monkeypatch, system32=VC_DLLS)
     assert p.vc_laufzeit_fehlt() == []
-    (system32 / "msvcp140.dll").unlink()
+    (system / "msvcp140.dll").unlink()
     assert p.vc_laufzeit_fehlt() == ["msvcp140.dll"]
+    (python / "vcruntime140_1.dll").unlink()
+    assert p.vc_laufzeit_fehlt() == ["msvcp140.dll"]            # System32 hat vcruntime140_1.dll noch
+    (system / "vcruntime140_1.dll").unlink()
+    assert p.vc_laufzeit_fehlt() == list(VC_DLLS)
+
+
+def test_pruefe_installation_vc_laufzeit_aufruf_der_batchdateien(monkeypatch):
+    """VC_AUFRUF im echten Python: Exit-Code 10 = beide DLLs ladbar (außerhalb von Windows gibt es nichts zu prüfen).
+    Ein Fehler im Prüfcode (Exit-Code 1) fiele hier auf – die Batch-Dateien liefen dann ungeprüft weiter."""
+    p = _pruefe_installation()
+    lauf = subprocess.run([sys.executable, str(WURZEL / "werkzeuge" / "pruefe_installation.py"), "--vc-laufzeit"],
+                          capture_output=True, text=True, timeout=120, cwd=str(WURZEL))
+    assert lauf.returncode == p.VC_EXIT_BASIS == 10, (lauf.stdout, lauf.stderr[-2000:])
+    if sys.platform == "win32":     # der echte Lader nennt den vollen Pfad der geladenen Datei
+        for dll, ort in p.vc_laufzeit().items():
+            assert ort and os.path.isabs(ort) and ort.lower().endswith(dll), (dll, ort)
+    # main() gibt den Exit-Code der Prüfung unverändert weiter
+    monkeypatch.setattr(p, "vc_laufzeit_exitcode", lambda laden=None: 13)
+    assert p.main(["--vc-laufzeit"]) == 13
 
 
 def test_pruefe_installation_meldet_den_benutzten_ocr_ordner(tmp_path, monkeypatch):
@@ -1315,6 +1560,60 @@ def test_startskript_meldet_dll_ladefehler_beim_start(tmp_path, ausloesen):
     assert lauf.returncode == 1, lauf.stderr[-2000:]
     assert "Traceback" not in lauf.stderr, lauf.stderr[-2000:]
     assert lauf.stdout.startswith("FEHLER: ") and VC_WINGET in lauf.stdout, lauf.stdout
+
+
+def test_startskript_andere_osfehler_kommen_in_die_fehlerlog(tmp_path):
+    """Befund: Seit auch OSError abgefangen wurde, erschien jeder OSError beim Import von PyMuPDF als „Das Paket
+    'PyMuPDF' fehlt“ – auch ohne DLL-Bezug, z. B. ein PermissionError, weil ein Virenscanner eine Paketdatei sperrt.
+    Die genannte Ursache war falsch, und es entstand keine fehler.log. Ein solcher Fehler geht jetzt wie jeder
+    unerwartete Fehler mit Traceback in die fehler.log (Dialog „Unerwarteter Fehler“ mit Details; hier verhindert die
+    tkinter-Attrappe den Dialog). Das Startskript läuft als Kopie mit dem Paket anonymisierer, damit die fehler.log
+    neben der Kopie entsteht und nicht im Projektordner."""
+    programm = tmp_path / "programm"
+    programm.mkdir()
+    shutil.copy2(WURZEL / "pdf_anonymisierer.py", programm)
+    shutil.copytree(WURZEL / "anonymisierer", programm / "anonymisierer",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    gesperrt = ("raise PermissionError(13, 'Der Prozess kann nicht auf die Datei zugreifen (Virenscanner-Sperre)', "
+                "'_extra.pyd')\n")
+    attrappe = tmp_path / "attrappe"
+    for paket, code in (("pymupdf", gesperrt), ("fitz", "from pymupdf import *\n"),
+                        ("tkinter", "raise ImportError('Testattrappe: kein Fehlerdialog')\n")):
+        (attrappe / paket).mkdir(parents=True)
+        (attrappe / paket / "__init__.py").write_text(code, encoding="utf-8")
+    umgebung = dict(os.environ, PYTHONPATH=str(attrappe), DISPLAY="", PYTHONIOENCODING="utf-8")
+    lauf = subprocess.run([sys.executable, "-W", "ignore", str(programm / "pdf_anonymisierer.py")],
+                          capture_output=True, text=True, encoding="utf-8", timeout=120, cwd=str(tmp_path),
+                          env=umgebung)
+    assert lauf.returncode == 1, lauf.stderr[-2000:]
+    assert "fehlt" not in lauf.stdout and "Installieren.bat" not in lauf.stdout, lauf.stdout
+    log = programm / "fehler.log"
+    assert log.is_file(), (lauf.stdout, lauf.stderr[-2000:])
+    eintrag = log.read_text(encoding="utf-8")
+    assert "Traceback" in eintrag and "PermissionError" in eintrag and "Virenscanner-Sperre" in eintrag, eintrag
+
+
+def _fliesstext(datei: str) -> str:
+    """Text einer Datei als Fließtext: ohne REM, # und echo am Zeilenanfang, ohne ^ und `, Leerraum zusammengefasst –
+    so lassen sich Sätze über Zeilenumbrüche hinweg prüfen."""
+    zeilen = (re.sub(r"^\s*(REM\b|#|echo\b)", "", z, flags=re.IGNORECASE) for z in _lies(datei).splitlines())
+    return re.sub(r"\s+", " ", " ".join(zeilen).replace("^", "").replace("`", ""))
+
+
+def test_vc_laufzeit_texte_nennen_die_quelle_richtig():
+    """Befund: Docstring des Startskripts, CHANGELOG, README, Prüfskript und Batch-Kommentare behaupteten, PyMuPDF lade
+    msvcp140.dll und vcruntime140_1.dll aus dem Windows-Systemordner, Python bringe sie nicht mit. Python bringt
+    vcruntime140_1.dll (ab 3.8.1, im Ordner von python.exe) selbst mit; fehlen kann praktisch nur msvcp140.dll."""
+    falsch = re.compile(r"msvcp140\.dll und vcruntime140_1\.dll (aus dem|im) (Windows-)?Systemordner"
+                        r"|Python bringt sie nicht mit", re.IGNORECASE)
+    richtig = re.compile(r"Python bringt .{0,100}vcruntime140_1\.dll.{0,100}\bmit\b")
+    for datei in ("README.md", "CHANGELOG.md", "pdf_anonymisierer.py", "werkzeuge/pruefe_installation.py",
+                  "Installieren.bat", "EXE-bauen.bat"):
+        treffer = falsch.search(_fliesstext(datei))
+        assert treffer is None, f"{datei}: {treffer.group(0)!r}"
+    for datei in ("README.md", "CHANGELOG.md", "pdf_anonymisierer.py", "werkzeuge/pruefe_installation.py",
+                  "Installieren.bat"):
+        assert richtig.search(_fliesstext(datei)), f"{datei}: sagt nicht, dass Python vcruntime140_1.dll mitbringt"
 
 
 def test_vc_laufzeit_ueberall_gleich_benannt():

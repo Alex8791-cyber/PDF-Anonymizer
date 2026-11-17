@@ -170,15 +170,18 @@ exit /b 0
 
 
 :pruefe_vc_laufzeit
-REM Wie in Installieren.bat: setzt VC_FEHLT auf die fehlenden DLLs der Visual-C++-Laufzeit
-REM (nicht gesetzt = beide da). Ein 32-Bit-cmd sieht unter System32 die 32-Bit-DLLs aus
-REM SysWOW64 - die 64-Bit-DLLs liegen fuer ihn unter Sysnative.
+REM Wie in Installieren.bat (Begruendung dort): setzt VC_FEHLT auf die DLLs der Visual-C++-Laufzeit, die
+REM das gefundene Python nicht laden kann (nicht gesetzt = beide ladbar oder nicht pruefbar). Python laedt
+REM sie zur Probe selbst - mit derselben Suchreihenfolge wie PyMuPDF, also auch aus dem Ordner von python.exe.
+REM Exit-Code: 10 + 1 (msvcp140.dll fehlt) + 2 (vcruntime140_1.dll fehlt), jeder andere: nicht pruefbar.
 set "VC_FEHLT="
-set "SYSDLL=%SystemRoot%\System32"
-if exist "%SystemRoot%\Sysnative\cmd.exe" set "SYSDLL=%SystemRoot%\Sysnative"
-if not exist "%SYSDLL%\vcruntime140_1.dll" set "VC_FEHLT=vcruntime140_1.dll"
-if not exist "%SYSDLL%\msvcp140.dll" if defined VC_FEHLT set "VC_FEHLT=msvcp140.dll, %VC_FEHLT%"
-if not exist "%SYSDLL%\msvcp140.dll" if not defined VC_FEHLT set "VC_FEHLT=msvcp140.dll"
+"%PY%" werkzeuge\pruefe_installation.py --vc-laufzeit >nul 2>&1
+if errorlevel 14 goto :eof
+if errorlevel 13 set "VC_FEHLT=msvcp140.dll, vcruntime140_1.dll"
+if errorlevel 13 goto :eof
+if errorlevel 12 set "VC_FEHLT=vcruntime140_1.dll"
+if errorlevel 12 goto :eof
+if errorlevel 11 set "VC_FEHLT=msvcp140.dll"
 goto :eof
 
 
@@ -252,8 +255,8 @@ exit /b 1
 
 :fehler_vc_laufzeit
 echo.
-echo FEHLER: Auf diesem Rechner fehlt die Visual-C++-Laufzeit von Microsoft ^(nicht gefunden:
-echo %VC_FEHLT%^). Ohne die "Microsoft Visual C++ 2015-2022 Redistributable (x64)" laesst sich
+echo FEHLER: Auf diesem Rechner fehlt die Visual-C++-Laufzeit von Microsoft ^(Python kann
+echo %VC_FEHLT% nicht laden^). Ohne die "Microsoft Visual C++ 2015-2022 Redistributable (x64)" laesst sich
 echo PyMuPDF nicht laden ^("DLL load failed"^) - so kann nicht gebaut werden, und die Pakete
 echo erneut zu installieren hilft nicht. Abhilfe ^(einmalig, braucht Administratorrechte^):
 echo zuerst Installieren.bat ausfuehren ^(bietet die Installation an^), oder
