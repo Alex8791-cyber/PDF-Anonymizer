@@ -19,16 +19,20 @@ Oberfläche (gui.py) – mit den echten Funktionen, keine Attrappen:
 
 Der Makler arbeitet in Stapeln zu 10 Dateien (Hinzufügen, Analysieren, Schwärzen, Liste leeren): 20 Stapel,
 40 Läufe. Dateimix: Briefe mit Name, Anschrift, IBAN, Geburtsdatum, Telefon, E-Mail und Versicherungsschein-Nr. –
-jede Datei eine andere Person; jede 25. Datei mit Bildbereich (Rasterbild mit Text: die Analyse liest ihn per OCR,
-die Schwärzung prüft ihn mit der Kontroll-OCR – in 16 Läufen startet und endet ein OCR-Pool mit Arbeitsprozess);
-jede 40. Datei kennwortgeschützt (AES-256).
+jede Datei eine andere Person. Jeder Stapel enthält eine Datei mit Bildbereich (Rasterbild mit Text: die Analyse
+liest ihn per OCR, die Schwärzung prüft ihn mit der Kontroll-OCR – in jedem der 40 Läufe startet und endet ein
+OCR-Pool mit Arbeitsprozess) und eine kennwortgeschützte (AES-256). So wächst auch ein Leck, das nur auf einem
+dieser seltenen Wege entsteht, mit jedem Stapel.
 
 Geprüft nach einer Aufwärmphase von 20 Dateien (Sprachmodell geladen, erster OCR-Pool samt dem Ressourcen-Wächter
-von multiprocessing, erste Arbeitskopie):
+von multiprocessing, erste Arbeitskopien):
 1. Handles (Linux: Einträge in /proc/self/fd; Windows: Handles des Prozesses, psutil oder GetProcessHandleCount):
    an jedem Ruhepunkt (Lauf beendet, OCR-Dienst geschlossen, Arbeitsprozesse beendet) höchstens HANDLES_RUHE über
    der Grundlinie und nicht mehr Threads als vor der Sitzung; nach jeder Datei höchstens HANDLES_LAUF darüber – das
-   deckt einen gerade laufenden OCR-Pool (Pipes der Warteschlangen, je Arbeitsprozess ein Handle).
+   deckt einen gerade laufenden OCR-Pool (Pipes der Warteschlangen, je Arbeitsprozess ein Handle). Vom Spielraum
+   unabhängig: an ANSTIEG_FENSTER Stapelenden in Folge (nach „Liste leeren“ und der Speicherbereinigung) bleibt die
+   Untergrenze höchstens HANDLES_ANSTIEG über der Grundlinie – das sieht auch ein Leck, das je Stapel nur um ein
+   oder zwei Handles wächst.
 2. Speicher: Der residente Speicher wächst von Datei 50 bis 200 um höchstens SPEICHER_SCHRANKE_MB (eigener Test:
    nur er wird übersprungen, wo weder psutil noch /proc/self/statm ihn messen).
 3. Temp-Dateien: Nach jeder Datei liegen im Ordner für Arbeitskopien genau die Kopien der Kennwort-PDFs des
@@ -38,19 +42,27 @@ von multiprocessing, erste Arbeitskopie):
    Zuordnungsdatei mit 200 Zeilen; der Eingangsordner bleibt unverändert, es entsteht keine fehler.log.
 4. Prozesse: Nach jedem Lauf leben keine OCR-Arbeitsprozesse mehr, am Ende keine neuen Kindprozesse – außer dem
    einen Ressourcen-Wächter von multiprocessing (POSIX: ein Prozess je Programm, kein OCR-Arbeiter; er endet mit dem
-   Programm). Dass Arbeitsprozesse wirklich liefen, wird mitgeprüft (sonst prüfte der Punkt nichts).
+   Programm). Dass Arbeitsprozesse wirklich liefen und jeder Stapel nach der Aufwärmphase beide seltenen Wege
+   durchlief, wird mitgeprüft (sonst prüften die Punkte 1 und 4 dort nichts).
 
 Gegenprobe mit eingebauten Lecks (Runde 3b, Linux; je ein Lauf mit einer Ersetzung per monkeypatch, danach wieder
-entfernt) – alle rot: jede mit pymupdf.open geöffnete Datei bleibt zusätzlich offen -> nach Datei 21 (342 statt
-höchstens 299 + 16 Deskriptoren); jeder OCR-Dienst öffnet eine Datei und schließt sie nie (ein Handle je Lauf) ->
-Ruhepunkt nach Stapel 5 (22 statt höchstens 17 + 4); jedes Analyse-Ergebnis samt Seitenmodell bleibt im Speicher ->
-+50 bis 52 MB von Datei 50 bis 200; Arbeitskopien werden nicht gelöscht -> „Liste leeren“ in Stapel 2
-(brief_017.pdf bleibt); jede Schwärzung lässt eine Zwischendatei liegen -> nach Datei 1; der OCR-Dienst bleibt
-erreichbar und wird nie geschlossen -> erster Ruhepunkt (Arbeitsprozess lebt); jeder OCR-Dienst startet einen
-Thread, der nie endet -> erster Ruhepunkt. Zu Recht grün blieben zwei Ersetzungen, die kein Leck sind: _aufraeumen
-lässt .anonym_tmp_* stehen (die einzige Zwischendatei dieser Briefe wird per os.replace zur Ausgabe – es bleibt
-nichts zu löschen), und ein vergessenes schliessen() allein (ist der Dienst nach dem Lauf unerreichbar, beendet die
-Speicherbereinigung den Pool über den Rückruf von ProcessPoolExecutor).
+entfernt) – alle rot: jede mit pymupdf.open geöffnete Datei bleibt zusätzlich offen -> nach Datei 21 (344 statt
+höchstens 300 + 16 Deskriptoren); jede Analyse lässt ihre Datei einmal offen (ein Handle je Datei) -> nach Datei 29;
+jeder OCR-Dienst öffnet eine Datei und schließt sie nie (ein Handle je Lauf) -> Ruhepunkt „Stapel 5 analysiert“
+(22 statt höchstens 17 + 4); jede Entschlüsselung lässt die geschützte Datei offen (ein Handle je geschützter Datei)
+-> „Stapel 7 analysiert“ (20 statt höchstens 15 + 4); jeder Lauf, der im OCR-Pool rechnet, behält ein Handle (eines
+je OCR-Lauf) -> „Stapel 5 analysiert“; jedes Analyse-Ergebnis samt Seitenmodell bleibt im Speicher -> +50,9 MB von
+Datei 50 bis 200; Arbeitskopien werden nicht gelöscht -> „Liste leeren“ in Stapel 1 (brief_007.pdf bleibt); jede
+Schwärzung lässt eine Zwischendatei liegen -> nach Datei 1; der OCR-Dienst bleibt erreichbar und wird nie
+geschlossen -> erster Ruhepunkt (Arbeitsprozess lebt); jeder OCR-Dienst startet einen Thread, der nie endet ->
+erster Ruhepunkt. Mit den Spielräumen von Windows (Ruhe 16, Lauf 48, Anstieg 4) ebenfalls rot: ein Handle je Datei
+-> „Stapel 4 analysiert“; je Lauf, je geschützter Datei und je OCR-Lauf -> an den Stapelenden nach Stapel 9, 11
+bzw. 9 (die Spielräume allein sähen die beiden letzten erst in Stapel 19 bzw. 11, mit der früheren Mischung – jede
+25. Datei mit Bild, jede 40. geschützt – gar nicht; das Leck je geschützter Datei blieb dort auch unter Linux grün).
+Zu Recht grün blieben zwei Ersetzungen, die kein Leck sind: _aufraeumen lässt .anonym_tmp_* stehen (die einzige
+Zwischendatei dieser Briefe wird per os.replace zur Ausgabe – es bleibt nichts zu löschen), und ein vergessenes
+schliessen() allein (ist der Dienst nach dem Lauf unerreichbar, beendet die Speicherbereinigung den Pool über den
+Rückruf von ProcessPoolExecutor).
 """
 
 import gc
@@ -82,8 +94,11 @@ ANZAHL = 200                   # Dateien der Sitzung (brief_001.pdf … brief_20
 STAPEL = 10                    # Dateien je Lauf: Hinzufügen, Analysieren, Schwärzen, Liste leeren
 AUFWAERMEN = 20                # Grundlinie (Handles, System-Temp) nach so vielen Dateien
 SPEICHER_VON = 50              # Speicherzuwachs ab Datei 50 …
-BILD_ALLE, BILD_REST = 25, 3              # Dateien 3, 28, 53 … mit Bildbereich (OCR)
-KENNWORT_ALLE, KENNWORT_REST = 40, 17     # Dateien 17, 57, 97 … kennwortgeschützt
+# Jeder Stapel durchläuft beide seltenen Wege (Befund der Gegenprüfung, Runde 3b: mit jeder 25. Datei als Bild und
+# jeder 40. geschützten blieben nach der Aufwärmphase 4 geschützte Dateien und 14 OCR-Läufe – ein Leck von einem
+# Handle je geschützter Datei blieb unter dem Ruhe-Spielraum, eines je OCR-Lauf unter dem von Windows):
+BILD_ALLE, BILD_REST = 10, 3              # Dateien 3, 13, 23 … mit Bildbereich (OCR): jeder Lauf mit OCR-Pool
+KENNWORT_ALLE, KENNWORT_REST = 10, 7      # Dateien 7, 17, 27 … kennwortgeschützt
 KENNWORT = "Makler-2026"
 PROFIL = gui.attrappen.STANDARD_PROFIL   # „hoch“ wie beim ersten Start; Kategorien der Stufe wie die Häkchen
 AKTIVE = gui.attrappen.profil_kategorien(gui.PROFILE, PROFIL, {k[0] for k in gui.KATEGORIEN})
@@ -92,10 +107,21 @@ AKTIVE = gui.attrappen.profil_kategorien(gui.PROFILE, PROFIL, {k[0] for k in gui
 # 2 darüber (Pipes eines eben geschlossenen Pools, bis die Speicherbereinigung sie schließt); ein laufender OCR-Pool
 # hält 8 bis 10 mehr (Pipes der Warteschlangen und des Weckrufs, je Arbeitsprozess eine). Unter Windows kommen
 # Handles hinzu, die kommen und gehen (Thread-Pool von Windows), und ein Pool hält Prozess-, Pipe- und
-# Semaphor-Handles. Ein Leck von einem Handle je Datei übersteigt den Ruhe-Spielraum spätestens nach zwei Stapeln,
-# eines von einem Handle je Lauf nach 5 (Linux) bzw. 17 Läufen (Windows) – Gegenprobe oben.
+# Semaphor-Handles. Je Stapel wächst ein Leck von einem Handle je Datei um 10, eines je geschützter Datei um 1 und
+# eines je OCR-Lauf um 2 (Analyse und Schwärzung). Über den Ruhe-Spielraum kommen sie im 1., 5. bzw. 3. Stapel nach
+# der Aufwärmphase (Linux), unter Windows erst im 2., 17. bzw. 9.
 HANDLES_RUHE = 16 if WINDOWS else 4
 HANDLES_LAUF = 48 if WINDOWS else 16
+# Vom Spielraum unabhängig: die Untergrenze der Handles an ANSTIEG_FENSTER Stapelenden in Folge (je nach
+# „Liste leeren“ und der Speicherbereinigung gemessen; das Minimum blendet aus, was kommt und geht, etwa die Pipes
+# eines eben geschlossenen Pools) liegt höchstens HANDLES_ANSTIEG über der Grundlinie. Gemessen (Linux): an allen
+# 20 Stapelenden genau die Grundlinie; 1 lässt Raum für einen Deskriptor, der erst nach der Aufwärmphase einmalig
+# entsteht, 4 unter Windows für Handles, die das System einmalig nachlegt (Thread-Pool, Lader). Ein stetiges Leck hebt
+# die Untergrenze dagegen mit jedem Stapel: eines je geschützter Datei fällt nach dem 6. Stapel nach der Aufwärmphase
+# auf (Windows: 9.), eines je OCR-Lauf nach dem 5. (Windows: 7.); am Ende läge die Untergrenze 14 bzw. 28 Handles
+# über der Grundlinie (test_pruefung_der_stapelenden_sieht_stetige_lecks).
+HANDLES_ANSTIEG = 4 if WINDOWS else 1
+ANSTIEG_FENSTER = 5
 SPEICHER_SCHRANKE_MB = 16      # Begründung bei test_langlauf_speicher_waechst_begrenzt
 RUHE_WARTEN_S = 30.0           # so lange darf ein geschlossener OCR-Pool brauchen, bis Arbeiter und Pipes weg sind
 
@@ -227,6 +253,11 @@ def _nummer(pdf: Path) -> int:
     return int(Path(pdf).stem.rpartition("_")[2])
 
 
+def _stapel_nr(nr: int) -> int:
+    """Datei 1 … 10 -> Stapel 1, Datei 11 … 20 -> Stapel 2 …"""
+    return (nr - 1) // STAPEL + 1
+
+
 def ist_bilddatei(nr: int) -> bool:
     return nr % BILD_ALLE == BILD_REST
 
@@ -239,7 +270,7 @@ def eingang_schreiben(eingang: Path) -> list[list[Path]]:
     """Je Stapel ein Kundenordner mit 10 Briefen (brief_001.pdf … brief_200.pdf); liefert die Dateien je Stapel."""
     stapel = []
     for nr in range(1, ANZAHL + 1):
-        ordner = eingang / f"kunde_{(nr - 1) // STAPEL + 1:02d}"
+        ordner = eingang / f"kunde_{_stapel_nr(nr):02d}"
         ordner.mkdir(parents=True, exist_ok=True)
         pfad = ordner / f"brief_{nr:03d}.pdf"
         with fitz.open() as doc:
@@ -317,11 +348,13 @@ class Langlauf:
         self.kopien: dict[Path, Path] = {}           # Arbeitskopien des laufenden Stapels (Original -> Kopie)
         self.je_datei: list = []                     # (Datei, Schritt, Handles, RSS in MB)
         self.ruhe: list = []                         # (Datei, Ruhepunkt, Handles, Threads)
+        self.stapelenden: list[tuple[int, int]] = []  # (Datei, Handles) nach „Liste leeren“ und gc.collect
         self.speicher: dict[int, int] = {}           # Datei -> RSS am Stapelende (nach gc.collect)
         self.kinder_vorher = kindprozesse()
         self.threads_vorher = threading.active_count()
         self.arbeiter: dict[int, str] = {}           # OCR-Arbeitsprozesse, die während der Läufe lebten
         self.ocr_laeufe: list[tuple[str, int]] = []  # (Lauf, letzte Datei) mit Aufträgen im OCR-Pool
+        self.entschluesselt: list[int] = []          # Dateien, die als Arbeitskopie ohne Kennwort liefen
         self.handles_basis: int | None = None
         self.systemp_basis: list | None = None
 
@@ -347,6 +380,7 @@ class Langlauf:
                 ziel = dateien.arbeitskopie_ziel(pdf.name)
                 assert dateien.pdf_entschluesseln(pdf, KENNWORT, ziel), f"{pdf.name}: Kennwort abgelehnt"
                 self.kopien[pdf] = ziel
+                self.entschluesselt.append(_nummer(pdf))
         assert len(self.kopien) == sum(1 for p in pdfs if ist_kennwortdatei(_nummer(p)))
         self._temp_pruefen(f"Stapel {nr} hinzugefügt")
         ergebnisse: dict[Path, dict] = {}
@@ -475,9 +509,11 @@ class Langlauf:
         assert threads <= self.threads_vorher, (
             f"{name}: {threads} Threads, vor der Sitzung {self.threads_vorher}: "
             f"{[t.name for t in threading.enumerate()]}")
-        if self.handles_basis is None and stapelende and self.datei_nr >= AUFWAERMEN:
+        if stapelende:                      # ohne Handles, die nur noch an Zyklen hängen: Grundlinie und Untergrenze
             gc.collect()
-            self.handles_basis = offene_handles()
+            self.stapelenden.append((self.datei_nr, offene_handles()))
+        if self.handles_basis is None and stapelende and self.datei_nr >= AUFWAERMEN:
+            self.handles_basis = self.stapelenden[-1][1]
             assert self.handles_basis is not None, "offene Handles sind auf diesem System nicht messbar"
             self.systemp_basis = self._baum(self.systemp)
             self.ruhe.append((self.datei_nr, "Grundlinie", self.handles_basis, threads))
@@ -487,11 +523,25 @@ class Langlauf:
                 f"Spielraum {HANDLES_RUHE} – Ruhepunkte (Datei, Punkt, Handles, Threads): {self.ruhe[-8:]}")
             neu = sorted(set(self._baum(self.systemp)) - set(self.systemp_basis))
             assert self._baum(self.systemp) == self.systemp_basis, f"{name}: System-Temp verändert, neu: {neu}"
+            if stapelende:
+                self._anstieg_pruefen(name)
         if stapelende:
-            gc.collect()
             rss = residenter_speicher()
             if rss is not None:
                 self.speicher[self.datei_nr] = rss
+
+    def _anstieg_pruefen(self, name: str):
+        """Vom Spielraum unabhängig: Bleiben die Handles an ANSTIEG_FENSTER Stapelenden in Folge mehr als
+        HANDLES_ANSTIEG über der Grundlinie, wächst etwas stetig – auch wenn jeder Ruhepunkt für sich noch im Spielraum
+        liegt (ein Leck je geschützter Datei wächst um 1, eines je OCR-Lauf um 2 Handles je Stapel). Das Minimum über
+        das Fenster blendet aus, was kommt und geht."""
+        fenster = [h for nr, h in self.stapelenden if nr > AUFWAERMEN][-ANSTIEG_FENSTER:]
+        if len(fenster) < ANSTIEG_FENSTER:
+            return
+        assert min(fenster) <= self.handles_basis + HANDLES_ANSTIEG, (
+            f"{name}: an {ANSTIEG_FENSTER} Stapelenden in Folge mindestens {min(fenster)} offene Handles, Grundlinie "
+            f"{self.handles_basis} + Anstieg {HANDLES_ANSTIEG} – stetiges Leck; Stapelenden (Datei: Handles): "
+            + ", ".join(f"{nr}: {h}" for nr, h in self.stapelenden))
 
     @staticmethod
     def _baum(ordner: Path) -> list[str]:
@@ -526,8 +576,13 @@ class Langlauf:
         reste = [p for p in multiprocessing.active_children() if p.pid not in self.kinder_vorher]
         assert not reste, f"multiprocessing-Prozesse nach dem Beenden: {reste}"
         assert self.arbeiter, "kein OCR-Arbeitsprozess lief – die Prüfung der Prozesse hätte nichts geprüft"
-        nach_aufwaermen = [lauf for lauf in self.ocr_laeufe if lauf[1] > AUFWAERMEN]
-        assert len(nach_aufwaermen) >= 4, f"zu wenige Läufe mit OCR-Pool nach der Aufwärmphase: {self.ocr_laeufe}"
+        # Ein Leck der seltenen Wege sehen die Prüfungen der Handles nur, wenn sie in jedem Stapel vorkommen:
+        stapel_danach = range(_stapel_nr(AUFWAERMEN) + 1, _stapel_nr(ANZAHL) + 1)
+        ocr = [sum(_stapel_nr(nr) == s for _, nr in self.ocr_laeufe) for s in stapel_danach]
+        kopien = [sum(_stapel_nr(nr) == s for nr in self.entschluesselt) for s in stapel_danach]
+        assert ocr and min(ocr) == 2 and min(kopien) >= 1, (
+            f"nicht jeder Stapel nach der Aufwärmphase lief mit OCR-Pool in Analyse und Schwärzung und mit einer "
+            f"Arbeitskopie – je Stapel OCR-Läufe {ocr}, Arbeitskopien {kopien}")
         assert not self._baum(self.temp), f"Ordner für Arbeitskopien nach dem Beenden: {self._baum(self.temp)}"
         assert dateien.aktuelle_sitzung() is None
         assert sorted(p.relative_to(self.eingang) for p in self.eingang.rglob("*")) == self.eingang_vorher, \
@@ -549,10 +604,18 @@ class Langlauf:
                   f"{max(nach) if nach else None} (Spielraum Lauf {HANDLES_LAUF}, Ruhe {HANDLES_RUHE})",
                   "Ruhepunkte (Datei, Punkt, Handles, Threads):"]
         zeilen += [f"  {r}" for r in self.ruhe]
+        danach = [h for nr, h in self.stapelenden if nr > AUFWAERMEN and h is not None]
+        untergrenze = max((min(danach[i:i + ANSTIEG_FENSTER]) for i in range(len(danach) - ANSTIEG_FENSTER + 1)),
+                          default=None)
+        zeilen.append("Stapelenden nach gc.collect (Datei: Handles): "
+                      + ", ".join(f"{nr}: {h}" for nr, h in self.stapelenden))
+        zeilen.append(f"Untergrenze je {ANSTIEG_FENSTER} Stapelenden in Folge höchstens {untergrenze} "
+                      f"(Grundlinie {self.handles_basis} + Anstieg {HANDLES_ANSTIEG})")
         zeilen.append("RSS am Stapelende (Datei: MB): " + ", ".join(
             f"{nr}: {rss / 2 ** 20:.1f}" for nr, rss in sorted(self.speicher.items())))
         zeilen.append(f"Läufe mit OCR-Pool (Lauf, bis Datei): {self.ocr_laeufe}")
-        zeilen.append(f"OCR-Arbeitsprozesse: {len(self.arbeiter)}")
+        zeilen.append(f"OCR-Arbeitsprozesse: {len(self.arbeiter)}; Arbeitskopien ohne Kennwort: "
+                      f"{len(self.entschluesselt)} (Dateien {self.entschluesselt[:3]} …)")
         return "\n".join(zeilen)
 
 
@@ -621,11 +684,44 @@ def test_messfuehler_sehen_lecks(tmp_path):
     assert prozess.pid not in kindprozesse()
 
 
+def _stapelenden_pruefen(handles: list[int]) -> str | None:
+    """Die Prüfung der Stapelenden über eine Messreihe (Handles am Ende von Stapel 1, 2 …), ohne Sitzung: None, wenn
+    sie nichts findet, sonst ihre Meldung."""
+    lauf = Langlauf.__new__(Langlauf)
+    lauf.stapelenden, lauf.handles_basis = [], None
+    try:
+        for nr, wert in enumerate(handles, 1):
+            lauf.stapelenden.append((nr * STAPEL, wert))
+            if nr * STAPEL == AUFWAERMEN:
+                lauf.handles_basis = wert
+            elif lauf.handles_basis is not None:
+                lauf._anstieg_pruefen(f"Stapel {nr}: Liste geleert")
+    except AssertionError as fehler:
+        return str(fehler)
+    return None
+
+
+@pytest.mark.parametrize("anstieg, erkannt", [(1, (8, 7)), (4, (11, 9))], ids=["linux", "windows"])
+def test_pruefung_der_stapelenden_sieht_stetige_lecks(monkeypatch, anstieg, erkannt):
+    """Gegenprobe der Prüfung auf stetigen Anstieg mit beiden Spielräumen, ohne Sitzung: ein Handle je geschützter
+    Datei (1 je Stapel) bzw. je OCR-Lauf (2 je Stapel) fällt an den oben genannten Stapelenden auf; Ausreißer
+    (Pipes eines eben geschlossenen Pools) und eine einmalige Stufe im Rahmen von HANDLES_ANSTIEG nicht."""
+    monkeypatch.setitem(globals(), "HANDLES_ANSTIEG", anstieg)
+    assert _stapelenden_pruefen([13] * 20) is None
+    ausreisser = [13, 13, 17, 13, 13, 15, 17, 13, 13, 13, 16, 13, 13, 17, 13, 13, 15, 13, 13, 17]
+    assert _stapelenden_pruefen(ausreisser) is None
+    assert _stapelenden_pruefen([13] * 8 + [13 + anstieg] * 12) is None
+    for je_stapel, stapel in zip((1, 2), erkannt):
+        meldung = _stapelenden_pruefen([13 + je_stapel * max(0, nr - 2) for nr in range(1, 21)])
+        assert meldung is not None and meldung.startswith(f"Stapel {stapel}: Liste geleert: "), (je_stapel, meldung)
+        assert "stetiges Leck" in meldung
+
+
 def test_langlauf_200_dateien_ohne_lecks(langlauf):
     """Punkte 1, 3 und 4: Handles und Threads, Temp-Dateien und Ausgaben, Arbeitsprozesse – geprüft während der
-    Sitzung nach jeder Datei und an jedem Ruhepunkt (Messung Runde 3b, Linux: 34 s für 200 Dateien; Grundlinie und
-    alle Ruhepunkte bei 13 Deskriptoren, zweimal kurz nach einem OCR-Pool 15; ein Thread; 16 Läufe mit OCR-Pool,
-    16 Arbeitsprozesse, alle beendet)."""
+    Sitzung nach jeder Datei, an jedem Ruhepunkt und an jedem Stapelende (Messung Runde 3b, Linux: 44 s für 200
+    Dateien; Grundlinie und alle 20 Stapelenden bei 13 Deskriptoren, Ruhepunkte kurz nach einem OCR-Pool bis 17; ein
+    Thread; 40 Läufe mit OCR-Pool, 40 Arbeitsprozesse, alle beendet; 20 Arbeitskopien)."""
     if langlauf.fehler is not None:
         raise langlauf.fehler
     assert langlauf.geschwaerzt == ANZAHL
@@ -634,14 +730,15 @@ def test_langlauf_200_dateien_ohne_lecks(langlauf):
 def test_langlauf_speicher_waechst_begrenzt(langlauf):
     """Punkt 2: Der residente Speicher wächst von Datei 50 bis 200 um höchstens SPEICHER_SCHRANKE_MB.
 
-    Messung Runde 3b (Linux, Sprachmodell geladen, RSS um 520 MB): +1,5 bis +4,8 MB in mehreren Läufen, in Stufen
-    von gut 1,5 MB. Das sind begrenzte Zwischenspeicher, die sich mit den neuen Wörtern jedes Briefs füllen
-    (lru_cache von wissen.normalisieren: nach 400 Briefen 33 719 von höchstens 131 072 Einträgen,
-    normalisieren_umschrift 31 495 von 65 536; die Stufen sind das Verdoppeln ihrer Hash-Tabellen) – sie wachsen
-    bis zu ihrer Obergrenze, nicht ohne Ende: über 400 Briefe +5,0 MB von Datei 50 bis 400. Ein echtes Leck ist
-    größer: ein behaltenes Analyse-Ergebnis samt Seitenmodell kostet bei diesen Briefen rund 340 KB, über 150
-    Dateien +50 bis 52 MB (Gegenprobe). Die Schranke liegt beim Dreifachen des größten gemessenen Zuwachses (Raum
-    für Speicherverwaltung und Arbeitssatz unter Windows) und fängt jedes Leck ab etwa 110 KB je Datei."""
+    Messung Runde 3b (Linux, Sprachmodell geladen, RSS um 520 MB): +1,2 bis +4,8 MB in mehreren Läufen (mit beiden
+    Dateimischungen, vor und nach der Gegenprüfung), in Stufen von gut 1,5 MB. Das sind begrenzte Zwischenspeicher,
+    die sich mit den neuen Wörtern jedes Briefs füllen (lru_cache von wissen.normalisieren: nach 400 Briefen 33 719
+    von höchstens 131 072 Einträgen, normalisieren_umschrift 31 495 von 65 536; die Stufen sind das Verdoppeln ihrer
+    Hash-Tabellen) – sie wachsen bis zu ihrer Obergrenze, nicht ohne Ende: über 400 Briefe +5,0 bzw. +5,9 MB von
+    Datei 50 bis 400, davon nur +1,6 MB nach Datei 200. Ein echtes Leck ist größer: ein behaltenes Analyse-Ergebnis
+    samt Seitenmodell kostet bei diesen Briefen rund 340 KB, über 150 Dateien +50 bis 52 MB (Gegenprobe). Die
+    Schranke liegt beim Dreifachen des größten gemessenen Zuwachses (Raum für Speicherverwaltung und Arbeitssatz
+    unter Windows) und fängt jedes Leck ab etwa 110 KB je Datei."""
     if residenter_speicher() is None:
         pytest.skip("residenter Speicher ist hier nicht messbar (weder psutil noch /proc/self/statm) – Handles, "
                     "Temp-Dateien und Prozesse prüft test_langlauf_200_dateien_ohne_lecks")
