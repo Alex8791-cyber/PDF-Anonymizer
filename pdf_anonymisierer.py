@@ -40,8 +40,8 @@ Starten: Desktop-Verknüpfung "PDF-Anonymisierer" (ein zweiter Start meldet nur,
 dass das Programm schon läuft)
 
 Dieses Skript ist nur der Startpunkt; die eigentliche Logik liegt im
-Paket "anonymisierer": Erkennung (muster, namen, wissen, detektoren,
-kundenliste, analyse), Lesen der Seiten (seitenmodell, ocr), Schwärzen
+Paket "anonymisierer": Erkennung (muster, kennungsformen, namen, wissen,
+detektoren, kundenliste, analyse), Lesen der Seiten (seitenmodell, ocr), Schwärzen
 und Prüfen der Ausgabe (schwaerzung, bilder, fotos, nebenkanaele,
 restrisiko) sowie Oberfläche und Dateien (gui, gui_attrappen, auftrag,
 vorschau_fenster, vorschau, dateien).
