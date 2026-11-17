@@ -30,9 +30,9 @@ from anonymisierer import dateien, gui, vorschau_fenster
 
 from conftest import braucht_ocr
 from test_gui import (FUND_MAIL, FUND_NAME, FUND_TEL, TEXT, Verdacht, _display_wiederherstellen,  # noqa: F401
-                      _prozesszustand, _screenshot, _screenshot_ordner, analysiere, app, dialoge, display_1366,
-                      fake_analyse, fake_analyse_neu, fake_schwaerzung, fake_schwaerzung_neu, pdf_schreiben, pumpe,
-                      root, starte_lauf, umgebung)
+                      _prozesszustand, _screenshot, _screenshot_ordner, analysiere, app, bis_geschlossen, dialoge,
+                      display_1366, fake_analyse, fake_analyse_neu, fake_schwaerzung, fake_schwaerzung_neu,
+                      pdf_schreiben, pumpe, root, starte_lauf, umgebung)
 
 WURZEL = Path(__file__).resolve().parent.parent
 gui_test = pytest.mark.skipif(not os.environ.get("DISPLAY") and sys.platform != "win32",
@@ -1395,6 +1395,74 @@ def test_statuszeile_nach_hinzufuegen_zu_analysierter_liste(app, umgebung, monke
 
 
 @gui_test
+def test_statuszeile_nach_abgebrochener_analyse(app, umgebung, monkeypatch, dialoge):
+    """Befund (Korrekturrunde, Statuszeile a/b): Nach einer abgebrochenen Analyse und dem Hinzufügen einer Mail stand
+    „… die bisherige Analyse gilt weiter“, obwohl „Schwärzen starten“ gesperrt war – die Statuszeile beachtete
+    analyse_veraltet nicht und zählte das Ergebnis „Abgebrochen“ als analysiert. Jetzt dieselbe Regel wie vor dem
+    Schwärzen (_analyse_luecken)."""
+    tmp = umgebung["tmp"]
+    a = pdf_schreiben(tmp / "avb.pdf")
+    im_lauf, weiter = threading.Event(), threading.Event()
+    innen = fake_analyse({}, seiten=2, warten=weiter)
+
+    def analyse(pdf_pfad, aktive, whitelist, immer_schwaerzen, melde=None, fortschritt=None, abbruch=None, ocr=None):
+        im_lauf.set()
+        return innen(pdf_pfad, aktive, whitelist, immer_schwaerzen, melde, fortschritt, abbruch, ocr)
+    monkeypatch.setattr(gui, "analysiere_pdf", analyse)
+    app._pdfs_hinzufuegen([str(a)])
+    app.analysieren()
+    assert pumpe(app.root, im_lauf.is_set, timeout=5)              # die Analyse liest gerade Seite 1
+    app.abbrechen()
+    weiter.set()
+    assert pumpe(app.root, lambda: not app.laeuft, timeout=30)
+    pumpe(app.root, timeout=0.05)
+    assert app.analyse_ergebnisse[a]["fehler"] == "Abgebrochen" and app.analyse_veraltet
+    assert app.status_label.cget("text") == "Analyse abgebrochen – bitte erneut analysieren."
+    mail = schreibe(tmp / "Mail_vom_Kunden.msg", MAIL_MSG)
+    app._pdfs_hinzufuegen([str(mail)])
+    text = app.status_label.cget("text")
+    assert "gilt weiter" not in text, text
+    assert text == ("⚠ 1 Datei(en) werden NICHT geprüft (siehe Protokoll) · Die letzte Analyse wurde abgebrochen oder "
+                    "gilt nicht mehr – bitte erneut „Analysieren“ drücken, bevor geschwärzt wird.")
+    assert app.schwaerzen() is False and app.letzter_dialog[1] == "Erneut analysieren"
+    # ein abgebrochenes Ergebnis zählt nie als analysiert – auch nicht ohne den Vermerk „veraltet“
+    assert app._analyse_luecken() == (True, [a])
+    app.analyse_veraltet = False
+    assert app._analyse_luecken() == (False, [a])
+    assert app.schwaerzen() is False and app.letzter_dialog[1] == "Erst analysieren"
+
+
+@gui_test
+def test_statuszeile_hinzufuegen_und_wieder_entfernen(app, umgebung, monkeypatch, dialoge):
+    """Befund (Korrekturrunde, Statuszeile c): Die eigene Meldung der Statuszeile wurde nie ersetzt, wenn ihr Grund
+    wegfiel – nach dem Entfernen der eben hinzugefügten Datei stand weiter „1 Datei(en) noch nicht analysiert“. Jetzt
+    steht wieder die Meldung der Analyse da, wenn sie für dieselben Dateien gilt, sonst eine neue."""
+    tmp = umgebung["tmp"]
+    a, b, c = (pdf_schreiben(tmp / name) for name in ("avb.pdf", "police.pdf", "antrag.pdf"))
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse({}))
+    analysiere(app, [a, b])
+    nach_analyse = app.status_label.cget("text")
+    assert nach_analyse.startswith("Keine Funde"), nach_analyse
+    noch_nicht = "1 Datei(en) noch nicht analysiert – bitte erneut „Analysieren“ drücken, bevor geschwärzt wird."
+    app._pdfs_hinzufuegen([str(c)])
+    assert app.status_label.cget("text") == noch_nicht
+    app.datei_entfernen(str(c))
+    assert app.status_label.cget("text") == nach_analyse           # vorher: „1 Datei(en) noch nicht analysiert“ blieb
+    # wieder hinzugefügt und eine analysierte Datei entfernt: die Meldung der Analyse gilt nicht mehr für diesen Stand
+    app._pdfs_hinzufuegen([str(c)])
+    app.datei_entfernen(str(b))
+    assert app.status_label.cget("text") == noch_nicht
+    app.datei_entfernen(str(c))
+    assert app.status_label.cget("text") == ("1 Datei(en) analysiert – Liste prüfen (Doppelklick auf eine Datei = "
+                                             "Vorschau), dann „Schwärzen starten“.")
+    # eine fremde Meldung (hier: die Analyse) bleibt stehen, solange es nichts Neues zu sagen gibt
+    starte_lauf(app, app.analysieren)
+    nach_analyse = app.status_label.cget("text")
+    app._pdfs_hinzufuegen([str(a)])                                 # schon in der Liste: nichts Neues
+    assert app.status_label.cget("text") == nach_analyse
+
+
+@gui_test
 def test_gui_analyse_mit_funden_nennt_nicht_gepruefte_dateien(app, umgebung, monkeypatch, dialoge):
     """Auch mit Funden erinnert schon der Analyse-Abschluss an die nicht geprüften Dateien (nicht erst die
     Schwärzung)."""
@@ -1688,7 +1756,10 @@ def test_schliessen_waehrend_des_laufs_loescht_kopie_nach_dem_thread(app, umgebu
     """Zweiter Weg (Windows): Schließen mit „Ja“ während einer Analyse – der Analyse-Thread hält die entschlüsselte
     Kopie noch offen, und Windows löscht keine offene Datei. Nachgebildet: rmtree lässt die „offene“ Datei stehen.
     Früher schluckten rmtree(ignore_errors) und arbeitskopie_entfernen das still, die Kopie blieb bis zum nächsten
-    Start liegen. Jetzt wird nach dem Ende des Threads erneut gelöscht."""
+    Start liegen. Jetzt wird nach dem Ende des Threads erneut gelöscht. Seit der Korrekturrunde „Schließen“ wartet das
+    Fenster zuerst auf den abgebrochenen Lauf (BEENDEN_WARTEN_S) – offen ist die Kopie beim Schließen also nur noch,
+    wenn der Lauf länger hängt; nachgestellt mit verkürzter Wartezeit."""
+    monkeypatch.setattr(gui, "BEENDEN_WARTEN_S", 0.3)
     pdf = geschuetzte_pdf(umgebung["tmp"] / "Kunde" / "Abrechnung.pdf")
     monkeypatch.setattr(app, "_kennwort_abfragen", lambda pfad, fehlversuch=False: "geheim")
     app._pdfs_hinzufuegen([str(pdf)])
@@ -1718,6 +1789,7 @@ def test_schliessen_waehrend_des_laufs_loescht_kopie_nach_dem_thread(app, umgebu
     assert pumpe(app.root, offen.is_set, timeout=10)
     dialoge.antwort = True                                 # „Wirklich beenden?“ -> Ja
     app.schliessen()
+    assert bis_geschlossen(app, timeout=10)                # Wartezeit abgelaufen, der Lauf hängt noch
     assert not fenster_existiert(app.root) and kopie.exists()      # noch offen: konnte nicht gelöscht werden
     faden = app._reste_threads.get(str(sitzung))
     assert faden is not None and faden.is_alive() and not faden.daemon

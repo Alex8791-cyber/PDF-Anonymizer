@@ -96,6 +96,21 @@ def pumpe(root, bedingung=None, timeout=20.0) -> bool:
         time.sleep(0.01)
 
 
+def bis_geschlossen(app, timeout=30.0) -> bool:
+    """Treibt die Ereignisschleife, bis das Hauptfenster zerstört ist (True) oder die Zeit abläuft (False). Beim
+    Beenden während eines Laufs wartet das Fenster auf das Ende des abgebrochenen Laufs."""
+    ende = time.monotonic() + timeout
+    while time.monotonic() < ende:
+        if not fenster_existiert(app.root):
+            return True
+        try:
+            app.root.update()
+        except tk.TclError:
+            return True
+        time.sleep(0.01)
+    return not fenster_existiert(app.root)
+
+
 def zellenbox(app, eintrag, spalte, timeout=3.0):
     """Liefert die Zellenbox (x, y, b, h) eines sichtbaren Baumeintrags; wartet, bis Tk sie gezeichnet hat
     (unter Windows ist die Box direkt nach dem Einfügen noch leer)."""
@@ -1271,9 +1286,12 @@ def test_schliessen_fragt_waehrend_des_laufs(app, umgebung, monkeypatch, dialoge
     assert dialoge.liste[-1][0] == "askyesno" and "läuft noch" in dialoge.liste[-1][1]
     dialoge.antwort = True
     app.schliessen()
-    assert not fenster_existiert(app.root)
-    assert FakeOcr.instanzen[-1].abgebrochen
+    # „Ja“ bricht ab; das Fenster schließt erst, wenn der Lauf zu Ende ist (Korrekturrunde „Schließen“: sonst räumte
+    # der Arbeits-Thread seine unfertigen Dateien nicht mehr auf) – bis dahin reagiert es und sagt, worauf es wartet
+    assert FakeOcr.instanzen[-1].abgebrochen and app.abbruch.is_set()
+    assert fenster_existiert(app.root) and app.status_label.cget("text") == gui.BEENDEN_TEXT
     weiter.set()
+    assert bis_geschlossen(app) and app.beendet
 
 
 # ----------------------------------------------------------------------
@@ -1383,7 +1401,7 @@ def test_beenden_ohne_freigabe_option_und_ohne_pruefen_fragt_nicht(app, umgebung
 
 def test_beenden_waehrend_eines_laufs_fragt_wie_bisher(app, umgebung, monkeypatch, dialoge):
     """Läuft gerade eine Analyse oder Schwärzung, bleibt es bei der einen Rückfrage „Lauf läuft noch“ – auch wenn
-    Ausgaben eines früheren Laufs noch auf die Freigabe warten."""
+    Ausgaben eines früheren Laufs noch auf die Freigabe warten (sie nennt sie dann mit, test_beenden.py)."""
     _ausgaben_zu_pruefen(app, umgebung, monkeypatch, "Kunde")
     weiter = threading.Event()
     monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse({}, warten=weiter))
@@ -1397,8 +1415,9 @@ def test_beenden_waehrend_eines_laufs_fragt_wie_bisher(app, umgebung, monkeypatc
     dialoge.antwort = True
     app.schliessen()
     assert [d[1] for d in dialoge.liste[vorher:]] == ["Lauf läuft noch", "Lauf läuft noch"]
-    assert not fenster_existiert(app.root)
-    weiter.set()
+    weiter.set()                                            # der abgebrochene Lauf endet, erst dann schließt
+    assert bis_geschlossen(app)
+    assert [d[1] for d in dialoge.liste[vorher:]] == ["Lauf läuft noch", "Lauf läuft noch"]
 
 
 def test_beenden_fragt_nicht_doppelt_bei_zweitem_klick(app, umgebung, monkeypatch, dialoge):
@@ -1486,10 +1505,10 @@ def test_beenden_lauf_beginnt_waehrend_der_freigabe_frage(app, umgebung, monkeyp
     monkeypatch.setattr(gui.messagebox, "askyesno", askyesno)
     app.schliessen()
     assert fragen == [gui.FREIGABE_OFFEN_TITEL, "Lauf läuft noch"]
-    if beenden:                                                         # wie jedes Beenden während eines Laufs
-        assert not fenster_existiert(app.root) and app.beendet
-        assert abbruch[0].is_set() and FakeOcr.instanzen[-1].abgebrochen
+    if beenden:                                                         # wie jedes Beenden während eines Laufs:
+        assert abbruch[0].is_set() and FakeOcr.instanzen[-1].abgebrochen   # abbrechen, auf den Lauf warten, schließen
         weiter.set()
+        assert bis_geschlossen(app) and app.beendet
     else:                                                               # Fenster bleibt offen, Lauf läuft weiter
         assert fenster_existiert(app.root) and not app.beendet and app.laeuft and not abbruch[0].is_set()
         weiter.set()
@@ -1549,18 +1568,23 @@ def test_zwischendateien_sind_keine_eingabe(app, umgebung):
 
 
 def test_schwaerzen_raeumt_verwaiste_zwischendateien_auf(app, umgebung, monkeypatch, dialoge):
+    """GR-11: Das Schwärzen räumt verwaiste Zwischendateien im Ausgabeordner auf – die eines abgestürzten Prozesses
+    DIESES Rechners (Rechnerkennung im Namen, Korrekturrunde „Schließen“ 2), nicht die eines Kollegen, der an
+    derselben Freigabe gerade dorthin schwärzt (seine PID ist hier immer „tot“; erst nach 24 Stunden verwaist)."""
     tmp = umgebung["tmp"]
     pdf = pdf_schreiben(tmp / "a.pdf")
     ziel = tmp / "anonymisiert"
     ziel.mkdir()
-    verwaist = ziel / ".anonym_tmp_2147480000_ausgabe.pdf"   # PID, die es nicht gibt
+    verwaist = ziel / f".anonym_tmp_2147480000_r{dateien.rechner_kennung()}_1_ausgabe.tmp"   # PID gibt es nicht
+    kollege = ziel / ".anonym_tmp_2147480000_r0badc0de_2_ausgabe.tmp"                       # anderer Rechner
     verwaist.write_bytes(b"%PDF")
+    kollege.write_bytes(b"%PDF")
     monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse({"a.pdf": [FUND_TEL]}))
     monkeypatch.setattr(gui, "schwaerze_pdf", fake_schwaerzung([]))
     analysiere(app, [pdf])
     starte_lauf(app, app.schwaerzen)
-    assert not verwaist.exists()
-    assert "verwaiste Zwischendatei" in app.protokoll_text()
+    assert not verwaist.exists() and kollege.exists()
+    assert "1 verwaiste Zwischendatei(en)" in app.protokoll_text()
 
 
 # ----------------------------------------------------------------------

@@ -26,7 +26,7 @@ import pytest
 import pymupdf as fitz
 
 from conftest import braucht_modell, braucht_ocr
-from anonymisierer import auftrag, muster
+from anonymisierer import auftrag, dateien, muster
 from test_gui import ARZTBERICHT, FakeOcr, pdf_schreiben, starte_lauf
 from test_gui import _prozesszustand, app, dialoge, root, umgebung  # noqa: F401,F811 (Fixtures)
 from werkzeuge.benchmark import bewertung, generator
@@ -482,7 +482,11 @@ def test_oberflaeche_und_benchmark_schicken_denselben_auftrag(app, umgebung, dia
                                 "profil": a["kwargs"]["profil"]}
     (b,) = benchmark_schwaerzungen
     assert b["args"][1] == g["args"][1] == benchmark_auftrag["funde"]
-    nur_gui = {"melde", "fortschritt", "abbruch", "ocr", "ziel_ordner"}
+    # zwischen_ordner (Korrekturrunde „Schließen“): nur der Ablageort der Zwischenstände – im Ordner für
+    # Arbeitskopien, nie im Ausgabeordner; die Ausgabe ändert er nicht
+    nur_gui = {"melde", "fortschritt", "abbruch", "ocr", "ziel_ordner", "zwischen_ordner"}
+    assert Path(g["kwargs"]["zwischen_ordner"]).parent == dateien.temp_basis()
+    assert Path(g["kwargs"]["zwischen_ordner"]) != app.ausgaben[pdf]["pfad"].parent
     assert set(g["kwargs"]) - nur_gui == set(b["kwargs"]) - {"ocr", "ziel_ordner"}
     for schluessel in set(b["kwargs"]) - {"ocr", "ziel_ordner"}:
         assert b["kwargs"][schluessel] is g["kwargs"][schluessel] or b["kwargs"][schluessel] == g["kwargs"][

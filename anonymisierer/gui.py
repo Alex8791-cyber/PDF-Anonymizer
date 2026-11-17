@@ -116,8 +116,17 @@ KNOPF_PADY = 3                       # Innenabstand oben/unten der Nebenknöpfe 
 PROTOKOLL_MAX_ZEILEN = 5000
 VORLADEN_NACH_MS = 800              # spaCy-Modell so lange nach dem Start im Hintergrund laden (PERF-09)
 ERSTSTART_NACH_MS = 300             # Hinweis beim ersten Start erst, wenn das Hauptfenster steht
+RESTE_PRUEFEN_NACH_MS = 200         # Zwischendateien eines abgestürzten Programms erst suchen, wenn das Fenster steht
 RESTE_WARTEN_S = 30.0               # beim Beenden höchstens so lange auf den Arbeits-Thread warten, der eine
                                     # Arbeitskopie noch offen hält (Windows löscht sie sonst nicht)
+BEENDEN_WARTEN_S = 20.0             # „Lauf läuft noch“ → „Ja“: so lange bleibt das Fenster offen und wartet auf den
+                                    # abgebrochenen Lauf (sein Aufräumen löscht die unfertigen Dateien)
+BEENDEN_PRUEFEN_MS = 100            # in diesem Abstand sieht das wartende Fenster nach, ob der Lauf zu Ende ist
+BEENDEN_ORDNER_WARTEN_S = 2.0       # beim Schließen höchstens so lange auf das Löschen eigener Zwischendateien in den
+                                    # Ausgabeordnern warten – ein nicht erreichbares Netzlaufwerk hält es nicht auf
+BEENDEN_TEXT = "Programm wird beendet – der Lauf wird abgebrochen, unfertige Dateien werden gelöscht …"
+BEENDEN_RESTE_TEXT = "Programm wird beendet – unfertige Zwischendateien werden gelöscht …"   # ohne laufenden Lauf
+LAUF_LAEUFT_TITEL = "Lauf läuft noch"                # Rückfrage beim Beenden während eines Laufs
 
 HAKEN = {"an": "☑", "aus": "☐", "teil": "⊟"}
 # Zeichen vor der Kategorie in der Fundliste: ⚑ = Fund mit Hinweis der Engine (Statuszeile zeigt ihn; steht auch an
@@ -958,6 +967,49 @@ class HinweisDialog:
             pass
 
 
+class _OrdnerAufraeumen:
+    """Beim Beenden: die eigenen Zwischendateien EINES Ausgabeordners löschen – in einem eigenen Hintergrund-Thread
+    (daemon), denn ein nicht erreichbares Netzlaufwerk (VPN getrennt) kann schon das Lesen des Ordners lange
+    blockieren. Darauf wartet weder das Fenster (höchstens BEENDEN_ORDNER_WARTEN_S auf den ersten Versuch) noch das
+    Programmende (der Nachlauf höchstens bis zur Frist); ein Ordner, der bis dahin nicht erledigt ist, bleibt für den
+    nächsten Start vermerkt. Lief beim Beenden noch ein Lauf (lauf), wird nach seinem Ende noch einmal gelöscht – er
+    kann noch eine Hilfsdatei angelegt haben; was sich nicht löschen lässt (unter Windows: noch geöffnet), wird bis zur
+    Frist erneut versucht."""
+
+    def __init__(self, ordner, lauf: threading.Thread | None, frist: float):
+        self.ordner = Path(ordner)
+        self._lauf = lauf
+        self._frist = frist
+        self.erster_versuch = threading.Event()
+        self.uebrig: list[Path] = []
+        self.lesefehler: Exception | None = None
+        self.faden = threading.Thread(target=self._arbeiten, daemon=True, name="Zwischendateien-loeschen")
+        self.faden.start()
+
+    def _versuch(self):
+        try:
+            self.uebrig = dateien.eigene_zwischendateien_loeschen(self.ordner, lesefehler=True)
+            self.lesefehler = None
+        except Exception as fehler:              # Ordner nicht lesbar: offen, ob dort noch eine liegt
+            self.lesefehler = fehler
+
+    def _arbeiten(self):
+        try:
+            self._versuch()
+        finally:
+            self.erster_versuch.set()
+        if self._lauf is not None and self._lauf.is_alive():
+            self._lauf.join(max(0.1, self._frist - time.monotonic()))
+            self._versuch()
+        while (self.uebrig or self.lesefehler is not None) and time.monotonic() < self._frist:
+            time.sleep(0.25)
+            self._versuch()
+
+    def erledigt(self) -> bool:
+        """Fertig, und im Ordner liegt sicher keine eigene Zwischendatei mehr."""
+        return not self.faden.is_alive() and self.lesefehler is None and not self.uebrig
+
+
 # ----------------------------------------------------------------------
 # Hauptfenster
 # ----------------------------------------------------------------------
@@ -1016,7 +1068,26 @@ class AnonymisiererApp:
         # Schließen, während eine Auswahl auf eine Rückfrage wartet (Kennwort, Fotos …): erst die Auswahl sauber
         # abbrechen (keine weitere Arbeitskopie), dann schließen (Befund Runde 2)
         self._schliessen_angefordert = False
-        self._beenden_frage_offen = False                # Rückfrage „Freigabe noch offen“ steht gerade da
+        self._beenden_frage_offen = False                # Rückfrage beim Beenden steht gerade da
+        self._beenden_wartet = False                     # „Lauf läuft noch“ → „Ja“: das Fenster wartet auf den Lauf
+        self._beenden_frist = 0.0                        # bis dahin (time.monotonic) wartet es höchstens
+        # Wo eigene Zwischendateien liegen können (beim Beenden wird nur dort gelöscht, Befund Korrekturrunde
+        # „Schließen“ 2 – sonst las das Beenden jeden Ausgabeordner der Sitzung): Ausgabeordner, in denen nach einem
+        # Lauf eine eigene liegen blieb, und die, in die der laufende Schwärzlauf schon geschrieben hat. Beide ändert
+        # der Arbeits-Thread – nur unter _reste_sperre lesen oder ändern.
+        self._ordner_mit_resten: set[Path] = set()
+        self._lauf_beruehrt: set[Path] = set()
+        self._reste_sperre = threading.Lock()
+        # Ergebnisse des laufenden bzw. letzten Schwärzlaufs, Datei für Datei (der Arbeits-Thread hängt an): die
+        # Rückfrage beim Beenden nennt auch schon fertige Ausgaben des laufenden Laufs (self.ausgaben kennt sie erst
+        # nach dem Lauf)
+        self._lauf_ergebnisse: list[tuple[Path, dict]] = []
+        self._aufgeraeumt = False                        # _aufraeumen ist gelaufen (läuft nur einmal)
+        # Statuszeile (_status_dateien): eigene Meldung und die Meldung davor – sie kommt zurück, wenn der Grund der
+        # eigenen Meldung wegfällt (mit dem Stand der Analyse, für den sie galt)
+        self._status_eigen: str | None = None
+        self._status_vor_eigen = ""
+        self._status_vor_eigen_stand: frozenset | None = None
         self._lauf_thread: threading.Thread | None = None   # Arbeits-Thread des laufenden bzw. letzten Laufs
         self._reste_threads: dict[str, threading.Thread] = {}   # Sitzungsordner -> Thread, der ihn später löscht
         self.laufprotokoll: list[dict] = []              # je Lauf eine Zusammenfassung ohne Inhalte (M-61)
@@ -2370,8 +2441,7 @@ class AnonymisiererApp:
             self._log(f"ℹ {len(bericht['ausgaben'])} Datei(en) im Ordner sind bereits Ausgaben des Programms "
                       f"und wurden ausgelassen.", "hinweis")
         if bericht.get("zwischendateien"):
-            self._log(f"ℹ {len(bericht['zwischendateien'])} Zwischendatei(en) einer abgebrochenen Schwärzung "
-                      f"(.anonym_tmp_…) ignoriert – sie werden beim nächsten Schwärzen aufgeräumt.", "hinweis")
+            self._zwischendateien_beim_hinzufuegen(bericht["zwischendateien"])
         if bericht["leere_ordner"]:
             namen = ", ".join(dateien.ohne_langpfad(p) for p in bericht["leere_ordner"][:3])
             teile.append("Ordner ohne PDF-Dateien")
@@ -2398,24 +2468,155 @@ class AnonymisiererApp:
         self._status_dateien()
         self._start_knopf_aktualisieren()
 
-    def _status_dateien(self):
+    def _zwischendateien_beim_hinzufuegen(self, gefunden: list):
+        """Zwischendateien einer Schwärzung (.anonym_tmp_…) in der Auswahl: nie eine Eingabe. Sicher verwaiste (ein
+        Programm auf diesem Rechner ist abgestürzt oder wurde abgewürgt; die eines anderen Rechners erst nach 24
+        Stunden, dateien.zwischendateien_aufraeumen) werden gleich gelöscht und gemeldet – sie sind unfertig und
+        gehören nicht in einen Ordner, der hochgeladen wird. Die eines noch laufenden Programms bleiben unberührt –
+        auch die eines anderen Rechners an derselben Netzwerkfreigabe (Befund Korrekturrunde „Schließen“ 2)."""
+        entfernt: list[Path] = []
+        for ordner in dict.fromkeys(Path(p).parent for p in gefunden):
+            try:
+                entfernt += dateien.zwischendateien_aufraeumen(ordner)
+            except Exception:
+                dateien.fehler_protokollieren(*sys.exc_info())
+        self._reste_melden(entfernt)
+        geblieben = [p for p in gefunden if os.path.exists(dateien.langpfad(p))]
+        hier = [p for p in geblieben if dateien.zwischendatei_herkunft(p) in ("prozess", "rechner")]
+        anderswo = [p for p in geblieben if p not in hier]
+        if hier:
+            self._log(f"ℹ {len(hier)} Zwischendatei(en) einer laufenden Schwärzung (.anonym_tmp_…) ignoriert – "
+                      f"unfertig, nie weitergeben.", "hinweis")
+        if anderswo:
+            self._log(f"ℹ {len(anderswo)} Zwischendatei(en) einer Schwärzung auf einem anderen Rechner oder aus einer "
+                      f"älteren Programmversion (.anonym_tmp_…) ignoriert – unfertig, nie weitergeben. Dort läuft "
+                      f"vielleicht noch ein Lauf; liegen gebliebene löscht das Programm, sobald sie älter als 24 "
+                      f"Stunden sind.", "hinweis")
+
+    def _reste_melden(self, entfernt: list, eigene_pids=None):
+        """Gelöschte unfertige Zwischendateien im Protokoll nennen, mit ihren Ordnern: Wer aus einem davon schon
+        hochgeladen hat, soll wissen, dass dort eine unfertige Datei lag. eigene_pids (beim Programmstart): PIDs der
+        abgestürzten früheren Sitzungen dieses Benutzers – nur deren Reste meldet der Start als „Beim letzten
+        Programmende blieb eine Schwärzung unfertig“; die eines anderen Programms bzw. Rechners nicht (Befund
+        Korrekturrunde „Schließen“ 2)."""
+        if not entfernt:
+            return
+        eigene: list[Path] = []
+        if eigene_pids:
+            eigene = [Path(p) for p in entfernt if dateien.zwischendatei_herkunft(p) in ("rechner", "unbekannt")
+                      and dateien.zwischendatei_pid(p) in eigene_pids]
+        andere = [Path(p) for p in entfernt if Path(p) not in eigene]
+        for gruppe, anlass in ((eigene, "Beim letzten Programmende blieb eine Schwärzung unfertig (Absturz?): "),
+                               (andere, "")):
+            if not gruppe:
+                continue
+            ordner = list(dict.fromkeys(dateien.ohne_langpfad(p.parent) for p in gruppe))
+            orte = ", ".join(ordner[:3]) + (f" und {len(ordner) - 3} weiteren Ordner(n)" if len(ordner) > 3 else "")
+            self._log(f"⚠ {anlass}{len(gruppe)} unfertige Zwischendatei(en) einer abgebrochenen Schwärzung "
+                      f"(.anonym_tmp_…) gelöscht – in {orte}. Sie waren nicht fertig geschwärzt; weitergegeben werden "
+                      f"nur anonym_….pdf-Dateien.", "warnung", zaehlen=False)
+
+    def reste_beim_start_aufraeumen(self, ordner=(), eigene_pids=()) -> threading.Thread | None:
+        """Nach dem Start (main): sicher verwaiste Zwischendateien in den Ausgabeordnern löschen, die eine frühere,
+        abgestürzte oder abgewürgte Sitzung vermerkt hat (eigene_pids: deren PIDs), und im gemeinsamen Zielordner –
+        diesen nur, wenn er eingeschaltet ist („zielordner_aktiv“; Befund Korrekturrunde „Schließen“ 2: sonst las und
+        löschte jeder Start in einem längst nicht mehr benutzten Ordner einer Netzwerkfreigabe) – und im Protokoll
+        melden. Hilfsdateien eines anderen Rechners gelten erst nach 24 Stunden als verwaist. Im Hintergrund: ein
+        Netzlaufwerk kann lange nicht antworten, das Fenster wartet nicht."""
+        liste = [Path(o) for o in ordner]
+        ziel = self.zielordner_var.get().strip() if self.zielordner_aktiv.get() else ""
+        if ziel and Path(ziel) not in liste:
+            liste.append(Path(ziel))
+        if not liste:
+            return None
+        pids = {int(pid) for pid in eigene_pids}
+
+        def aufraeumen():
+            entfernt: list[Path] = []
+            for o in liste:
+                try:
+                    entfernt += dateien.zwischendateien_aufraeumen(o, eigene_pids=pids)
+                except Exception:
+                    dateien.fehler_protokollieren(*sys.exc_info())
+            if entfernt:
+                self._im_hauptthread(self._reste_melden, entfernt, pids)
+
+        faden = threading.Thread(target=aufraeumen, daemon=True, name="Reste-beim-Start")
+        faden.start()
+        return faden
+
+    @staticmethod
+    def _analyse_abgebrochen(ergebnis: dict | None) -> bool:
+        """Ist das Ergebnis das einer abgebrochenen Analyse („Abgebrochen“ – die Datei ist nicht analysiert)?"""
+        return bool(ergebnis) and (ergebnis.get("fehler") == "Abgebrochen" or "ABGEBROCHEN" in meldungs_codes(ergebnis))
+
+    def _analyse_luecken(self, dateiliste=None) -> tuple[bool, list[Path]]:
+        """Dieselbe Regel für die Sperre vor dem Schwärzen (schwaerzen) und die Statuszeile (_status_dateien):
+        (veraltet, nicht analysiert). Veraltet: Einstellungen geändert oder Analyse abgebrochen; nicht analysiert: ohne
+        Ergebnis oder nur mit dem Ergebnis einer abgebrochenen Analyse."""
+        liste = list(self.dateien) if dateiliste is None else list(dateiliste)
+        fehlend = [p for p in liste
+                   if p not in self.analyse_ergebnisse or self._analyse_abgebrochen(self.analyse_ergebnisse[p])]
+        return bool(self.analyse_veraltet), fehlend
+
+    def _analysierte_dateien(self) -> frozenset:
+        _, fehlend = self._analyse_luecken()
+        return frozenset(p for p in self.dateien if p not in fehlend)
+
+    def _status_dateien_text(self) -> str | None:
+        """Meldung zum Stand der Liste; None: alles analysiert und aktuell (dann gilt die Meldung der Analyse)."""
         # die Statuszeile ist immer sichtbar (auch wenn der Einstellbereich weggescrollt ist): nicht geprüfte Dateien
         # stehen dort zuerst
         vorne = (f"⚠ {len(self.nicht_geprueft)} Datei(en) werden NICHT geprüft (siehe Protokoll) · "
                  if self.nicht_geprueft else "")
-        # dieselbe Regel wie vor dem Schwärzen (schwaerzen): ohne Analyseergebnis = nicht analysiert
-        offen = sum(1 for p in self.dateien if p not in self.analyse_ergebnisse)
+        veraltet, fehlend = self._analyse_luecken()
         if not self.dateien:
-            self._status(vorne + "Bereit. Bitte PDF-Dateien hinzufügen (Schritt 1).")
-        elif not self.analyse_ergebnisse:
-            self._status(vorne + f"{len(self.dateien)} Datei(en) ausgewählt – jetzt unten „Analysieren“ drücken.")
-        elif offen:
+            return vorne + "Bereit. Bitte PDF-Dateien hinzufügen (Schritt 1)."
+        if not self.analyse_ergebnisse:
+            return vorne + f"{len(self.dateien)} Datei(en) ausgewählt – jetzt unten „Analysieren“ drücken."
+        if veraltet:
+            # z. B. nach einer abgebrochenen Analyse (Befund: dort stand „die bisherige Analyse gilt weiter“, obwohl
+            # „Schwärzen starten“ gesperrt war)
+            return vorne + ("Die letzte Analyse wurde abgebrochen oder gilt nicht mehr – bitte erneut „Analysieren“ "
+                            "drücken, bevor geschwärzt wird.")
+        if fehlend:
             # z. B. zu einer schon analysierten Liste hinzugefügt (Befund: dort blieb „Dateien werden geprüft …“ stehen)
-            self._status(vorne + f"{offen} Datei(en) noch nicht analysiert – bitte erneut „Analysieren“ drücken, "
-                                 f"bevor geschwärzt wird.")
-        elif self._auswahl_ungeprueft:
+            return vorne + (f"{len(fehlend)} Datei(en) noch nicht analysiert – bitte erneut „Analysieren“ drücken, "
+                            f"bevor geschwärzt wird.")
+        if self._auswahl_ungeprueft:
             # alles analysiert, aber Dateien dieser Auswahl werden NICHT geprüft – das gehört vorn in die Statuszeile
-            self._status(vorne + "Keine neue Datei zum Analysieren – die bisherige Analyse gilt weiter.")
+            return vorne + "Keine neue Datei zum Analysieren – die bisherige Analyse gilt weiter."
+        return None
+
+    def _status_dateien(self):
+        """Statuszeile nach einer Änderung der Liste (Hinzufügen, Entfernen, Leeren) – nach derselben Regel wie die
+        Sperre vor dem Schwärzen. Die eigene Meldung wird ersetzt, sobald sich der Stand ändert; fällt ihr Grund weg
+        (alles analysiert und aktuell), steht wieder die Meldung von vorher da (meist die der Analyse) – wenn sie für
+        dieselben analysierten Dateien galt, sonst eine neue. Befund: „1 Datei(en) noch nicht analysiert“ blieb stehen,
+        nachdem die Datei wieder entfernt war."""
+        text = self._status_dateien_text()
+        aktuell = self.status_label.cget("text")
+        eigen = self._status_eigen is not None and aktuell == self._status_eigen
+        if text is None:
+            if eigen:
+                vorne = (f"⚠ {len(self.nicht_geprueft)} Datei(en) werden NICHT geprüft (siehe Protokoll) · "
+                         if self.nicht_geprueft else "")
+                if self._status_vor_eigen and self._status_vor_eigen_stand == self._analysierte_dateien():
+                    # ohne den alten Vorspann „⚠ … NICHT geprüft“ (die Zahl kann sich geändert haben)
+                    basis = re.sub(r"^⚠ \d+ Datei\(en\) (?:werden )?NICHT geprüft \(siehe Protokoll\) · ", "",
+                                   self._status_vor_eigen)
+                else:
+                    basis = (f"{len(self.dateien)} Datei(en) analysiert – Liste prüfen (Doppelklick auf eine Datei = "
+                             f"Vorschau), dann „Schwärzen starten“.")
+                self._status(vorne + basis)
+            self._status_eigen = None
+            return
+        if not eigen:
+            # die Meldung davor (meist die der Analyse) gilt für die Dateien, die jetzt analysiert sind
+            self._status_vor_eigen = aktuell
+            self._status_vor_eigen_stand = self._analysierte_dateien()
+        self._status(text)
+        self._status_eigen = text
 
     def _datei_vergessen(self, pdf: Path):
         """Alles zu einer Datei vergessen (Vorschau, manuelle Markierungen, Ausgabestatus, Arbeitskopie)."""
@@ -3088,6 +3289,32 @@ class AnonymisiererApp:
         sich keine dieser Ausgaben mehr freigeben."""
         return [p for p in self.dateien if self.ausgabe_vorhanden(p) and self.ausgaben[p]["status"] == "pruefen"]
 
+    def _wartende_ausgaben(self, nur_laufender_lauf: bool = False) -> list[tuple[Path, Path]]:
+        """(Datei, Ausgabe) in Listenreihenfolge für jede Ausgabe, die noch auf die Freigabe wartet: aus früheren
+        Läufen dieser Sitzung (offene_freigaben) und die schon fertigen Ausgaben des LAUFENDEN Schwärzlaufs –
+        self.ausgaben kennt sie erst nach dem Lauf (Befund Korrekturrunde „Schließen“ 2: mehrere Dateien schwärzen und
+        mittendrin schließen ist der häufigste Fall). Hat der laufende Lauf für eine Datei schon eine neue Ausgabe
+        geschrieben, zählt nur diese. nur_laufender_lauf: ohne die früheren (sie sind in diesem Beenden schon
+        bestätigt). Die Ausgaben des laufenden Laufs hat der Arbeits-Thread eben geschrieben – sie werden hier nicht
+        noch einmal auf dem (vielleicht nicht erreichbaren) Laufwerk nachgesehen."""
+        neu: dict[Path, Path | None] = {}
+        if self.laeuft and self.lauf_art == "schwaerzen":
+            for pdf, e in list(self._lauf_ergebnisse):
+                ausgabe = e.get("ausgabe")
+                status = e.get("_status")
+                if ausgabe is None or status not in ("fertig", "pruefen"):
+                    continue
+                neu[pdf] = Path(ausgabe) if status == "pruefen" else None
+        frueher = set() if nur_laufender_lauf else set(self.offene_freigaben())
+        wartend: list[tuple[Path, Path]] = []
+        for pdf in self.dateien:
+            if pdf in neu:
+                if neu[pdf] is not None:
+                    wartend.append((pdf, neu[pdf]))
+            elif pdf in frueher:
+                wartend.append((pdf, Path(self.ausgaben[pdf]["pfad"])))
+        return wartend
+
     def naechste_zu_pruefen(self, nach: Path | None = None) -> Path | None:
         """Nächste Datei (in Listenreihenfolge nach „nach“), deren Ausgabe noch freigegeben werden muss."""
         reihe = self.offene_freigaben()
@@ -3576,6 +3803,9 @@ class AnonymisiererApp:
         self._log("Abbruch angefordert …", "warnung", zaehlen=False)
 
     def _laeuft_hinweis(self):
+        if self._beenden_wartet:                      # es wird schon beendet: nur sagen, worauf das Fenster wartet
+            self._status(BEENDEN_TEXT)
+            return
         self._dialog("info", "Lauf läuft noch",
                      "Gerade läuft noch eine Analyse oder Schwärzung. Bitte warten oder „Abbrechen“ drücken.")
 
@@ -3588,7 +3818,7 @@ class AnonymisiererApp:
             # Fenster trotz modaler Meldung): nicht ein zweites Mal fragen – es gilt die Antwort auf die offene Frage
             return False
         try:
-            offen = self.offene_freigaben()
+            offen = [(p, Path(self.ausgaben[p]["pfad"])) for p in self.offene_freigaben()]
             text = self._freigabe_offen_text(offen) if offen else ""
         except Exception:
             try:
@@ -3604,10 +3834,11 @@ class AnonymisiererApp:
         finally:
             self._beenden_frage_offen = False
 
-    def _freigabe_offen_text(self, offen: list) -> str:
-        """Text der Rückfrage „Freigabe noch offen“: die betroffenen Dateien und was nach dem Beenden noch geht."""
+    def _freigabe_offen_teile(self, offen: list) -> tuple[str, str]:
+        """(die wartenden Ausgaben, was nach dem Beenden noch geht) – für beide Rückfragen beim Beenden. offen: Paare
+        (Datei, Ausgabe)."""
         einzahl = len(offen) == 1
-        zeilen = [f"  • {self._anzeigename(p)} → {Path(self.ausgaben[p]['pfad']).name}" for p in offen[:5]]
+        zeilen = [f"  • {self._anzeigename(p)} → {Path(ausgabe).name}" for p, ausgabe in offen[:5]]
         if len(offen) > 5:
             zeilen.append(f"  … und {len(offen) - 5} weitere")
         wartet = "Eine Ausgabe wartet" if einzahl else f"{len(offen)} Ausgaben warten"
@@ -3615,17 +3846,68 @@ class AnonymisiererApp:
                   "analysieren und zu schwärzen – das ergibt eine neue Ausgabe." if einzahl else
                   "Nach dem Beenden lassen sie sich nicht mehr freigeben. Dann bleibt nur, die Originale erneut zu "
                   "analysieren und zu schwärzen – das ergibt neue Ausgaben.")
-        return (f"{wartet} noch auf Ihre Freigabe:\n" + "\n".join(zeilen) + f"\n\n{danach}\n\nTrotzdem beenden?\n\n"
-                "„Nein“: Das Programm bleibt offen. Prüfen und freigeben können Sie in der Vorschau (Doppelklick "
-                "auf die Datei).")
+        return f"{wartet} noch auf Ihre Freigabe:\n" + "\n".join(zeilen), danach
+
+    def _freigabe_offen_text(self, offen: list) -> str:
+        """Text der Rückfrage „Freigabe noch offen“ (kein Lauf aktiv): die betroffenen Dateien – Paare (Datei,
+        Ausgabe) – und was nach dem Beenden noch geht."""
+        liste, danach = self._freigabe_offen_teile(offen)
+        return (f"{liste}\n\n{danach}\n\nTrotzdem beenden?\n\n„Nein“: Das Programm bleibt offen. Prüfen und freigeben "
+                "können Sie in der Vorschau (Doppelklick auf die Datei).")
+
+    def _beenden_trotz_laufendem_lauf(self, freigaben_bestaetigt: bool = False) -> bool:
+        """Rückfrage „Lauf läuft noch“ (True: beenden). Warten Ausgaben noch auf die Freigabe – aus früheren Läufen oder
+        schon fertige des laufenden Schwärzlaufs (_wartende_ausgaben) –, nennt sie sie mit; Voreinstellung dann „Nein“
+        (Befunde Korrekturrunde „Schließen“: während eines Laufs entfiel „Freigabe noch offen“, obwohl sich auch dann
+        nach dem Beenden nichts mehr freigeben lässt; Runde 2: die Ausgaben des laufenden Laufs fehlten). Freigeben geht
+        erst nach dem Ende des Laufs (bis dahin ist die Vorschau gesperrt) – so steht es auch im Text. Ist
+        „Freigabe noch offen“ in diesem Beenden schon mit „Ja“ beantwortet (ein Lauf hat erst während dieser Frage
+        begonnen), nennt sie nur noch Ausgaben dieses Laufs."""
+        try:
+            offen = self._wartende_ausgaben(nur_laufender_lauf=freigaben_bestaetigt)
+        except Exception:                              # nur ein Hinweis – eine gescheiterte Prüfung hält nicht auf
+            try:
+                dateien.fehler_protokollieren(*sys.exc_info())
+            except Exception:
+                pass
+            offen = []
+        text = ("Es läuft noch eine Analyse oder Schwärzung. Wirklich beenden?\n\n"
+                "Bereits fertige Ausgabedateien bleiben erhalten; die aktuelle Datei wird nicht fertig. Das Programm "
+                "bricht den Lauf ab und schließt, sobald seine unfertigen Dateien gelöscht sind.")
+        optionen = {}
+        if offen:
+            liste, danach = self._freigabe_offen_teile(offen)
+            text += (f"\n\n{liste}\n\n{danach}\n\n„Nein“: Das Programm bleibt offen, der Lauf geht weiter. Prüfen "
+                     f"und freigeben können Sie nach dem Ende des Laufs in der Vorschau (Doppelklick auf die Datei).")
+            optionen["default"] = messagebox.NO
+        self._beenden_frage_offen = True
+        try:
+            antwort = messagebox.askyesno(LAUF_LAEUFT_TITEL, _anzeigetext(text), icon="warning", parent=self.root,
+                                          **optionen)
+        except tk.TclError:
+            antwort = False
+        finally:
+            self._beenden_frage_offen = False
+        self.letzter_dialog = ("askyesno", LAUF_LAEUFT_TITEL, str(antwort))
+        return bool(antwort)
 
     def schliessen(self):
         """Fenster schließen; Einstellungen sichern, Sperre freigeben. Vorher fragt es nach: ohne laufenden Lauf,
         solange Ausgaben dieser Sitzung noch auf die Freigabe warten („Freigabe noch offen“), und solange ein Lauf
-        aktiv ist („Lauf läuft noch“ – auch für einen Lauf, der erst während der ersten Frage begonnen hat).
+        aktiv ist („Lauf läuft noch“ – auch für einen Lauf, der erst während der ersten Frage begonnen hat; warten noch
+        Ausgaben auf die Freigabe, nennt diese Frage sie mit). „Ja“ während eines Laufs bricht ihn ab; das Fenster
+        schließt erst, wenn der Arbeits-Thread aufgeräumt hat (_beenden_nach_dem_lauf) – sonst blieb ein halb
+        geschwärzter Zwischenstand im Ausgabeordner liegen (Befund Korrekturrunde „Schließen“).
         Wartet gerade eine Auswahl auf eine Rückfrage (Kennwort, Fotos …), wird sie zuerst abgebrochen – erst danach
         schließt das Fenster, damit keine (entschlüsselte) Arbeitskopie mehr entsteht oder liegen bleibt."""
         if self.beendet:
+            return
+        if self._beenden_wartet:
+            self._status(BEENDEN_TEXT)                  # erneut geschlossen: das Fenster schließt von selbst
+            return
+        if self._beenden_frage_offen:
+            # erneut geschlossen, während eine Rückfrage offen ist (unter Linux erreicht das X der Titelleiste das
+            # Fenster trotz modaler Meldung): nicht ein zweites Mal fragen – es gilt die Antwort auf die offene Frage
             return
         if self._hinzufuegen_laeuft:
             self._schliessen_angefordert = True
@@ -3633,33 +3915,99 @@ class AnonymisiererApp:
             if dialog is not None:
                 dialog.abbrechen()                      # wie „Überspringen“; _pdfs_hinzufuegen schließt danach
             return
-        if not self.laeuft and not self._beenden_trotz_offener_freigaben():
-            return
+        freigaben_bestaetigt = False
+        if not self.laeuft:
+            if not self._beenden_trotz_offener_freigaben():
+                return
+            freigaben_bestaetigt = True
         if self.laeuft:
             # auch ein Lauf, der erst während der Rückfrage „Freigabe noch offen“ begonnen hat (unter Windows bleibt ein
             # Vorschau-Fenster dabei bedienbar: „Markierte nachschwärzen“) – „Ja“ dort bricht ihn nicht ungefragt ab
-            antwort = messagebox.askyesno(
-                "Lauf läuft noch",
-                "Es läuft noch eine Analyse oder Schwärzung. Wirklich beenden?\n\n"
-                "Bereits fertige Ausgabedateien bleiben erhalten; die aktuelle Datei wird nicht fertig.",
-                icon="warning", parent=self.root)
-            self.letzter_dialog = ("askyesno", "Lauf läuft noch", str(antwort))
-            if not antwort:
+            if not self._beenden_trotz_laufendem_lauf(freigaben_bestaetigt):
                 return
-            self.abbrechen()
+            self._beenden_nach_dem_lauf()
+            return
+        self._beenden_abschliessen()
+
+    def _beenden_nach_dem_lauf(self):
+        """„Lauf läuft noch“ → „Ja“: den Lauf abbrechen und das Fenster erst schließen, wenn der Arbeits-Thread zu Ende
+        ist – sein Aufräumen löscht die unfertigen Dateien (Zwischenstand, Hilfsdatei der Ausgabe). Bis dahin läuft die
+        Ereignisschleife weiter: das Fenster reagiert und sagt in Statuszeile und Protokoll, worauf es wartet; Dialoge
+        öffnet es nicht mehr. Nach BEENDEN_WARTEN_S schließt es trotzdem – dann löscht _aufraeumen die eigenen
+        Zwischendateien in den Ordnern, in die der Lauf schon geschrieben hat, selbst (in Hintergrund-Threads) und nach
+        dem Ende des Laufs noch einmal (_OrdnerAufraeumen, _reste_spaeter_loeschen)."""
+        self._beenden_wartet = True
+        self.abbrechen()
+        self._log("Programm wird beendet: Lauf abgebrochen – unfertige Dateien werden gelöscht …", "warnung",
+                  zaehlen=False)
+        self._status(BEENDEN_TEXT)
+        try:
+            self.root.config(cursor="watch")
+        except tk.TclError:
+            pass
+        self._beenden_frist = time.monotonic() + BEENDEN_WARTEN_S
+        self._beenden_warten()
+
+    def _beenden_warten(self):
+        """Sieht alle BEENDEN_PRUEFEN_MS nach, ob der abgebrochene Lauf zu Ende ist; dann (oder nach der Frist)
+        schließt es das Fenster – über after(0), also erst nach dem Abschluss des Laufs (_schwaerzen_fertig): Den hat
+        der Arbeits-Thread vor seinem Ende per after() eingereiht, er kommt damit vorher dran. Sonst lief er nie, und
+        beim Nachschwärzen blieb neben der neuen Ausgabe auch die alte liegen (Gegenprobe zur Korrekturrunde
+        „Schließen“ 2: mit kurzem Prüfabstand mal so, mal so)."""
+        if self.beendet:
+            return
+        faden = self._lauf_thread
+        if faden is not None and faden.is_alive() and time.monotonic() < self._beenden_frist:
+            try:
+                self.root.after(BEENDEN_PRUEFEN_MS, self._beenden_warten)
+                return
+            except tk.TclError:
+                pass
+        try:
+            self.root.after(0, self._beenden_abschliessen)
+            return
+        except tk.TclError:
+            pass
+        self._beenden_abschliessen()
+
+    def _beenden_abschliessen(self):
+        """Einstellungen sichern, aufräumen, Fenster schließen – das Fenster schließt auch, wenn das Aufräumen scheitert
+        (sonst bliebe es nach „Lauf läuft noch“ → „Ja“ im Zustand „wird beendet“ stehen)."""
         try:
             self.einstellungen_speichern()
         except Exception:
             pass
         self.beendet = True
-        self._aufraeumen()
-        self.root.destroy()
+        try:
+            self._aufraeumen()
+        except Exception:
+            try:
+                dateien.fehler_protokollieren(*sys.exc_info())
+            except Exception:
+                pass
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
 
     def _aufraeumen(self):
         """Prozessweite Zustände zurückgeben (KQ-10): threading.excepthook, Einzelinstanz-Sperre, ausstehende
-        after()-Aufrufe; Arbeitskopien (Bild als PDF, entschlüsselte PDF) dieser Sitzung löschen – endgültig: danach
-        entsteht keine neue Arbeitskopie mehr. Lässt sich etwas nicht löschen (unter Windows hält ein noch laufender
-        Analyse- oder Schwärz-Thread die Kopie offen), wird es nach dem Ende des Threads erneut versucht."""
+        after()-Aufrufe; Arbeitskopien (Bild als PDF, entschlüsselte PDF) und Zwischenstände dieser Sitzung löschen –
+        endgültig: danach entsteht keine neue Arbeitskopie mehr – und die eigenen Zwischendateien (.anonym_tmp_<PID>_…)
+        in den Ausgabeordnern, auch wenn ein abgebrochener Lauf nicht mehr selbst aufräumen konnte. Läuft nur einmal
+        (beim Beenden ruft es danach noch die <Destroy>-Bindung von main auf).
+
+        Ausgabeordner liest es nur, wo wirklich noch eigene Zwischendateien liegen können
+        (_ordner_mit_moeglichen_resten) – nach einem gewöhnlichen Lauf keinen: dessen Ende hat sie schon gelöscht.
+        Gelesen und gelöscht wird dort in je einem Hintergrund-Thread (_OrdnerAufraeumen): Das Fenster wartet höchstens
+        BEENDEN_ORDNER_WARTEN_S auf den ersten Versuch – ein erreichbarer Ordner ist dann sauber, ein nicht erreichbares
+        Netzlaufwerk hält das Schließen nicht auf (Befund Korrekturrunde „Schließen“ 2: der Hauptthread las jeden
+        Ausgabeordner der Sitzung, zweimal).
+        Was noch offen ist (Ordner nicht erreichbar, Datei noch geöffnet, Lauf läuft noch), erledigt der Nachlauf
+        _reste_spaeter_loeschen; bis dahin bleiben solche Ordner für den nächsten Start vermerkt."""
+        if self._aufgeraeumt:
+            return
+        self._aufgeraeumt = True
         for kennung in self._nach_start:
             try:
                 self.root.after_cancel(kennung)
@@ -3676,38 +4024,93 @@ class AnonymisiererApp:
         for pdf in list(self.arbeitskopien):
             self._arbeitskopie_loeschen(pdf)
         sitzung = dateien.aktuelle_sitzung()
-        if not dateien.sitzung_aufraeumen(endgueltig=True) and sitzung is not None:
-            self._reste_spaeter_loeschen(sitzung, kopien)
+        lauf = self._lauf_thread
+        lauf_lebt = lauf is not None and lauf.is_alive()
+        frist = time.monotonic() + RESTE_WARTEN_S
+        helfer = [_OrdnerAufraeumen(o, lauf if lauf_lebt else None, frist)
+                  for o in self._ordner_mit_moeglichen_resten(lauf_lebt)]
+        if helfer:
+            try:
+                self.status_label.config(text=BEENDEN_TEXT if lauf_lebt else BEENDEN_RESTE_TEXT)
+                self.root.update_idletasks()
+            except tk.TclError:
+                pass
+            bis = time.monotonic() + BEENDEN_ORDNER_WARTEN_S
+            for h in helfer:
+                h.erster_versuch.wait(max(0.0, bis - time.monotonic()))
+        sitzung_weg = dateien.sitzung_aufraeumen(endgueltig=True)
+        offen = [h.ordner for h in helfer if not h.erledigt()]
+        if offen:
+            # der Vermerk lag im eben gelöschten Sitzungsordner: Bleibt etwas offen, findet der nächste Start den Ordner
+            # so wieder (der Nachlauf löscht den Vermerk, wenn er alles erledigt)
+            sitzung = sitzung or dateien.temp_basis() / f"sitzung_{os.getpid()}_vermerk"
+            dateien.ausgabeordner_vermerk_schreiben(sitzung, offen)
+        if helfer or lauf_lebt or (not sitzung_weg and sitzung is not None):
+            self._reste_spaeter_loeschen(sitzung, kopien, helfer, frist)
         if self.instanz_sperre is not None:
             self.instanz_sperre.freigeben()
             self.instanz_sperre = None
 
-    def _reste_spaeter_loeschen(self, sitzung: Path, kopien: list):
-        """Arbeitskopien, die beim Beenden noch geöffnet waren (Windows löscht keine offene Datei; der Analyse- bzw.
-        Schwärz-Thread liest sie noch), nach dem Ende des Threads löschen. Ein eigener, nicht im Hintergrund
-        laufender Thread hält das Programm so lange am Leben (höchstens RESTE_WARTEN_S Sekunden). Bleibt trotzdem
-        etwas übrig, steht das in fehler.log – der nächste Programmstart löscht es."""
-        schluessel = str(sitzung)
-        if schluessel in self._reste_threads and self._reste_threads[schluessel].is_alive():
-            return
+    def _ordner_mit_moeglichen_resten(self, lauf_lebt: bool) -> list[Path]:
+        """Ausgabeordner, in denen beim Beenden noch eigene Zwischendateien liegen können: die, in denen nach einem Lauf
+        eine liegen blieb, und – solange der Schwärzlauf noch lebt – die, in die er schon geschrieben hat. Nach einem
+        gewöhnlichen Lauf ist die Liste leer (dessen Ende hat seine Zwischendateien gelöscht)."""
+        with self._reste_sperre:
+            ordner = set(self._ordner_mit_resten)
+            if lauf_lebt:
+                ordner |= self._lauf_beruehrt
+        return sorted(ordner)
+
+    def _reste_spaeter_loeschen(self, sitzung: Path | None, kopien: list, helfer=(), frist: float | None = None):
+        """Nachlauf beim Beenden – was noch nicht gelöscht werden konnte oder ein noch laufender Lauf noch anlegen
+        könnte, nach dem Ende des Arbeits-Threads löschen: Arbeitskopien (Windows löscht keine offene Datei; der
+        Analyse- bzw. Schwärz-Thread liest sie noch) und den Sitzungsordner mit den Zwischenständen; die eigenen
+        Zwischendateien in den Ausgabeordnern löschen die Hilfs-Threads (helfer, _OrdnerAufraeumen), auf die er wartet.
+        Ein eigener, nicht im Hintergrund laufender Thread hält das Programm so lange am Leben – höchstens bis zur Frist
+        (RESTE_WARTEN_S nach dem Schließen), auch wenn ein Netzlaufwerk nicht antwortet: Die Hilfs-Threads laufen im
+        Hintergrund und halten das Programmende nicht auf. Bleibt etwas übrig, steht das in fehler.log, und die
+        betroffenen Ausgabeordner bleiben im Sitzungsordner vermerkt – der nächste Programmstart löscht dort."""
+        schluessel = str(sitzung) if sitzung is not None else "ausgabeordner"
+        if any(faden.is_alive() for faden in self._reste_threads.values()):
+            return                      # schon ein Nachlauf unterwegs: einer genügt
         lauf = self._lauf_thread
+        helfer = list(helfer)
+        frist = frist if frist is not None else time.monotonic() + RESTE_WARTEN_S
 
         def spaeter():
-            ende = time.monotonic() + RESTE_WARTEN_S
             if lauf is not None and lauf.is_alive():
-                lauf.join(max(0.1, ende - time.monotonic()))
+                lauf.join(max(0.1, frist - time.monotonic()))
             while True:
                 for kopie in kopien:
                     dateien.arbeitskopie_entfernen(kopie)
-                if dateien.ordner_loeschen(sitzung) or time.monotonic() >= ende:
+                sitzung_weg = sitzung is None or dateien.ordner_loeschen(sitzung)
+                if sitzung_weg or time.monotonic() >= frist:
                     break
                 time.sleep(0.25)
-            if Path(sitzung).exists():
+            offen = [h.ordner for h in helfer if not h.erledigt()]
+            if offen and sitzung is not None:
+                dateien.ausgabeordner_vermerk_schreiben(sitzung, offen)      # gleich wieder vermerken
+            for h in helfer:
+                h.faden.join(max(0.0, frist - time.monotonic()))
+            lauf_lebt = lauf is not None and lauf.is_alive()
+            offen = [h.ordner for h in helfer if lauf_lebt or not h.erledigt()]
+            if not sitzung_weg:
                 hinweis = RuntimeError(f"Arbeitskopien im Ordner für Zwischendateien (%LOCALAPPDATA%\\"
                                        f"PDF-Anonymisierer\\temp\\{Path(sitzung).name}) konnten beim Beenden nicht "
                                        f"gelöscht werden (Datei noch geöffnet?) – sie werden beim nächsten "
                                        f"Programmstart gelöscht.")
                 dateien.fehler_protokollieren(type(hinweis), hinweis, None)
+            if offen:
+                if sitzung is not None:
+                    dateien.ausgabeordner_vermerk_schreiben(sitzung, offen)
+                hinweis = RuntimeError(f"In {len(offen)} Ausgabeordner(n) konnten unfertige Zwischendateien "
+                                       f"(.anonym_tmp_…) beim Beenden nicht gelöscht oder nicht geprüft werden (Ordner "
+                                       f"nicht erreichbar, Datei noch geöffnet oder Lauf noch nicht zu Ende?) – sie "
+                                       f"werden beim nächsten Programmstart bzw. Schwärzen gelöscht. Bis dahin NICHT "
+                                       f"weitergeben.")
+                dateien.fehler_protokollieren(type(hinweis), hinweis, None)
+            elif sitzung_weg and sitzung is not None:
+                dateien.ordner_loeschen(sitzung)              # nur der Vermerk war noch da: alles erledigt
 
         faden = threading.Thread(target=spaeter, daemon=False, name="Arbeitskopien-loeschen")
         self._reste_threads[schluessel] = faden
@@ -3911,6 +4314,8 @@ class AnonymisiererApp:
             self._log(f"{name}: {len(ergebnis['funde'])} Fund(e){zusatz}", "grau")
 
     def _analyse_fertig(self, pdfs, ergebnisse, abgebrochen, fehler_intern, erster_fehler=None, weitergabe_neu=0):
+        if self._beenden_wartet:
+            return                  # das Programm wird beendet (Lauf abgebrochen): keine Fundliste, kein Dialog mehr
         self.analyse_ergebnisse.update(ergebnisse)
         for pdf in pdfs:
             if pdf not in ergebnisse and str(pdf) in self.zeilen and self.baum.exists(str(pdf)):
@@ -4240,13 +4645,14 @@ class AnonymisiererApp:
         if self.laeuft:
             self._laeuft_hinweis()
             return False
-        if self.analyse_veraltet:
-            self._dialog("info", "Erneut analysieren",
-                         "Schutzstufe, Kategorien, Listen oder Dateien wurden seit der letzten Analyse geändert. "
-                         "Bitte zuerst erneut analysieren.")
-            return False
         dateiliste = list(nur) if nur is not None else list(self.dateien)
-        nicht_analysiert = [p for p in dateiliste if p not in self.analyse_ergebnisse]
+        # dieselbe Regel wie die Statuszeile (_status_dateien): veraltet, abgebrochen, fehlend
+        veraltet, nicht_analysiert = self._analyse_luecken(dateiliste)
+        if veraltet:
+            self._dialog("info", "Erneut analysieren",
+                         "Die letzte Analyse wurde abgebrochen, oder Schutzstufe, Kategorien, Listen oder Dateien "
+                         "wurden seitdem geändert. Bitte zuerst erneut analysieren.")
+            return False
         if nicht_analysiert:
             self._dialog("info", "Erst analysieren",
                          f"{len(nicht_analysiert)} Datei(en) sind noch nicht analysiert "
@@ -4286,27 +4692,47 @@ class AnonymisiererApp:
                                   "basis_profil": self.basis_profil, "nachschwaerzen": ersetzt is not None,
                                   "gemeinsamer_zielordner": ziel_ordner is not None and ersetzt is None,
                                   "fotos": sum(1 for a in auftraege if a.get("foto"))}
+        zwischen = self._ausgabeordner_vermerken(auftraege, ziel_ordner)
+        ergebnisse: list[tuple[Path, dict]] = []
+        self._lauf_ergebnisse = ergebnisse              # die Rückfrage beim Beenden sieht die fertigen Ausgaben
+        with self._reste_sperre:
+            self._lauf_beruehrt = set()
         self._lauf_starten("schwaerzen")
         self._status("Schwärzung startet …")
         self._lauf_thread = threading.Thread(target=self._schwaerz_lauf,
                                              args=(auftraege, ziel_ordner, self.abbruch, freigabe, self.basis_profil,
-                                                   ersetzt),
+                                                   ersetzt, zwischen, ergebnisse),
                                              daemon=True, name="Schwaerzung")
         self._lauf_thread.start()
         return True
 
-    def _schwaerz_lauf(self, auftraege, ziel_ordner, abbruch, freigabe=True, profil="hoch", ersetzt=None):
-        ergebnisse: list[tuple[Path, dict]] = []
+    @staticmethod
+    def _ausgabeordner_des_auftrags(auftrag: dict, ziel_ordner) -> Path:
+        """Ordner, in den die Schwärzung die Ausgabe dieses Auftrags (und ihre Hilfsdatei) schreibt."""
+        return Path(ziel_ordner or auftrag.get("ziel_ordner") or Path(auftrag["pdf"]).parent / dateien.AUSGABE_ORDNER)
+
+    def _ausgabeordner_vermerken(self, auftraege, ziel_ordner) -> Path | None:
+        """Vor dem Schwärzen: die Ausgabeordner dieses Laufs (und die, in denen von früher noch eine eigene
+        Zwischendatei liegt) im Sitzungsordner vermerken – nach einem Absturz findet der nächste Start dort liegen
+        gebliebene Zwischendateien. Liefert den Sitzungsordner: dort legt die Schwärzung ihre Zwischenstände ab (nur
+        teilweise geschwärzt – nie im Ausgabeordner); None, wenn er nicht anzulegen ist."""
+        ordner = list(dict.fromkeys(self._ausgabeordner_des_auftrags(a, ziel_ordner) for a in auftraege))
+        with self._reste_sperre:
+            ordner += sorted(o for o in self._ordner_mit_resten if o not in ordner)
+        return dateien.ausgabeordner_vermerken(ordner)
+
+    def _schwaerz_lauf(self, auftraege, ziel_ordner, abbruch, freigabe=True, profil="hoch", ersetzt=None,
+                       zwischen_ordner=None, ergebnisse: list | None = None):
+        ergebnisse = [] if ergebnisse is None else ergebnisse
         fehler_intern = None
         erster_fehler = None
         ocr = None
+        ordner = {self._ausgabeordner_des_auftrags(a, ziel_ordner) for a in auftraege}
         try:
             ocr = self._ocr_dienst_anlegen()
             self.ocr = ocr
             seiten = {a["pdf"]: _seitenzahl(a.get("datei", a["pdf"])) for a in auftraege}
             self._fortschritt_maximum(max(1, sum(seiten.values())))
-            ordner = {ziel_ordner} if ziel_ordner else {a.get("ziel_ordner") or a["pdf"].parent / dateien.AUSGABE_ORDNER
-                                                        for a in auftraege}
             for o in sorted(ordner):
                 entfernt = dateien.zwischendateien_aufraeumen(o)
                 if entfernt:
@@ -4324,8 +4750,12 @@ class AnonymisiererApp:
                     self._fortschritt_setzen(_basis + min(int(seite), seiten[_pdf]))
                     self._status(f"Schwärzung: Datei {_nr}/{len(auftraege)}, Seite {seite}/{gesamt} – {_name}")
 
+                with self._reste_sperre:                # hier kann gleich eine Hilfsdatei entstehen (beim Beenden)
+                    self._lauf_beruehrt.add(self._ausgabeordner_des_auftrags(auftrag, ziel_ordner))
                 kwargs = {"melde": lambda t: self._log(t, "grau"), "fortschritt": fortschritt, "abbruch": abbruch,
                           "ocr": ocr, "ziel_ordner": ziel_ordner or auftrag.get("ziel_ordner")}
+                if zwischen_ordner is not None and kann(schwaerze_pdf, "zwischen_ordner"):
+                    kwargs["zwischen_ordner"] = zwischen_ordner     # Zwischenstände nie in den Ausgabeordner
                 # ocr_cache, Modell, Nebenkanäle, manuelle Markierungen, Freigabe, Schutzstufe (wie im Benchmark)
                 kwargs.update(_auftrag_modul.schwaerz_parameter(auftrag, freigabe, profil, schwaerze_pdf))
                 freigabe_engine = kann(schwaerze_pdf, "freigabe_erforderlich")
@@ -4361,8 +4791,35 @@ class AnonymisiererApp:
             fehler_intern = sys.exc_info()
         finally:
             self._ocr_schliessen(ocr)
+            self._zwischendateien_nach_dem_lauf()
             self._im_hauptthread(self._schwaerzen_fertig, auftraege, ergebnisse, abbruch.is_set(), fehler_intern,
                                  erster_fehler, ersetzt)
+
+    def _zwischendateien_nach_dem_lauf(self):
+        """Ende einer Schwärzung (im Arbeits-Thread, auch nach einem Abbruch): Zwischendateien gibt es nur während eines
+        Laufs. Eigene, die die Schwärzung nicht selbst löschen konnte, jetzt löschen – in den Ausgabeordnern, in die
+        sie geschrieben hat, und in denen, wo von früher noch eine liegt (nicht in den übrigen: das Beenden und jeder
+        Lauf läsen sonst jeden Ausgabeordner, Befund Korrekturrunde „Schließen“ 2). Wo sich eine nicht löschen lässt
+        oder der Ordner nicht zu lesen ist (Netzlaufwerk getrennt), merkt es sich den Ordner (_ordner_mit_resten, dort
+        löscht das Beenden noch einmal); ist keine mehr übrig, braucht es den Vermerk der Ausgabeordner (für einen
+        Absturz) nicht mehr."""
+        try:
+            with self._reste_sperre:
+                ordner = sorted(self._lauf_beruehrt | self._ordner_mit_resten)
+            mit_resten: set[Path] = set()
+            for o in ordner:
+                try:
+                    if dateien.eigene_zwischendateien_loeschen(o, lesefehler=True):
+                        mit_resten.add(Path(o))
+                except OSError:
+                    mit_resten.add(Path(o))           # nicht lesbar: offen, ob dort noch eine liegt
+            with self._reste_sperre:
+                self._ordner_mit_resten = mit_resten
+                self._lauf_beruehrt = set()
+            if not mit_resten:
+                dateien.ausgabeordner_vermerk_loeschen()
+        except Exception:
+            dateien.fehler_protokollieren(*sys.exc_info())
 
     @staticmethod
     def _reste_verorten(ergebnis: dict):
@@ -4472,6 +4929,17 @@ class AnonymisiererApp:
 
     def _schwaerzen_fertig(self, auftraege, ergebnisse, abgebrochen, fehler_intern, erster_fehler=None,
                            ersetzt=None):
+        if self._beenden_wartet:
+            # das Programm wird beendet (Lauf abgebrochen): kein Abschlussdialog mehr. Wurde beim Nachschwärzen die
+            # neue Ausgabe doch noch fertig, die alte wie sonst verwerfen – sonst lägen beide im Ausgabeordner
+            if ersetzt is not None and any(e.get("ausgabe") is not None and Path(e["ausgabe"]).exists()
+                                           and not e.get("fehler") for _, e in ergebnisse):
+                try:
+                    self._vorschau_dateien_freigeben(ersetzt)
+                    verwerfen(ersetzt)
+                except Exception:
+                    dateien.fehler_protokollieren(*sys.exc_info())
+            return
         auftrag_je_pdf = {a["pdf"]: a for a in auftraege}
         for pdf, e in ergebnisse:
             status = e.get("_status") or self._ausgabe_status(e)
@@ -4915,9 +5383,12 @@ class AnonymisiererApp:
     # Fehler, Dialoge, Protokoll (thread-sicher)
     # ------------------------------------------------------------------
     def _dialog(self, art, titel, text, eltern=None):
-        """Zeigt einen Hinweis (nur im Hauptthread aufrufen) und merkt ihn sich für Tests."""
+        """Zeigt einen Hinweis (nur im Hauptthread aufrufen) und merkt ihn sich für Tests. Während das Fenster auf das
+        Ende eines abgebrochenen Laufs wartet, um zu schließen, öffnet es keinen Dialog mehr (er stünde im Weg)."""
         text = _anzeigetext(text)
         self.letzter_dialog = (art, titel, text)
+        if self._beenden_wartet:
+            return
         zeiger = {"info": messagebox.showinfo, "warning": messagebox.showwarning,
                   "error": messagebox.showerror}[art]
         try:
@@ -4929,6 +5400,8 @@ class AnonymisiererApp:
         """Ja/Nein-Frage (nur im Hauptthread); merkt sich den Text für Tests. standard_nein: Enter = „Nein“."""
         text = _anzeigetext(text)
         self.letzter_dialog = ("askyesno", titel, text)
+        if self._beenden_wartet:
+            return False                                # das Programm wird beendet (siehe _dialog)
         optionen = {"default": messagebox.NO} if standard_nein else {}
         try:
             return bool(messagebox.askyesno(titel, text, icon="warning" if warnung else "question",
@@ -5057,8 +5530,17 @@ def main(ereignisschleife: bool = True):
             dateien.fehler_protokollieren(type(fehler), fehler, fehler.__traceback__)
     if root is None:
         root = tk.Tk()
-    # Arbeitskopien früherer Sitzungen (z. B. nach einem Absturz) löschen – unter der Einzelinstanz-Sperre läuft
-    # keine andere Sitzung dieses Benutzers
+    # Arbeitskopien und Zwischenstände früherer Sitzungen (z. B. nach einem Absturz) löschen – unter der
+    # Einzelinstanz-Sperre läuft keine andere Sitzung dieses Benutzers. Vorher die Ausgabeordner lesen, die sie
+    # vermerkt haben, und ihre PIDs: dort kann eine unfertige Zwischendatei liegen (gelöscht im Hintergrund, siehe
+    # unten; als Rest eines eigenen Absturzes gemeldet wird nur, was eine dieser PIDs trägt)
+    reste_ordner: list = []
+    reste_pids: set = set()
+    try:
+        reste_ordner = dateien.ausgabeordner_frueherer_sitzungen()
+        reste_pids = dateien.pids_frueherer_sitzungen()
+    except Exception:
+        dateien.fehler_protokollieren(*sys.exc_info())
     try:
         dateien.alte_sitzungen_aufraeumen()
     except Exception:
@@ -5066,10 +5548,13 @@ def main(ereignisschleife: bool = True):
     app = AnonymisiererApp(root, modell_vorladen=True)
     app.instanz_sperre = sperre
     app._nach_start.append(root.after(ERSTSTART_NACH_MS, app.erststart_hinweis))
+    # erst, wenn die Ereignisschleife läuft: der Hintergrund-Thread meldet über root.after()
+    app._nach_start.append(root.after(RESTE_PRUEFEN_NACH_MS, app.reste_beim_start_aufraeumen, reste_ordner,
+                                      reste_pids))
 
     def zerstoert(ereignis):
         if ereignis.widget is root:
-            app._aufraeumen()
+            app._aufraeumen()                   # nach schliessen() schon erledigt: läuft nur einmal
 
     root.bind("<Destroy>", zerstoert, add="+")
     if ereignisschleife:
