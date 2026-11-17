@@ -423,7 +423,9 @@ scheint.
 einem Neustart, nach „Liste leeren“ oder „Datei aus Liste entfernen“ kann das Programm eine
 ältere `_PRUEFEN`-Ausgabe nicht mehr freigeben. Dann das Original erneut hinzufügen,
 analysieren, schwärzen und die neue Ausgabe prüfen und freigeben; die alte `_PRUEFEN`-Datei
-nicht weitergeben. Deshalb vor dem Beenden alle Ausgaben prüfen und freigeben.
+nicht weitergeben. Deshalb vor dem Beenden alle Ausgaben prüfen und freigeben. Stehen beim
+Beenden noch Dateien mit nicht freigegebener Ausgabe in der Liste, fragt das Programm nach
+(„Freigabe noch offen“, Voreinstellung „Nein“ – das Programm bleibt dann offen).
 
 Fotos und Bild-Scans brauchen die Freigabe immer, ebenso Ausgaben mit einem gefundenen, nicht
 abgedeckten Lichtbild oder einer erkannten Ausweiskopie ohne Lichtbild (eine nicht erkannte

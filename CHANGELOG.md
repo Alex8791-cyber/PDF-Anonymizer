@@ -16,7 +16,8 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   (Standard: an): Die Ausgabe heißt `anonym_NN_PRUEFEN.pdf`, bis sie in der Vorschau mit „Freigeben“ zu
   `anonym_NN.pdf` wird. Die Einstellung lässt sich abschalten; Ausgaben umgewandelter Fotos und Bild-Scans
   brauchen die Freigabe trotzdem. Freigeben geht nur in derselben Programmsitzung – also vor dem Beenden
-  prüfen und freigeben.
+  prüfen und freigeben. Stehen beim Beenden noch Dateien mit nicht freigegebener Ausgabe in der Liste,
+  fragt das Programm nach („Freigabe noch offen“, Voreinstellung „Nein“).
 - **`_PRUEFEN` hat viele neue Gründe**, z. B. ein Verdacht der neuen Restrisiko-Prüfung, ein kaum lesbarer
   Scan, eine unlesbare Textebene, eine beschädigte Datei oder ein beschädigtes Bild, Personendaten nur in
   versteckten Teilen der Datei, eine ausgefallene Erkennungsregel oder eine Namenserkennung ohne
