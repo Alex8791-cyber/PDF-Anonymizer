@@ -1010,6 +1010,9 @@ class AnonymisiererApp:
         self._auswahl_ungeprueft: dict[Path, str] | None = None   # davon aus der gerade laufenden Auswahl
         self._auswahl_dateien: list[Path] = []           # alle Dateien der gerade laufenden Auswahl (für einen Abbruch)
         self._hinzufuegen_laeuft = False
+        # Text, den _beschaeftigt in die Statuszeile geschrieben hat, und die Meldung davor (kommt danach zurück)
+        self._beschaeftigt_text: str | None = None
+        self._status_vor_beschaeftigt = ""
         # Schließen, während eine Auswahl auf eine Rückfrage wartet (Kennwort, Fotos …): erst die Auswahl sauber
         # abbrechen (keine weitere Arbeitskopie), dann schließen (Befund Runde 2)
         self._schliessen_angefordert = False
@@ -1984,11 +1987,21 @@ class AnonymisiererApp:
             self.zielordner_aktiv.set(True)
 
     def _beschaeftigt(self, an: bool, text: str | None = None):
-        """Sanduhr während längerer Prüfungen im Hauptthread (großer Ordner, Netzlaufwerk)."""
+        """Sanduhr während längerer Prüfungen im Hauptthread (großer Ordner, Netzlaufwerk). Der Text steht nur so lange
+        in der Statuszeile, wie die Prüfung dauert – danach steht dort wieder die Meldung von vorher, sofern niemand
+        inzwischen eine neue gesetzt hat (Befund: „Dateien werden geprüft …“ blieb nach dem Hinzufügen zu einer schon
+        analysierten Liste stehen)."""
         try:
             self.root.config(cursor="watch" if an else "")
             if an and text:
+                if self._beschaeftigt_text is None:
+                    self._status_vor_beschaeftigt = self.status_label.cget("text")
+                self._beschaeftigt_text = text
                 self.status_label.config(text=text)
+            elif not an and self._beschaeftigt_text is not None:
+                if self.status_label.cget("text") == self._beschaeftigt_text:
+                    self.status_label.config(text=self._status_vor_beschaeftigt)
+                self._beschaeftigt_text = None
             self.root.update_idletasks()
         except tk.TclError:
             pass
@@ -2390,10 +2403,19 @@ class AnonymisiererApp:
         # stehen dort zuerst
         vorne = (f"⚠ {len(self.nicht_geprueft)} Datei(en) werden NICHT geprüft (siehe Protokoll) · "
                  if self.nicht_geprueft else "")
+        # dieselbe Regel wie vor dem Schwärzen (schwaerzen): ohne Analyseergebnis = nicht analysiert
+        offen = sum(1 for p in self.dateien if p not in self.analyse_ergebnisse)
         if not self.dateien:
             self._status(vorne + "Bereit. Bitte PDF-Dateien hinzufügen (Schritt 1).")
         elif not self.analyse_ergebnisse:
             self._status(vorne + f"{len(self.dateien)} Datei(en) ausgewählt – jetzt unten „Analysieren“ drücken.")
+        elif offen:
+            # z. B. zu einer schon analysierten Liste hinzugefügt (Befund: dort blieb „Dateien werden geprüft …“ stehen)
+            self._status(vorne + f"{offen} Datei(en) noch nicht analysiert – bitte erneut „Analysieren“ drücken, "
+                                 f"bevor geschwärzt wird.")
+        elif self._auswahl_ungeprueft:
+            # alles analysiert, aber Dateien dieser Auswahl werden NICHT geprüft – das gehört vorn in die Statuszeile
+            self._status(vorne + "Keine neue Datei zum Analysieren – die bisherige Analyse gilt weiter.")
 
     def _datei_vergessen(self, pdf: Path):
         """Alles zu einer Datei vergessen (Vorschau, manuelle Markierungen, Ausgabestatus, Arbeitskopie)."""

@@ -1360,6 +1360,41 @@ def test_gui_nur_angeboten_nennt_nicht_gepruefte_dateien(app, umgebung, dialoge)
 
 
 @gui_test
+def test_statuszeile_nach_hinzufuegen_zu_analysierter_liste(app, umgebung, monkeypatch, dialoge):
+    """Befund: nach dem Hinzufügen zu einer schon analysierten Liste blieb „Dateien werden geprüft …“ in der
+    Statuszeile stehen. Jetzt: noch nicht analysierte Dateien -> Aufforderung, erneut zu analysieren (dieselbe Regel
+    wie vor dem Schwärzen); nichts Neues -> die Meldung der Analyse bleibt; nicht geprüfte Dateien stehen vorn."""
+    tmp = umgebung["tmp"]
+    a, b = pdf_schreiben(tmp / "avb.pdf"), pdf_schreiben(tmp / "police.pdf")
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse({}))
+    analysiere(app, [a])
+    nach_analyse = app.status_label.cget("text")
+    assert nach_analyse.startswith("Keine Funde"), nach_analyse
+    # dieselbe Datei noch einmal: nichts Neues – die Meldung der Analyse bleibt (vorher: „Dateien werden geprüft …“)
+    app._pdfs_hinzufuegen([str(a)])
+    assert app.status_label.cget("text") == nach_analyse
+    assert app.root.cget("cursor") == ""
+    # eine neue Datei: Aufforderung, erneut zu analysieren
+    app._pdfs_hinzufuegen([str(b)])
+    erwartet = "1 Datei(en) noch nicht analysiert – bitte erneut „Analysieren“ drücken, bevor geschwärzt wird."
+    assert app.status_label.cget("text") == erwartet
+    # nur eine Mail dazu (wird NICHT geprüft): das steht vorn – und die neue PDF ist weiterhin nicht analysiert
+    mail = schreibe(tmp / "Mail_vom_Kunden.msg", MAIL_MSG)
+    app._pdfs_hinzufuegen([str(mail)])
+    assert app.status_label.cget("text") == "⚠ 1 Datei(en) werden NICHT geprüft (siehe Protokoll) · " + erwartet
+    # Schwärzen sperrt aus demselben Grund
+    assert app.schwaerzen() is False
+    assert app.letzter_dialog[1] == "Erst analysieren"
+    # erneut analysieren, danach ist alles analysiert: eine weitere Mail ändert nur den Vorspann
+    starte_lauf(app, app.analysieren)
+    assert "noch nicht analysiert" not in app.status_label.cget("text")
+    mail2 = schreibe(tmp / "Mail_zwei.msg", MAIL_MSG)
+    app._pdfs_hinzufuegen([str(mail2)])
+    assert app.status_label.cget("text") == ("⚠ 2 Datei(en) werden NICHT geprüft (siehe Protokoll) · Keine neue "
+                                             "Datei zum Analysieren – die bisherige Analyse gilt weiter.")
+
+
+@gui_test
 def test_gui_analyse_mit_funden_nennt_nicht_gepruefte_dateien(app, umgebung, monkeypatch, dialoge):
     """Auch mit Funden erinnert schon der Analyse-Abschluss an die nicht geprüften Dateien (nicht erst die
     Schwärzung)."""

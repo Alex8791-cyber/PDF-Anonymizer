@@ -176,6 +176,9 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - Texterkennung: Stürzt sie bei einer Seite ab, reißt sie das Programm nicht mehr mit; nach dem Beenden – auch
   nach einem Absturz des Programms – läuft sie nicht im Hintergrund weiter; mehrseitige Scans werden schneller
   gelesen (10-seitiger Scan auf dem Entwicklungsrechner: 18 statt 46 Sekunden).
+- Statuszeile: Nach dem Hinzufügen von Dateien zu einer schon analysierten Liste blieb dort „Dateien werden
+  geprüft …“ stehen. Jetzt steht dort, wie viele Dateien noch nicht analysiert sind; kam keine neue Datei
+  hinzu, bleibt die Meldung der Analyse stehen.
 
 ### Sicherheit
 - Manche PDFs (z. B. aus LibreOffice) enthielten nach dem Schwärzen das ungeschwärzte Originalbild unsichtbar
