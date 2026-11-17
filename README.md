@@ -386,9 +386,10 @@ Während eines Laufs sind die Eingaben gesperrt; „Abbrechen“ beendet den Lau
 halbe Ausgabedateien zu hinterlassen. Das gilt auch beim Schließen des Fensters während eines
 Laufs: Nach „Lauf läuft noch“ → „Ja“ bricht das Programm den Lauf ab und schließt erst, wenn
 seine unfertigen Dateien gelöscht sind (höchstens etwa 20 Sekunden; die Statuszeile sagt, worauf
-es wartet). Ein nicht erreichbares Netzlaufwerk (z. B. VPN getrennt) hält das Schließen nicht
-auf: Das Fenster wartet höchstens zwei Sekunden darauf; was dort noch zu löschen ist, löscht das
-Programm danach im Hintergrund oder beim nächsten Start. Nach einem Absturz löscht der nächste
+es wartet). Beim Löschen von Hilfsdateien auf einem nicht erreichbaren Netzlaufwerk (z. B. VPN
+getrennt) wartet das Fenster höchstens zwei Sekunden; was dort noch zu löschen ist, löscht das
+Programm danach im Hintergrund oder beim nächsten Start. Die Prüfung, ob Ausgaben auf diesem
+Laufwerk noch auf die Freigabe warten, kann das Schließen aber verzögern. Nach einem Absturz löscht der nächste
 Start, das nächste Hinzufügen oder Schwärzen des Ordners liegen gebliebene Zwischendateien und
 meldet sie im Protokoll. Eine Hilfsdatei, die ein anderer Rechner in einen gemeinsam genutzten
 Ordner (Netzwerkfreigabe) gelegt hat, löscht es erst, wenn sie älter als 24 Stunden ist – dort

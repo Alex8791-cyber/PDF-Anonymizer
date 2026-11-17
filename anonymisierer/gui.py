@@ -3880,6 +3880,14 @@ class AnonymisiererApp:
             text += (f"\n\n{liste}\n\n{danach}\n\n„Nein“: Das Programm bleibt offen, der Lauf geht weiter. Prüfen "
                      f"und freigeben können Sie nach dem Ende des Laufs in der Vorschau (Doppelklick auf die Datei).")
             optionen["default"] = messagebox.NO
+        elif self.laeuft and self.lauf_art == "schwaerzen":
+            # Die Liste entsteht beim Öffnen der Frage; die Schwärzung läuft dahinter weiter. Was sie fertig schreibt,
+            # während die Frage dasteht, fehlte sonst – und „Ja“ war vorgewählt (Gegenprüfung Runde 5)
+            text += ("\n\nAusgaben, die dieser Schwärzlauf noch fertig schreibt, heißen „_PRUEFEN“, solange sie auf "
+                     "die Freigabe warten – nach dem Beenden lassen sie sich nicht mehr freigeben.\n\n„Nein“: Das "
+                     "Programm bleibt offen, der Lauf geht weiter. Prüfen und freigeben können Sie nach dem Ende des "
+                     "Laufs in der Vorschau (Doppelklick auf die Datei).")
+            optionen["default"] = messagebox.NO
         self._beenden_frage_offen = True
         try:
             antwort = messagebox.askyesno(LAUF_LAEUFT_TITEL, _anzeigetext(text), icon="warning", parent=self.root,

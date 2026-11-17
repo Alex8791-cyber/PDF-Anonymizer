@@ -565,6 +565,38 @@ def test_rueckfrage_nennt_fertige_ausgaben_des_laufenden_laufs(app, umgebung, mo
 
 
 @gui_test
+def test_rueckfrage_waehrend_der_schwaerzung_ohne_fertige_ausgabe_voreinstellung_nein(app, umgebung, monkeypatch,
+                                                                                        dialoge):
+    """Gegenprüfung Runde 5: Die Liste der wartenden Ausgaben entsteht beim Öffnen der Rückfrage; die Schwärzung läuft
+    dahinter weiter. War noch keine Ausgabe fertig, sagte die Rückfrage nichts zur Freigabe und „Ja“ war vorgewählt –
+    eine während der Frage fertig geschriebene anonym_NN_PRUEFEN.pdf ließ sich danach nie mehr freigeben. Jetzt steht
+    bei laufender Schwärzung immer der Hinweis da, Voreinstellung „Nein“."""
+    pdfs, zweite_laeuft, weiter = _zwei_kunden_mit_wartendem_zweiten(umgebung, monkeypatch)
+    app._pdfs_hinzufuegen([str(pdfs[1])])                          # nur KundeB: seine Schwärzung wartet
+    starte_lauf(app, app.analysieren)
+    assert app.schwaerzen()
+    try:
+        assert pumpe(app.root, zweite_laeuft.is_set, timeout=10)
+        assert app._wartende_ausgaben() == []                       # noch nichts fertig
+        fragen = []
+
+        def askyesno(titel=None, nachricht=None, **kw):
+            fragen.append((titel, nachricht, kw))
+            return False                                            # „Nein“: das Programm bleibt offen
+        monkeypatch.setattr(gui.messagebox, "askyesno", askyesno)
+        app.schliessen()
+        assert [f[0] for f in fragen] == [gui.LAUF_LAEUFT_TITEL]
+        titel, text, optionen = fragen[0]
+        assert "nach dem Beenden lassen sie sich nicht mehr freigeben" in text, text
+        assert optionen.get("default") == gui.messagebox.NO
+        assert fenster_existiert(app.root) and app.laeuft and not app.abbruch.is_set()
+    finally:
+        weiter.set()
+    assert pumpe(app.root, lambda: not app.laeuft, timeout=20)
+    assert app.offene_freigaben() == [pdfs[1]]                      # die Ausgabe von KundeB wartet jetzt
+
+
+@gui_test
 def test_ja_waehrend_des_laufs_nach_hinweis_auf_die_fertige_ausgabe(app, umgebung, monkeypatch, dialoge):
     """Befund (Folge): Mit „Ja“ blieb die fertige anonym_01_PRUEFEN.pdf des laufenden Laufs für immer unfreigegeben,
     ohne dass die Rückfrage es sagte. Jetzt steht sie in der Rückfrage (Voreinstellung „Nein“); nach „Ja“ wird der
@@ -720,11 +752,15 @@ def test_beenden_haengendes_laufwerk_haelt_das_fenster_nicht_auf(app, umgebung, 
 
 
 @gui_test
-def test_ausgabeordner_am_laufende_nicht_lesbar_wird_beim_beenden_aufgeraeumt(app, umgebung, monkeypatch, dialoge):
+@pytest.mark.parametrize("fehler", ["oserror", "enoent_netzpfad"])
+def test_ausgabeordner_am_laufende_nicht_lesbar_wird_beim_beenden_aufgeraeumt(app, umgebung, monkeypatch, dialoge,
+                                                                             fehler):
     """Gegenstück zu Befund 2: Das Beenden liest nur noch Ausgabeordner, in denen eigene Reste sein können – keiner darf
     dabei verloren gehen. Ist ein Ausgabeordner am Ende des Laufs nicht lesbar (Netzlaufwerk kurz getrennt), bleibt er
     als „Ordner mit Resten“ vermerkt; ist er beim Beenden wieder erreichbar, löscht das Beenden die dort liegen
-    gebliebene Hilfsdatei – im Moment, in dem das Fenster zu ist, liegt dort nichts Unfertiges mehr."""
+    gebliebene Hilfsdatei – im Moment, in dem das Fenster zu ist, liegt dort nichts Unfertiges mehr.
+    enoent_netzpfad (Gegenprüfung Runde 5): Windows bildet ERROR_BAD_NETPATH/ERROR_BAD_NET_NAME auf ENOENT ab – ein
+    nicht erreichbares Netzlaufwerk meldet also „nicht gefunden“ und galt als fehlender Ordner (nichts vermerkt)."""
     pdf = pdf_schreiben(umgebung["tmp"] / "Netz" / "Police.pdf")
     ordner = pdf.parent / dateien.AUSGABE_ORDNER
     rest = f".anonym_tmp_{os.getpid()}_1_ausgabe.tmp"
@@ -743,9 +779,12 @@ def test_ausgabeordner_am_laufende_nicht_lesbar_wird_beim_beenden_aufgeraeumt(ap
 
     def iterdir(self):
         if self == ordner and getrennt.is_set():
+            if fehler == "enoent_netzpfad":
+                raise FileNotFoundError(2, "Der Netzwerkpfad wurde nicht gefunden", str(self))
             raise OSError(22, "Der angegebene Netzwerkname ist nicht mehr verfügbar", str(self))
         return echt_iterdir(self)
     monkeypatch.setattr(Path, "iterdir", iterdir)
+    monkeypatch.setattr(dateien, "_wurzel_erreichbar", lambda o: not getrennt.is_set(), raising=False)  # Wurzel weg
     app._pdfs_hinzufuegen([str(pdf)])
     starte_lauf(app, app.analysieren)
     starte_lauf(app, app.schwaerzen)
@@ -819,6 +858,23 @@ def test_beenden_wartet_auf_den_eingereihten_abschluss_des_laufs(app, umgebung, 
 # ----------------------------------------------------------------------
 # Runde 2, Befund 3: Hilfsdateien eines anderen Rechners (gemeinsame Freigabe) nur löschen, wenn sicher verwaist
 # ----------------------------------------------------------------------
+def test_nicht_erreichbares_netzlaufwerk_ist_kein_fehlender_ordner(tmp_path, monkeypatch):
+    """Gegenprüfung Runde 5: Unter Windows meldet ein nicht erreichbares Netzlaufwerk „nicht gefunden“
+    (ERROR_BAD_NETPATH -> ENOENT). eigene_zwischendateien_loeschen(lesefehler=True) hielt das für einen fehlenden
+    Ordner („nichts zu tun“) – der Ordner wurde nicht vermerkt. Fehlt schon die Wurzel (Laufwerk/Freigabe), gibt sie
+    den Fehler jetzt weiter; ein wirklich gelöschter Ordner auf erreichbarem Laufwerk bleibt „nichts zu tun“."""
+    ordner = tmp_path / "geloescht"
+    assert dateien.eigene_zwischendateien_loeschen(ordner, lesefehler=True) == []
+    assert dateien._wurzel_erreichbar(ordner) is True
+    monkeypatch.setattr(dateien, "_wurzel_erreichbar", lambda o: False)
+    with pytest.raises(FileNotFoundError):
+        dateien.eigene_zwischendateien_loeschen(ordner, lesefehler=True)
+    assert dateien.eigene_zwischendateien_loeschen(ordner) == []      # ohne lesefehler wie bisher still
+    monkeypatch.undo()
+    monkeypatch.setattr(dateien.os.path, "exists", lambda p: False)
+    assert dateien._wurzel_erreichbar(ordner) is False
+
+
 def test_hilfsdatei_eines_anderen_rechners_gilt_nicht_als_verwaist(tmp_path):
     """Befund: Als verwaist galt eine Zwischendatei, deren PID auf DIESEM Rechner nicht lebt – die PID eines anderen
     Rechners ist hier aber praktisch immer „tot“. In einem gemeinsam genutzten Ordner (Netzwerkfreigabe) löschten so

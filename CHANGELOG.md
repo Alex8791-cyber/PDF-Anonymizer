@@ -196,9 +196,10 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Seiten geschwärzt, die übrigen wie im Original. Jetzt bricht das Programm den Lauf ab und schließt erst,
   wenn er aufgeräumt hat (höchstens etwa 20 Sekunden), und löscht beim Beenden zusätzlich eigene
   Zwischendateien, wo noch welche liegen können (in den Ordnern, in die der abgebrochene Lauf schrieb, oder
-  wo sich nach einem Lauf eine nicht löschen ließ) – in Hintergrund-Threads: Ein nicht erreichbares
-  Netzlaufwerk hält das Schließen nicht auf (das Fenster wartet höchstens zwei Sekunden), der Ordner bleibt
-  dann für den nächsten Start vermerkt. Nach einem gewöhnlichen Lauf liest das Beenden keinen Ausgabeordner.
+  wo sich nach einem Lauf eine nicht löschen ließ) – in Hintergrund-Threads: Auf ein nicht erreichbares
+  Netzlaufwerk wartet das Löschen höchstens zwei Sekunden, der Ordner bleibt dann für den nächsten Start
+  vermerkt (die Prüfung auf wartende Freigaben kann das Schließen dort trotzdem verzögern). Nach einem
+  gewöhnlichen Lauf liest das Beenden keinen Ausgabeordner.
   Zwischenstände liegen nicht mehr im Ausgabeordner, sondern im Ordner für Arbeitskopien; Hilfsdateien enden
   auf `.tmp`, nie auf `.pdf`. Reste nach einem Absturz löschen der nächste Start (in den Ausgabeordnern, in
   die gerade geschwärzt wurde, und im gemeinsamen Zielordner, wenn er eingeschaltet ist), das Hinzufügen des

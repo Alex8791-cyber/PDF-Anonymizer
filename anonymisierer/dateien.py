@@ -918,6 +918,18 @@ def zwischendateien_aufraeumen(ordner, max_alter: float = ZWISCHENDATEI_MAX_ALTE
     return entfernt
 
 
+def _wurzel_erreichbar(ordner) -> bool:
+    """Ist die Wurzel des Ordners (Laufwerk „Z:\\“ bzw. Freigabe „\\\\server\\freigabe\\“) erreichbar? Ohne Wurzel
+    (relativer Pfad) gilt sie als erreichbar."""
+    wurzel = Path(ordner).anchor
+    if not wurzel:
+        return True
+    try:
+        return os.path.exists(wurzel)
+    except OSError:
+        return False
+
+
 def eigene_zwischendateien_loeschen(ordner, lesefehler: bool = False) -> list[Path]:
     """Löscht die Zwischendateien DIESES Prozesses (zwischendatei_herkunft „prozess“) direkt im Ordner – beim Beenden:
     auch die eines abgebrochenen Laufs, der nicht mehr selbst aufräumen konnte; nie die eines anderen Rechners mit
@@ -928,7 +940,12 @@ def eigene_zwischendateien_loeschen(ordner, lesefehler: bool = False) -> list[Pa
     uebrig: list[Path] = []
     try:
         kandidaten = [p for p in Path(ordner).iterdir() if ist_zwischendatei(p)]
-    except (FileNotFoundError, NotADirectoryError):
+    except (FileNotFoundError, NotADirectoryError) as fehler:
+        # Unter Windows meldet auch ein nicht erreichbares Netzlaufwerk „nicht gefunden“ (ERROR_BAD_NETPATH,
+        # ERROR_BAD_NET_NAME, ERROR_PATH_NOT_FOUND -> ENOENT): fehlt schon die Wurzel (Laufwerk bzw. Freigabe), ist
+        # offen, ob dort noch eine liegt (Gegenprüfung Runde 5) – sonst fehlt nur der Ordner, nichts zu tun
+        if lesefehler and isinstance(fehler, FileNotFoundError) and not _wurzel_erreichbar(ordner):
+            raise
         return uebrig
     except OSError:
         if lesefehler:
