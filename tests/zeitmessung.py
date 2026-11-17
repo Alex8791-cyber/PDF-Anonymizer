@@ -18,7 +18,10 @@ Verschlechterung ausmacht, mit Größen, die von der Last kaum abhängen:
                                           unter (Schwärzung: Verhältnis 6,0 bis 9,4; Befund Runde 3a)
   wachstum_messen(klein, gross, faktor)   beides in einem Schritt, auch für kurze Aufrufe: faktor-mal klein gegen
                                           einmal gross (bei linearer Laufzeit dieselbe Arbeit), so oft hintereinander,
-                                          dass jede Messung mindestens 0,1 s CPU-Zeit dauert (Runde 3b)
+                                          dass jede Messung mindestens 0,1 s CPU-Zeit und mindestens 20 Schritte der
+                                          Prozessuhr dauert; mit schranke= wird ein Wert an der Schranke einmal
+                                          nachgemessen (Runde 3b)
+  uhr_schritt()                           Takt, in dem time.process_time() weiterzählt (Windows: 15,6 ms)
   gemessener_ocr_arbeiter(...)            Ersatz für ocr._ocr_worker, der in jedem Arbeitsprozess Prozessnummer,
                                           Beginn und Ende jedes Auftrags aufschreibt (Verzeichnis in der
                                           Umgebungsvariablen UMGEBUNG) – so lässt sich zeigen, dass zwei Arbeiter
@@ -29,8 +32,15 @@ Verschlechterung ausmacht, mit Größen, die von der Last kaum abhängen:
 
 Auflösung unter Windows (Runde 3b): time.process_time() liest dort GetProcessTimes, das die CPU-Zeit nur in Schritten
 des Zeitgebers zählt (15,6 ms) – ein Aufruf von 10 ms misst 0 oder 15,6 ms. Absolute Schranken liegen deshalb
-mehrere Schritte über null (ab 50 ms), Verhältnisse entstehen aus Messungen von mindestens 0,1 s (wachstum_messen:
-höchstens ein Schritt Fehler je Messung, unter 16 %).
+mehrere Schritte über null (ab 50 ms). In ein Verhältnis gehen die Fehler BEIDER Messungen ein: dauern beide n
+Schritte und liegt jede um bis zu einen Schritt daneben, fällt es um bis zu (n+1)/(n-1) zu groß aus. Bei 0,1 s je
+Messung (gut 6 Schritte) sind das bis zu 1,4 – ein wahres Wachstum von 1,2 las sich als 1,6, über der Schranke 1,5 der
+Muster-Tests (Befund der Gegenprüfung, Runde 3b: 1,57 einmal in rund 1 300 Messungen mit nachgebildeter Windows-Uhr;
+test_zeitmessung.py stellt den ungünstigsten Fall nach). wachstum_messen misst deshalb jede Größe mindestens
+SCHRITTE_JE_MESSUNG = 20 Schritte lang (unter Windows 0,31 s; wo die Uhr fein zählt, bleibt es bei `mindestens`):
+mehr als 19 Schritte, also höchstens 20/18 = 1,11-fach bei linearer Laufzeit. Ausreißer durch Last, die nur die
+Messungen einer Größe trifft – auch mit genauer Uhr einzeln über 1,5 –, fängt die Nachmessung an der Schranke
+(wachstum_messen, schranke=).
 
 Dieses Modul ist kein Testmodul (wird nicht gesammelt); die Arbeitsprozesse des OCR-Pools (Start-Methode "spawn")
 importieren es über den von pytest gesetzten Suchpfad.
@@ -91,21 +101,59 @@ def cpu_sekunden_abwechselnd(funktionen: dict, wiederholungen: int = 2) -> dict:
     return beste
 
 
-def wachstum_messen(klein, gross, faktor: int, wiederholungen: int = 2, mindestens: float = 0.1) -> tuple:
+SCHRITTE_JE_MESSUNG = 20       # Mindestlänge jeder Messung in Schritten der Prozessuhr (Modulbeschreibung)
+
+
+def uhr_schritt(proben: int = 3) -> float:
+    """Größter von `proben` beobachteten Schritten, in denen time.process_time() weiterzählt: unter Windows der Takt
+    des Zeitgebers (15,6 ms), unter Linux und macOS weit unter einer Millisekunde. time.get_clock_info() taugt dafür
+    nicht – unter Windows meldet sie 100 ns, die Einheit der Zahl, nicht den Takt, in dem sie weiterzählt."""
+    schritt = 0.0
+    for _ in range(proben):
+        anfang = jetzt = time.process_time()
+        while jetzt == anfang:
+            jetzt = time.process_time()
+        schritt = max(schritt, jetzt - anfang)
+    return schritt
+
+
+def wachstum_messen(klein, gross, faktor: int, wiederholungen: int = 2, mindestens: float = 0.1,
+                    schranke: float | None = None) -> tuple:
     """(wachstum, CPU-Zeit je Aufruf von klein, CPU-Zeit je Aufruf von gross) für zwei Aufrufe ohne Argumente, deren
     Eingaben sich um `faktor` unterscheiden (klein verarbeitet 1/faktor dessen, was gross verarbeitet). Gemessen
     werden `faktor` Aufrufe von klein gegen EINEN von gross: bei linearer Laufzeit dieselbe Arbeit, also gleich lange
     Messungen, und ihr Verhältnis ist das Wachstum (1,0 = linear; ein quadratischer Anteil hebt es bis auf `faktor`,
     feste Kosten je Aufruf senken es unter 1). Kurze Aufrufe laufen r-mal hintereinander, r so gewählt, dass gross
-    allein mindestens `mindestens` Sekunden CPU-Zeit braucht – so bleibt der Fehler der Windows-Zählung (Schritte von
-    15,6 ms) unter 16 % je Messung. Beide Messungen wechseln sich ab (cpu_sekunden_abwechselnd), es zählt je das
-    Minimum; die Aufrufe davor (einmal klein, r-mal gross) wärmen Zwischenspeicher und Module auf."""
+    allein mindestens `mindestens` Sekunden CPU-Zeit braucht und mindestens SCHRITTE_JE_MESSUNG Schritte der
+    Prozessuhr (uhr_schritt) – so verschiebt der Zählfehler unter Windows das Verhältnis linearer Messungen höchstens
+    um den Faktor 1,11 (Modulbeschreibung). Beide Messungen wechseln sich ab (cpu_sekunden_abwechselnd), es zählt je
+    das Minimum; die Aufrufe davor (einmal klein, r-mal gross) wärmen Zwischenspeicher und Module auf.
+
+    schranke: liegt das Wachstum an oder über ihr, wird einmal nachgemessen – doppelt so lang, mit einem Wechsel mehr
+    – und der kleinere Wert zählt. Last, die gerade die Messungen einer Größe trifft (geteilte Caches, ein Nachbar auf
+    demselben Kern), hebt einzelne Werte auch ohne Regression und ohne Zählfehler über die Schranke 1,5: neben anderer
+    Last auf dem Rechner bis 1,62 mit genauer Uhr und 1,56 mit Windows-Uhr (Runde 3b, je 360 Messungen; unter vier
+    reinen Busy-Loops höchstens 1,22). Zweimal hintereinander geschieht das kaum: von 22 ersten Messungen über 1,1
+    (darunter 1,62, 1,57 und 1,50) blieb jede Nachmessung darunter, höchstens 1,08. Eine echte Regression dagegen hält
+    beide Messungen über der Schranke (die nachgebauten: 5,9 bis 8,5)."""
+    dauer = max(mindestens, SCHRITTE_JE_MESSUNG * uhr_schritt())
+    ergebnis = _wachstum_einmal(klein, gross, faktor, wiederholungen, dauer)
+    if schranke is not None and ergebnis[0] >= schranke:
+        nachmessung = _wachstum_einmal(klein, gross, faktor, wiederholungen + 1, 2 * dauer)
+        print(f"wachstum {ergebnis[0]:.2f} an oder über der Schranke {schranke}, nachgemessen ({2 * dauer:.2f} s, "
+              f"{wiederholungen + 1} Wechsel): {nachmessung[0]:.2f}")
+        ergebnis = min(ergebnis, nachmessung)
+    return ergebnis
+
+
+def _wachstum_einmal(klein, gross, faktor: int, wiederholungen: int, dauer: float) -> tuple:
+    """Eine Messung für wachstum_messen; jede Größe läuft mindestens `dauer` Sekunden CPU-Zeit."""
     klein()
     r, anfang = 0, time.process_time()
     while True:
         gross()
         r += 1
-        if time.process_time() - anfang >= mindestens:
+        if time.process_time() - anfang >= dauer:
             break
     gemessen = cpu_sekunden_abwechselnd({"klein": lambda: [klein() for _ in range(r * faktor)],
                                          "gross": lambda: [gross() for _ in range(r)]}, wiederholungen)

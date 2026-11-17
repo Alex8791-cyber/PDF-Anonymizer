@@ -879,12 +879,12 @@ def test_laufzeit_scan_liste_mit_vielen_personen_platzhaltern(tmp_path):
     Lastunabhängig (Runde 3b): die Wanduhr-Schranke 3 s riss unter Last (3,3 s bei vier belegten Kernen, CPU-Zeit
     dabei 0,55 s). Jetzt zwei Prüfungen mit der CPU-Zeit des eigenen Prozesses:
     (1) Wachstum: 8 Listen mit 10 Zeilen gegen eine mit 80 (dieselbe Seite, dieselbe Zeilenzahl insgesamt) – gemessen
-        1,1 bis 1,4 (auch unter Last und mit der Windows-Zählung): leicht überlinear, weil schon jetzt einige Schritte
+        1,1 bis 1,55 (auch unter Last und mit der Windows-Zählung): leicht überlinear, weil schon jetzt einige Schritte
         Platzhalter mit Platzhaltern vergleichen (neben_platzhalter, _ohne_platzhalter, die Suche der grauen Rechtecke
         in _unterschrift_pruefen); die nachgebaute Regression (jeder Bereich rastert alle erklärten Rechtecke selbst,
-        wie vor Befund 7) hebt es auf 6 bis 6,6 – Schranke 2,0. Das Wachstum hängt nicht von der Geschwindigkeit des
-        Rechners ab: die alte Laufzeit (4,5 s) läge auf einem doppelt so schnellen Rechner unter der Schranke 3 s,
-        ihr Wachstum nicht;
+        wie vor Befund 7) hebt es auf 5,9 bis 6,7 – Schranke 2,0; ein Wert an der Schranke wird einmal nachgemessen
+        (zeitmessung.wachstum_messen). Das Wachstum hängt nicht von der Geschwindigkeit des Rechners ab: die alte
+        Laufzeit (4,5 s) läge auf einem doppelt so schnellen Rechner unter der Schranke 3 s, ihr Wachstum nicht;
     (2) die bisherige Schranke 3 s für 80 Zeilen, jetzt als CPU-Zeit (gemessen 0,55 s)."""
     import zeitmessung
     klein_pdf, gross_pdf = tmp_path / "k.pdf", tmp_path / "l.pdf"
@@ -894,7 +894,7 @@ def test_laufzeit_scan_liste_mit_vielen_personen_platzhaltern(tmp_path):
         return restrisiko_pruefen(pdf, ocr=OcrAttrappe({0: woerter}), ocr_modus={0: "seite"})
 
     wachstum, klein, gross = zeitmessung.wachstum_messen(lambda: pruefen(klein_pdf, klein_woerter),
-                                                         lambda: pruefen(gross_pdf, gross_woerter), 8)
+                                                         lambda: pruefen(gross_pdf, gross_woerter), 8, schranke=2.0)
     print(f"Restrisiko Scan-Liste CPU: 10 Zeilen {klein:.3f} s, 80 Zeilen {gross:.3f} s, wachstum {wachstum:.2f}")
     assert wachstum < 2.0, (f"Restrisiko-Prüfung wächst nicht linear: 10 Zeilen {klein:.3f} s, 80 Zeilen "
                             f"{gross:.3f} s (x{gross / klein:.1f} bei 8-facher Zeilenzahl)")
