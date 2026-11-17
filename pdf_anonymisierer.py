@@ -5,35 +5,45 @@ PDF-Anonymisierer — Dokumente für ChatGPT & Claude pseudonymisieren
 
 Zweck: PDFs sollen an KI-Dienste (ChatGPT, Claude …) gegeben werden
 können, ohne direkte personenbezogene Daten preiszugeben. Das Programm
-findet automatisch:
+findet automatisch unter anderem (vollständige Liste in der README):
 
-  • Namen von Personen        (KI-Erkennung, deutsches Sprachmodell)
-  • Adressen                  (Straße + Hausnummer, PLZ + Ort)
-  • IBANs                     (mit Prüfziffern-Kontrolle)
-  • Telefonnummern
-  • E-Mail-Adressen
-  • Geburtsdaten              (Datumsangaben neben "geb." / "Geburtsdatum")
-  • Vertrags-/Kunden-/Versicherungsschein-Nummern
-  • Sozialversicherungsnummern, Steuer-IDs, Kindergeldnummern
-  • Kfz-Kennzeichen
+  • Namen von Personen        (Sprachmodell, Namenslisten, Aufbau von
+                               Briefen, Tabellen und Formularen)
+  • Anschriften               (Straße + Hausnummer, PLZ + Ort, Orte ohne
+                               PLZ, ausländische Anschriften)
+  • IBAN, BIC, Telefonnummern, E-Mail-Adressen, Geburtsdaten
+  • Vertrags-, Kunden- und Versicherungsscheinnummern, Aktenzeichen
+  • Sozialversicherungs-, Steuer-, Krankenversicherten- und
+    Kindergeldnummern, Ausweis- und Passnummern
+  • Kfz-Kennzeichen, Fahrzeug-Identnummern
+  • Beruf und Arbeitgeber (ab Schutzstufe „Hoch“), Diagnosen und
+    Medikamente (angehakt nur in „Maximal“)
+  • Lichtbilder auf Ausweiskopien; in „Maximal“ auch Bilder auf
+    Textseiten und Fotobereiche auf Scans (mit Ausnahmen)
 
 Ersetzt wird mit lesbaren Platzhaltern wie [PERSON A], [IBAN],
 [ADRESSE] — so bleibt das Dokument für die KI verständlich
 ("Person A" bleibt im ganzen Dokument dieselbe Person!), aber ohne
 die direkten Identifikatoren. Der Text wird dabei wirklich aus der PDF
-entfernt. Das Ergebnis ist eine Pseudonymisierung: Diagnosen, Beruf,
-Arbeitgeber, Beträge und andere Kontextangaben bleiben lesbar.
+entfernt. Das Ergebnis ist eine Pseudonymisierung: Beträge und andere
+Kontextangaben bleiben lesbar, je nach Schutzstufe auch Diagnosen,
+Beruf, Arbeitgeber und Orte.
 
 WICHTIG: Vor dem Schwärzen zeigt das Programm eine Prüfliste aller
-Funde. Keine automatische Erkennung ist perfekt — der Blick auf die
-Liste (und auf das Ergebnis) bleibt Pflicht!
+Funde; danach prüft es jede Ausgabe ein zweites Mal (Restrisiko-
+Prüfung). Keine automatische Erkennung ist perfekt — jede Ausgabe in
+der Vorschau zu prüfen bleibt Pflicht!
 
 Einmalige Vorbereitung: Installieren.bat doppelklicken
 Starten: Desktop-Verknüpfung "PDF-Anonymisierer" (ein zweiter Start meldet nur,
 dass das Programm schon läuft)
 
 Dieses Skript ist nur der Startpunkt; die eigentliche Logik liegt im
-Paket "anonymisierer" (muster, namen, analyse, ocr, schwaerzung, dateien, gui).
+Paket "anonymisierer": Erkennung (muster, namen, wissen, detektoren,
+kundenliste, analyse), Lesen der Seiten (seitenmodell, ocr), Schwärzen
+und Prüfen der Ausgabe (schwaerzung, bilder, fotos, nebenkanaele,
+restrisiko) sowie Oberfläche und Dateien (gui, vorschau_fenster,
+vorschau, dateien).
 """
 
 import multiprocessing

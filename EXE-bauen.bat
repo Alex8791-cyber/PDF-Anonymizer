@@ -133,7 +133,7 @@ echo   - Die ZIP ueber Netzlaufwerk, OneDrive/SharePoint oder USB weitergeben
 echo     ^(nicht per E-Mail: Outlook blockiert .exe, auch in ZIPs^).
 echo   - Empfaenger entpacken den Ordner z. B. nach Dokumente und starten
 echo     PDF-Anonymisierer.exe darin. Keine Installation, KEIN Tesseract noetig -
-echo     Sprachmodell und OCR-Sprachdatei stecken im Ordner.
+echo     Sprachmodell, OCR-Sprachdatei und Wortlisten stecken im Ordner.
 echo   - Der ganze Ordner gehoert zusammen; nur die .exe allein laeuft nicht.
 echo.
 echo   Hinweise zu Warnungen:

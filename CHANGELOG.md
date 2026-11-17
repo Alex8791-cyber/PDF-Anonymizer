@@ -6,6 +6,188 @@ Alle nennenswerten Änderungen am PDF-Anonymisierer. Das Format folgt
 
 ## [Unreleased]
 
+Seit 0.2.0 sind Erkennung, Schwärzung, die Prüfung der Ausgabe und die Oberfläche in großen Teilen neu
+gebaut. Zuerst steht, was sich an der gewohnten Arbeit ändert, danach Neues, weitere Änderungen,
+Fehlerbehebungen und Sicherheit, dann ein kurzer Teil für Entwickler. Am Ende folgen die Änderungen aus dem
+Review „Auslieferung/Doku“ (AD-01 … AD-08).
+
+### Geändert – bitte beachten
+- **Jede Ausgabe heißt zuerst `_PRUEFEN`.** Neue Einstellung „Freigabe vor Weitergabe erforderlich“
+  (Standard: an): Die Ausgabe heißt `anonym_NN_PRUEFEN.pdf`, bis sie in der Vorschau mit „Freigeben“ zu
+  `anonym_NN.pdf` wird. Die Einstellung lässt sich abschalten; Ausgaben umgewandelter Fotos und Bild-Scans
+  brauchen die Freigabe trotzdem. Freigeben geht nur in derselben Programmsitzung – also vor dem Beenden
+  prüfen und freigeben.
+- **`_PRUEFEN` hat viele neue Gründe**, z. B. ein Verdacht der neuen Restrisiko-Prüfung, ein kaum lesbarer
+  Scan, eine unlesbare Textebene, eine beschädigte Datei oder ein beschädigtes Bild, Personendaten nur in
+  versteckten Teilen der Datei, eine ausgefallene Erkennungsregel oder eine Namenserkennung ohne
+  Sprachmodell. Die Gründe stehen in der Fundliste und im Abschlussdialog. Nicht jeder Prüffall ist ein
+  echtes Leck; mit deutlich mehr `_PRUEFEN`-Dateien ist zu rechnen.
+- **Jede lesbare Datei bekommt eine Ausgabe**, auch ohne Fund (vorher: keine Ausgabe). Sie ist bereinigt
+  (Metadaten, Anhänge, Formulardaten u. a. entfernt) und geprüft. Ohne Ausgabe bleiben nur Dateien, die sich
+  nicht bearbeiten lassen; der Abschlussdialog nennt sie unter „OHNE Ausgabedatei“. Regel: nur aus dem
+  Ausgabeordner hochladen, nie das Original.
+- **Die Zuordnungsdatei liegt neben dem Ausgabeordner** statt darin und heißt `_zuordnung_<Ausgabeordner>.txt`,
+  im Normalfall also `_zuordnung_anonymisiert.txt` neben den Originalen. Ist der Zielordner eine Laufwerks-
+  oder Freigabe-Wurzel (z. B. `E:\`), liegt sie unter `%APPDATA%\PDF-Anonymisierer\Zuordnungen`. Eine alte
+  `_zuordnung.txt` im Ausgabeordner wird beim nächsten Schwärzen übernommen und gelöscht.
+- **Mehr wird geschwärzt oder angeboten:** Die Standardstufe „Hoch“ schwärzt zusätzlich Beruf, Arbeitgeber,
+  ausländische Anschriften und Orte ohne PLZ und deckt Lichtbilder auf Ausweiskopien ab. Diagnosen und
+  Medikamente stehen nicht angehakt in der Fundliste (Zeichen ⚕). Anschriften von Firmen, Versicherern und
+  Behörden bleiben dagegen jetzt stehen; unbekannte Firmenanschriften erscheinen als abgewählter Fund
+  „vermutlich Firmenanschrift“. Die Anschrift einer Person im eigenen Briefkopf (z. B. bei Selbständigen)
+  wird geschwärzt.
+- **Ein sichtbares Lichtbild verlangt die Freigabe:** Ein abgewähltes oder unsicheres Lichtbild und eine
+  Ausweiskopie ohne abgedecktes Lichtbild machen die Ausgabe `_PRUEFEN` – auch bei abgeschalteter
+  Freigabe-Einstellung.
+- **Dateien werden am Inhalt geprüft, nicht an der Endung.** Fotos und Bild-Scans werden nach Rückfrage in
+  eine PDF umgewandelt, auch wenn sie die Endung `.pdf` tragen. Office-Dateien, Mails, Webseiten, HEIC, WEBP
+  und GIF werden nicht aufgenommen, auch nicht mit der Endung `.pdf`, und als „NICHT geprüft“ gemeldet. Bei
+  kennwortgeschützten PDFs fragt das Programm nach dem Kennwort; die Ausgabe hat dann kein Kennwort. Eine
+  Ausgabe des Programms wird nur nach Rückfrage als Eingabe aufgenommen.
+- **„Markierte nachschwärzen“ erzeugt eine neue Ausgabe** mit der nächsten freien Nummer und löscht die alte;
+  in der Nummernfolge entstehen Lücken.
+- **Geänderte Einstellungen setzen die Analyse zurück:** Nach einer Änderung an Schutzstufe, Kategorien,
+  NIE-/IMMER-Liste oder Kundenliste muss neu analysiert werden; manuelle Markierungen aus der Vorschau gehen
+  dabei verloren.
+- **Geschwärzte Bilder werden neu gespeichert**, meist als JPEG in der Qualität des Originals (höchstens
+  85); geschwärzte JPEG-Fotos über 24 Megapixel werden auf 24 Megapixel verkleinert. Die Ausgabe wird
+  kleiner, ist aber nicht pixelgleich mit dem Original.
+- **Nur ein Programmfenster:** Ein zweiter Start meldet „PDF-Anonymisierer läuft bereits“.
+- **Kleine Bildschirme:** Auf 1366×768 und auf 1920×1080 ab 125 % Skalierung startet das Fenster maximiert.
+  Im kleinen Fenster entfallen großer Titel, Untertitel und Bedienhinweis; bei Platzmangel wird der
+  Hinweiskasten einzeilig (ein Klick zeigt alle Grenzen), und die Knöpfe werden flacher. Alle Hinweise
+  stehen weiter unter Hilfe → „Was wird nicht erkannt?“ und „Hinweise vor der Nutzung …“.
+- **Rechenzeit und Arbeitsspeicher:** Restrisiko-Prüfung und Fotoerkennung kosten zusätzlich Zeit. Auf dem
+  Entwicklungsrechner brauchten Scan-Seiten mehrere Sekunden je Seite und ein großes Handyfoto rund 1 GB
+  Arbeitsspeicher.
+- **Umstieg von 0.2.0:** Gespeicherte Einstellungen erscheinen als Stufe „Benutzerdefiniert“ (bei
+  unveränderter Auswahl mit denselben Häkchen wie „Hoch“); ein Klick auf „Hoch (Standard)“ stellt die
+  Standardstufe ein.
+
+### Hinzugefügt
+- **Schutzstufen** „Ausgewogen“, „Hoch (Standard)“, „Maximal“ und „Benutzerdefiniert“ über den Häkchen; die
+  Häkchen folgen der Stufe, die Wahl wird gespeichert. „Maximal“ schwärzt zusätzlich Diagnosen, Medikamente,
+  alle plausiblen Geburtsdaten und unbekannte Eigennamen bei Personen und deckt Bilder auf Textseiten und
+  Fotobereiche auf Scans ab. Stehen bleiben winzige Bilder, Vektorgrafiken und der Text über einem Bild
+  (gefundene Angaben darin werden wie sonst geschwärzt); von einem Bild über mindestens die halbe Textseite
+  werden nur die Fotos darin abgedeckt. Unterschriften und Handschrift auf Scans bleiben auch in „Maximal“
+  stehen.
+- **Sechs neue Kategorien** (26 statt 20): ausländische Anschriften und Kennzeichen `[AUSLAND]`, Orte ohne PLZ
+  `[ORT]`, Beruf `[BERUF]` und Arbeitgeber `[ARBEITGEBER]` (bei Personen), Diagnosen und ICD-Codes
+  `[DIAGNOSE]`, Medikamente `[MEDIKAMENT]`. Gesundheitsdaten erkennt das Programm nur als bekannte Begriffe
+  der Wortlisten, ICD-10-Codes und Körpermaße, jeweils im Gesundheitszusammenhang.
+- **Vorschau-Fenster** (Doppelklick auf eine Datei, Knopf „Vorschau …“ oder Alt+V). „Geplante Schwärzung“:
+  rot = wird geschwärzt, grau gestrichelt = nicht, blau = manuell; ein Klick schaltet eine Stelle um oder
+  schwärzt ein nicht erkanntes Wort, ein gezogener Rahmen schwärzt einen Bereich. „Ergebnis (Ausgabe)“: die
+  Ausgabe mit Verdachtsstellen (orange) und den Knöpfen „Freigeben“, „Markierte nachschwärzen“ und
+  „Verwerfen (Ausgabe löschen)“.
+- **Restrisiko-Prüfung:** Eine zweite, von der Erkennung unabhängige Prüfung liest jede Ausgabe noch einmal
+  (Textebene, bei Scans die Texterkennung) und meldet, was noch nach Personendaten aussieht – Nummern,
+  Namen, Anschriften, Geburtsdaten, auf Scans ungelesene Tinte in Unterschriftsblöcken sowie Scan-Seiten,
+  die sich nicht verlässlich lesen lassen. Jeder Verdacht macht die Ausgabe `_PRUEFEN`.
+- **Kundenliste** (Menü „Kundenliste“): Import einer CSV-Datei mit Kundendaten. Gespeichert werden nur nicht
+  umkehrbare Prüfwerte, kein Klartext. Passt ein starkes Merkmal (voller Name, Kunden- oder Vertragsnummer,
+  IBAN, E-Mail), sucht das Programm alle Angaben dieses Kunden.
+- **Namenserkennung mit Wortlisten und Dokumentaufbau:** rund 6 200 Vornamen und 8 500 Nachnamen, Regeln für
+  Tabellen, Formularfelder, Anschriftfelder, Anrede und Grußformel, Betreff sowie Kopf- und Fußzeilen. In
+  Firmenbezeichnungen wie „Werkstatt Berger“ wird der Name geschwärzt, Rechtsform und Betriebswort bleiben.
+- **Ausweiskopien und weitere Nummern:** maschinenlesbare Zone, Zugangsnummer und Führerscheinfelder;
+  Personalausweis- und Passnummern auch ohne Etikett, wenn die Prüfziffer stimmt; BIC ohne Etikett in
+  eindeutiger Form; Steuernummern in den Formaten der Bundesländer und als ELSTER-Nummer; Kammfelder (ein
+  Zeichen je Kästchen) und Fax-Kopfzeilen; Geburtsdaten auch als „Jg. 1961“ oder direkt hinter dem Namen.
+- **Lichtbilder auf Ausweiskopien** werden gesucht und als angehakter Fund `[LICHTBILD]` abgedeckt, in
+  Fundliste und Vorschau abwählbar. Ein unsicherer Treffer steht nicht angehakt in der Liste.
+- **Fotos und Bild-Scans** (JPEG, PNG, TIFF, BMP) werden nach Rückfrage in eine PDF-Arbeitskopie umgewandelt
+  und wie PDFs geprüft. **Kennwortgeschützte PDFs** werden nach Eingabe des Kennworts geprüft; das Kennwort
+  wird weder gespeichert noch protokolliert. Arbeitskopien liegen unter
+  `%LOCALAPPDATA%\PDF-Anonymisierer\temp` und werden spätestens beim nächsten Start gelöscht.
+- **Bedienung:** Menüs „Datei“ und „Kundenliste“, unterstrichene Zugriffstasten (Alt+A Analysieren, Alt+S
+  Schwärzen starten, Alt+V Vorschau), „Datei → Protokoll speichern …“ (Laufprotokoll ohne Dokumentinhalte,
+  Originaldateinamen und Ordner), ein Hinweis beim ersten Start (später unter Hilfe → „Hinweise vor der
+  Nutzung …“) und ein Programmsymbol.
+- **`werkzeuge/selbsttest.py`** (Kommandozeile, nur mit Python-Installation): prüft einen Ordner eigener
+  Dokumente und gibt nur Zählwerte aus, nie Inhalte.
+
+### Geändert
+- **Prüfziffern sind nur noch ein Indiz:** Eine IBAN mit falscher Prüfziffer wird trotzdem geschwärzt, wenn
+  sie eindeutig wie eine IBAN aussieht, und trägt den Hinweis „Prüfziffer ungültig (Lesefehler?)“ (⚑).
+- **Scans:** Die Texterkennung teilt Seiten in Spalten und Blöcke auf (zweispaltige Briefköpfe werden nicht
+  mehr vermischt), rückt schräge Scans gerade und erkennt die Lage gedrehter Seiten an der Plausibilität der
+  gelesenen Wörter. Typische Lesefehler (O/0, I/1, S/5 …) und verlesene Feldnamen werden nur bei gescanntem
+  Text berücksichtigt. Bei durchsuchbaren Scans entfernt jeder Treffer Text und Bildpunkte an derselben
+  Stelle.
+- **Weitergabe im Lauf:** Namen und Kennungen aus einem Dokument werden in allen Dokumenten derselben Analyse
+  gesucht; Abgewähltes bleibt abgewählt.
+- **NIE-Liste:** Nummern gelten unabhängig von Leerzeichen („DE89 3704 …“ gibt auch „DE893704…“ frei).
+- **Versteckte Teile der Datei** (Metadaten, Lesezeichen, Anhänge samt Inhalt, Formular- und XFA-Daten,
+  JavaScript, Link-Ziele, Seitenbeschriftungen) werden mit denselben Regeln geprüft und gemeldet; die Ausgabe
+  entfernt sie.
+- **Fundliste:** Die Dateizeile zeigt den Status der Ausgabe („fertig“ oder „prüfen“) und den Grund; ⚑
+  markiert Funde mit Hinweis, ⚕ nur angebotene Gesundheitsdaten; die Leertaste schaltet einen Fund um; lange
+  Dateinamen werden in der Mitte gekürzt. Die Hinweiszeile nennt NICHT geprüfte Dateien.
+- **Abschlussdialog:** nennt die Gründe für `_PRUEFEN`, Dateien ohne Ausgabe und NICHT geprüfte Dateien und
+  bietet an, die Vorschau der ersten zu prüfenden Datei zu öffnen (sonst den Ergebnisordner).
+- **Aktionsleiste:** „Analysieren – Funde anzeigen“ steht neben „Schwärzen starten“, der Fortschrittsbalken
+  in einer eigenen Zeile; das Sprachmodell wird im Hintergrund vorgeladen.
+- **EXE:** `EXE-bauen.bat` packt die Wortlisten und alle Erkennungsregeln mit; fehlt in der EXE eine Regel,
+  meldet die Analyse das, und die Ausgabe wird `_PRUEFEN`. Hilfetexte nennen in der EXE „Programmordner neu
+  entpacken“ statt `Installieren.bat`.
+
+### Behoben
+- Bilder, Webseiten und andere Nicht-PDFs mit der Endung `.pdf` konnten das ganze Programm zum Absturz
+  bringen; sie werden jetzt vor dem Öffnen erkannt.
+- Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt die Lesung
+  unplausibel, meldet das Programm das, und die Ausgabe wird `_PRUEFEN`.
+- Sehr große Seiten (Handyfotos, Pläne) werden mit höchstens 40 Megapixeln gelesen, bei Speichermangel mit
+  halber Auflösung und verständlicher Meldung.
+- Scheitert die Schwärzung einer Seite (z. B. an zyklisch verschachtelten Formularobjekten), wird die Seite
+  als Bild geschwärzt; vorher endete die Datei mit einem Fehler ohne Ausgabe.
+- Vorschau, Analyse und Fotoerkennung hängen nicht mehr an Dateien mit einem Zyklus im Strukturbaum
+  (MuPDF 1.28 hing dort über zehn Minuten).
+- Schräge Scans: Schwärzungsrechtecke folgen der Zeile und treffen keine Nachbarzeilen mehr; graue Kästen
+  verdecken keine Nachbarwörter mehr.
+- Unter Windows werden Nummern und Namen mit geschütztem Leerzeichen, weichem Trennstrich oder geschütztem
+  Bindestrich in der Textebene gefunden.
+- Lange Windows-Pfade (über 260 Zeichen) funktionieren beim Hinzufügen, Analysieren, Schwärzen und in der
+  Zuordnungsdatei; was im Ordner nicht lesbar ist, steht mit Grund unter „nicht lesbar“.
+- Texterkennung: Arbeitsprozesse enden mit dem Programm, ein abgestürzter Arbeitsprozess reißt das Programm
+  nicht mehr mit, und Seiten werden parallel vorgelesen (10-seitiger Scan auf dem Entwicklungsrechner: 18
+  statt 46 Sekunden).
+
+### Sicherheit
+- Ungeschwärzte Originalbilder, die in geerbten oder mit anderen Seiten geteilten Ressourcen stehen blieben
+  (z. B. in LibreOffice-PDFs), werden vor dem Speichern geleert – in jeder Schutzstufe; ein zweites Netz
+  prüft die gespeicherte Datei.
+- Beschädigte PDFs werden vor jeder Änderung repariert (Ausgabe `_PRUEFEN`). Repariert MuPDF erst während
+  des Schwärzens, entsteht keine Ausgabe, weil dabei Schwärzungen verloren gehen können.
+- Seiten mit unlesbarer Textebene (falsche oder fehlende Zeichenzuordnung) werden per Texterkennung gelesen
+  und geschwärzt; sonst blieben dort z. B. Name und IBAN lesbar.
+- Text, den die Schwärzung sonst nicht erreicht – als Vektorgrafik gezeichnet, in Kachelmustern, außerhalb
+  des sichtbaren Bereichs oder abgeschnitten –, wird per Texterkennung gelesen bzw. entfernt.
+- Gedrehte Seiten mit Ausschnitt behalten genau ihren sichtbaren Bereich; Weggeschnittenes wird nicht
+  sichtbar.
+- Die Ausgabe entfernt weitere versteckte Teile: Strukturbaum und Ersatztexte, Seitenbeschriftungen,
+  JavaScript und Aktionen, Ebenennamen, Anhänge auch als ZUGFeRD-Daten, XMP-Daten an Seiten und Bildern,
+  EXIF-/IPTC-Daten in Bildern und die Dokument-ID.
+- `fehler.log` enthält keine Ordnernamen mehr; Pfade werden auf den Dateinamen gekürzt.
+
+### Für Entwickler (Tests, CI, Messwerkzeuge)
+- Neuer Aufbau: ein Seitenmodell für Analyse, Schwärzung und Selbstkontrolle (`seitenmodell.py`),
+  Erkennungsregeln als Module mit Register und Rückfallliste für die EXE (`anonymisierer/detektoren/`),
+  Wissensbasis (`wissen.py`, 17 Wortlisten in `anonymisierer/daten/`), dazu `kundenliste.py`,
+  `restrisiko.py`, `nebenkanaele.py`, `bilder.py`, `fotos.py`, `vorschau.py` und `vorschau_fenster.py`.
+- Tests: von 382 auf über 3000, u. a. Layouts für 1366×768, 1024×768 und 1920×1080 bei mehreren
+  Skalierungen sowie Windows-Pfade und -Schriften; Laufzeittests prüfen das Wachstum über die CPU-Zeit
+  (`tests/zeitmessung.py`).
+- CI: Zeitgrenze 300 s je Test (`pytest-timeout`, neu in `requirements-dev.txt`), die 15 langsamsten Tests im
+  Bericht, unter Windows `-v`, Benchmark-Bericht als Artefakt `benchmark-bericht-<os>` auch bei Fehlschlag.
+- Werkzeuge: Der Entwicklungs-Benchmark `werkzeuge/benchmark.py` (Paket `werkzeuge/benchmark/`) erzeugt
+  synthetische Versicherungsdokumente samt Scans und versteckten Teilen und bewertet die Ausgabe über alle
+  Kanäle; `tests/test_benchmark.py` nutzt ihn als Qualitätstor (12 Dokumente). Dazu
+  `werkzeuge/wissen_pflegen.py` (Wortlisten) und `werkzeuge/programmsymbol.py` (`icon.ico`).
+- Kommentare im Code verweisen auf Entwicklungsunterlagen (`CONTRACT_V2.md`, `BENCHMARK_SCHEMA.md`, „Vertrag
+  Abschnitt …“), die nicht im Repository liegen.
+
 Auslieferung und Dokumentation nach dem Review „Auslieferung/Doku“ (AD-01 … AD-08):
 
 ### Installation und EXE (`Installieren.bat`, `EXE-bauen.bat`, `requirements.txt`)
