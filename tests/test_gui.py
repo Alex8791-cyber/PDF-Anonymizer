@@ -1277,6 +1277,149 @@ def test_schliessen_fragt_waehrend_des_laufs(app, umgebung, monkeypatch, dialoge
 
 
 # ----------------------------------------------------------------------
+# Inventar C-10: Freigeben geht nur in derselben Sitzung (der Stand liegt nur im Speicher) – beim Beenden
+# mit noch nicht freigegebenen Ausgaben einmal nachfragen
+# ----------------------------------------------------------------------
+def _ausgaben_zu_pruefen(app, umgebung, monkeypatch, *kunden):
+    """Je Kunde eine Police analysiert und geschwärzt; mit „Freigabe vor Weitergabe“ (Standard) heißen alle Ausgaben
+    anonym_01_PRUEFEN.pdf."""
+    pdfs = [pdf_schreiben(umgebung["tmp"] / kunde / "Police.pdf") for kunde in kunden]
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse({f"{kunde}/Police.pdf": [FUND_TEL] for kunde in kunden}))
+    monkeypatch.setattr(gui, "schwaerze_pdf", fake_schwaerzung([]))
+    analysiere(app, pdfs)
+    starte_lauf(app, app.schwaerzen)
+    assert [app.ausgaben[p]["pfad"].name for p in pdfs] == ["anonym_01_PRUEFEN.pdf"] * len(pdfs)
+    assert app.offene_freigaben() == pdfs
+    return pdfs
+
+
+def test_beenden_fragt_bei_ausgaben_ohne_freigabe(app, umgebung, monkeypatch, dialoge):
+    a, b = _ausgaben_zu_pruefen(app, umgebung, monkeypatch, "KundeA", "KundeB")
+    optionen = []
+
+    def askyesno(titel=None, nachricht=None, **kw):
+        dialoge.liste.append(("askyesno", titel, nachricht))
+        optionen.append(kw)
+        return dialoge.antwort
+    monkeypatch.setattr(gui.messagebox, "askyesno", askyesno)
+    vorher = len(dialoge.liste)
+    dialoge.antwort = False
+    app.schliessen()
+    assert len(dialoge.liste) == vorher + 1                             # eine Rückfrage für alle Ausgaben
+    art, titel, text = dialoge.liste[-1]
+    assert art == "askyesno" and titel == gui.FREIGABE_OFFEN_TITEL == "Freigabe noch offen"
+    assert text.startswith("2 Ausgaben warten noch auf Ihre Freigabe:\n")
+    assert "  • KundeA/Police.pdf → anonym_01_PRUEFEN.pdf\n  • KundeB/Police.pdf → anonym_01_PRUEFEN.pdf" in text
+    assert ("Nach dem Beenden lassen sie sich nicht mehr freigeben – dafür müssten Sie die Originale erneut "
+            "analysieren und schwärzen.") in text
+    assert "Trotzdem beenden?" in text and "„Nein“: Das Programm bleibt offen." in text
+    assert optionen[-1].get("default") == gui.messagebox.NO and optionen[-1].get("icon") == "warning"
+    # „Nein“ (auch Enter): das Fenster bleibt offen, nichts ist aufgeräumt, Freigeben geht weiter
+    assert fenster_existiert(app.root) and not app.beendet
+    assert threading.excepthook == app._thread_excepthook
+    assert app.offene_freigaben() == [a, b] and app.naechste_zu_pruefen() == a
+    # „Ja“: das Fenster schließt wie sonst; die Ausgaben bleiben unverändert liegen (_PRUEFEN)
+    dialoge.antwort = True
+    app.nie_feld.insert("1.0", "Makler GmbH")
+    app.schliessen()
+    assert len(dialoge.liste) == vorher + 2
+    assert not fenster_existiert(app.root) and app.beendet
+    assert threading.excepthook != app._thread_excepthook
+    assert dateien.einstellungen_laden()["nie"] == ["Makler GmbH"]
+    for kunde in ("KundeA", "KundeB"):
+        assert (umgebung["tmp"] / kunde / "anonymisiert" / "anonym_01_PRUEFEN.pdf").exists()
+
+
+def test_beenden_freigegebene_ausgaben_zaehlen_nicht(app, umgebung, monkeypatch, dialoge):
+    a, b = _ausgaben_zu_pruefen(app, umgebung, monkeypatch, "KundeA", "KundeB")
+    assert app.ausgabe_freigeben(a) == umgebung["tmp"] / "KundeA" / "anonymisiert" / "anonym_01.pdf"
+    assert app.offene_freigaben() == [b]
+    dialoge.antwort = False
+    app.schliessen()
+    art, titel, text = dialoge.liste[-1]
+    assert titel == gui.FREIGABE_OFFEN_TITEL and fenster_existiert(app.root)
+    assert text.startswith("Eine Ausgabe wartet noch auf Ihre Freigabe:\n  • KundeB/Police.pdf → anonym_01_PRUEFEN.pdf")
+    assert "KundeA" not in text
+    assert "Nach dem Beenden lässt sie sich nicht mehr freigeben – dafür müssten Sie das Original erneut" in text
+    # auch die zweite freigegeben: nichts mehr offen – keine Rückfrage, das Fenster schließt
+    assert app.ausgabe_freigeben(b) is not None and app.offene_freigaben() == []
+    vorher = len(dialoge.liste)
+    app.schliessen()
+    assert len(dialoge.liste) == vorher and not fenster_existiert(app.root)
+
+
+def test_beenden_ohne_offene_freigabe_fragt_nicht(app, umgebung, monkeypatch, dialoge):
+    """Keine Rückfrage, wenn nichts mehr freizugeben ist: Ausgabe verworfen, Datei außerhalb des Programms gelöscht,
+    Datei aus der Liste entfernt."""
+    a, b, c = _ausgaben_zu_pruefen(app, umgebung, monkeypatch, "KundeA", "KundeB", "KundeC")
+    assert app.ausgabe_verwerfen(a)
+    app.ausgaben[b]["pfad"].unlink()                                    # z. B. im Explorer gelöscht
+    app.datei_entfernen(str(c))
+    assert app.offene_freigaben() == []
+    vorher = len(dialoge.liste)
+    dialoge.antwort = False
+    app.schliessen()
+    assert len(dialoge.liste) == vorher and not fenster_existiert(app.root)
+
+
+def test_beenden_ohne_freigabe_option_und_ohne_pruefen_fragt_nicht(app, umgebung, monkeypatch, dialoge):
+    """„Freigabe vor Weitergabe erforderlich“ aus und kein Grund zum Prüfen: die Ausgabe heißt anonym_01.pdf, beim
+    Beenden kommt keine Rückfrage."""
+    pdf = pdf_schreiben(umgebung["tmp"] / "Kunde" / "Police.pdf")
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse({"Police.pdf": [FUND_TEL]}))
+    monkeypatch.setattr(gui, "schwaerze_pdf", fake_schwaerzung([]))
+    app.freigabe_var.set(False)
+    analysiere(app, [pdf])
+    starte_lauf(app, app.schwaerzen)
+    assert app.ausgaben[pdf]["status"] == "fertig" and app.ausgaben[pdf]["pfad"].name == "anonym_01.pdf"
+    vorher = len(dialoge.liste)
+    dialoge.antwort = False
+    app.schliessen()
+    assert len(dialoge.liste) == vorher and not fenster_existiert(app.root)
+
+
+def test_beenden_waehrend_eines_laufs_fragt_wie_bisher(app, umgebung, monkeypatch, dialoge):
+    """Läuft gerade eine Analyse oder Schwärzung, bleibt es bei der einen Rückfrage „Lauf läuft noch“ – auch wenn
+    Ausgaben eines früheren Laufs noch auf die Freigabe warten."""
+    _ausgaben_zu_pruefen(app, umgebung, monkeypatch, "Kunde")
+    weiter = threading.Event()
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse({}, warten=weiter))
+    app.analysieren()
+    assert pumpe(app.root, lambda: app.laeuft, timeout=5)
+    assert app.offene_freigaben()
+    vorher = len(dialoge.liste)
+    dialoge.antwort = False
+    app.schliessen()
+    assert [d[1] for d in dialoge.liste[vorher:]] == ["Lauf läuft noch"] and fenster_existiert(app.root)
+    dialoge.antwort = True
+    app.schliessen()
+    assert [d[1] for d in dialoge.liste[vorher:]] == ["Lauf läuft noch", "Lauf läuft noch"]
+    assert not fenster_existiert(app.root)
+    weiter.set()
+
+
+def test_beenden_fragt_nicht_doppelt_bei_zweitem_klick(app, umgebung, monkeypatch, dialoge):
+    """Unter Linux erreicht ein weiterer Klick auf das X der Titelleiste das Fenster, während die Rückfrage offen ist:
+    keine zweite Rückfrage, es gilt die Antwort auf die offene Frage – und das Fenster schließt nur einmal."""
+    _ausgaben_zu_pruefen(app, umgebung, monkeypatch, "Kunde")
+    fragen = []
+
+    def askyesno(titel=None, nachricht=None, **kw):
+        fragen.append(titel)
+        app.root.tk.call(app.root.protocol("WM_DELETE_WINDOW"))         # zweiter Klick, während die Frage offen ist
+        return dialoge.antwort
+    monkeypatch.setattr(gui.messagebox, "askyesno", askyesno)
+    dialoge.antwort = False
+    app.schliessen()
+    assert fragen == [gui.FREIGABE_OFFEN_TITEL] and fenster_existiert(app.root) and not app.beendet
+    dialoge.antwort = True
+    app.schliessen()
+    assert fragen == [gui.FREIGABE_OFFEN_TITEL] * 2 and not fenster_existiert(app.root) and app.beendet
+    fehlerlog = umgebung["fehlerlog"]
+    assert not fehlerlog.exists() or "TclError" not in fehlerlog.read_text(encoding="utf-8")
+
+
+# ----------------------------------------------------------------------
 # M-58 / GR-08 / GR-11: Dateiliste, Nicht-PDF, Entfernen, Drag & Drop, Zwischendateien
 # ----------------------------------------------------------------------
 def test_dateiliste_meldet_nicht_pdf_und_erlaubt_entfernen(app, umgebung, dialoge):

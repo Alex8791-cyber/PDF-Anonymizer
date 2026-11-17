@@ -550,9 +550,11 @@ def test_gui_kennwort_abfragen_entschluesseln_und_nirgends_speichern(app, umgebu
     assert app.ausgaben[a]["pfad"].parent == tmp / "Kunde" / "anonymisiert"
     with fitz.open(app.ausgaben[a]["pfad"]) as doc:
         assert not doc.needs_pass                                   # Ausgabe ohne Kennwort, wie angekündigt
-    # Schließen löscht die entschlüsselten Kopien
+    # Schließen löscht die entschlüsselten Kopien (die Ausgaben sind noch nicht freigegeben: „Trotzdem beenden?“ – Ja)
     kopien = [app._arbeitsdatei(a), app._arbeitsdatei(b)]
+    dialoge.antwort = True
     app.schliessen()
+    assert dialoge.liste[-1][1] == gui.FREIGABE_OFFEN_TITEL
     assert not any(k.exists() for k in kopien)
 
 
@@ -1471,6 +1473,40 @@ def test_schliessen_waehrend_der_fotofrage(app, umgebung, monkeypatch, dialoge):
     app._pdfs_hinzufuegen([str(ordner)])
     assert app.dateien == []
     assert _ereignisse_bis_geschlossen(app.root)
+    assert app.beendet and _temp_dateien() == []
+
+
+@gui_test
+def test_schliessen_waehrend_der_fotofrage_mit_offener_freigabe(app, umgebung, monkeypatch, dialoge):
+    """Wie oben, aber eine Ausgabe wartet noch auf die Freigabe (Inventar C-10): Erst wird die Auswahl abgebrochen
+    (nichts umgewandelt), dann kommt die Rückfrage „Freigabe noch offen“. „Nein“ lässt das Fenster offen."""
+    police = pdf_schreiben(umgebung["tmp"] / "Kunde" / "Police.pdf")
+    monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse({"Police.pdf": [FUND_TEL]}))
+    monkeypatch.setattr(gui, "schwaerze_pdf", fake_schwaerzung([]))
+    analysiere(app, [police])
+    starte_lauf(app, app.schwaerzen)
+    assert app.offene_freigaben() == [police]
+    ordner = umgebung["tmp"] / "Neu"
+    pdf_schreiben(ordner / "Antrag.pdf")
+    schreibe(ordner / "Ausweis.jpg", jpeg_bytes())
+    fragen = []
+
+    def frage(titel=None, nachricht=None, **kw):
+        fragen.append(titel)
+        if titel == gui.FREIGABE_OFFEN_TITEL:
+            return dialoge.antwort
+        _schliessen_wie_fenstermanager(app)              # während die Fotofrage offen ist …
+        return True                                      # … danach „Ja“
+    monkeypatch.setattr(gui.messagebox, "askyesno", frage)
+    dialoge.antwort = False
+    app._pdfs_hinzufuegen([str(ordner)])
+    pumpe(app.root, lambda: len(fragen) >= 2, timeout=5)
+    assert fragen == ["Fotos als PDF übernehmen?", gui.FREIGABE_OFFEN_TITEL]
+    assert fenster_existiert(app.root) and not app.beendet
+    assert app.dateien == [police] and _temp_dateien() == []
+    dialoge.antwort = True
+    app.schliessen()
+    assert fragen[-1] == gui.FREIGABE_OFFEN_TITEL and _ereignisse_bis_geschlossen(app.root)
     assert app.beendet and _temp_dateien() == []
 
 

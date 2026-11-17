@@ -177,6 +177,7 @@ ANZEIGE_NACHSCHWAERZEN = "Manuell (Nachschwärzen)"
 PLATZHALTER_MANUELL = attrappen.PLATZHALTER_MANUELL
 PRUEFEN_ERKLAERUNG = ("„_PRUEFEN“ im Dateinamen heißt: noch nicht zur Weitergabe freigegeben – erst in der "
                       "Vorschau prüfen und dort „Freigeben“ drücken.")
+FREIGABE_OFFEN_TITEL = "Freigabe noch offen"         # Rückfrage beim Beenden (offene_freigaben)
 STATUS_TEXT = {"fertig": "✔ fertig", "pruefen": "⚠ prüfen", "fehler": "✖ Fehler", "verworfen": "verworfen",
                "keine": "keine Ausgabe"}
 
@@ -966,6 +967,7 @@ class AnonymisiererApp:
         # Schließen, während eine Auswahl auf eine Rückfrage wartet (Kennwort, Fotos …): erst die Auswahl sauber
         # abbrechen (keine weitere Arbeitskopie), dann schließen (Befund Runde 2)
         self._schliessen_angefordert = False
+        self._beenden_frage_offen = False                # Rückfrage „Freigabe noch offen“ steht gerade da
         self._lauf_thread: threading.Thread | None = None   # Arbeits-Thread des laufenden bzw. letzten Laufs
         self._reste_threads: dict[str, threading.Thread] = {}   # Sitzungsordner -> Thread, der ihn später löscht
         self.laufprotokoll: list[dict] = []              # je Lauf eine Zusammenfassung ohne Inhalte (M-61)
@@ -2943,9 +2945,15 @@ class AnonymisiererApp:
         from .vorschau_fenster import engine_zwischenspeicher_leeren
         engine_zwischenspeicher_leeren()
 
+    def offene_freigaben(self) -> list[Path]:
+        """Dateien (in Listenreihenfolge), deren Ausgabe noch „_PRUEFEN“ heißt und in der Vorschau freigegeben werden
+        kann. Dieser Stand lebt nur im Speicher (self.ausgaben, nicht in den Einstellungen): Nach dem Beenden lässt
+        sich keine dieser Ausgaben mehr freigeben."""
+        return [p for p in self.dateien if self.ausgabe_vorhanden(p) and self.ausgaben[p]["status"] == "pruefen"]
+
     def naechste_zu_pruefen(self, nach: Path | None = None) -> Path | None:
         """Nächste Datei (in Listenreihenfolge nach „nach“), deren Ausgabe noch freigegeben werden muss."""
-        reihe = [p for p in self.dateien if self.ausgabe_vorhanden(p) and self.ausgaben[p]["status"] == "pruefen"]
+        reihe = self.offene_freigaben()
         if nach in self.dateien:
             spaeter = [p for p in reihe if self.dateien.index(p) > self.dateien.index(nach)]
             reihe = spaeter + [p for p in reihe if p not in spaeter]
@@ -3438,8 +3446,36 @@ class AnonymisiererApp:
         self._dialog("info", "Lauf läuft noch",
                      "Gerade läuft noch eine Analyse oder Schwärzung. Bitte warten oder „Abbrechen“ drücken.")
 
+    def _beenden_trotz_offener_freigaben(self) -> bool:
+        """Warten Ausgaben dieser Sitzung noch auf die Freigabe, einmal nachfragen (Enter = „Nein“, das Fenster bleibt
+        offen). Freigeben geht nur in dieser Sitzung (offene_freigaben). True: beenden."""
+        offen = self.offene_freigaben()
+        if not offen:
+            return True
+        if self._beenden_frage_offen:
+            # erneut geschlossen, während die Frage noch offen ist (unter Linux erreicht das X der Titelleiste das
+            # Fenster trotz modaler Meldung): nicht ein zweites Mal fragen – es gilt die Antwort auf die offene Frage
+            return False
+        einzahl = len(offen) == 1
+        zeilen = [f"  • {self._anzeigename(p)} → {Path(self.ausgaben[p]['pfad']).name}" for p in offen[:5]]
+        if len(offen) > 5:
+            zeilen.append(f"  … und {len(offen) - 5} weitere")
+        wartet = "Eine Ausgabe wartet" if einzahl else f"{len(offen)} Ausgaben warten"
+        lassen, originale = ("lässt", "das Original") if einzahl else ("lassen", "die Originale")
+        text = (f"{wartet} noch auf Ihre Freigabe:\n" + "\n".join(zeilen) + "\n\n"
+                f"Nach dem Beenden {lassen} sie sich nicht mehr freigeben – dafür müssten Sie {originale} erneut "
+                "analysieren und schwärzen.\n\nTrotzdem beenden?\n\n"
+                "„Nein“: Das Programm bleibt offen. Prüfen und freigeben können Sie in der Vorschau (Doppelklick "
+                "auf die Datei).")
+        self._beenden_frage_offen = True
+        try:
+            return self._frage(FREIGABE_OFFEN_TITEL, text, warnung=True, standard_nein=True)
+        finally:
+            self._beenden_frage_offen = False
+
     def schliessen(self):
-        """Fenster schließen (Rückfrage, solange ein Lauf aktiv ist); Einstellungen sichern, Sperre freigeben.
+        """Fenster schließen (Rückfrage, solange ein Lauf aktiv ist, sonst, solange Ausgaben noch auf die Freigabe
+        warten); Einstellungen sichern, Sperre freigeben.
         Wartet gerade eine Auswahl auf eine Rückfrage (Kennwort, Fotos …), wird sie zuerst abgebrochen – erst danach
         schließt das Fenster, damit keine (entschlüsselte) Arbeitskopie mehr entsteht oder liegen bleibt."""
         if self.beendet:
@@ -3460,6 +3496,8 @@ class AnonymisiererApp:
             if not antwort:
                 return
             self.abbrechen()
+        elif not self._beenden_trotz_offener_freigaben():
+            return
         try:
             self.einstellungen_speichern()
         except Exception:
