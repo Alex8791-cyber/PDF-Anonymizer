@@ -711,3 +711,23 @@ def test_ner_titel_davor_schuetzt_verlesenen_namen_vor_sachwort():
     Häußler" – ein Titel davor ist ein Personenbeleg, auch wenn ein Wort wie ein Sachname aussieht."""
     text = "Nerdticht Lobensvereichkrung Ad\t\tvoratane: Dr, med. Neina-Josat Haustier\t\tVorsitz Aufsiulnaräars"
     assert _deckt(_namen(text), "Haustier")
+
+
+@pytest.mark.parametrize("zeile, stelle", [
+    ("Aufnehmender Beamter: POK Ludwig, PI Grafing", "POK Ludwig"),   # Korpus s3x (Messung Runde 5)
+    ("Rückfragen richten Sie bitte an KHKin Sedlmayr (K 33).", "KHKin Sedlmayr"),
+])
+def test_befund_54_dienstgrad_kuerzel_wird_mitgeschwaerzt(zeile, stelle):
+    assert _deckt(_namen(zeile), stelle)
+
+
+@pytest.mark.parametrize("zeile", ["Unfallort: Parkhaus Altstadt", "Schadenort: Tiefgarage Ortsmitte"])
+def test_befund_18_gegenprobe_ortsteil_gattung_ist_kein_ort(zeile):
+    assert not _geschwaerzt(_funde(zeile), "plzort")      # Korpus s3x (Messung Runde 5): "Parkhaus Altstadt"
+
+
+@braucht_modell
+def test_ner_kopfzeilenwort_hinter_namen_ist_kein_modellcode():
+    """Korpus s9x (Messung Runde 5): In der Faxkopfzeile "PRAXIS DIR. RNGLL FAX …" ist "FAX" kein Modellcode hinter
+    einer Marke – der verlesene Name davor bleibt ein Name."""
+    assert _deckt(_namen("07.10,25 13:09 PRAXIS DIR. RNGLL FAX OPT3T ASTRO SO"), "RNGLL")

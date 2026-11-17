@@ -535,6 +535,8 @@ def _rang_namen(text: str, tokens: list) -> list:
         if j >= n or not _rang_name_moeglich(tokens[j].text):
             continue
         s, e = tokens[j].start, tokens[j].ende - (1 if tokens[j].text.endswith(".") else 0)
+        if namen._rang_kuerzel(t.text):
+            s = t.start                                    # das Kürzel davor gehört zur Stelle ("POK Ludwig")
         if j + 1 < n and tokens[j].naechster_trenner == " " and _art(tokens[j].text.rstrip("."))[0] \
                 and _rang_name_moeglich(tokens[j + 1].text):
             e = tokens[j + 1].ende - (1 if tokens[j + 1].text.endswith(".") else 0)   # "KHK Hans Sedlmayr"

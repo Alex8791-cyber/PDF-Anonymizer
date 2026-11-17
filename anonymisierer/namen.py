@@ -399,8 +399,9 @@ def _ner_sachtreffer(text: str, start: int, ende: int, teile: list) -> bool:
                 return True                               # "Mofa Simson", "AEG DDLE"
     if len(teile) >= 2 and any(_code_wort(t) for t in teile[1:]) and not paar:
         return True                                       # "Böckmann TPV", "Logan MCV", "Bosch GSR"
-    if not paar and _MODELL_DANACH_RE.match(text, ende):
-        return True                                       # "Tabbert Rossini 540", "Fronius Symo 10.0-3-M"
+    modell = _MODELL_DANACH_RE.match(text, ende) if not paar else None
+    if modell and (not re.fullmatch(r"[ \t]+[A-Z]{2,5}[ \t]?", modell.group(0)) or _code_wort(modell.group(0).strip())):
+        return True                                       # "Tabbert Rossini 540", "Fronius Symo 10.0-3-M"; nicht "FAX"
     if _RECHTSFORM_DANACH_RE.match(text, ende) or any(_ORG_TEIL_RE.search(t) for t in teile):
         return True                                       # "Sixt GmbH …", "Stadtwerke Rosenheim"
     if _DATEI_DANACH_RE.match(text, ende) or _DATEI_ENDE_RE.search(text[start:ende]) \
@@ -678,7 +679,7 @@ def _bereinigen(text: str, start: int, ende: int):
         voll = m.group(1).lower()
         if (wort in ANREDEN or voll in ANREDEN or wort in TITEL or voll in TITEL
                 or (wort in NAMEN_STOPPLISTE and not _kalendername(text, start, wort))
-                or (voll in _VERSICHERER_EINZELWORT and not mit_anrede) or _rang_kuerzel(m.group(1))):
+                or (voll in _VERSICHERER_EINZELWORT and not mit_anrede)):
             start += m.end()
             mit_anrede = wort in ANREDEN or voll in ANREDEN
         else:

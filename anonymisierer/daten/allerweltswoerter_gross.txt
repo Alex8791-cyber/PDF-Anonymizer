@@ -204,6 +204,7 @@ Altersvorsorgeverträge
 Altersvorsorgezulage
 Altertumskunde
 Altschaden
+Altstadt
 Altverträge
 Ambulant
 Ambulante
@@ -5591,6 +5592,8 @@ Ortschaft
 Ortsdurchfahrt
 Ortsgruppe
 Ortsgruppen
+Ortskern
+Ortsmitte
 Ortsnetzbereich
 Ortstarif
 Ortsteil
@@ -7224,6 +7227,7 @@ Stadtstaat
 Stadtteil
 Stadtvertretung
 Stadtverwaltung
+Stadtzentrum
 Stahlträger
 Stallpflicht
 Stammdaten
