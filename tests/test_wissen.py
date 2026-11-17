@@ -29,6 +29,7 @@ MINDESTGROESSE = {
     "etiketten_kontakt": 40,
     "etiketten_vertragsdaten": 100,
     "anreden_titel": 150,
+    "orte": 600,
 }
 
 

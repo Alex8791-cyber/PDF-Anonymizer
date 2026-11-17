@@ -121,7 +121,7 @@ steht unter [Was NICHT erkannt wird](#was-nicht-erkannt-wird).
 | Ausweis-/Pass-/Führerscheinnummern | Ausweisnummer: L01X00T47 | `[AUSWEIS-NR]` | Ausgewogen | mit Etikett; Ausweis- und Passnummern auch ohne Etikett, wenn die Prüfziffer stimmt; auf Ausweiskopien auch die maschinenlesbare Zone |
 | SEPA-Mandatsreferenzen | Mandatsreferenz MR-2024-0815 | `[MANDATSREFERENZ]` | Ausgewogen | nur hinter einem Etikett |
 | BIC (bei IBAN oder Etikett) | COBADEFFXXX | `[BIC]` | Ausgewogen | hinter „BIC“, neben einer IBAN oder in eindeutiger Form (11 Zeichen auf „XXX“ oder mit Ziffer im Ortscode) |
-| Kreditkartennummern | 4111 1111 1111 1111 | `[KREDITKARTE]` | Ausgewogen | auch die Kartenprüfnummer (CVC/CVV, „CVC-Code“) hinter ihrem Etikett – nur dort, nicht dieselben Ziffern an anderer Stelle; „Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder Gutachten-Prüfnummer) |
+| Kreditkartennummern | 4111 1111 1111 1111 | `[KREDITKARTE]` | Ausgewogen | auch die Kartenprüfnummer (CVC/CVV, „Kartenprüfnr.“, „CID“) hinter ihrem Etikett und in Kartendaten („…, gültig bis 12/27, 739“) – nur dort, nicht dieselben Ziffern an anderer Stelle; „Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder Gutachten-Prüfnummer) |
 | Ausländische Anschriften und Kennzeichen | Kerkstraat 12, 1017 GC Amsterdam | `[AUSLAND]` | Hoch |  |
 | Orte ohne PLZ (Ort-Datum-Zeile, Geburtsort) | Musterstadt, 03.04.2025 | `[ORT]` | Hoch | Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“ |
 | Beruf (bei Personen) | Beruf: Elektriker | `[BERUF]` | Hoch | hinter „Beruf:“ oder im Satz („arbeitet als …“) |
@@ -608,7 +608,7 @@ Tesseract** – nur den entpackten Ordner.
   Prüfziffern, Tabellen, Formulare, Briefe und Anschriften, Ausweise, Faxkopf, Kammfelder,
   OCR-Lesefehler, Kundenliste); **spaCy** mit dem Modell `de_core_news_md` für Personennamen;
   eine Wissensbasis in `anonymisierer/daten/` (Wortlisten mit Vor- und Nachnamen, Berufen,
-  Diagnosen, Medikamenten, Etiketten, Versicherern und Organisationen; Quellen in
+  Diagnosen, Medikamenten, Etiketten, Versicherern und Organisationen, Orten; Quellen in
   `daten/QUELLEN.md`). Feste Pseudonyme je Person; Varianten und Namensbestandteile werden
   zusammengeführt. Prüfziffern (IBAN Mod 97, Steuer-ID nach § 139b AO, ICAO bei Ausweisen …)
   bestimmen meist nur die Sicherheit eines Funds; ohne Etikett verlangen Steuer-ID und
@@ -617,7 +617,10 @@ Tesseract** – nur den entpackten Ordner.
 - **Zwei Kontrollen nach dem Schwärzen:** Die Selbstkontrolle sucht die geschwärzten Texte in
   der Ausgabe (bei Scans per erneuter OCR). Die Restrisiko-Prüfung (`restrisiko.py`) liest die
   Ausgabe als unabhängige zweite Linie mit eigenen Regeln – ohne die Erkennungsregeln und ohne
-  das Sprachmodell – und meldet alles, was nach Personendaten aussieht. Eine zentrale
+  das Sprachmodell – und meldet alles, was nach Personendaten aussieht. Gemeinsam mit der
+  Erkennung nutzt sie nur die Regel „Etikett + Wert“ für eVB-Nummer, Transferticket,
+  Kartenprüfnummer und Geburtsname (`kennungsformen.py`), damit beide dieselben Schreibweisen
+  kennen. Eine zentrale
   Statusregel (`analyse.WARNUNGS_CODES`, `analyse.ist_leckrelevant`) entscheidet für jede
   Meldung, ob die Ausgabe `_PRUEFEN` heißt.
 - **Bilder:** `fotos.py` (Fotobereiche und Lichtbilder), `bilder.py` (Neukodierung,
@@ -636,7 +639,7 @@ Tesseract** – nur den entpackten Ordner.
   Hinweiskasten einzeilig, Dateikopf und Ablagefläche in einer Zeile, flachere Knöpfe.
 - Code und Oberfläche sind deutsch. Paketaufbau `anonymisierer/`: `analyse.py`,
   `schwaerzung.py`, `seitenmodell.py`, `detektoren/`, `muster.py` (Kategorien, Muster,
-  Schutzstufen), `namen.py` (spaCy), `wissen.py` + `daten/`, `kundenliste.py`,
+  Schutzstufen), `kennungsformen.py`, `namen.py` (spaCy), `wissen.py` + `daten/`, `kundenliste.py`,
   `restrisiko.py`, `ocr.py`, `fotos.py`, `bilder.py`, `nebenkanaele.py`, `vorschau.py`,
   `vorschau_fenster.py`, `gui.py`, `gui_attrappen.py`, `dateien.py`; Startskript
   `pdf_anonymisierer.py`.

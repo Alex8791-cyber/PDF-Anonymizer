@@ -57,7 +57,7 @@ __all__ = [
     "normalisieren", "normalisieren_umschrift", "sortierschluessel", "woerter",
     "ist_vorname", "ist_nachname", "ist_mehrdeutig", "ist_vorname_mehrdeutig",
     "ist_partikel", "ist_anrede_titel",
-    "ist_allerweltswort", "ist_beruf", "ist_diagnose", "ist_medikament", "ist_allowlist",
+    "ist_allerweltswort", "ist_beruf", "ist_diagnose", "ist_medikament", "ist_allowlist", "ist_ort",
     "etiketten",
 ]
 
@@ -82,6 +82,7 @@ LISTEN = {
     "etiketten_vertragsdaten": "etiketten_vertragsdaten.txt",
     "allerweltswoerter_gross": "allerweltswoerter_gross.txt",
     "anreden_titel": "anreden_titel.txt",
+    "orte": "orte.txt",
 }
 # Kurznamen (bequemer in Regeln)
 _ALIAS = {
@@ -620,6 +621,21 @@ def ist_grossstadt(wort: str) -> bool:
     """Deutsche Großstadt (über 100 000 Einwohner, ein Wort oder "Bergisch Gladbach")? Viele sind zugleich Nachnamen
     (Hagen, Essen): Regeln prüfen ist_nachname zusätzlich."""
     return normalisieren(wort or "") in _GROSSSTAEDTE or normalisieren_umschrift(wort or "") in _GROSSSTAEDTE
+
+
+def ist_ort(phrase: str) -> bool:
+    """Ein Ort: Staat oder Land ("Polen", "Türkei", "USA"), Region ("Schlesien"), Stadt im Ausland ("Wien", "Zürich",
+    "Istanbul") oder in Deutschland ("Marburg", "Bad Homburg", "Sankt Ingbert"; dazu die Großstädte) – Liste orte.txt.
+    Auch Orte sind oft Nachnamen (Landau, Holland): Regeln prüfen ist_nachname zusätzlich."""
+    p = " ".join((phrase or "").split())
+    if not p:
+        return False
+    if ist_grossstadt(p):
+        return True
+    teile = p.split()
+    if teile[0].casefold() in ("st.", "st") and len(teile) > 1:
+        p = " ".join(["Sankt"] + teile[1:])            # "St. Ingbert" wie "Sankt Ingbert"
+    return _im_index("orte", p.title() if p.isupper() else p)
 
 
 # ----------------------------------------------------------------------

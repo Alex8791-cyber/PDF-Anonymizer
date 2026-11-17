@@ -14,6 +14,8 @@ Toleranz für OCR-Lesefehler gehört nicht hierher (detektoren/ocr_lesart.py pr�
 import functools
 import re
 
+from . import kennungsformen
+
 _NLP = None          # das geladene Sprachmodell (oder None)
 _NLP_FEHLER = None   # Begründung, falls nicht verfügbar
 _STUECK_LAENGE = 60_000   # Zeichen je spaCy-Aufruf (Stücke enden an Zeilenumbrüchen)
@@ -957,27 +959,30 @@ def _regel_kandidaten(text: str) -> list:
 # Berlinerin") und Spaltenköpfe ("geb. ⇥⇥ Ort": hinter "geb." zählt nur dieselbe Zelle).
 _GEB_ETIKETT_RE = re.compile(
     r"(?<![\wäöüß.\-])(?:(?P<geb>geb|GEB|Geb)(?:\.:?|:|,)?|(?P<geborene>geborene[rn]?|GEBORENE[RN]?|Geborene[rn]?)"
-    r"|(?P<feld>Geburtsname|GEBURTSNAME)(?:[ \t]*\([^()\n]{1,25}\))?[ \t]*:?)"
-    # dahinter kein Wortzeichen – außer direkt hinter "geb." / "geb:" ein großer Anfangsbuchstabe ("geb.Schulz")
+    # "gab." – so liest die Texterkennung "geb." ("Anna Weber gab. Quarnstedt"); nur zwischen zwei Namen (unten)
+    r"|(?P<gab>gab|GAB)\.)"
+    # dahinter kein Wortzeichen – außer direkt hinter "geb." / "geb:" ein großer Anfangsbuchstabe ("geb.Schulz");
+    # das Feld-Etikett "Geburtsname" liest kennungsformen.geburtsname_hinter_etikett (dieselbe Regel wie die
+    # Selbstkontrolle)
     r"(?:(?![\wäöüß\-])|(?<=[.:])(?=[" + _GROSS + r"]))")
 _GEB_PARTIKEL_WORT = (r"(?:von|van|de|der|den|zu|zur|vom|ten|ter|da|di|dos|das|del|della|du|la|le|al|el|"
                       r"VON|VAN|DE|DER|DEN|ZU|ZUR|VOM|DA|DI|DOS|DEL|DU|LA|LE|AL|EL)")
 _GEB_PARTIKEL = r"(?:" + _GEB_PARTIKEL_WORT + r"[ ]+){0,2}"
-_GEB_NAME_RE = re.compile(_GEB_PARTIKEL + r"[" + _GROSS + r"][\wäöüß'’]+(?:-[" + _GROSS + r"][\wäöüß'’]+)*"
+_GEB_NAME_RE = re.compile(_GEB_PARTIKEL + r"(?:[dDlL]['’])?[" + _GROSS + r"][\wäöüß'’]+(?:-[" + _GROSS
+                          + r"][\wäöüß'’]+)*"
                           r"(?![\wäöüß'’\-])")
 # weiterer Teil eines mehrteiligen Geburtsnamens ("Garcia Lopez", "da Silva Santos", "Öztürk Demir", "Mac Allister")
 _GEB_WEITER_RE = re.compile(r"[ ]+((?:" + _GEB_PARTIKEL_WORT + r"[ ]+)?[" + _GROSS + r"][\wäöüß'’]+(?:-["
                             + _GROSS + r"][\wäöüß'’]+)*)(?![\wäöüß'’\-])")
 # Vorsilben, hinter denen ein Geburtsname immer weitergeht ("Mac Allister", "O' Brien", "San Martín")
 _GEB_VORSILBE = frozenset({"mac", "mc", "o'", "o’", "fitz", "san", "santa", "st.", "abu", "ben", "bin", "ibn"})
-_GEB_LUECKE_RE = re.compile(r"[ ]{0,3}")
+_GEB_LUECKE_RE = re.compile(r"[ ]{0,8}")             # Festbreiten-Listen: "WEBER, ANNA GEB.    QUARNSTEDT"
 _GEB_UMBRUCH_RE = re.compile(r"[ ]*\n[ ]*")
-_FELD_LUECKE_RE = re.compile(r"[ \t]{1,12}|[ \t]*\n[ \t]*")
 # hinter dem Wort geht ein Datum weiter: eine Ziffer (auch hinter einem Punkt: "Od.12.1973") oder ein Monatsname
 # hinter einem Punkt ("geb. Od. Dez. 1973" – so liest die OCR "geb. 04. Dez. 1973"; das Wort ist der Tag)
 _DATUM_DAHINTER_RE = re.compile(
-    r"[ \t]*(?:\d|\.[ \t]*(?:\d|(?i:jan(?:uar)?|jän(?:ner)?|feb(?:ruar)?|mär(?:z)?|maerz|mrz|apr(?:il)?|mai|jun(?:i)?"
-    r"|jul(?:i)?|aug(?:ust)?|sep(?:t(?:ember)?)?|okt(?:ober)?|nov(?:ember)?|dez(?:ember)?)(?![\wäöüß])))")
+    r"[ \t]{0,2}(?:\d|\.[ \t]*(?:\d|(?i:jan(?:uar)?|jän(?:ner)?|feb(?:ruar)?|mär(?:z)?|maerz|mrz|apr(?:il)?|mai"
+    r"|jun(?:i)?|jul(?:i)?|aug(?:ust)?|sep(?:t(?:ember)?)?|okt(?:ober)?|nov(?:ember)?|dez(?:ember)?)(?![\wäöüß])))")
 # Name (eines Kandidaten) direkt vor dem Etikett: nur Leerraum, Komma oder öffnende Klammer dazwischen
 _VOR_GEB_RE = re.compile(r"[ \t]*,?[ \t]*\(?[ \t]*$")
 _NAME_DAVOR_RE = re.compile(r"[" + _GROSS + r"][\wäöüß'’\-]+,?[ \t]*\(?$")
@@ -1128,25 +1133,41 @@ def geburtsnamen(text: str, kandidaten=()) -> list:
             wort_davor = re.search(r"([^\W\d_]+)[ \t]*$", davor)
             if wort_davor and wort_davor.group(1)[:1].islower():
                 continue                              # "eine geborene Berlinerin": Eigenschaftswort
-        if art == "feld":
-            luecke = _FELD_LUECKE_RE.match(text, m.end())
-        else:                                         # "Anna Weber geb." ⏎ "Schulz" (nur mit Name davor)
-            luecke = _GEB_UMBRUCH_RE.match(text, m.end()) or _GEB_LUECKE_RE.match(text, m.end())
+        # "Anna Weber geb." ⏎ "Schulz" (nur mit Name davor)
+        luecke = _GEB_UMBRUCH_RE.match(text, m.end()) or _GEB_LUECKE_RE.match(text, m.end())
         n = _GEB_NAME_RE.match(text, luecke.end()) if luecke else None
-        if n is None or not _geburtsname_wort(text, n.start(), n.end()):
-            continue                                  # Datum, Ort, klein geschriebenes Wort, Feldbezeichner …
+        if n is None or not _geburtsname_wort(text, n.start(), n.end()) \
+                or not kennungsformen.geburtsname_moeglich(text, n.start(), n.end()) \
+                or kennungsformen.feld_etikett(text, n.start(), n.end()):
+            continue                                  # Datum, Ort, Funktionswort, Feldbezeichner …
         if n.start() == m.end() and n.group(0).casefold() in _GEB_KUERZEL_TEIL:
             continue                                  # "GEB.DAT.", "geb.Tag": Feldkürzel
         s, e = n.start(), _geburtsname_ende(text, n.start(), n.end())
-        person = None if art == "feld" else _name_vor(text, m.start(), starts_je_ende)
-        if "\n" in luecke.group(0) and art != "feld" and person is None:
-            continue
+        person = _name_vor(text, m.start(), starts_je_ende)
+        if person is None and (m.group("geb") == "Geb" or art in ("geborene", "gab") or "\n" in luecke.group(0)):
+            continue                                  # "Standort Köln, Geb. Kantine", "Als geborener Kölner …"
+        if art == "gab" and ("\n" in luecke.group(0) or not kennungsformen.WERT_ENDE_RE.match(text, e)):
+            continue                                  # "… die ihm Frau Weber gab. Müller kam später"
         gruppe = None
         if person is not None:
             name = text[person[0]:person[1]]
             gruppe = f"{name} geb. {text[s:e]}"
             if person[0] not in starts_je_ende.get(person[1], ()):
                 aus.append({"text": name, "start": person[0], "ende": person[1], "gruppe": gruppe})
+        aus.append({"text": text[s:e], "start": s, "ende": e, "gruppe": gruppe, "quelle": GEBURTSNAME_QUELLE})
+    # Feld-Etikett "Geburtsname", "Geb.-Name": dieselbe Regel „Etikett + Wert“ wie die Selbstkontrolle
+    # (kennungsformen.geburtsname_hinter_etikett) – auch "Geburtsname, falls abweichend: …", in der Zelle daneben
+    for m in kennungsformen.GEBURTSNAME_ETIKETT_RE.finditer(text):
+        sp = kennungsformen.geburtsname_hinter_etikett(text, m, _GEB_NAME_RE)
+        if sp is None or not _geburtsname_wort(text, sp.start, sp.ende):
+            continue
+        s, e = sp.start, _geburtsname_ende(text, sp.start, sp.ende)
+        gruppe = None
+        if sp.person is not None:                     # "Familienname (Geburtsname): Weber (Quarnstedt)"
+            ps, pe = sp.person
+            gruppe = f"{text[ps:pe]} geb. {text[s:e]}"
+            if ps not in starts_je_ende.get(pe, ()):
+                aus.append({"text": text[ps:pe], "start": ps, "ende": pe, "gruppe": gruppe})
         aus.append({"text": text[s:e], "start": s, "ende": e, "gruppe": gruppe, "quelle": GEBURTSNAME_QUELLE})
     return aus
 

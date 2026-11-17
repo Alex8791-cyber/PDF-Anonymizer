@@ -311,18 +311,33 @@ def _alle_abgewaehlt(fund: dict) -> bool:
     return bool(stellen) and not any(st.get("an", True) for st in stellen)
 
 
-def _kartenpruefnummer(kategorie: str, text: str) -> bool:
+# ein Kartennummer-Etikett direkt vor einer kurzen Nummer ("Karten-Nr.: 1234", "Kartennummer 1234"): die (gekürzte)
+# Kartennummer, keine Kartenprüfnummer – sie wird wie jede Kennung weitergegeben ("Karte 1234 gesperrt")
+_KARTENNUMMER_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:kredit|debit|giro|ec|bank)?-?karten?-?(?:nr\.?|nummer|no\.?)"
+                                    r"[ \t]*[:.#]?[ \t]*$")
+
+
+def _kartenpruefnummer(kategorie: str, text: str, davor: str | None = None) -> bool:
     """Kurze Kartenprüfnummer (CVC/CVV, Kategorie kreditkarte, höchstens vier Zeichen)? Sie gilt nur hinter ihrem
     Etikett: dieselben drei oder vier Ziffern anderswo sind Beträge, Seitenzahlen, Flächen oder Tarife ("250 EUR",
-    "Seite 2 von 250") – sie wird weder im Dokument noch in andere Dokumente weitergegeben."""
-    return kategorie == "kreditkarte" and sum(c.isalnum() for c in text or "") <= 4
+    "Seite 2 von 250") – sie wird weder im Dokument noch in andere Dokumente weitergegeben. davor: Text vor der
+    Fundstelle – steht dort ein Kartennummer-Etikett ("Karten-Nr.: 1234"), ist es keine Kartenprüfnummer."""
+    if kategorie != "kreditkarte" or sum(c.isalnum() for c in text or "") > 4:
+        return False
+    return davor is None or not _KARTENNUMMER_DAVOR_RE.search(davor)
+
+
+def _kontext_davor(fund: dict) -> str | None:
+    """Text vor dem Fund in seinem Kontext ("… Karten-Nr.: »1234« …" -> "… Karten-Nr.:")."""
+    kontext = fund.get("kontext") or ""
+    return kontext.split(" »", 1)[0] if " »" in kontext else None
 
 
 def _nicht_weitergeben(fund: dict) -> bool:
     """Funde, die nie in andere Dokumente wandern: Titel ohne Namen (gehören zu keiner Person), angebotene
     Firmenanschriften (sonst würden sie dort zu angehakten Stellen) und kurze Kartenprüfnummern (_kartenpruefnummer)."""
     return (fund.get("anzeige") == ANZEIGE_TITEL or QUELLE_FIRMENANSCHRIFT in (fund.get("quellen") or ())
-            or _kartenpruefnummer(fund.get("kategorie", ""), fund.get("text", "")))
+            or _kartenpruefnummer(fund.get("kategorie", ""), fund.get("text", ""), _kontext_davor(fund)))
 
 
 class LaufWissen:
@@ -1218,7 +1233,9 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
         modus = modus_fuer(kategorie)
         schl = schluessel_je_treffer[(kategorie, roh)]
         einzelwort = modus == "name" and len(roh.split()) == 1 and "," not in roh
-        kurz = _kartenpruefnummer(kategorie, roh)
+        kurz = _kartenpruefnummer(kategorie, roh) and any(
+            _kartenpruefnummer(kategorie, roh, text[max(0, t.start - 40):t.start]) for t in behalten
+            if t.kategorie == kategorie and text[t.start:t.ende] == roh)
         for s, e in vorkommen[modus].get(roh, ()):
             if kategorie != "begriff" and nie.umhuellt(s, e):
                 ausgelassen.append((s, e, schl, GRUND_NIE))
