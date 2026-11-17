@@ -304,7 +304,7 @@ def _hinweiskasten_kurz(neue_kategorien: bool) -> str:
     Runde 3b: die einzeilige Fassung ließ genau diese Angaben im kleinen Fenster weg. Ein Klick zeigt alle Grenzen."""
     lesbar = "Je nach Schutzstufe bleiben" if neue_kategorien else "Es bleiben"
     return (f"⚠ {lesbar} Diagnosen, Beruf, Arbeitgeber und Bilder lesbar; Unterschriften und Handschrift werden nicht "
-            "geschwärzt; Cloud-Ordner (OneDrive …) synchronisieren mit – Klick: alle Grenzen")
+            "erkannt; Cloud-Ordner (OneDrive …) synchronisieren mit – Klick: alle Grenzen")
 
 
 HINWEISKASTEN_KURZ = _hinweiskasten_kurz(_NEUE_KATEGORIEN)
