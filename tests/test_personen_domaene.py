@@ -679,3 +679,35 @@ def test_befunde_66_83_gegenproben_verdacht_bleibt(text, wert):
 ])
 def test_ner_anrede_mit_bindestrich_bleibt_name(zeilen, name):
     assert _deckt(_namen("\n".join(zeilen)), name)
+
+
+@braucht_modell
+def test_ner_ocr_namensteile_klein_teilen_den_namen_nicht():
+    """Korpus s7 (Messung Runde 5): verlesene Kleinbuchstaben-Wörter mitten im Namen der Vorstandszeile teilen die
+    Spanne der KI nicht – sonst bliebe der Nachname stehen."""
+    text = "Kordlicht Lebensversicherung Au\t\tYorarand: Dr. ww. Heinz ensmf Näußlenr\t\t5\t\tVorsitz Aufsichtsrat:"
+    assert _deckt(_namen(text), "Näußlenr")
+
+
+@pytest.mark.parametrize("zeile", [
+    "Schadenort:\t\tKreuzung Bamberger Straße / Am Anger",
+    "Unfallort: Kreuzung Hauptstraße / Kirchenweg",
+])
+def test_befund_18_gegenprobe_strasse_hinter_gattungswort_ist_kein_ort(zeile):
+    assert not _geschwaerzt(_funde(zeile), "plzort")
+    assert not _verdacht(zeile)
+
+
+def test_befund_4_gegenprobe_sterbedatum_hinter_geburtsdatum():
+    """Korpus s7 (Messung Runde 5): „geboren am“ kündigt sein eigenes (geschwärztes) Datum an – das spätere Datum
+    desselben Satzes ist kein Geburtsdatum."""
+    text = "mein Ehemann [PERSON A], geboren am [GEB-DATUM] ist am 31.03.2025 verstorben."
+    assert not _gemeldet(text, "31.03.2025", platzhalter=["[PERSON A]", "[GEB-DATUM]"])
+
+
+@braucht_modell
+def test_ner_titel_davor_schuetzt_verlesenen_namen_vor_sachwort():
+    """Korpus s7 (Messung Runde 5): "Dr, med. Neina-Josat Haustier" ist der verlesene Vorstand "Dr. med. Heinz-Josef
+    Häußler" – ein Titel davor ist ein Personenbeleg, auch wenn ein Wort wie ein Sachname aussieht."""
+    text = "Nerdticht Lobensvereichkrung Ad\t\tvoratane: Dr, med. Neina-Josat Haustier\t\tVorsitz Aufsiulnaräars"
+    assert _deckt(_namen(text), "Haustier")

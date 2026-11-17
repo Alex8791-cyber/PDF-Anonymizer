@@ -370,6 +370,10 @@ def _code_wort(wort: str) -> bool:
     return not _wissen_wort("ist_wortgestalt", wort)
 
 
+_TITEL_DAVOR_RE = re.compile(r"(?<![^\W\d_])(?:Dr|Prof|Dipl\.-\w+)[.,][ \t]*"
+                             r"(?:(?:med|rer|nat|jur|phil|dent|vet|oec|habil)[.,][ \t]*){0,3}$")
+
+
 def _ner_sachtreffer(text: str, start: int, ende: int, teile: list) -> bool:
     """Ist ein reiner Treffer der KI (ohne Anrede) eine Sache statt einer Person: eine Marke, ein Modell oder eine
     Tierrasse der Wissensbasis ("Kalkhoff", "Jack Russell" in "Jack Russell Terrier", "Junghans Max Bill"), ein
@@ -378,7 +382,9 @@ def _ner_sachtreffer(text: str, start: int, ende: int, teile: list) -> bool:
     oder Adjektiv ("Ausgefertigt", "Gegnerischer"), ein Dateiname ("Bescheid.pdf") oder eine englische Grußformel?
     Ein Personenbeleg aus Vor- und Nachnamen der Wissensbasis bleibt ein Name, außer eine Sache umfasst ihn ganz und
     reicht über ihn hinaus ("Jack Russell Terrier")."""
-    paar = _personen_paar(teile)
+    # ein akademischer Titel direkt davor ist ein Personenbeleg – auch verlesen ("Dr, med. Neina-Josat Haustier" für
+    # "Dr. med. Heinz-Josef Häußler"): dann zählen Marken, Rassen und Modellcodes nicht
+    paar = _personen_paar(teile) or bool(_TITEL_DAVOR_RE.search(text, max(0, start - 24), start))
     zeilenanfang = text.rfind("\n", 0, start) + 1
     zeilenende = text.find("\n", ende)
     zeilenende = len(text) if zeilenende < 0 else zeilenende
@@ -391,7 +397,7 @@ def _ner_sachtreffer(text: str, start: int, ende: int, teile: list) -> bool:
             rest = [t for t in teile if not (a <= zeile.find(t, s) < b)]
             if all(not _wissen_art(t)[0] or _code_wort(t) for t in rest):
                 return True                               # "Mofa Simson", "AEG DDLE"
-    if len(teile) >= 2 and any(_code_wort(t) for t in teile[1:]):
+    if len(teile) >= 2 and any(_code_wort(t) for t in teile[1:]) and not paar:
         return True                                       # "Böckmann TPV", "Logan MCV", "Bosch GSR"
     if not paar and _MODELL_DANACH_RE.match(text, ende):
         return True                                       # "Tabbert Rossini 540", "Fronius Symo 10.0-3-M"
