@@ -19,6 +19,11 @@ Arbeitsweise:
     Lücke, Kollateralprüfung. Danach Selbstkontrolle der AUSGABE mit demselben Modell und demselben
     Vergleicher (Ganzwort, alle Schreibweisen; Scan-Seiten per Kontroll-OCR mit derselben Ausrichtung).
   * Ausgabename exklusiv reserviert (O_CREAT|O_EXCL) – zwei gleichzeitige Läufe überschreiben sich nie.
+  * Hilfsdateien heißen „.anonym_tmp_<PID>_<Lauf>_<Kennung>.tmp“ – nie „….pdf“, damit eine liegen gebliebene nie wie
+    eine Ausgabe aussieht (Korrekturrunde „Schließen“). Die fertige Ausgabe entsteht im Zielordner (os.replace im
+    selben Ordner: atomar, und sie erbt dessen Zugriffsrechte); die Zwischenstände bei vielen Scan-Seiten
+    (erste Seiten geschwärzt, die übrigen noch wie im Original) legt die Oberfläche über „zwischen_ordner“ in den
+    lokalen Ordner für Arbeitskopien, nie in den Ordner, der hochgeladen wird.
   * Nur echte PDFs (Gutachten R-01): ein Bild oder eine Webseite mit der Endung .pdf wird vor jedem
     Seitenzugriff abgewiesen (sonst Absturz im C-Code von PyMuPDF).
   * Status _PRUEFEN (Gutachten R-07/R-11) außer bei Resten, Verdacht, nicht lokalisierten Stellen und
@@ -103,6 +108,7 @@ UNTERKANTE = sm.UNTERKANTE
 OCR_RAND = sm.OCR_RAND
 OCR_DPI = sm.OCR_DPI
 STAPEL_SCANSEITEN = 10        # nach so vielen geschwärzten Scan-Seiten Zwischenstand speichern
+ZWISCHEN_ENDUNG = ".tmp"      # Hilfsdateien enden nie auf .pdf (dateien.ist_zwischendatei erkennt den Namensanfang)
 SATZZEICHEN = ".,;:!?()[]{}\"'„“‚‘«»/\\|<>*"
 ABGEBROCHEN = "Abgebrochen"
 # Warnung älterer Programmversionen (dort entstand ohne Treffer keine Ausgabe); die Oberfläche ergänzt sie noch für
@@ -666,7 +672,7 @@ def verwerfen(ausgabe_pfad) -> None:
 # Lauf-Zustand
 # ----------------------------------------------------------------------
 class _Lauf:
-    def __init__(self, pdf_pfad, funde, melde, fortschritt, abbruch, ocr, ocr_cache, ziel):
+    def __init__(self, pdf_pfad, funde, melde, fortschritt, abbruch, ocr, ocr_cache, ziel, zwischen_ordner=None):
         self.pdf_pfad = pdf_pfad
         self.funde = funde
         self.melde = melde or (lambda t: None)
@@ -675,6 +681,9 @@ class _Lauf:
         self.ocr = ocr
         self.ocr_cache = dict(ocr_cache) if ocr_cache else {}
         self.ziel = ziel
+        # Ordner für die Zwischenstände (None: der Zielordner) – die Oberfläche gibt den lokalen Ordner für
+        # Arbeitskopien vor: ein Zwischenstand ist nur teilweise geschwärzt und gehört nie in den Ausgabeordner
+        self.zwischen_ordner = Path(zwischen_ordner) if zwischen_ordner else None
         self.restrisiko_fehler = False       # Kontrolle der Ausgabe (Kontroll-OCR oder Restrisiko-Prüfung) ausgefallen
         self.restrisiko_ausgefallen = False  # die Restrisiko-Prüfung selbst fehlt oder ist ausgefallen
         self.doc = None
@@ -734,12 +743,27 @@ class _Lauf:
         except OSError as e:
             raise OSError(f"Zielordner kann nicht angelegt werden ({self.ziel}): {e}") from e
 
-    def tmp_pfad(self, kennung: str) -> Path:
-        self.ziel_sicherstellen()
-        p = self.ziel / f".anonym_tmp_{os.getpid()}_{id(self)}_{kennung}.pdf"
+    def tmp_pfad(self, kennung: str, ordner: Path | None = None) -> Path:
+        """Hilfsdatei „.anonym_tmp_<PID>_<Lauf>_<Kennung>.tmp“ (Endung nie .pdf), standardmäßig im Zielordner: dort
+        wird die fertige Ausgabe per os.replace abgelegt. Der finally-Block von schwaerze_pdf löscht sie."""
+        if ordner is None:
+            self.ziel_sicherstellen()
+            ordner = self.ziel
+        p = Path(ordner) / f".anonym_tmp_{os.getpid()}_{id(self)}_{kennung}{ZWISCHEN_ENDUNG}"
         if p not in self.tmp_pfade:
             self.tmp_pfade.append(p)
         return p
+
+    def zwischenstand_ordner(self) -> Path:
+        """Ordner für die Zwischenstände: der vorgegebene (anlegen, falls nötig), sonst der Zielordner."""
+        if self.zwischen_ordner is not None:
+            try:
+                self.zwischen_ordner.mkdir(parents=True, exist_ok=True)
+                return self.zwischen_ordner
+            except OSError:
+                self.zwischen_ordner = None
+        self.ziel_sicherstellen()
+        return self.ziel
 
     def bilder_kodieren(self):
         """Durch die Pixel-Schwärzung geänderte Bilder wieder kompakt speichern (Gutachten S-04)."""
@@ -756,14 +780,17 @@ class _Lauf:
     def zwischenspeichern(self, nr):
         """Zwischenstand speichern und neu öffnen, damit geschwärzte Scan-Bilder nicht unkomprimiert
         im Speicher bleiben (M-52). Wechselt zwischen zwei Dateinamen, weil PyMuPDF nicht auf die
-        gerade geöffnete Datei speichert."""
+        gerade geöffnete Datei speichert. Ein Zwischenstand ist nur teilweise geschwärzt: er heißt nie „….pdf“ und
+        liegt im vorgegebenen Ordner (zwischen_ordner – die Oberfläche gibt den lokalen Ordner für Arbeitskopien vor),
+        nur ohne Vorgabe im Zielordner."""
         _spaete_reparatur_pruefen(self, self.doc)      # nie einen zurückgesetzten Stand weiterverarbeiten (R-11)
         self.bilder_kodieren()
-        kennung = "b" if self.geoeffnet_von == self.tmp_pfad("a") else "a"
-        ziel = self.tmp_pfad(kennung)
+        ordner = self.zwischenstand_ordner()
+        kennung = "b" if self.geoeffnet_von == self.tmp_pfad("a", ordner) else "a"
+        ziel = self.tmp_pfad(kennung, ordner)
         self.doc.save(ziel, garbage=1, deflate=True)
         self.doc.close()
-        self.doc = fitz.open(ziel)
+        self.doc = fitz.open(ziel, filetype="pdf")
         self.geoeffnet_von = ziel
         self.scan_seiten_seit_speichern = 0
         self.melde(f"   Zwischenstand gespeichert (Seite {nr + 1}) …")
@@ -2424,7 +2451,7 @@ def _bildreste_nachpruefen(lauf: _Lauf, ausgabe: Path) -> None:
 def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=None, ocr=None,
                   ocr_cache=None, ziel_ordner=None, modell=None, manuelle_bereiche=None,
                   manuelle_stellen=None, freigabe_erforderlich: bool = False, profil: str = "hoch",
-                  nebenkanaele: dict | None = None) -> dict:
+                  nebenkanaele: dict | None = None, zwischen_ordner=None) -> dict:
     """Ersetzt alle übergebenen Funde durch ihre Platzhalter – auch in Scans (Bildpixel werden mit
     entfernt) – und schreibt eine neutral benannte Ausgabedatei.
 
@@ -2437,7 +2464,8 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
     melde(text): Protokolltext; fortschritt(seite_1basiert, seiten_gesamt); abbruch: threading.Event;
     ocr: OcrDienst (sonst eigener); ocr_cache: {Seitenindex: Wortliste} aus der Analyse;
     ziel_ordner: sonst <Ordner der PDF>/anonymisiert; nebenkanaele: „nebenkanaele“ aus dem Analyse-Ergebnis
-    (sonst prüft die Schwärzung selbst, wenn auf den Seiten nichts zu schwärzen ist).
+    (sonst prüft die Schwärzung selbst, wenn auf den Seiten nichts zu schwärzen ist); zwischen_ordner: Ordner für
+    die Zwischenstände bei vielen Scan-Seiten (nur teilweise geschwärzt; sonst der Zielordner).
     Jede lesbare PDF bekommt eine Ausgabe – auch ohne angehakten Fund (Runde 3): das Dokument ohne
     Dateieigenschaften, Lesezeichen, Anhänge, Formulardaten und abgeschnittenen Text, mit Selbstkontrolle und
     Restrisiko-Prüfung. Ohne Ausgabe (und mit „fehler“ sowie einer Meldung der Art „fehler“) endet nur eine Datei,
@@ -2462,7 +2490,7 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
     eigener_dienst = None
     if ocr is None:
         ocr = eigener_dienst = OcrDienst()
-    lauf = _Lauf(pdf_pfad, funde, melde, fortschritt, abbruch, ocr, ocr_cache, ziel)
+    lauf = _Lauf(pdf_pfad, funde, melde, fortschritt, abbruch, ocr, ocr_cache, ziel, zwischen_ordner)
     lauf.bildauftrag = bildauftrag
     lauf.analyse_modell = modell
     lauf.nebenkanal_bezug = nebenkanal_bezug
@@ -2800,10 +2828,13 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
         pruefen_gruende.append("Freigabe ausstehend")
     ergebnis["pruefen_gruende"] = pruefen_gruende if pruefen else []
     lauf.abbruch_pruefen()
+    ausgabe = None
     try:
         ausgabe = _ausgabe_reservieren(lauf.ziel, pruefen=pruefen)
         os.replace(tmp, ausgabe)
     except OSError as e:
+        if ausgabe is not None:
+            _aufraeumen([ausgabe])        # der reservierte, leere Name sähe sonst wie eine fertige Ausgabe aus
         raise OSError(f"Ausgabe konnte nicht abgelegt werden ({e}) – Ordner »{lauf.ziel}« beschreibbar?") from e
     lauf.tmp_pfade.remove(tmp)
     ergebnis["ausgabe"] = ausgabe

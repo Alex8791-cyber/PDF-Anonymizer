@@ -29,13 +29,14 @@ FEHLERLOG_MAX_BYTES = 200_000          # danach wird nach fehler.log.1 rotiert
 AUSGABE_ORDNER = "anonymisiert"        # Unterordner, in den die Schwärzung schreibt
 ZWISCHENDATEI_MAX_ALTER = 3600.0       # Sekunden; ältere Zwischendateien gelten immer als verwaist
 TEMP_ORDNER = "temp"                   # Arbeitskopien (Bild als PDF, entschlüsselte PDF) je Programmsitzung
+AUSGABEORDNER_VERMERK = "ausgabeordner.txt"   # im Sitzungsordner: Ausgabeordner, in die diese Sitzung schwärzt
 SITZUNG_MAX_ALTER = 7 * 86400.0        # Sekunden; ältere Sitzungsordner werden beim Start immer gelöscht
 PROTOKOLL_PRAEFIX = "PDF-Anonymisierer_Protokoll_"   # Laufprotokolle („Protokoll speichern …“)
 
 # Dateinamen, die die Schwärzung selbst erzeugt (neu: anonym_01.pdf, alt: <name>_anonym.pdf)
 _AUSGABE_NAME = re.compile(r"^anonym_\d+(_PRUEFEN)?$|_anonym$", re.IGNORECASE)
-# Zwischendateien der Schwärzung („.anonym_tmp_<PID>_<Kennung>.pdf“): nie eine Eingabe; bleiben nur nach
-# einem Absturz liegen (GR-11)
+# Zwischendateien der Schwärzung („.anonym_tmp_<PID>_<Lauf>_<Kennung>.tmp“, ältere Versionen „….pdf“): nie eine
+# Eingabe; bleiben nur nach einem Absturz liegen (GR-11). Erkannt wird der Anfang des Namens – jede Endung zählt.
 _ZWISCHEN_NAME = re.compile(r"^\.anonym_tmp_(\d+)_", re.IGNORECASE)
 _SITZUNG_NAME = re.compile(r"^sitzung_(\d+)_")
 _CLOUD_MERKMALE = ("onedrive", "dropbox", "icloud", "google drive", "googledrive",
@@ -297,7 +298,7 @@ def _lesefehler_text(fehler: OSError, pfad) -> str:
 # PDFs einsammeln
 # ----------------------------------------------------------------------
 def ist_zwischendatei(pfad) -> bool:
-    """True für Zwischendateien der Schwärzung (.anonym_tmp_<PID>_….pdf)."""
+    """True für Zwischendateien der Schwärzung (.anonym_tmp_<PID>_…, jede Endung)."""
     return bool(_ZWISCHEN_NAME.match(Path(pfad).name))
 
 
@@ -325,10 +326,10 @@ def _endung(name: str) -> str:
 def _einordnen(bericht: dict, pfad: Path, im_ordner: bool) -> bool:
     """Ordnet eine Datei nach ihrem Inhalt ein. Liefert True, wenn sie für den Ordner zählt (PDF, Bild, Ausgabe …)."""
     if ist_zwischendatei(pfad):
-        if not im_ordner or _endung(pfad.name) == ".pdf":
-            bericht["zwischendateien"].append(pfad)
-            return True
-        return False
+        # nie eine Eingabe – jede Endung (Zwischenstände heißen „….tmp“, in älteren Versionen „….pdf“): die
+        # Oberfläche löscht verwaiste gleich beim Hinzufügen und meldet sie
+        bericht["zwischendateien"].append(pfad)
+        return True
     if im_ordner:
         if ist_systemdatei(pfad.name):
             return False
@@ -596,15 +597,14 @@ def ordner_loeschen(ordner) -> bool:
     return not ordner.exists()
 
 
-def alte_sitzungen_aufraeumen(max_alter: float = SITZUNG_MAX_ALTER) -> list[Path]:
-    """Löscht Arbeitskopien früherer Sitzungen (z. B. nach einem Absturz): Prozess beendet oder Ordner älter als
-    max_alter Sekunden. Die eigene Sitzung bleibt. Liefert die gelöschten Ordner."""
-    entfernt: list[Path] = []
+def _alte_sitzungen(max_alter: float) -> list[Path]:
+    """Sitzungsordner früherer Sitzungen: Prozess beendet oder Ordner älter als max_alter Sekunden (die eigene nie)."""
     try:
         kandidaten = [p for p in temp_basis().iterdir() if p.is_dir() and _SITZUNG_NAME.match(p.name)]
     except OSError:
-        return entfernt
+        return []
     jetzt = time.time()
+    alte = []
     for ordner in kandidaten:
         if _SITZUNG is not None and ordner == _SITZUNG:
             continue
@@ -615,10 +615,68 @@ def alte_sitzungen_aufraeumen(max_alter: float = SITZUNG_MAX_ALTER) -> list[Path
             continue
         if pid == os.getpid() or (alter < max_alter and prozess_lebt(pid)):
             continue
+        alte.append(ordner)
+    return alte
+
+
+def alte_sitzungen_aufraeumen(max_alter: float = SITZUNG_MAX_ALTER) -> list[Path]:
+    """Löscht Arbeitskopien und Zwischenstände früherer Sitzungen (z. B. nach einem Absturz): Prozess beendet oder
+    Ordner älter als max_alter Sekunden. Die eigene Sitzung bleibt. Liefert die gelöschten Ordner. Vorher
+    ausgabeordner_frueherer_sitzungen lesen – der Vermerk der Ausgabeordner wird mit dem Sitzungsordner gelöscht."""
+    entfernt: list[Path] = []
+    for ordner in _alte_sitzungen(max_alter):
         shutil.rmtree(ordner, ignore_errors=True)
         if not ordner.exists():
             entfernt.append(ordner)
     return entfernt
+
+
+def ausgabeordner_vermerken(ordner) -> Path | None:
+    """Vermerkt im Ordner dieser Sitzung, in welche Ausgabeordner sie schwärzt (eine Zeile je Ordner), solange ein Lauf
+    dort Zwischendateien anlegen kann. Endet das Programm unerwartet (Absturz, im Task-Manager beendet, Stromausfall),
+    findet der nächste Start dort liegen gebliebene Zwischendateien (ausgabeordner_frueherer_sitzungen). Der Vermerk
+    liegt nur im lokalen Ordner für Arbeitskopien, nach dem Lauf löscht ihn ausgabeordner_vermerk_loeschen. Liefert
+    den Sitzungsordner (None: kein Vermerk möglich)."""
+    try:
+        sitzung = sitzungsordner()
+        (sitzung / AUSGABEORDNER_VERMERK).write_text("".join(f"{Path(o)}\n" for o in ordner), encoding="utf-8")
+        return sitzung
+    except (OSError, SitzungBeendet):
+        return None
+
+
+def ausgabeordner_vermerk_loeschen() -> None:
+    """Den Vermerk der Ausgabeordner wieder löschen: Zwischendateien gibt es nur während eines Laufs – ist er zu Ende
+    und keine liegen geblieben, wird er nicht mehr gebraucht. Ist der Sitzungsordner danach leer (keine Arbeitskopie,
+    kein Zwischenstand), verschwindet auch er; eine neue Arbeitskopie legt ihn wieder an."""
+    global _SITZUNG
+    sitzung = _SITZUNG
+    if sitzung is None:
+        return
+    try:
+        (sitzung / AUSGABEORDNER_VERMERK).unlink()
+    except OSError:
+        pass
+    try:
+        sitzung.rmdir()                                   # nur, wenn er leer ist
+    except OSError:
+        return
+    if _SITZUNG == sitzung:
+        _SITZUNG = None
+
+
+def ausgabeordner_frueherer_sitzungen(max_alter: float = SITZUNG_MAX_ALTER) -> list[Path]:
+    """Ausgabeordner, die frühere (beendete oder abgestürzte) Sitzungen vermerkt haben (ausgabeordner_vermerken) –
+    dort kann nach einem Absturz eine Zwischendatei liegen. Nur lesen (kein Zugriff auf die Ordner selbst, die auf
+    einem Netzlaufwerk liegen können); vor alte_sitzungen_aufraeumen aufrufen, das die Vermerke mit löscht."""
+    ordner: list[Path] = []
+    for sitzung in _alte_sitzungen(max_alter):
+        try:
+            zeilen = (sitzung / AUSGABEORDNER_VERMERK).read_text(encoding="utf-8").splitlines()
+        except (OSError, ValueError):
+            continue
+        ordner += [Path(z.strip()) for z in zeilen if z.strip()]
+    return list(dict.fromkeys(ordner))
 
 
 def bild_als_pdf(bild, ziel, art: str | None = None) -> int:
@@ -737,9 +795,10 @@ def prozess_lebt(pid: int) -> bool:
 
 
 def zwischendateien_aufraeumen(ordner, max_alter: float = ZWISCHENDATEI_MAX_ALTER) -> list[Path]:
-    """Löscht verwaiste Zwischendateien (.anonym_tmp_<PID>_….pdf) direkt im Ordner: der erzeugende Prozess
-    lebt nicht mehr oder die Datei ist älter als max_alter Sekunden. Zwischendateien dieses Prozesses bleiben.
-    Liefert die gelöschten Pfade (GR-11)."""
+    """Löscht verwaiste Zwischendateien (.anonym_tmp_<PID>_…, jede Endung) direkt im Ordner: der erzeugende Prozess
+    lebt nicht mehr oder die Datei ist älter als max_alter Sekunden. Zwischendateien dieses Prozesses bleiben (sie
+    gehören einem laufenden Lauf; beim Beenden löscht sie eigene_zwischendateien_loeschen). Liefert die gelöschten
+    Pfade (GR-11)."""
     entfernt: list[Path] = []
     try:
         kandidaten = [p for p in Path(ordner).iterdir() if ist_zwischendatei(p)]
@@ -762,6 +821,27 @@ def zwischendateien_aufraeumen(ordner, max_alter: float = ZWISCHENDATEI_MAX_ALTE
         except OSError:
             pass
     return entfernt
+
+
+def eigene_zwischendateien_loeschen(ordner) -> list[Path]:
+    """Löscht die Zwischendateien DIESES Prozesses (.anonym_tmp_<eigene PID>_…) direkt im Ordner – beim Beenden: auch
+    die eines abgebrochenen Laufs, der nicht mehr selbst aufräumen konnte. Liefert die Dateien, die sich (noch) nicht
+    löschen ließen (unter Windows: noch geöffnet)."""
+    uebrig: list[Path] = []
+    try:
+        kandidaten = [p for p in Path(ordner).iterdir() if ist_zwischendatei(p)]
+    except OSError:
+        return uebrig
+    for pfad in kandidaten:
+        if int(_ZWISCHEN_NAME.match(pfad.name).group(1)) != os.getpid():
+            continue
+        try:
+            pfad.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            uebrig.append(pfad)
+    return uebrig
 
 
 # ----------------------------------------------------------------------

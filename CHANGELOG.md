@@ -17,7 +17,8 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   `anonym_NN.pdf` wird. Die Einstellung lässt sich abschalten; Ausgaben umgewandelter Fotos und Bild-Scans
   brauchen die Freigabe trotzdem. Freigeben geht nur in derselben Programmsitzung – also vor dem Beenden
   prüfen und freigeben. Stehen beim Beenden noch Dateien mit nicht freigegebener Ausgabe in der Liste,
-  fragt das Programm nach („Freigabe noch offen“, Voreinstellung „Nein“).
+  fragt das Programm nach („Freigabe noch offen“, Voreinstellung „Nein“) – während eines Laufs in der
+  Rückfrage „Lauf läuft noch“.
 - **`_PRUEFEN` hat viele neue Gründe**, z. B. ein Verdacht der neuen Restrisiko-Prüfung, ein kaum lesbarer
   Scan, eine unlesbare Textebene, eine beschädigte Datei oder ein beschädigtes Bild, Personendaten nur in
   versteckten Teilen der Datei, eine ausgefallene Erkennungsregel oder eine Namenserkennung ohne
@@ -178,7 +179,18 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   gelesen (10-seitiger Scan auf dem Entwicklungsrechner: 18 statt 46 Sekunden).
 - Statuszeile: Nach dem Hinzufügen von Dateien zu einer schon analysierten Liste blieb dort „Dateien werden
   geprüft …“ stehen. Jetzt steht dort, wie viele Dateien noch nicht analysiert sind; kam keine neue Datei
-  hinzu, bleibt die Meldung der Analyse stehen.
+  hinzu, bleibt die Meldung der Analyse stehen. Sie folgt derselben Regel wie die Sperre vor dem Schwärzen:
+  Nach einer abgebrochenen Analyse steht dort nicht mehr „die bisherige Analyse gilt weiter“, und wird die
+  neue Datei wieder entfernt, verschwindet „noch nicht analysiert“.
+- Beenden während einer Schwärzung („Lauf läuft noch“ → „Ja“): Das Fenster schloss sofort, und im
+  Ausgabeordner konnte ein Zwischenstand `.anonym_tmp_…_a.pdf` liegen bleiben – bei großen Scans die ersten
+  Seiten geschwärzt, die übrigen wie im Original. Jetzt bricht das Programm den Lauf ab und schließt erst,
+  wenn er aufgeräumt hat (höchstens etwa 20 Sekunden), und löscht beim Beenden zusätzlich die eigenen
+  Zwischendateien in allen Ausgabeordnern der Sitzung. Zwischenstände liegen nicht mehr im Ausgabeordner,
+  sondern im Ordner für Arbeitskopien; Hilfsdateien enden auf `.tmp`, nie auf `.pdf`. Reste nach einem
+  Absturz löschen der nächste Start (in den Ausgabeordnern, in die gerade geschwärzt wurde, und im
+  gemeinsamen Zielordner), das Hinzufügen des Ordners oder das nächste Schwärzen dorthin – mit Meldung im
+  Protokoll.
 
 ### Sicherheit
 - Manche PDFs (z. B. aus LibreOffice) enthielten nach dem Schwärzen das ungeschwärzte Originalbild unsichtbar
