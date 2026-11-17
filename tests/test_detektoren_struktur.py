@@ -5,8 +5,6 @@ Geometrie wird mit kleinen PDFs (fitz) geprüft, reine Textregeln mit seitenmode
 Zu jeder Regel gibt es Gegenproben: Vertragsdaten, Beträge, Spaltenköpfe, Anschriften von Versicherern
 bleiben stehen."""
 
-import time
-
 import pytest
 
 try:
@@ -415,13 +413,22 @@ def test_layoutspalten_sind_keine_tabelle(tmp_path):
 
 
 def test_tabelle_laufzeit_je_seite(tmp_path):
-    dok = _modell(_pdf(tmp_path / "zeit.pdf", _bestandsliste(zeilen_je_seite=40, anzahl=32, abstand=13), quer=True))
+    """Alle Strukturregeln auf einer dichten Tabellenseite (32 Zeilen, 8 Spalten) unter 1 s. Lastunabhängig
+    (Runde 3b): CPU-Zeit des eigenen Prozesses statt Wanduhr, Minimum aus drei Läufen, jeder auf einem frischen
+    Seitenmodell – die Regeln legen Zwischenstände am Dokument ab, ein zweiter Lauf auf demselben Modell wäre nicht
+    derselbe (gemessen 0,01 bis 0,02 s, mit vier belegten Kernen ebenso)."""
+    import zeitmessung
+    pdf = _pdf(tmp_path / "zeit.pdf", _bestandsliste(zeilen_je_seite=40, anzahl=32, abstand=13), quer=True)
+    modelle = iter([_modell(pdf) for _ in range(3)])
     kontext = Kontext(ALLE)
-    anfang = time.perf_counter()
-    for name in ("struktur.tabelle", "struktur.etikett_wert", "struktur.adressblock", "struktur.anrede_gruss",
-                 "struktur.betreff", "struktur.ort_datum", "struktur.kopf_fuss", "struktur.formularfeld"):
-        _detektor(name)(dok, kontext)
-    assert time.perf_counter() - anfang < 1.0
+
+    def alle_regeln(dok):
+        for name in ("struktur.tabelle", "struktur.etikett_wert", "struktur.adressblock", "struktur.anrede_gruss",
+                     "struktur.betreff", "struktur.ort_datum", "struktur.kopf_fuss", "struktur.formularfeld"):
+            _detektor(name)(dok, kontext)
+
+    _, cpu = zeitmessung.cpu_sekunden(lambda: alle_regeln(next(modelle)), wiederholungen=3)
+    assert cpu < 1.0, f"Strukturregeln auf einer Tabellenseite: {cpu:.2f} s CPU-Zeit"
 
 
 # ----------------------------------------------------------------------

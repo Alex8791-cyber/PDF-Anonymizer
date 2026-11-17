@@ -1179,14 +1179,16 @@ def symbolraster(breite, hoehe, abstand=21.0, radius=2.0):
 
 def test_symbolraster_ist_kein_vektortext_und_schnell():
     """R-03/Laufzeit: Kreise im Abstand von 21 pt (Baum-, Hydranten-, Leuchtenplan). vektortext_bereiche zählte je
-    Bereich alle Pfade – A2 mit 4028 Symbolen 56-84 s je Aufruf, A4 mit 900 Symbolen 3,5 s. Jetzt linear."""
-    import time
+    Bereich alle Pfade – A2 mit 4028 Symbolen 56-84 s je Aufruf, A4 mit 900 Symbolen 3,5 s. Jetzt linear.
+    Lastunabhängig (Runde 3b): CPU-Zeit des eigenen Prozesses statt Wanduhr, die Schranke 5 s bleibt (gemessen A4
+    0,05 s, A2 0,22 s, mit vier belegten Kernen ebenso)."""
+    import zeitmessung
     for breite, hoehe in ((595, 842), (1191, 1684)):
         doc = symbolraster(breite, hoehe)
-        start = time.perf_counter()
-        assert ocr.vektortext_bereiche(doc[0]) == []
-        assert ocr.seiten_pruefung(doc[0]).modus == "nein"
-        assert time.perf_counter() - start < 5.0
+        (bereiche, modus), cpu = zeitmessung.cpu_sekunden(
+            lambda: (ocr.vektortext_bereiche(doc[0]), ocr.seiten_pruefung(doc[0]).modus))
+        assert bereiche == [] and modus == "nein"
+        assert cpu < 5.0, f"Symbolraster {breite} x {hoehe} pt: {cpu:.2f} s CPU-Zeit"
 
 
 def test_dichtes_symbolraster_ist_kein_vektortext():
@@ -1250,16 +1252,17 @@ def test_ocr_probe_rendert_eine_kopie_ohne_strukturbaum(monkeypatch):
 
 
 def test_nahe_gruppen_linear():
+    """20 000 kleine Formen in Gitter + Union-Find statt paarweise (Befund R-03: 84 s bei 4000 Symbolen).
+    Lastunabhängig (Runde 3b): CPU-Zeit statt Wanduhr, die Schranke 5 s bleibt (gemessen 0,05 s)."""
     import random
-    import time
+    import zeitmessung
     zufall = random.Random(3)
     rechtecke = []
     for _ in range(20000):
         x, y = zufall.uniform(0, 3000), zufall.uniform(0, 3000)
         rechtecke.append((x, y, x + 4, y + 4))
-    start = time.perf_counter()
-    gruppen = ocr._nahe_gruppen(rechtecke, ocr.VEKTORTEXT_ABSTAND_PT)
-    assert time.perf_counter() - start < 5.0
+    gruppen, cpu = zeitmessung.cpu_sekunden(lambda: ocr._nahe_gruppen(rechtecke, ocr.VEKTORTEXT_ABSTAND_PT))
+    assert cpu < 5.0, f"_nahe_gruppen für 20 000 Formen: {cpu:.2f} s CPU-Zeit"
     assert sum(len(g) for g in gruppen) == len(rechtecke)
     # zwei Rechtecke mit 10 pt Abstand gehören zusammen, mit 40 pt nicht
     assert len(ocr._nahe_gruppen([(0, 0, 5, 5), (15, 0, 20, 5)], 12.0)) == 1

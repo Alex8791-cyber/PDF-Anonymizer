@@ -2,7 +2,6 @@
 
 import random
 import sys
-import time
 import unicodedata
 from pathlib import Path
 
@@ -466,24 +465,29 @@ def _beispieltext(groesse=100_000):
 @pytest.mark.parametrize("name", ["nachnamen", "vornamen", "allerweltswoerter_gross", "diagnosen",
                                   "versicherer_und_organisationen", "etiketten_kennung"])
 def test_finde_ist_schnell(name):
+    """Phrasenindex: wenige Millisekunden je 100 KB Text, Schranke 50 ms. Lastunabhängig (Runde 3b): CPU-Zeit des
+    eigenen Prozesses statt Wanduhr, Minimum aus drei Läufen – mit vier belegten Kernen riss die Wanduhr-Schranke
+    (nachnamen 64 ms), die CPU-Zeit blieb bei 9 bis 15 ms. Unter Windows zählt die CPU-Zeit in Schritten von 15,6 ms,
+    die Schranke liegt drei Schritte darüber."""
+    import zeitmessung
     text = _beispieltext()
     w.index(name)                                     # Aufbau zählt nicht (einmalig)
-    beste = min(_dauer(lambda: w.finde(text, name)) for _ in range(3))
-    assert beste < 0.050, f"{name}: {beste * 1000:.1f} ms für 100 KB"
-
-
-def _dauer(funktion):
-    anfang = time.perf_counter()
-    funktion()
-    return time.perf_counter() - anfang
+    _, beste = zeitmessung.cpu_sekunden(lambda: w.finde(text, name), wiederholungen=3)
+    assert beste < 0.050, f"{name}: {beste * 1000:.1f} ms CPU-Zeit für 100 KB"
 
 
 def test_indexaufbau_aller_listen_unter_zwei_sekunden():
-    _caches_leeren()
-    anfang = time.perf_counter()
-    for name in w.LISTEN:
-        w.index(name)
-    assert time.perf_counter() - anfang < 2.0
+    """Alle Listen laden und indizieren unter 2 s. Lastunabhängig (Runde 3b): CPU-Zeit statt Wanduhr (gemessen 0,3 s,
+    mit vier belegten Kernen ebenso)."""
+    import zeitmessung
+
+    def aufbauen():
+        _caches_leeren()
+        for name in w.LISTEN:
+            w.index(name)
+
+    _, cpu = zeitmessung.cpu_sekunden(aufbauen)
+    assert cpu < 2.0, f"Indexaufbau aller Listen: {cpu:.2f} s CPU-Zeit"
 
 
 # ----------------------------------------------------------------------

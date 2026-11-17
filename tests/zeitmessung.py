@@ -16,6 +16,9 @@ Verschlechterung ausmacht, mit Größen, die von der Last kaum abhängen:
                                           größer die Spreizung, desto deutlicher. Bei n gegen 4n mit Schranke 8
                                           (fast das Doppelte von linear) ging eine echte Funde-x-Seiten-Regression
                                           unter (Schwärzung: Verhältnis 6,0 bis 9,4; Befund Runde 3a)
+  wachstum_messen(klein, gross, faktor)   beides in einem Schritt, auch für kurze Aufrufe: faktor-mal klein gegen
+                                          einmal gross (bei linearer Laufzeit dieselbe Arbeit), so oft hintereinander,
+                                          dass jede Messung mindestens 0,1 s CPU-Zeit dauert (Runde 3b)
   gemessener_ocr_arbeiter(...)            Ersatz für ocr._ocr_worker, der in jedem Arbeitsprozess Prozessnummer,
                                           Beginn und Ende jedes Auftrags aufschreibt (Verzeichnis in der
                                           Umgebungsvariablen UMGEBUNG) – so lässt sich zeigen, dass zwei Arbeiter
@@ -23,6 +26,11 @@ Verschlechterung ausmacht, mit Größen, die von der Last kaum abhängen:
   auftraege(ordner)                       die aufgeschriebenen Aufträge als Lauf(prozess, seite, beginn, ende)
   groesste_ueberlappung(laeufe)           größter Anteil, zu dem sich zwei Aufträge verschiedener Prozesse
                                           zeitlich überdecken (1.0 = der kürzere lief ganz neben dem anderen)
+
+Auflösung unter Windows (Runde 3b): time.process_time() liest dort GetProcessTimes, das die CPU-Zeit nur in Schritten
+des Zeitgebers zählt (15,6 ms) – ein Aufruf von 10 ms misst 0 oder 15,6 ms. Absolute Schranken liegen deshalb
+mehrere Schritte über null (ab 50 ms), Verhältnisse entstehen aus Messungen von mindestens 0,1 s (wachstum_messen:
+höchstens ein Schritt Fehler je Messung, unter 16 %).
 
 Dieses Modul ist kein Testmodul (wird nicht gesammelt); die Arbeitsprozesse des OCR-Pools (Start-Methode "spawn")
 importieren es über den von pytest gesetzten Suchpfad.
@@ -81,6 +89,28 @@ def cpu_sekunden_abwechselnd(funktionen: dict, wiederholungen: int = 2) -> dict:
             ergebnis, dauer = cpu_sekunden(funktion)
             beste[name] = (ergebnis, min(dauer, beste[name][1]) if name in beste else dauer)
     return beste
+
+
+def wachstum_messen(klein, gross, faktor: int, wiederholungen: int = 2, mindestens: float = 0.1) -> tuple:
+    """(wachstum, CPU-Zeit je Aufruf von klein, CPU-Zeit je Aufruf von gross) für zwei Aufrufe ohne Argumente, deren
+    Eingaben sich um `faktor` unterscheiden (klein verarbeitet 1/faktor dessen, was gross verarbeitet). Gemessen
+    werden `faktor` Aufrufe von klein gegen EINEN von gross: bei linearer Laufzeit dieselbe Arbeit, also gleich lange
+    Messungen, und ihr Verhältnis ist das Wachstum (1,0 = linear; ein quadratischer Anteil hebt es bis auf `faktor`,
+    feste Kosten je Aufruf senken es unter 1). Kurze Aufrufe laufen r-mal hintereinander, r so gewählt, dass gross
+    allein mindestens `mindestens` Sekunden CPU-Zeit braucht – so bleibt der Fehler der Windows-Zählung (Schritte von
+    15,6 ms) unter 16 % je Messung. Beide Messungen wechseln sich ab (cpu_sekunden_abwechselnd), es zählt je das
+    Minimum; die Aufrufe davor (einmal klein, r-mal gross) wärmen Zwischenspeicher und Module auf."""
+    klein()
+    r, anfang = 0, time.process_time()
+    while True:
+        gross()
+        r += 1
+        if time.process_time() - anfang >= mindestens:
+            break
+    gemessen = cpu_sekunden_abwechselnd({"klein": lambda: [klein() for _ in range(r * faktor)],
+                                         "gross": lambda: [gross() for _ in range(r)]}, wiederholungen)
+    zeit_klein, zeit_gross = gemessen["klein"][1], gemessen["gross"][1]
+    return wachstum(zeit_klein / faktor, zeit_gross, faktor), zeit_klein / (r * faktor), zeit_gross / r
 
 
 def gemessener_ocr_arbeiter(*args, **kwargs):
