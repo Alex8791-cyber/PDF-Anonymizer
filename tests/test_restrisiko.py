@@ -11,7 +11,6 @@ import random
 import re
 import statistics
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -302,13 +301,18 @@ def test_mehrere_seiten_und_gedrehte_seite(tmp_path):
 
 
 def test_laufzeit_textseite(tmp_path):
+    """Ziel 0,3 s je Textseite, Schranke 1 s (Spielraum für langsame CI-Rechner). Lastunabhängig (Runde 3b): CPU-Zeit
+    des eigenen Prozesses statt Wanduhr, Minimum aus drei Läufen (gemessen 0,08 s, mit vier belegten Kernen ebenso;
+    die Wanduhr dehnt sich unter Last, die Rechenzeit nicht)."""
+    import zeitmessung
     zeilen = [f"Zeile {i}: Der Versicherungsnehmer hat den Antrag vom 12.03.2025 unterschrieben, Betrag "
               f"{i},50 EUR." for i in range(55)]
     pdf = pdf_mit_zeilen(tmp_path / "l.pdf", zeilen, fontsize=8, abstand=13, y=40)
     restrisiko_pruefen(pdf)                           # Wissensbasis laden (einmal je Programmstart)
-    beginn = time.perf_counter()
-    assert restrisiko_pruefen(pdf) == []
-    assert time.perf_counter() - beginn < 1.0          # Ziel 0,3 s/Seite; Spielraum für langsame CI-Rechner
+    verdacht, cpu = zeitmessung.cpu_sekunden(lambda: restrisiko_pruefen(pdf), wiederholungen=3)
+    print(f"Restrisiko Textseite: {cpu:.3f} s CPU-Zeit")
+    assert verdacht == []
+    assert cpu < 1.0, f"Restrisiko-Prüfung einer Textseite: {cpu:.2f} s CPU-Zeit"
 
 
 # ----------------------------------------------------------------------
@@ -781,15 +785,20 @@ def _scan_vollmacht(pfad, lesung="keine", zug=True, rechts_geschwaerzt=True):
 def test_rollenzeilen_erkennung():
     """Rollen ohne Doppelpunkt ("Mandant", "Antragsteller(in)") sind Text einer Rollenzeile; Feldetiketten mit Komma
     und nummerierte Abschnittsüberschriften nicht. Der Ausdruck läuft auch an langen Wörtern nicht exponentiell
-    zurück (eine OCR-Zeile mit Komma am Ende hielt den Benchmark sonst minutenlang an)."""
+    zurück (eine OCR-Zeile mit Komma am Ende hielt den Benchmark sonst minutenlang an).
+    Laufzeit lastunabhängig (Runde 3b): CPU-Zeit statt Wanduhr, an wachsenden Wortlängen – ein Ausdruck, der wie die
+    Zwischenfassung exponentiell zurückläuft (Trenner zwischen den Wiederholungen optional), braucht schon bei 24
+    Buchstaben Sekunden und scheitert dort, statt an den 102 Buchstaben bis zum Zeitlimit zu hängen."""
+    import zeitmessung
     r = restrisiko._ROLLE_RE
     for text in ("Mandant", "Makler", "Mandant/in", "Mandant/-in", "Antragsteller(in)", "Versicherte Person"):
         assert r.fullmatch(text), text
     for text in ("Name,", "« Unfallgegner", "4. Unfallgegner", "Name:"):
         assert not r.fullmatch(text), text
-    beginn = time.perf_counter()
-    assert not r.fullmatch("Versicherungsnehmerinnenvertretung" * 3 + ",")
-    assert time.perf_counter() - beginn < 0.1
+    wort = "Versicherungsnehmerinnenvertretung" * 3
+    for laenge in (16, 24, len(wort)):
+        treffer, cpu = zeitmessung.cpu_sekunden(lambda text=wort[:laenge] + ",": r.fullmatch(text))
+        assert treffer is None and cpu < 0.1, (laenge, cpu)
 
 
 @pytest.mark.parametrize("lesung", ["keine", "mandant"])
@@ -957,15 +966,14 @@ def test_tintengruppen_mit_seitenmaske_wie_je_bereich(tmp_path):
         assert restrisiko._tintengruppen(seitenmaske, fitz.Rect(45, 160, 360, 230))     # dort ist Tinte übrig
 
 
-def test_laufzeit_scan_liste_mit_vielen_personen_platzhaltern(tmp_path):
-    """Gescannte Bestandsliste mit 80 Zeilen, je Zeile ein Personen-Platzhalter und drei weitere: die Tintenprüfung
-    rastert das Erklärte einmal je Seite – die Prüfung bleibt weit unter einer Sekunde (vorher quadratisch: über
-    4 s auf diesem Rechner, 1-4 s je Seite auf realen Listen)."""
+def _scan_bestandsliste(pfad, anzahl):
+    """Gescannte Bestandsliste (A4 quer) mit `anzahl` Zeilen im Zeilenabstand einer 80-zeiligen Liste, je Zeile ein
+    Personen-Platzhalter und drei weitere, grau hinterlegt wie von der Schwärzung. Liefert die Wörter (wie eine OCR)."""
     breite, hoehe = 842, 595
     vorlage = fitz.open()
     s = vorlage.new_page(width=breite, height=hoehe)
     s.insert_text((30, 30), "Bestandsliste Makler – Stand 01.10.2026", fontsize=9, fontname="helv")
-    zeilen = [50 + i * (hoehe - 70) / 80 for i in range(80)]
+    zeilen = [50 + i * (hoehe - 70) / 80 for i in range(anzahl)]
     for i, y in enumerate(zeilen):
         s.insert_text((30, y), f"{i + 1:3d}", fontsize=7, fontname="helv")
         s.insert_text((200, y), "Wohngebäude Komfort", fontsize=7, fontname="helv")
@@ -979,13 +987,39 @@ def test_laufzeit_scan_liste_mit_vielen_personen_platzhaltern(tmp_path):
         for x0, muster in ((60, "[PERSON {}]"), (300, "[GEBURTSDATUM]"), (420, "[PLZ ORT]"), (560, "[VERTRAGS-NR]")):
             p.draw_rect(fitz.Rect(x0, y - 6, x0 + 110, y + 1.5), color=None, fill=restrisiko.FUELLFARBE)
             p.insert_text((x0 + 2, y), muster.format(i + 1), fontsize=6, fontname="helv")
-    doc.save(tmp_path / "l.pdf")
+    doc.save(pfad)
     doc.close()
     vorlage.close()
-    restrisiko_pruefen(tmp_path / "l.pdf", ocr=OcrAttrappe({0: woerter}), ocr_modus={0: "seite"})
-    beginn = time.perf_counter()
-    restrisiko_pruefen(tmp_path / "l.pdf", ocr=OcrAttrappe({0: woerter}), ocr_modus={0: "seite"})
-    assert time.perf_counter() - beginn < 3.0          # hier ~0,5 s; Spielraum für langsame CI-Rechner
+    return woerter
+
+
+def test_laufzeit_scan_liste_mit_vielen_personen_platzhaltern(tmp_path):
+    """Gescannte Bestandsliste mit 80 Zeilen, je Zeile ein Personen-Platzhalter und drei weitere: die Tintenprüfung
+    rastert das Erklärte einmal je Seite – die Prüfung bleibt weit unter einer Sekunde (vorher quadratisch: über
+    4 s auf diesem Rechner, 1-4 s je Seite auf realen Listen).
+    Lastunabhängig (Runde 3b): die Wanduhr-Schranke 3 s riss unter Last (3,3 s bei vier belegten Kernen, CPU-Zeit
+    dabei 0,55 s). Jetzt zwei Prüfungen mit der CPU-Zeit des eigenen Prozesses:
+    (1) Wachstum: 8 Listen mit 10 Zeilen gegen eine mit 80 (dieselbe Seite, dieselbe Zeilenzahl insgesamt) – gemessen
+        1,1 bis 1,4 (auch unter Last und mit der Windows-Zählung): leicht überlinear, weil schon jetzt einige Schritte
+        Platzhalter mit Platzhaltern vergleichen (neben_platzhalter, _ohne_platzhalter, die Suche der grauen Rechtecke
+        in _unterschrift_pruefen); die nachgebaute Regression (jeder Bereich rastert alle erklärten Rechtecke selbst,
+        wie vor Befund 7) hebt es auf 6 bis 6,6 – Schranke 2,0. Das Wachstum hängt nicht von der Geschwindigkeit des
+        Rechners ab: die alte Laufzeit (4,5 s) läge auf einem doppelt so schnellen Rechner unter der Schranke 3 s,
+        ihr Wachstum nicht;
+    (2) die bisherige Schranke 3 s für 80 Zeilen, jetzt als CPU-Zeit (gemessen 0,55 s)."""
+    import zeitmessung
+    klein_pdf, gross_pdf = tmp_path / "k.pdf", tmp_path / "l.pdf"
+    klein_woerter, gross_woerter = _scan_bestandsliste(klein_pdf, 10), _scan_bestandsliste(gross_pdf, 80)
+
+    def pruefen(pdf, woerter):
+        return restrisiko_pruefen(pdf, ocr=OcrAttrappe({0: woerter}), ocr_modus={0: "seite"})
+
+    wachstum, klein, gross = zeitmessung.wachstum_messen(lambda: pruefen(klein_pdf, klein_woerter),
+                                                         lambda: pruefen(gross_pdf, gross_woerter), 8)
+    print(f"Restrisiko Scan-Liste CPU: 10 Zeilen {klein:.3f} s, 80 Zeilen {gross:.3f} s, wachstum {wachstum:.2f}")
+    assert wachstum < 2.0, (f"Restrisiko-Prüfung wächst nicht linear: 10 Zeilen {klein:.3f} s, 80 Zeilen "
+                            f"{gross:.3f} s (x{gross / klein:.1f} bei 8-facher Zeilenzahl)")
+    assert gross < 3.0, f"Restrisiko-Prüfung einer Scan-Liste mit 80 Zeilen: {gross:.2f} s CPU-Zeit"
 
 
 def _scan_formular(pfad, wert="kritzel"):

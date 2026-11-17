@@ -210,17 +210,18 @@ def _band(pix, y0, y1):
 
 @pytest.mark.parametrize("streifen", [8, 100, 150, 300])
 def test_streifen_scan_gilt_als_scan(tmp_path, streifen):
-    """PERF-03: auch 100-300 Streifen à < 1 % der Seite ergeben EINEN Bereich und den Modus "seite"."""
+    """PERF-03: auch 100-300 Streifen à < 1 % der Seite ergeben EINEN Bereich und den Modus "seite".
+    Laufzeit lastunabhängig (Runde 3b): CPU-Zeit des eigenen Prozesses statt Wanduhr, die Schranke 1 s bleibt
+    (gemessen 1 bis 20 ms)."""
+    import zeitmessung
     pdf = _streifen_scan(tmp_path / f"streifen_{streifen}.pdf", streifen)
     doc = fitz.open(pdf)
     seite = doc[0]
     assert len(seite.get_image_info()) >= streifen * 0.9
-    start = time.perf_counter()
-    pruefung = seiten_pruefung(seite)
-    dauer = time.perf_counter() - start
+    pruefung, dauer = zeitmessung.cpu_sekunden(lambda: seiten_pruefung(seite))
     assert pruefung.modus == "seite", pruefung
     assert len(pruefung.bereiche) == 1 and pruefung.bildanteil > 0.9
-    assert dauer < 1.0, f"Zusammenfassen zu langsam: {dauer:.2f}s"
+    assert dauer < 1.0, f"Zusammenfassen zu langsam: {dauer:.2f} s CPU-Zeit"
     doc.close()
 
 
@@ -864,6 +865,13 @@ def test_arbeiter_beenden_sich_wenn_der_elternprozess_stirbt(tmp_path):
 
 @braucht_ocr
 def test_dienst_abbrechen_und_zuruecksetzen(tmp_path, dienst):
+    """Abbruch beendet den wartenden Aufruf sofort; ein zurückgesetzter Dienst liest wieder.
+    Zeitprüfung (Runde 3b): die Wartezeit nach einem Abbruch ist Wanduhr-Zeit, die CPU-Zeit sagt darüber nichts.
+    Die Schranke 10 s ab dem Start bleibt als Wächter gegen Hängen – sie ist lastfest: gemessen 0,31 s ohne Last und
+    0,32 bis 0,34 s mit acht Busy-Loops auf vier Kernen, während die ungestörte OCR derselben Seite von 4,8 auf 40 bis
+    45 s wuchs. Neu dazu: die Rückkehr nach abbrechen() (gemessen 0,00 bis 0,04 s, auch unter Last) bleibt unter der
+    Hälfte der ungestörten OCR im selben Test – beide sehen dieselbe Last. Wartete der Aufruf die OCR ab, läge das
+    Verhältnis nahe 1, auch auf einem schnellen Rechner, auf dem die ganze OCR unter den 10 s bleibt."""
     pdf, _ = scan_pdf(tmp_path / "abbruch.pdf", zeilen=ZEILEN * 8)   # dichte Seite -> längere OCR
     d = OcrDienst(prozesse=1)
     try:
@@ -876,16 +884,22 @@ def test_dienst_abbrechen_und_zuruecksetzen(tmp_path, dienst):
         start = time.perf_counter()
         t.start()
         time.sleep(0.3)
+        abbruch = time.perf_counter()
         d.abbrechen()
         t.join(timeout=15)
+        ende = time.perf_counter()
         assert not t.is_alive(), "Abbruch muss den wartenden Aufruf beenden"
         assert ergebnis["r"] == ([], "Abgebrochen")
-        assert time.perf_counter() - start < 10
+        assert ende - start < 10
         assert d.woerter(pdf, 0) == ([], "Abgebrochen"), "nach Abbruch keine neuen Aufträge"
         assert d.vorab(pdf, [0]) == 0
         d.zuruecksetzen()
+        beginn = time.perf_counter()
         woerter, warnung = d.woerter(pdf, 0)
+        ungestoert = time.perf_counter() - beginn
         assert "Mustermann" in texte(woerter) and warnung is None
+        assert ende - abbruch < 0.5 * ungestoert, (f"Rückkehr erst {ende - abbruch:.2f} s nach dem Abbruch, die "
+                                                   f"ungestörte OCR brauchte {ungestoert:.2f} s")
     finally:
         d.schliessen()
 

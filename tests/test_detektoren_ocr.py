@@ -394,9 +394,19 @@ def test_unbekannte_nachnamen_bleiben_namen(quelle):
 
 
 def test_unscharfe_etiketten_laufzeit():
-    import time
+    """Der Index der Etikettwörter (Löschvarianten) entsteht einmal; die Suche auf einer langen OCR-Zeile bleibt
+    danach weit unter 0,1 s. Lastunabhängig (Runde 3b): CPU-Zeit des eigenen Prozesses statt Wanduhr, Minimum aus drei
+    Läufen, der Zwischenspeicher je Wort vor jedem Lauf geleert – sonst hinge die Messung davon ab, welche Tests die
+    Wörter schon nachgeschlagen haben (gemessen 0,4 ms). Schranke 0,1 s statt 1 s: ohne Zwischenspeicher des Index
+    (bei jedem nachgeschlagenen Wort neu aufgebaut) braucht die Zeile 0,3 bis 0,8 s und blieb unter der alten
+    Schranke; 0,1 s liegt weiter weit über der Messung und über der Zählung in Schritten von 15,6 ms unter Windows."""
+    import zeitmessung
     zeile = "Versicherungsnehmerin Dorothea Kaltenbrunner-Hofstätter wohnhaft Ebersberger Landstraße 117 " * 20
     eu.unscharfe_etiketten("Vomame: Max")                   # Index aufbauen
-    t0 = time.perf_counter()
-    eu.unscharfe_etiketten(zeile)
-    assert time.perf_counter() - t0 < 1.0
+
+    def ohne_zwischenspeicher():
+        eu.etikettwort_fuer.cache_clear()
+        return eu.unscharfe_etiketten(zeile)
+
+    _, cpu = zeitmessung.cpu_sekunden(ohne_zwischenspeicher, wiederholungen=3)
+    assert cpu < 0.1, f"Unscharfe Etiketten auf einer langen Zeile: {cpu:.3f} s CPU-Zeit"

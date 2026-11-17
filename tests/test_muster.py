@@ -1,7 +1,5 @@
 """Tests für die Muster-Erkennung (anonymisierer/muster.py)."""
 
-import time
-
 import pytest
 
 from anonymisierer import muster as mu
@@ -375,14 +373,25 @@ def test_kennzeichen_negativ(text):
                                       mu.finde_vertragsnummern, mu.finde_geburtsdaten, mu.finde_iban,
                                       mu.finde_kennzeichen])
 def test_laufzeit_lange_zeile(funktion):
-    text = "Aa-" * 10_000                                      # 30.000 Zeichen ohne Leerzeichen
-    start = time.perf_counter()
-    funktion(text)
-    assert time.perf_counter() - start < 1.0
+    """M-69: alle Wiederholungen sind nach oben begrenzt, eine lange Zeile kostet linear. Lastunabhängig (Runde 3b),
+    mit der CPU-Zeit des eigenen Prozesses statt der Wanduhr:
+    (1) Wachstum auf einer Zeile ohne Leerzeichen und ohne Treffer, 8 x 3 750 gegen 30 000 Zeichen – dort zählt allein
+        das Abtasten der Zeile (gemessen 0,7 bis 1,2, auch unter Last und mit der Windows-Zählung). Eine Wiederholung
+        ohne Obergrenze und ohne Rückblick (jede Position liest bis zum Ende des Tokens, der Befund M-69) hebt es auf 8
+        – Schranke 1,5. Anders als die absolute Schranke hängt das nicht von der Geschwindigkeit des Rechners ab;
+    (2) die bisherigen Schranken als CPU-Zeit: 30 000 Zeichen ohne Leerzeichen unter 1 s, 160 000 Zeichen Fließtext mit
+        2 000 Treffern unter 2 s. Dort keine Wachstumsprüfung: finde_telefon prüft jede Fundstelle gegen alle bisherigen
+        auf Überlappung und wächst deshalb mit der Trefferzahl quadratisch (gemessen 0,26 s für 2 000 Treffer)."""
+    import zeitmessung
+    zeile = "Aa-" * 10_000                                      # 30.000 Zeichen ohne Leerzeichen
+    kurz = zeile[:len(zeile) // 8]
+    wachstum, _, zeit = zeitmessung.wachstum_messen(lambda: funktion(kurz), lambda: funktion(zeile), 8)
+    print(f"{funktion.__name__} CPU: 30 000 Zeichen {zeit * 1000:.2f} ms, wachstum {wachstum:.2f}")
+    assert wachstum < 1.5, f"{funktion.__name__}: Laufzeit wächst auf einer langen Zeile um {wachstum:.2f} x linear"
+    assert zeit < 1.0, f"{funktion.__name__}: {zeit:.2f} s CPU-Zeit für 30 000 Zeichen"
     text = "Max Mustermann wohnt in der Hauptstraße 12, 90402 Nürnberg, Tel. 0911 123456. " * 2000
-    start = time.perf_counter()
-    funktion(text)
-    assert time.perf_counter() - start < 2.0
+    _, zeit = zeitmessung.cpu_sekunden(lambda: funktion(text), wiederholungen=2)
+    assert zeit < 2.0, f"{funktion.__name__}: {zeit:.2f} s CPU-Zeit für 160 000 Zeichen"
 
 
 # ======================================================================
@@ -498,14 +507,24 @@ def test_vertragsnummern_phase3(text, erwartet):
 
 
 def test_vertragsnummern_lineare_laufzeit():                                # EQ-17 / PERF-07
+    """Gutachten EQ-17/PERF-07: 3 000 Etiketten auf einer Zeile – je Etikett zählt nur ein begrenztes Fenster dahinter,
+    verschachtelte Werte fallen in einem Durchlauf weg. Lastunabhängig (Runde 3b), CPU-Zeit statt Wanduhr:
+    (1) Wachstum 8 x 375 gegen 3 000 Etiketten, je Messung mindestens 0,2 s (gemessen 0,9 bis 1,1); ohne das
+        Fenster (je Etikett der ganze Rest der Zeile) 7,6 – Schranke 1,5; dazu die bisherige Schranke 1 s als CPU-Zeit;
+    (2) BIC hinter 2 000 IBANs unter 2 s CPU-Zeit (gemessen 0,25 s). Nur diese Schranke: _iban_spannen prüft jede
+        OCR-Lesart einer IBAN gegen alle bisherigen Treffer, die Laufzeit wächst mit der Zahl der IBANs quadratisch."""
+    import zeitmessung
     text = "Kunden-Nr.: 4711 " * 3000
-    start = time.perf_counter()
-    mu.finde_vertragsnummern(text)
-    assert time.perf_counter() - start < 1.0
+    kurz = text[:len(text) // 8]
+    wachstum, _, zeit = zeitmessung.wachstum_messen(lambda: mu.finde_vertragsnummern(kurz),
+                                                    lambda: mu.finde_vertragsnummern(text), 8, mindestens=0.2)
+    print(f"Vertragsnummern CPU: 3 000 Etiketten {zeit * 1000:.2f} ms, wachstum {wachstum:.2f}")
+    assert wachstum < 1.5, f"Vertragsnummern: Laufzeit wächst um {wachstum:.2f} x linear"
+    assert zeit < 1.0, f"Vertragsnummern: {zeit:.2f} s CPU-Zeit für 3 000 Etiketten"
     text = ("IBAN DE89 3704 0044 0532 0130 00 BIC COBADEFFXXX " * 2000)
-    start = time.perf_counter()
-    assert mu.finde_bic(text) == ["COBADEFFXXX"]
-    assert time.perf_counter() - start < 2.0
+    bic, zeit = zeitmessung.cpu_sekunden(lambda: mu.finde_bic(text))
+    assert bic == ["COBADEFFXXX"]
+    assert zeit < 2.0, f"BIC: {zeit:.2f} s CPU-Zeit für 2 000 IBANs"
 
 
 def test_strasse_fahrbahn_und_roemische_zahlen():                           # EQ-12, EQ-13
