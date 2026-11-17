@@ -363,10 +363,14 @@ Während eines Laufs sind die Eingaben gesperrt; „Abbrechen“ beendet den Lau
 halbe Ausgabedateien zu hinterlassen. Das gilt auch beim Schließen des Fensters während eines
 Laufs: Nach „Lauf läuft noch“ → „Ja“ bricht das Programm den Lauf ab und schließt erst, wenn
 seine unfertigen Dateien gelöscht sind (höchstens etwa 20 Sekunden; die Statuszeile sagt, worauf
-es wartet). Nach einem Absturz löscht der nächste Start, das nächste Hinzufügen oder Schwärzen
-des Ordners liegen gebliebene Zwischendateien und meldet sie im Protokoll. Nach dem Schwärzen
-steht in der Zeile jeder Datei „✔ fertig“ oder „⚠ prüfen“ mit dem Namen der Ausgabe, der Grund
-in der Spalte „Kontext“.
+es wartet). Ein nicht erreichbares Netzlaufwerk (z. B. VPN getrennt) hält das Schließen nicht
+auf: Das Fenster wartet höchstens zwei Sekunden darauf; was dort noch zu löschen ist, löscht das
+Programm danach im Hintergrund oder beim nächsten Start. Nach einem Absturz löscht der nächste
+Start, das nächste Hinzufügen oder Schwärzen des Ordners liegen gebliebene Zwischendateien und
+meldet sie im Protokoll. Eine Hilfsdatei, die ein anderer Rechner in einen gemeinsam genutzten
+Ordner (Netzwerkfreigabe) gelegt hat, löscht es erst, wenn sie älter als 24 Stunden ist – dort
+läuft vielleicht noch der Lauf eines Kollegen. Nach dem Schwärzen steht in der Zeile jeder Datei
+„✔ fertig“ oder „⚠ prüfen“ mit dem Namen der Ausgabe, der Grund in der Spalte „Kontext“.
 Menü Datei → „Protokoll speichern …“ sichert ein Laufprotokoll der Sitzung – ohne
 Dokumentinhalte, Original-Dateinamen und Ordner.
 
@@ -432,8 +436,9 @@ analysieren, schwärzen und die neue Ausgabe prüfen und freigeben; die alte `_P
 nicht weitergeben. Deshalb vor dem Beenden alle Ausgaben prüfen und freigeben. Stehen beim
 Beenden noch Dateien mit nicht freigegebener Ausgabe in der Liste, fragt das Programm nach
 („Freigabe noch offen“, Voreinstellung „Nein“ – das Programm bleibt dann offen). Läuft dabei
-gerade eine Analyse oder Schwärzung, nennt die Rückfrage „Lauf läuft noch“ diese Dateien mit
-(Voreinstellung dann ebenfalls „Nein“).
+gerade eine Analyse oder Schwärzung, nennt die Rückfrage „Lauf läuft noch“ diese Dateien mit –
+auch die Ausgaben, die die laufende Schwärzung schon fertig geschrieben hat (Voreinstellung dann
+ebenfalls „Nein“). Mit „Nein“ läuft der Lauf weiter; freigeben lässt sich erst nach seinem Ende.
 
 Fotos und Bild-Scans brauchen die Freigabe immer, ebenso Ausgaben mit einem gefundenen, nicht
 abgedeckten Lichtbild oder einer erkannten Ausweiskopie ohne Lichtbild (eine nicht erkannte
@@ -457,7 +462,7 @@ solange geschwärzt wird (siehe Tabelle).
 |---|---|
 | `anonym_01.pdf`, `anonym_02.pdf`, … | Freigegebene bzw. fertige Ausgaben. Die Namen sind absichtlich neutral – der Original-Dateiname (oft ein Kundenname!) soll nicht mit zur KI wandern. Bestehende Dateien werden nie überschrieben, es wird immer die nächste freie Nummer genommen. |
 | `anonym_03_PRUEFEN.pdf` | Diese Ausgabe ist noch **nicht** zur Weitergabe freigegeben. Mit „Freigabe vor Weitergabe“ (Standard) heißt zunächst jede Ausgabe so; bei einer Datei ohne Fund steht dann „keine personenbezogenen Daten gefunden – Freigabe ausstehend“. Dazu kommen die Gründe unten. Erst in der Vorschau prüfen, ggf. nachschwärzen und dort „Freigeben“ drücken. |
-| `.anonym_tmp_….tmp` | Unfertige Hilfsdatei, solange eine Ausgabe geprüft und abgelegt wird – **nie weitergeben**. Sie verschwindet mit dem Ende des Laufs, auch beim Abbrechen und beim Schließen des Fensters; nach einem Absturz löscht das Programm sie beim nächsten Start, Hinzufügen oder Schwärzen dieses Ordners. |
+| `.anonym_tmp_….tmp` | Unfertige Hilfsdatei, solange eine Ausgabe geprüft und abgelegt wird – **nie weitergeben**. Sie verschwindet mit dem Ende des Laufs, auch beim Abbrechen und beim Schließen des Fensters; nach einem Absturz löscht das Programm sie beim nächsten Start, Hinzufügen oder Schwärzen dieses Ordners. Ihr Name enthält eine Kennung des Rechners (ein kurzer Hash des Rechnernamens): Die Hilfsdatei eines anderen Rechners – etwa eines Kollegen, der in denselben Ordner einer Netzwerkfreigabe schwärzt – löscht das Programm erst, wenn sie älter als 24 Stunden ist. |
 
 Außerdem heißt eine Ausgabe immer `_PRUEFEN`, wenn mindestens einer dieser Gründe zutrifft
 (der Grund steht in der Liste neben der Datei und im Abschlussdialog):
@@ -530,7 +535,7 @@ Hochladen nicht mit auszuwählen.
 | Was | Wo |
 |---|---|
 | Ausgaben | Unterordner `anonymisiert` neben dem Original (bzw. direkt im gemeinsamen Zielordner): `anonym_NN.pdf` oder `anonym_NN_PRUEFEN.pdf`; solange eine Ausgabe geprüft und abgelegt wird, eine Hilfsdatei `.anonym_tmp_….tmp` (nie weitergeben, siehe [Ausgabedateien](#ausgabedateien)) |
-| Zwischenstände beim Schwärzen großer Scans (nur teilweise geschwärzt) und, solange geschwärzt wird, ein Vermerk der Ausgabeordner (für das Aufräumen nach einem Absturz) | `%LOCALAPPDATA%\PDF-Anonymisierer\temp\sitzung_…` – nie im Ausgabeordner; gelöscht am Ende des Laufs, beim Beenden bzw. nach einem Absturz beim nächsten Start |
+| Zwischenstände beim Schwärzen großer Scans (nur teilweise geschwärzt) und, solange geschwärzt wird, ein Vermerk der Ausgabeordner (für das Aufräumen nach einem Absturz; nach dem Beenden nur, wenn in einem Ausgabeordner noch etwas zu löschen blieb, z. B. weil er nicht erreichbar war) | `%LOCALAPPDATA%\PDF-Anonymisierer\temp\sitzung_…` – nie im Ausgabeordner; gelöscht am Ende des Laufs, beim Beenden bzw. nach einem Absturz beim nächsten Start |
 | Zuordnungsdatei | neben dem Ausgabeordner: `_zuordnung_<Name des Ausgabeordners>.txt`; bei einem Laufwerk oder einer Freigabe als Zielordner in `%APPDATA%\PDF-Anonymisierer\Zuordnungen`; nur notfalls (mit Warnung) als `_zuordnung.txt` im Ausgabeordner |
 | Einstellungen (Schutzstufe, Kategorien, Listen, Zielordner, „Freigabe vor Weitergabe“, Fenstergröße, Hinweis gelesen) | `%APPDATA%\PDF-Anonymisierer\einstellungen.json` |
 | Kundenliste (nur Prüfwerte, kein Klartext; unter Windows nur mit dem eigenen Windows-Konto verwendbar) | `%APPDATA%\PDF-Anonymisierer\kundenliste.dat` |

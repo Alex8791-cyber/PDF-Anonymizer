@@ -1568,18 +1568,23 @@ def test_zwischendateien_sind_keine_eingabe(app, umgebung):
 
 
 def test_schwaerzen_raeumt_verwaiste_zwischendateien_auf(app, umgebung, monkeypatch, dialoge):
+    """GR-11: Das Schwärzen räumt verwaiste Zwischendateien im Ausgabeordner auf – die eines abgestürzten Prozesses
+    DIESES Rechners (Rechnerkennung im Namen, Korrekturrunde „Schließen“ 2), nicht die eines Kollegen, der an
+    derselben Freigabe gerade dorthin schwärzt (seine PID ist hier immer „tot“; erst nach 24 Stunden verwaist)."""
     tmp = umgebung["tmp"]
     pdf = pdf_schreiben(tmp / "a.pdf")
     ziel = tmp / "anonymisiert"
     ziel.mkdir()
-    verwaist = ziel / ".anonym_tmp_2147480000_ausgabe.pdf"   # PID, die es nicht gibt
+    verwaist = ziel / f".anonym_tmp_2147480000_r{dateien.rechner_kennung()}_1_ausgabe.tmp"   # PID gibt es nicht
+    kollege = ziel / ".anonym_tmp_2147480000_r0badc0de_2_ausgabe.tmp"                       # anderer Rechner
     verwaist.write_bytes(b"%PDF")
+    kollege.write_bytes(b"%PDF")
     monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse({"a.pdf": [FUND_TEL]}))
     monkeypatch.setattr(gui, "schwaerze_pdf", fake_schwaerzung([]))
     analysiere(app, [pdf])
     starte_lauf(app, app.schwaerzen)
-    assert not verwaist.exists()
-    assert "verwaiste Zwischendatei" in app.protokoll_text()
+    assert not verwaist.exists() and kollege.exists()
+    assert "1 verwaiste Zwischendatei(en)" in app.protokoll_text()
 
 
 # ----------------------------------------------------------------------

@@ -246,21 +246,33 @@ def test_zwischendateien_sind_nie_eingabe(tmp_path):
 
 
 def test_verwaiste_zwischendateien_werden_aufgeraeumt(tmp_path, monkeypatch):
+    """GR-11; Korrekturrunde „Schließen“ 2: Nach der PID entscheidet das Programm nur bei Hilfsdateien DIESES Rechners
+    (Rechnerkennung im Namen) – die PID eines anderen Rechners ist hier praktisch immer „tot“. Hilfsdateien eines
+    anderen Rechners und solche ohne Kennung (ältere Programmversion) gelten erst nach 24 Stunden als verwaist."""
     import os
     import time
-    tot = tmp_path / ".anonym_tmp_2147480000_ausgabe.pdf"           # Prozess gibt es nicht
-    eigen = tmp_path / f".anonym_tmp_{os.getpid()}_ausgabe.pdf"      # dieser Prozess: bleibt
+    rechner = dateien.rechner_kennung()
+    tot = tmp_path / f".anonym_tmp_2147480000_r{rechner}_1_ausgabe.tmp"   # Prozess gibt es nicht
+    eigen = tmp_path / f".anonym_tmp_{os.getpid()}_ausgabe.pdf"      # dieser Prozess (auch alte Form): bleibt
     eltern = os.getppid()                                           # lebt sicher (startete pytest)
-    lebend_jung = tmp_path / f".anonym_tmp_{eltern}_a.pdf"          # Prozess lebt, Datei jung -> bleibt
-    lebend_alt = tmp_path / f".anonym_tmp_{eltern}_b.pdf"           # Prozess lebt, aber > 1 h alt -> weg
+    lebend_jung = tmp_path / f".anonym_tmp_{eltern}_r{rechner}_2_a.tmp"   # Prozess lebt, Datei jung -> bleibt
+    lebend_alt = tmp_path / f".anonym_tmp_{eltern}_r{rechner}_3_b.tmp"    # Prozess lebt, aber > 1 h alt -> weg
+    unbekannt = tmp_path / ".anonym_tmp_2147480000_ausgabe.pdf"     # alte Form, Rechner unbekannt -> bleibt
+    fremd = tmp_path / ".anonym_tmp_2147480000_r0badc0de_4_ausgabe.tmp"   # anderer Rechner, jung -> bleibt
+    fremd_alt = tmp_path / ".anonym_tmp_2147480001_r0badc0de_5_ausgabe.tmp"   # anderer Rechner, > 24 h -> weg
     andere = tmp_path / "anonym_01.pdf"
-    for p in (tot, eigen, lebend_jung, lebend_alt, andere):
+    for p in (tot, eigen, lebend_jung, lebend_alt, unbekannt, fremd, fremd_alt, andere):
         p.write_bytes(b"%PDF")
     alt = time.time() - 2 * 3600
     os.utime(lebend_alt, (alt, alt))
+    os.utime(unbekannt, (alt, alt))
+    os.utime(fremd, (alt, alt))
+    sehr_alt = time.time() - 25 * 3600
+    os.utime(fremd_alt, (sehr_alt, sehr_alt))
+    assert rechner != "0badc0de"
     entfernt = dateien.zwischendateien_aufraeumen(tmp_path)
-    assert sorted(entfernt) == sorted([tot, lebend_alt])
-    assert eigen.exists() and lebend_jung.exists() and andere.exists()
+    assert sorted(entfernt) == sorted([tot, lebend_alt, fremd_alt])
+    assert eigen.exists() and lebend_jung.exists() and unbekannt.exists() and fremd.exists() and andere.exists()
     assert dateien.zwischendateien_aufraeumen(tmp_path / "gibt_es_nicht") == []
 
 

@@ -18,7 +18,8 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   brauchen die Freigabe trotzdem. Freigeben geht nur in derselben Programmsitzung – also vor dem Beenden
   prüfen und freigeben. Stehen beim Beenden noch Dateien mit nicht freigegebener Ausgabe in der Liste,
   fragt das Programm nach („Freigabe noch offen“, Voreinstellung „Nein“) – während eines Laufs in der
-  Rückfrage „Lauf läuft noch“.
+  Rückfrage „Lauf läuft noch“, die dann auch die schon fertigen Ausgaben des laufenden Laufs nennt;
+  freigeben lässt sich erst nach dem Ende des Laufs.
 - **`_PRUEFEN` hat viele neue Gründe**, z. B. ein Verdacht der neuen Restrisiko-Prüfung, ein kaum lesbarer
   Scan, eine unlesbare Textebene, eine beschädigte Datei oder ein beschädigtes Bild, Personendaten nur in
   versteckten Teilen der Datei, eine ausgefallene Erkennungsregel oder eine Namenserkennung ohne
@@ -185,12 +186,22 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - Beenden während einer Schwärzung („Lauf läuft noch“ → „Ja“): Das Fenster schloss sofort, und im
   Ausgabeordner konnte ein Zwischenstand `.anonym_tmp_…_a.pdf` liegen bleiben – bei großen Scans die ersten
   Seiten geschwärzt, die übrigen wie im Original. Jetzt bricht das Programm den Lauf ab und schließt erst,
-  wenn er aufgeräumt hat (höchstens etwa 20 Sekunden), und löscht beim Beenden zusätzlich die eigenen
-  Zwischendateien in allen Ausgabeordnern der Sitzung. Zwischenstände liegen nicht mehr im Ausgabeordner,
-  sondern im Ordner für Arbeitskopien; Hilfsdateien enden auf `.tmp`, nie auf `.pdf`. Reste nach einem
-  Absturz löschen der nächste Start (in den Ausgabeordnern, in die gerade geschwärzt wurde, und im
-  gemeinsamen Zielordner), das Hinzufügen des Ordners oder das nächste Schwärzen dorthin – mit Meldung im
-  Protokoll.
+  wenn er aufgeräumt hat (höchstens etwa 20 Sekunden), und löscht beim Beenden zusätzlich eigene
+  Zwischendateien, wo noch welche liegen können (in den Ordnern, in die der abgebrochene Lauf schrieb, oder
+  wo sich nach einem Lauf eine nicht löschen ließ) – in Hintergrund-Threads: Ein nicht erreichbares
+  Netzlaufwerk hält das Schließen nicht auf (das Fenster wartet höchstens zwei Sekunden), der Ordner bleibt
+  dann für den nächsten Start vermerkt. Nach einem gewöhnlichen Lauf liest das Beenden keinen Ausgabeordner.
+  Zwischenstände liegen nicht mehr im Ausgabeordner, sondern im Ordner für Arbeitskopien; Hilfsdateien enden
+  auf `.tmp`, nie auf `.pdf`. Reste nach einem Absturz löschen der nächste Start (in den Ausgabeordnern, in
+  die gerade geschwärzt wurde, und im gemeinsamen Zielordner, wenn er eingeschaltet ist), das Hinzufügen des
+  Ordners oder das nächste Schwärzen dorthin – mit Meldung im Protokoll.
+- Gemeinsam genutzte Ordner (Netzwerkfreigabe): Als verwaist galt eine Hilfsdatei, deren Prozess auf diesem
+  Rechner nicht lief – das trifft auf die eines anderen Rechners praktisch immer zu. So konnten Programmstart,
+  Hinzufügen und Schwärzen die Hilfsdatei eines Kollegen mitten in seinem Lauf löschen (seine Datei endete ohne
+  Ausgabe mit Fehler), und der Start meldete das als eigenen Absturz. Jetzt enthält der Name jeder Hilfsdatei
+  eine Kennung des Rechners (kurzer Hash des Rechnernamens); die eines anderen Rechners – und eine ohne Kennung
+  aus einer älteren Testversion – gilt erst nach 24 Stunden als verwaist. Als Rest eines eigenen Absturzes
+  meldet der Start nur noch Hilfsdateien der eigenen abgestürzten Sitzung.
 
 ### Sicherheit
 - Manche PDFs (z. B. aus LibreOffice) enthielten nach dem Schwärzen das ungeschwärzte Originalbild unsichtbar

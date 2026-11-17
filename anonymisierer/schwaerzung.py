@@ -19,11 +19,13 @@ Arbeitsweise:
     Lücke, Kollateralprüfung. Danach Selbstkontrolle der AUSGABE mit demselben Modell und demselben
     Vergleicher (Ganzwort, alle Schreibweisen; Scan-Seiten per Kontroll-OCR mit derselben Ausrichtung).
   * Ausgabename exklusiv reserviert (O_CREAT|O_EXCL) – zwei gleichzeitige Läufe überschreiben sich nie.
-  * Hilfsdateien heißen „.anonym_tmp_<PID>_<Lauf>_<Kennung>.tmp“ – nie „….pdf“, damit eine liegen gebliebene nie wie
-    eine Ausgabe aussieht (Korrekturrunde „Schließen“). Die fertige Ausgabe entsteht im Zielordner (os.replace im
-    selben Ordner: atomar, und sie erbt dessen Zugriffsrechte); die Zwischenstände bei vielen Scan-Seiten
-    (erste Seiten geschwärzt, die übrigen noch wie im Original) legt die Oberfläche über „zwischen_ordner“ in den
-    lokalen Ordner für Arbeitskopien, nie in den Ordner, der hochgeladen wird.
+  * Hilfsdateien heißen „.anonym_tmp_<PID>_r<Rechner>_<Lauf>_<Kennung>.tmp“ – nie „….pdf“, damit eine liegen
+    gebliebene nie wie eine Ausgabe aussieht (Korrekturrunde „Schließen“); die Rechnerkennung (dateien.rechner_kennung)
+    zeigt in einem gemeinsam genutzten Ordner, von welchem Rechner sie stammt – nur dort sagt die PID etwas.
+    Die fertige Ausgabe entsteht im Zielordner (os.replace im selben Ordner: atomar, und sie erbt dessen
+    Zugriffsrechte); die Zwischenstände bei vielen Scan-Seiten (erste Seiten geschwärzt, die übrigen noch wie im
+    Original) legt die Oberfläche über „zwischen_ordner“ in den lokalen Ordner für Arbeitskopien, nie in den Ordner,
+    der hochgeladen wird.
   * Nur echte PDFs (Gutachten R-01): ein Bild oder eine Webseite mit der Endung .pdf wird vor jedem
     Seitenzugriff abgewiesen (sonst Absturz im C-Code von PyMuPDF).
   * Status _PRUEFEN (Gutachten R-07/R-11) außer bei Resten, Verdacht, nicht lokalisierten Stellen und
@@ -744,12 +746,13 @@ class _Lauf:
             raise OSError(f"Zielordner kann nicht angelegt werden ({self.ziel}): {e}") from e
 
     def tmp_pfad(self, kennung: str, ordner: Path | None = None) -> Path:
-        """Hilfsdatei „.anonym_tmp_<PID>_<Lauf>_<Kennung>.tmp“ (Endung nie .pdf), standardmäßig im Zielordner: dort
-        wird die fertige Ausgabe per os.replace abgelegt. Der finally-Block von schwaerze_pdf löscht sie."""
+        """Hilfsdatei „.anonym_tmp_<PID>_r<Rechner>_<Lauf>_<Kennung>.tmp“ (Endung nie .pdf; Anfang aus
+        dateien.zwischendatei_praefix), standardmäßig im Zielordner: dort wird die fertige Ausgabe per os.replace
+        abgelegt. Der finally-Block von schwaerze_pdf löscht sie."""
         if ordner is None:
             self.ziel_sicherstellen()
             ordner = self.ziel
-        p = Path(ordner) / f".anonym_tmp_{os.getpid()}_{id(self)}_{kennung}{ZWISCHEN_ENDUNG}"
+        p = Path(ordner) / f"{_dateien.zwischendatei_praefix()}{id(self)}_{kennung}{ZWISCHEN_ENDUNG}"
         if p not in self.tmp_pfade:
             self.tmp_pfade.append(p)
         return p
