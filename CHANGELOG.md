@@ -39,8 +39,10 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Anschriften von Firmen, Versicherern und Behörden bleiben dagegen jetzt stehen; unbekannte
   Firmenanschriften erscheinen als abgewählter Fund „vermutlich Firmenanschrift“. Wirkt ein Briefkopf wie der
   einer Firma (z. B. mit Webadresse oder Bankverbindung, wie oft bei Selbständigen), wird die Anschrift darin
-  nur geschwärzt, wenn davor ein Name steht, den das Programm als Vor- oder Nachnamen kennt; sonst steht sie
-  abgewählt als „vermutlich Firmenanschrift“ in der Fundliste – bitte prüfen und anhaken.
+  nur geschwärzt, wenn davor ein Name steht, den das Programm als Vor- oder Nachnamen kennt, und auch dann nicht
+  immer (z. B. nicht mit einer Zeile wie „Mitglied der Handwerkskammer …“ zwischen Name und Anschrift); sonst
+  steht sie abgewählt als „vermutlich Firmenanschrift“ in der Fundliste. Bei Selbständigen jeden solchen Fund
+  prüfen und anhaken, wenn es ihre Anschrift ist – auch wenn ihr Name davorsteht.
 - **Lichtbilder und Freigabe:** Bleibt ein gefundenes Lichtbild sichtbar (abgewählt oder als unsicherer
   Treffer nicht angehakt) oder ist auf einer erkannten Ausweiskopie (Ausweistext wie „PERSONALAUSWEIS“ im Bild
   lesbar) kein Lichtbild abgedeckt, heißt die Ausgabe `_PRUEFEN` – auch bei abgeschalteter
@@ -62,8 +64,10 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   kleiner, ist aber nicht pixelgleich mit dem Original.
 - **Nur ein Programmfenster:** Ein zweiter Start meldet „PDF-Anonymisierer läuft bereits“.
 - **Kleine Bildschirme:** Auf 1366×768 und auf 1920×1080 ab 125 % Skalierung startet das Fenster maximiert.
-  Im kleinen Fenster entfallen großer Titel, Untertitel und Bedienhinweis; bei Platzmangel wird der
-  Hinweiskasten einzeilig (ein Klick zeigt alle Grenzen), und die Knöpfe werden flacher. Die Grenzen der
+  Im kleinen Fenster entfallen großer Titel, Untertitel und Bedienhinweis. Reicht der Platz für die Fundliste
+  dann nicht, rücken der Reihe nach – nur so weit wie nötig – Titel „1 · PDF-Dateien“ und Ablagefläche in eine
+  Zeile (wenn beide nebeneinander passen), die Knöpfe werden flacher, und zuletzt zeigt der Hinweiskasten eine
+  Kurzfassung in höchstens zwei Zeilen mit den Kernaussagen (ein Klick zeigt alle Grenzen). Die Grenzen der
   Erkennung stehen weiter unter Hilfe → „Was wird nicht erkannt?“ und „Hinweise vor der Nutzung …“; den
   Bedienhinweis über der Fundliste (Leertaste, Doppelklick, Rechtsklick) gibt es nur im normal großen Fenster.
 - **Rechenzeit und Arbeitsspeicher:** Restrisiko-Prüfung und Fotoerkennung kosten zusätzlich Zeit. Auf dem
@@ -93,9 +97,13 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - **Restrisiko-Prüfung:** Eine zweite, von der Erkennung unabhängige Prüfung liest jede Ausgabe noch einmal
   (bei Scans per Texterkennung) und meldet, was noch nach Personendaten aussieht – Nummern, Namen,
   Anschriften, Geburtsdaten, auf Scans ungelesene Tinte in Unterschriftsblöcken sowie Scan-Seiten, die sich
-  nicht verlässlich lesen lassen. Jeder Verdacht macht die Ausgabe `_PRUEFEN`. Was in der Fundliste
-  abgewählt ist (z. B. „vermutlich Firmenanschrift“), meldet sie nicht; nach Gesundheitsdaten, Beruf und
-  Arbeitgeber sucht sie nicht.
+  nicht verlässlich lesen lassen. Jeder Verdacht macht die Ausgabe `_PRUEFEN`. Einzelne abgewählte Stellen
+  eines angehakten Funds meldet sie nicht. Einen ganz abgewählten Fund im Text (z. B. „vermutlich
+  Firmenanschrift“) gibt die Oberfläche dagegen gar nicht an die Schwärzung; sieht er nach Personendaten aus,
+  meldet die Prüfung ihn deshalb meist weiter als Verdacht. Darauf ist aber kein Verlass: Hält die Prüfung einen
+  Briefkopf für den einer Organisation (z. B. mit einer eigenen Zeile „Mitglied der Handwerkskammer …“ über der
+  Anschrift), bleibt die lesbare Privatanschrift einer Selbständigen ohne Verdacht. Nach Gesundheitsdaten, Beruf
+  und Arbeitgeber sucht sie nicht.
 - **Kundenliste** (Menü „Kundenliste“): Import einer CSV-Datei mit Kundendaten. Gespeichert werden nur nicht
   umkehrbare Prüfwerte, kein Klartext. Passt ein starkes Merkmal (voller Name, Kunden- oder Vertragsnummer,
   IBAN, E-Mail), sucht das Programm alle Angaben dieses Kunden.
@@ -206,7 +214,9 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - Neuer Aufbau: ein Seitenmodell für Analyse, Schwärzung und Selbstkontrolle (`seitenmodell.py`),
   Erkennungsregeln als Module mit Register und Rückfallliste für die EXE (`anonymisierer/detektoren/`),
   Wissensbasis (`wissen.py`, 17 Wortlisten in `anonymisierer/daten/`), dazu `kundenliste.py`,
-  `restrisiko.py`, `nebenkanaele.py`, `bilder.py`, `fotos.py`, `vorschau.py` und `vorschau_fenster.py`.
+  `restrisiko.py`, `nebenkanaele.py`, `bilder.py`, `fotos.py`, `vorschau.py`, `vorschau_fenster.py` und
+  `auftrag.py` (welche Funde und Stellen die Oberfläche an die Schwärzung gibt; auch für
+  `werkzeuge/benchmark.py --weg oberflaeche`).
 - Technik hinter den Korrekturen: Seiten werden ohne Strukturbaum gerendert (ein Zyklus darin ließ MuPDF 1.28
   über zehn Minuten hängen); scheitert `apply_redactions` an einer Seite (z. B. zyklische Form-XObjects),
   wird sie mit 200 dpi als Bild geschwärzt (`SEITE_ALS_BILD`); `analyse.reparatur_erzwingen` lässt MuPDF vor

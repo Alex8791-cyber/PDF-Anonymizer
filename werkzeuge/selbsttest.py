@@ -7,11 +7,16 @@ Aufruf (aus der Projektwurzel):
     python werkzeuge/selbsttest.py <ordner> [--profil hoch] [--behalten <ordner>] [--einstellungen]
                                             [--kategorien iban,email,...]
 
-Ablauf: Alle PDFs im Ordner (auch in Unterordnern, ohne bereits anonymisierte Ausgaben) werden wie in der
-Oberfläche analysiert und geschwärzt – jede lesbare PDF bekommt eine Ausgabe, auch ohne Fund (dann bereinigt) –
-in einen temporären Ordner, der danach samt Zuordnungsdatei gelöscht wird (außer mit
+Ablauf: Alle PDFs im Ordner (auch in Unterordnern, ohne bereits anonymisierte Ausgaben) werden analysiert und
+geschwärzt – jede lesbare PDF bekommt eine Ausgabe, auch ohne Fund (dann bereinigt) – in einen temporären Ordner,
+der danach samt Zuordnungsdatei gelöscht wird (außer mit
 --behalten <ordner>: dann liegen die Ausgaben dort, wie bei normaler Benutzung; die Zuordnungsdatei liegt daneben,
 _zuordnung_<ordner>.txt – bei einer Laufwerkswurzel wie E:\\ im Programmordner, siehe README „Ausgabedateien“).
+Geschwärzt wird, was die Fundliste nach der Analyse angehakt hat, aber nicht ganz wie in der Oberfläche: jedes
+Dokument für sich (kein LaufWissen, kein weitergabe_anwenden, keine Kundenliste; NIE-/IMMER-Liste nur mit
+--einstellungen), ohne freigabe_erforderlich, und ganz abgewählte Funde gehen mit ihren abgewählten Stellen an
+schwaerze_pdf (die Oberfläche lässt sie weg, auftrag.auftrag_funde) – die Restrisiko-Prüfung meldet sie deshalb
+nicht. Die Zählwerte für Verdacht und _PRUEFEN können darum von der Oberfläche abweichen.
 
 Ausgegeben werden NUR Zählwerte: Dokumente (als laufende Nummer, ohne Dateinamen), Seiten, OCR-Seiten, Funde je
 Kategorie, Verdachtsstellen je Dokument und je Regel, wie viele Ausgaben _PRUEFEN sind, Meldungs-Codes, Fehlerarten

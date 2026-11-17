@@ -8,6 +8,7 @@ werden aber wirklich ausgeführt.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -583,6 +584,229 @@ def test_readme_fakten_aus_dem_auslieferungs_review():
     # AD-08: ARM64 ist ungetestet, nicht pauschal "nicht unterstützt"
     assert "ungetestet" in text
     assert not re.search(r"ARM64[^.]*werden\s+nicht\s+unterstützt", text)
+
+
+# ----------------------------------------------------------------------
+# Durchsicht der Doku: Aussagen von README, CHANGELOG und Modulköpfen am Code geprüft
+# ----------------------------------------------------------------------
+def _flach(text: str) -> str:
+    """Text mit zusammengezogenem Leerraum (Zeilenumbrüche der Markdown-Absätze zählen nicht)."""
+    return " ".join(text.split())
+
+
+def _listenpunkt(text: str, anfang: str) -> str:
+    """Der Listenpunkt (auch ein nummerierter Schritt), der mit `anfang` beginnt: seine erste Zeile und alle
+    eingerückten Folgezeilen, Leerraum zusammengezogen."""
+    zeilen = text[text.index(anfang):].splitlines()
+    punkt = [zeilen[0]]
+    for zeile in zeilen[1:]:
+        if not zeile.startswith(" ") or not zeile.strip():
+            break
+        punkt.append(zeile)
+    return _flach("\n".join(punkt))
+
+
+def _abschnitt(text: str, ueberschrift: str) -> str:
+    """Abschnitt von der Überschrift bis zur nächsten Überschrift desselben Rangs, Leerraum zusammengezogen."""
+    start = text.index(ueberschrift + "\n")
+    ende = text.find("\n" + ueberschrift.split(" ", 1)[0] + " ", start + len(ueberschrift))
+    return _flach(text[start:ende if ende >= 0 else len(text)])
+
+
+def _konstante(datei: str, name: str):
+    """Wert einer Konstante auf Modulebene (ohne Import – die Oberfläche bräuchte tkinter)."""
+    for knoten in ast.parse(_lies(datei)).body:
+        if isinstance(knoten, ast.Assign) and [getattr(z, "id", None) for z in knoten.targets] == [name]:
+            return ast.literal_eval(knoten.value)
+    raise AssertionError(f"{name} fehlt in {datei}")
+
+
+def test_doku_anschrift_im_eigenen_briefkopf():
+    """Durchsicht Befund 1: Die README versprach „Die Anschrift einer Person im eigenen Briefkopf (z. B. Selbständige)
+    wird geschwärzt“. Wirkt der Briefkopf wie der einer Firma (Webadresse, Bankverbindung, USt-IdNr.), schwärzt das
+    Programm sie aber nur mit einem Namen davor, den die Wortlisten als Vor- oder Nachnamen kennen
+    (analyse._person_vorn); sonst steht sie nicht angehakt als „vermutlich Firmenanschrift“ in der Liste (Verhalten:
+    test_robustheit_analyse.py::test_briefkopf_wie_eine_firma_nur_mit_bekanntem_namen_geschwaerzt). README und
+    CHANGELOG sagen das gleich."""
+    readme = _lies("README.md")
+    assert "Die Anschrift einer Person im eigenen Briefkopf (z. B. Selbständige) wird geschwärzt" not in _flach(readme)
+    for text, anfang in ((readme, "- **Firmenanschriften**"), (_lies("CHANGELOG.md"), "- **Mehr wird geschwärzt")):
+        punkt = _listenpunkt(text, anfang)
+        for begriff in ("Webadresse", "Bankverbindung", "Vor- oder Nachnamen", "vermutlich Firmenanschrift",
+                        "Selbständigen", "prüfen und anhaken"):
+            assert begriff in punkt, (anfang, begriff)
+
+
+def test_doku_restrisiko_meldet_ganz_abgewaehlte_funde():
+    """Durchsicht Befund 2: CHANGELOG und der Docstring von analyse._firmenanschriften sagten, die Restrisiko-Prüfung
+    melde nicht, was in der Fundliste abgewählt ist (z. B. „vermutlich Firmenanschrift“). Die Oberfläche gibt einen
+    ganz abgewählten Text-Fund aber gar nicht an die Schwärzung (auftrag.auftrag_funde): sieht er nach Personendaten
+    aus, bleibt er meist Verdacht – gewollt, bei Selbständigen der Hinweis auf eine lesbare Privatanschrift (Verhalten:
+    test_robustheit_analyse.py::test_ganz_abgewaehlter_fund_bleibt_verdacht_abgewaehlte_einzelstelle_nicht). Nur
+    abgewählte Stellen eines angehakten Funds meldet sie nicht."""
+    changelog = _lies("CHANGELOG.md")
+    assert "Was in der Fundliste abgewählt ist" not in _flach(changelog)
+    punkt = _listenpunkt(changelog, "- **Restrisiko-Prüfung:**")
+    for begriff in ("abgewählte Stellen eines angehakten Funds", "ganz abgewählten Fund", "gar nicht an die Schwärzung",
+                    "weiter als Verdacht"):
+        assert begriff in punkt, begriff
+    funktion = next(k for k in ast.parse(_lies("anonymisierer/analyse.py")).body
+                    if isinstance(k, ast.FunctionDef) and k.name == "_firmenanschriften")
+    doc = _flach(ast.get_docstring(funktion))
+    assert "meldet abgewählte Stellen nicht als Verdacht" not in doc
+    assert "auftrag.auftrag_funde" in doc and "Nur abgewählte Stellen eines angehakten Funds" in doc
+    # Die Regel, auf die sich beide Texte stützen: ein ganz abgewählter Text-Fund bleibt aus dem Auftrag weg
+    sys.path.insert(0, str(WURZEL))
+    from anonymisierer import auftrag
+    fund = {"kategorie": "strasse", "text": "Hauptstraße 12",
+            "stellen": [{"seite": 0, "start": 0, "ende": 14, "an": False}]}
+    assert auftrag.auftrag_funde([fund], ["aus"], True) == ([], [])
+
+
+def test_doku_seitenrahmen_auch_bei_hellen_scans():
+    """Durchsicht Befund 3: „bei sehr hellen Scans fehlt der Seitenrahmen“ stimmt seit Runde 3b nicht mehr – ein heller
+    Scan, auf dem die OCR nichts liest, ist ein Seitenverdacht und wird ganz umrahmt (restrisiko._seite_nachweislich_
+    leer, test_restrisiko.py::test_hell_gedruckte_ungelesene_scan_seite_ist_seitenverdacht). Ohne Rahmen bleibt z. B.
+    eine Seite mit viel Handschrift, auf der die OCR nur ein paar gedruckte Wörter liest (Grund „Scan kaum lesbar“,
+    test_restrisiko.py::test_kaum_lesbare_seite_mit_einigen_woertern_ohne_seitenrahmen) – das Beispiel an beiden
+    Stellen der README, mit dem Grund, wie ihn die Schwärzung nennt."""
+    readme = _lies("README.md")
+    for alt in ("zum Beispiel nicht bei sehr hellen Scans",
+                "Der Rahmen kann aber fehlen (z. B. bei sehr hellen Scans)"):
+        assert alt not in _flach(readme), alt
+    grund = _konstante("anonymisierer/schwaerzung.py", "_GRUND_TEXTE")["KAUM_LESBAR"]
+    for ueberschrift in ("## Was NICHT erkannt wird", "## Prüfen und freigeben"):
+        teil = _abschnitt(readme, ueberschrift)
+        assert f"„{grund}“" in teil and "viel Handschrift" in teil, ueberschrift
+
+
+def test_doku_kompaktstufen_wie_in_der_oberflaeche():
+    """Durchsicht Befund 4: README und CHANGELOG beschrieben die alten Kompaktstufen (zuerst „Hinweiskasten
+    einzeilig“). Die Oberfläche (gui.KOMPAKT_STUFEN) setzt erst Titel und Ablagefläche in eine Zeile (nur, wenn beide
+    nebeneinander passen), macht dann die Knöpfe flacher und zeigt zuletzt eine Kurzfassung des Hinweiskastens:
+    höchstens zwei Zeilen mit den Kernaussagen, ein Klick zeigt alle Grenzen (test_layout_bildschirme.py::
+    test_kompaktstufen_nur_so_weit_wie_noetig_und_umkehrbar). Beide Texte nennen die Stufen in dieser Reihenfolge;
+    die README dazu die Fenstergrenze und die Zeilen des Protokolls aus gui.py."""
+    stufen = _konstante("anonymisierer/gui.py", "KOMPAKT_STUFEN")
+    assert stufen == ("dateikopf", "knoepfe", "hinweiskasten")
+    merkmal = {"dateikopf": "Ablagefläche", "knoepfe": "flacher", "hinweiskasten": "Kurzfassung"}
+    for text, anfang in ((_lies("README.md"), "- **Kleine Bildschirme**"),
+                         (_lies("CHANGELOG.md"), "- **Kleine Bildschirme:**")):
+        punkt = _listenpunkt(text, anfang)
+        assert "einzeilig" not in punkt, anfang
+        lage = [punkt.index(merkmal[stufe]) for stufe in stufen]
+        assert lage == sorted(lage), (anfang, lage)
+        for begriff in ("nebeneinander passen", "zwei Zeilen", "Kernaussagen", "Klick"):
+            assert begriff in punkt, (anfang, begriff)
+    punkt = _listenpunkt(_lies("README.md"), "- **Kleine Bildschirme**")
+    assert f"Unter {_konstante('anonymisierer/gui.py', 'FENSTER_KLEIN_HOEHE')} Pixel Fensterhöhe" in punkt
+    assert (f"{_konstante('anonymisierer/gui.py', 'PROTOKOLL_ZEILEN_KLEIN')} statt "
+            f"{_konstante('anonymisierer/gui.py', 'PROTOKOLL_ZEILEN')} Zeilen") in punkt
+
+
+def test_doku_paketaufbau_nennt_jedes_modul():
+    """Durchsicht Befund 5: Der Paketaufbau der README und der Modulkopf von pdf_anonymisierer.py nannten
+    anonymisierer/auftrag.py nicht. Jedes Modul des Pakets steht in beiden."""
+    module = sorted(p.stem for p in (WURZEL / "anonymisierer").glob("*.py") if p.stem != "__init__")
+    assert "auftrag" in module
+    aufbau = _listenpunkt(_lies("README.md"), "- Code und Oberfläche sind deutsch.")
+    kopf = ast.get_docstring(ast.parse(_lies("pdf_anonymisierer.py")))
+    for name in module:
+        assert f"`{name}.py`" in aufbau, f"Paketaufbau der README nennt {name}.py nicht"
+        assert re.search(rf"(?<!\w){name}(?!\w)", kopf), f"Modulkopf von pdf_anonymisierer.py nennt {name} nicht"
+    for ordner in ("detektoren", "daten"):
+        assert f"`{ordner}/`" in aufbau, ordner
+
+
+def test_doku_entwicklerteil_nennt_exe_bau_fuer_jeden_pull_request():
+    """Durchsicht Befund 5: Seit a88d8da baut die GitHub-Action die EXE auch für jeden Pull Request (Job „exe“,
+    test_github_action_rechte_zeitlimits_screenshots_und_exe_job); der Entwicklerteil der README nannte nur „auf
+    Wunsch bzw. für Versions-Tags“. Der Satz zum EXE-Bau nennt alle drei Auslöser des Jobs."""
+    entwickler = _abschnitt(_lies("README.md"), "## Mitentwickeln und Tests")
+    satz = next(s for s in re.split(r"(?<=[.)])\s+(?=[A-ZÄÖÜ])", entwickler) if "EXE-bauen.bat" in s)
+    for ausloeser in ("für jeden Pull Request", "auf Wunsch", "Versions-Tags"):
+        assert ausloeser in satz, (ausloeser, satz)
+
+
+# Nachprüfung der Durchsicht: Grenzen, die die Gegenprüfung an den berichtigten Texten gefunden hat
+def test_doku_briefkopf_rat_auch_bei_bekanntem_namen():
+    """Nachprüfung Befund 1: README und CHANGELOG nannten den bekannten Namen vor der Anschrift, als reiche er – der Rat
+    „prüfen und anhaken“ hing am unbekannten Namen. Nötig ist er, er reicht aber nicht immer: Ohne Trenner hinter dem
+    Namen oder mit einer Firmenzeile zwischen Name und Anschrift („Mitglied der Handwerkskammer …“) bleibt die
+    Anschrift auch mit bekanntem Namen nicht angehakt (test_robustheit_analyse.py::
+    test_briefkopf_wie_eine_firma_nur_mit_bekanntem_namen_geschwaerzt). Beide Texte geben den Rat deshalb unabhängig
+    vom Namen; der Modulkopf von analyse.py nennt die Bedingungen (_absender_einer_person, _person_vorn)."""
+    for text, anfang in ((_lies("README.md"), "- **Firmenanschriften**"),
+                         (_lies("CHANGELOG.md"), "- **Mehr wird geschwärzt")):
+        punkt = _listenpunkt(text, anfang)
+        for begriff in ("auch dann nicht immer", "Mitglied der Handwerkskammer",
+                        "jeden solchen Fund prüfen und anhaken, wenn es ihre Anschrift ist",
+                        "auch wenn ihr Name davorsteht"):
+            assert begriff in punkt, (anfang, begriff)
+    assert _konstante("anonymisierer/analyse.py", "_ABSENDER_ZEILEN_DARUEBER") == 3
+    kopf = _flach(ast.get_docstring(ast.parse(_lies("anonymisierer/analyse.py"))))
+    for begriff in ("bis zu drei Zeilen darüber", "ohne Firmenzeile dazwischen", "erste Segment endet mit ihm"):
+        assert begriff in kopf, begriff
+
+
+def test_doku_restrisiko_kein_verlass_auf_verdacht_fuer_abgewaehlte_anschrift():
+    """Nachprüfung Befund 2: Der CHANGELOG versprach, eine lesbare Privatanschrift im Briefkopf von Selbständigen falle
+    in der Ausgabe als Verdacht auf. Steht über ihr eine Zeile, die die Restrisiko-Prüfung als Namen einer Organisation
+    liest („Mitglied der Handwerkskammer …“), meldet sie sie nicht (test_robustheit_analyse.py::
+    test_abgewaehlte_privatanschrift_unter_kammerzeile_ohne_verdacht). CHANGELOG und Docstring von
+    analyse._firmenanschriften sagen deshalb „meist“ und nennen die Grenze. Außerdem gilt „gar nicht an die Schwärzung“
+    nur für Funde im Text: ein ganz abgewähltes Lichtbild geht mit allen Bereichen abgewählt mit (auftrag.auftrag_funde,
+    Lichtbild-Punkt des CHANGELOG)."""
+    punkt = _listenpunkt(_lies("CHANGELOG.md"), "- **Restrisiko-Prüfung:**")
+    assert "fällt bei Selbständigen eine lesbare Privatanschrift im Briefkopf noch in der Ausgabe auf" not in punkt
+    for begriff in ("ganz abgewählten Fund im Text", "meist weiter als Verdacht", "kein Verlass", "Organisation",
+                    "Mitglied der Handwerkskammer", "ohne Verdacht"):
+        assert begriff in punkt, begriff
+    funktion = next(k for k in ast.parse(_lies("anonymisierer/analyse.py")).body
+                    if isinstance(k, ast.FunctionDef) and k.name == "_firmenanschriften")
+    doc = _flach(ast.get_docstring(funktion))
+    assert "ist das in der Ausgabe der einzige Hinweis" not in doc
+    for begriff in ("meist weiter als Verdacht", "oft der einzige Hinweis", "verlässlich ist er nicht",
+                    "Mitglied der Handwerkskammer", "restrisiko._org_name"):
+        assert begriff in doc, begriff
+    # Ein ganz abgewählter Fund im Text bleibt aus dem Auftrag weg, ein ganz abgewähltes Lichtbild geht abgewählt mit
+    sys.path.insert(0, str(WURZEL))
+    from anonymisierer import auftrag
+    text_fund = {"kategorie": "strasse", "text": "Hauptstraße 12", "stellen": [{"seite": 0, "start": 0, "ende": 14}]}
+    bild_fund = {"kategorie": "lichtbild", "text": "", "stellen": [{"seite": 0, "start": 0, "ende": 0, "an": True,
+                                                                    "text": "", "bereich": [40, 60, 160, 210]}]}
+    angehakt, bilder = auftrag.auftrag_funde([text_fund, bild_fund], ["aus", "aus"], True)
+    assert angehakt == [] and [b["kategorie"] for b in bilder] == ["lichtbild"]
+    assert [st["an"] for st in bilder[0]["stellen"]] == [False]
+
+
+def test_doku_selbsttest_nennt_abweichungen_von_der_oberflaeche():
+    """Nachprüfung (Werkzeuge): Die README sagte, selbsttest.py analysiere und schwärze einen Ordner „wie die
+    Oberfläche“. Er gibt aber auch ganz abgewählte Funde an die Schwärzung – die Restrisiko-Prüfung meldet sie dann
+    nicht (test_selbsttest.py::test_selbsttest_gibt_ganz_abgewaehlte_funde_mit_anders_als_die_oberflaeche) –,
+    schwärzt ohne „Freigabe vor Weitergabe“ und nimmt jedes Dokument für sich, ohne Weitergabe im Lauf und ohne
+    Kundenliste. README und Modulkopf nennen das; die Aufrufe in selbsttest.py, auf die sich beide stützen, sind hier
+    mitgeprüft."""
+    punkt = _listenpunkt(_lies("README.md"), "- `selbsttest.py`")
+    assert "Ordner wie die Oberfläche" not in punkt
+    for begriff in ("nicht ganz wie in der Oberfläche", "jedes Dokument für sich", "Weitergabe im Lauf", "Kundenliste",
+                    "Freigabe vor Weitergabe", "ganz abgewählte Funde", "Restrisiko-Prüfung", "--einstellungen"):
+        assert begriff in punkt, begriff
+    baum = ast.parse(_lies("werkzeuge/selbsttest.py"))
+    kopf = _flach(ast.get_docstring(baum))
+    assert "wie in der Oberfläche analysiert und geschwärzt" not in kopf
+    for begriff in ("nicht ganz wie in der Oberfläche", "auftrag.auftrag_funde", "freigabe_erforderlich", "Kundenliste",
+                    "weitergabe_anwenden"):
+        assert begriff in kopf, begriff
+    aufrufe = {getattr(k.args[0], "id", None): k for k in ast.walk(baum)
+               if isinstance(k, ast.Call) and getattr(k.func, "id", None) == "_rufe" and k.args}
+    assert not {"lauf", "kundenliste"} & {w.arg for w in aufrufe["analysiere_pdf"].keywords}
+    schwaerzen = aufrufe["schwaerze_pdf"]
+    assert "freigabe_erforderlich" not in {w.arg for w in schwaerzen.keywords}
+    assert ast.unparse(schwaerzen.args[2]) == "a['funde']"           # alle Funde der Analyse, auch ganz abgewählte
+    namen = {k.id for k in ast.walk(baum) if isinstance(k, ast.Name)} | {k.attr for k in ast.walk(baum)
+                                                                         if isinstance(k, ast.Attribute)}
+    assert not {"standard_auftrag", "auftrag_funde", "weitergabe_anwenden", "LaufWissen"} & namen
 
 
 def test_lizenz_und_drittkomponenten():

@@ -30,7 +30,9 @@ Ablauf:
   Wissensbasis als Vor- oder Nachnamen kennt („Graf“, „Ritter“, „Kaplan“, „Pastor“: das bleibt eine Person).
   Firmenanschriften, die die Strukturregeln stehen lassen, werden abgewählt angeboten („vermutlich
   Firmenanschrift“) – außer im Absender einer Person (eigener Briefkopf von Selbständigen, Fußzeile eines
-  Privatbriefs) oder wenn ein anderes Dokument des Laufs dieselbe Anschrift als Kundenanschrift angehakt hat.
+  Privatbriefs: ein angehakter Name, den die Wortlisten als Vor- oder Nachnamen kennen, vorn in der Zeile oder bis zu
+  drei Zeilen darüber, ohne Firmenzeile dazwischen, und das erste Segment endet mit ihm – _absender_einer_person,
+  _person_vorn) oder wenn ein anderes Dokument des Laufs dieselbe Anschrift als Kundenanschrift angehakt hat.
   Vor dem Seitenmodell: keine PDF (Bild/Webseite mit Endung .pdf) -> klare Meldung statt Absturz (R-01); jedes Objekt
   einmal geladen, damit MuPDF eine nötige Reparatur JETZT ausführt und nicht erst nach Änderungen -> DATEI_REPARIERT
   (R-11); beschädigte Bilder (abgebrochenes JPEG) -> BILD_BESCHAEDIGT (R-07); Nebenkanäle mit denselben Detektoren
@@ -936,9 +938,15 @@ def _absender_einer_person(dok, s: int, e: int, namen_je_seite: dict) -> bool:
 def _firmenanschriften(dok, funde: list, aktive: set) -> list:
     """Firmenanschriften, die die Strukturregeln stehen lassen (dok.struktur_vorschlaege: Briefkopf, Fußzeile einer
     unbekannten Firma), als Funde mit lauter abgewählten Stellen: die Nutzerin sieht sie in der Liste und kann sie
-    anhaken; die Restrisiko-Prüfung meldet abgewählte Stellen nicht als Verdacht. Vorschläge, die eine vorhandene
-    Stelle berühren, entfallen. Steht eine solche Anschrift im Absender einer Person (siehe _absender_einer_person),
-    ist es die Anschrift der Kundin bzw. des Kunden: dann ein normaler, angehakter Fund (HINWEIS_ABSENDER)."""
+    anhaken. Bleibt ein solcher Fund ganz abgewählt, gibt die Oberfläche ihn nicht an die Schwärzung
+    (auftrag.auftrag_funde) – sieht die Anschrift nach Personendaten aus, meldet die Restrisiko-Prüfung sie deshalb
+    meist weiter als Verdacht. Nur abgewählte Stellen eines angehakten Funds meldet sie nicht. Gewollt: bei
+    Selbständigen ist der Verdacht in der Ausgabe oft der einzige Hinweis auf eine lesbare Privatanschrift – verlässlich
+    ist er nicht: Unter einer Zeile, die die Prüfung als Namen einer Organisation liest („Mitglied der Handwerkskammer
+    …“, restrisiko._org_name), gilt die Anschrift als Angabe dieser Organisation (org_kontext) und bleibt ohne Verdacht.
+    Vorschläge, die eine vorhandene Stelle berühren, entfallen. Steht eine solche Anschrift im Absender einer Person
+    (siehe _absender_einer_person), ist es die Anschrift der Kundin bzw. des Kunden: dann ein normaler, angehakter Fund
+    (HINWEIS_ABSENDER)."""
     vorschlaege = getattr(dok, "struktur_vorschlaege", None) or []
     if not vorschlaege:
         return []
