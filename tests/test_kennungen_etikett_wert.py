@@ -452,13 +452,21 @@ def test_c2_kein_geburtsname_aus_nicht_namen(text, wort):
 @pytest.mark.parametrize("text, wort", [
     ("Klinikum Mitte, Geb. Nord", "Nord"),
     ("Werk Süd, Geb. West", "West"),
-    ("[PERSON A], geb. Flensburg", "Flensburg"),
     ("Geborene Zwillinge sind im Tarif mitversichert.", "Zwillinge"),
     ("[PERSON A] geb. In Köln", "In"),
-    ("[PERSON A] geb. Polen", "Polen"),
 ])
 def test_c2_kein_fehlverdacht_geburtsname(text, wort):
     assert not [g for t, g in _gruende(text, platzhalter=["[PERSON A]"]) if wort in t and "Geburtsname" in g], \
+        _gruende(text, platzhalter=["[PERSON A]"])
+
+
+@pytest.mark.parametrize("text, wort", [("[PERSON A], geb. Flensburg", "Flensburg"),
+                                        ("[PERSON A] geb. Polen", "Polen")])
+def test_c2_ort_hinter_geb_wird_gemeldet(text, wort):
+    """Gegenprüfung 4d (Befund 2): ein Ort direkt hinter "Name geb." kann Geburtsname sein (Herkunftsnamen wie Linz,
+    Dessau, Israel) – die Erkennung schwärzt ihn nicht (er kann auch der Geburtsort sein), die Selbstkontrolle meldet
+    ihn, bleibt er lesbar. Bis Runde 4c galt das als Fehlverdacht; still blieb so jeder Herkunftsname."""
+    assert [g for t, g in _gruende(text, platzhalter=["[PERSON A]"]) if wort in t and "Geburtsname" in g], \
         _gruende(text, platzhalter=["[PERSON A]"])
 
 

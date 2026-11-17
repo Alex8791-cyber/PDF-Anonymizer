@@ -1076,7 +1076,9 @@ def _nummer_am_folgezeilenanfang(text: str, zeilenende: int):
 # Zeile bzw. Zelle, hinter Zwischenwörtern desselben Satzes bis zu einer Ankündigung ("Die eVB-Nummer Ihres neuen
 # Fahrzeugs lautet: …") und in einer Aufzählung ("eVB-Nummern: M3N4P5Q, R7T2W9K").
 def _kfz_kennungen(text: str) -> list:
-    """(anfang, ende) der eVB-Nummern und Transfertickets hinter ihrem Etikett (kennungsformen.kennungen)."""
+    """(anfang, ende) der eVB-Nummern und Transfertickets hinter ihrem Etikett (kennungsformen.kennungen) – ein
+    Kammfeld über Tabellenzellen ("K ⇥⇥ 7 ⇥⇥ H …") als ganze Stelle, nie je Zeichen: ein einzelnes Zeichen als
+    Kennung fände die Weitergabe in jeder Seitenzahl und jedem Wort wieder."""
     return [(f.start, f.ende) for f in kennungsformen.kennungen(text, ist_etikett=kennungsformen.wissen_etikett)
             if f.art in ("evb", "ticket")]
 
@@ -1668,9 +1670,9 @@ def eigener_rohwert(art: str, wert: str) -> bool:
     return sum(c.isdigit() for c in w) >= 2
 
 
-def kennungsform(wert: str) -> bool:
+def kennungsform(wert: str, zeitraum_erlaubt: bool = False) -> bool:
     """Allgemeine Form einer Kennung hinter einem Etikett mit eigener Wertform (kennungsformen.kennungsform)."""
-    return kennungsformen.kennungsform(wert)
+    return kennungsformen.kennungsform(wert, zeitraum_erlaubt)
 
 
 def _kreditkarte_spannen(text: str) -> list:

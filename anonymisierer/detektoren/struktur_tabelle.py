@@ -24,6 +24,7 @@ import re
 from bisect import bisect_left
 from typing import NamedTuple
 
+from .. import kennungsformen
 from . import Treffer, detektor
 from .struktur import (_ORG_ROLLEN_RE, _ROH_FUNKTIONSWORT, _ROH_KEIN_WOHNORT, _ROH_ORTSZUSATZ, ABKUERZUNG_RE,
                        ALLE_KATEGORIEN, PARTIKEL, PII_ARTEN, SICHERHEIT_SPALTE, Lage,
@@ -470,7 +471,7 @@ def _kennung(text: str, s: int, e: int, kategorie: str | None, eintrag: str = ""
         if art == "cvc":
             kategorie = "vertrag"
     sp = kennung_spanne(text, i, e, 3)
-    if sp is None or (art is not None and not allgemeiner_wert_passt(text[sp[0]:sp[1]])):
+    if sp is None or (art is not None and not allgemeiner_wert_passt(eintrag, text[sp[0]:sp[1]])):
         return []
     kat = kategorie or "vertrag"
     if kat == "iban" and _muster is not None and not _muster.finde_iban(text[sp[0]:sp[1]]):
@@ -545,6 +546,14 @@ def _kontakt(text: str, s: int, e: int, kategorie: str | None) -> list:
     return aus
 
 
+def _kartendaten_in_zellen(dok, tab: _Tabelle) -> bool:
+    """Stehen in den Zellen der Tabelle Kartendaten (kennungsformen.kartendaten: "Visa", eine Kartennummer mit gültiger
+    Prüfziffer)? Nur gefragt, wenn ein Spaltenkopf eine Prüfnummer sein kann."""
+    if _muster is None or not any(_muster.pruefnummer_etikett(sp.eintrag) for sp in tab.spalten):
+        return False
+    return any(kennungsformen.kartendaten(dok.seiten[nr].text[s:e]) for werte in tab.werte for nr, s, e, _ in werte)
+
+
 def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
     """Treffer aller Spalten einer Tabelle."""
     treffer = []
@@ -554,8 +563,12 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
     namensspalte = {i for i, sp in enumerate(tab.spalten) if "person" in sp.arten
                     and _NAMEN_KOPF_RE.match(_vergleichsform(sp.eintrag))}
     ganze_zellen = []     # Zellen einer Namensspalte ohne lesbare Namensform ("FREITAG", "NUR", "Kaplan")
+    # Tabelle mit Kartendaten: eine Spalte "Kartennummer"/"Kreditkarte" oder Kartendaten in den Zellen ("Karte ⇥⇥
+    # Nummer ⇥⇥ Sicherheitscode" über "Visa ⇥⇥ 4111 1111 1111 1111 ⇥⇥ 739") – dann ist "Prüfnummer"/"Sicherheitscode"
+    # im Kopf die Kartenprüfnummer
     karten_tabelle = any(sp.kategorie == "kreditkarte" and not (_muster is not None and (
-        _muster.pruefnummer_etikett(sp.eintrag) or _muster.eigene_wertform(sp.eintrag))) for sp in tab.spalten)
+        _muster.pruefnummer_etikett(sp.eintrag) or _muster.eigene_wertform(sp.eintrag))) for sp in tab.spalten) \
+        or _kartendaten_in_zellen(dok, tab)
     for idx, sp in enumerate(tab.spalten):
         werte = tab.werte[idx]
         if not werte:

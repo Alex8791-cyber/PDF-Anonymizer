@@ -220,10 +220,12 @@ Bitte vor dem Einsatz lesen – das sind die Grenzen des Werkzeugs:
 - **Unterschriften, Handschrift, Stempel** – werden nicht geschwärzt, auf Scans auch in
   „Maximal“ nicht. Die Texterkennung (OCR) liest Handschrift nicht zuverlässig. Die
   Restrisiko-Prüfung meldet auf Scans nicht gelesene Tinte in Unterschriftsfeldern, neben
-  Personenangaben und hinter Bankangaben als Verdacht; ein Unterschriftszug neben einem schon
-  geschwärzten Namen gilt nicht als Verdacht. Als Linien gezeichnete Unterschriften, Stempel
-  oder Logos in digitalen PDFs nennt nur ein Hinweis („Grafiken/Zeichnungen …, die nicht
-  geprüft werden“). Abhilfe: in der Vorschau einen Rahmen darüberziehen.
+  Personenangaben, hinter Bankangaben und hinter dem Etikett einer eVB-Nummer, eines
+  Transfertickets oder einer Kartenprüfnummer (etwa ein Kammfeld mit einer Ziffer je Kästchen)
+  als Verdacht; ein Unterschriftszug neben einem schon geschwärzten Namen gilt nicht als
+  Verdacht. Als Linien gezeichnete Unterschriften, Stempel oder Logos in digitalen PDFs nennt
+  nur ein Hinweis („Grafiken/Zeichnungen …, die nicht geprüft werden“). Abhilfe: in der
+  Vorschau einen Rahmen darüberziehen.
 - **Gesichter und Fotos** – gesucht werden nur Lichtbilder auf Ausweiskopien, und die nicht
   immer. Andere Gesichter und Fotos bleiben in „Ausgewogen“ und „Hoch“ stehen. In „Maximal“
   bleiben winzige Bilder, Bilder über mindestens die halbe Seite (nur die Fotos darin werden

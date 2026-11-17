@@ -34,9 +34,11 @@ Regel „Etikett + Wert“ (wert_hinter_etikett):
     kennungen(text, ...) -> [Kennungsfund]   alle eVB-Nummern, Transfertickets, Kartenprüfnummern hinter Etiketten
     kennungsform(wert)                   hat ein Wert hinter einem dieser Etiketten die allgemeine Form einer Kennung?
     kartenbezug(text, s, e, extra=None)  Kartenangabe oder Kartennummer in der Nähe?
+    kartendaten(text)                    Kartenangabe oder Kartennummer mit gültiger Prüfziffer in text?
     etikett_zeile(text, s, e)            Etikettzeile (Doppelpunkt dahinter, höchstens zwei Wörter davor)?
     ist_funktionswort(wort), ist_abkuerzung(wort, danach)
     geburtsname_hinter_etikett(text, m, ...) -> Geburtsnamenfund | None   Name hinter einem Geburtsnamen-Etikett
+    weitere_geburtsnamen(text, m, ende, ...) -> [Geburtsnamenfund]      weitere Namen hinter "Geburtsnamen:"
     geburtsname_moeglich(text, s, e), feld_etikett(text, s, e)          Name möglich? / selbst ein Feld-Etikett?
 """
 
@@ -56,12 +58,13 @@ _SUCHFENSTER = 400                # so weit hinter dem Etikett wird gesucht (Zei
 _UE = r"(?:ü|ue|u)"               # Umlaut, wie ihn die OCR liest ("Kartenprufnummer", "Versicherungsbestatigung")
 _AE = r"(?:ä|ae|a)"
 _M = r"(?:m|rn)"                  # die OCR liest "m" als "rn" ("eVB-Nurnmer", "Geburtsnarne")
-_NUMMER = rf"(?:nr\.?|nu{_M}{_M}er[n]?|no\.?)"
+_NU = rf"nu{_M}{_M}[ec]r"         # "Nummer", OCR auch "Nurnmer", "Nummcr" ("e" als "c" gelesen)
+_NUMMER = rf"(?:nr\.?|{_NU}[n]?|no\.?)"
 # eVB-Nummer: "eVB", "e-VB", "eV8" (OCR), "VB-Nr."/"VB-Nummer" (nicht "VB" allein: Verhandlungsbasis),
 # "(elektronische) Versicherungsbestätigung(en/s)", mit Nummer-Zusatz in Einzahl und Mehrzahl ("eVB-Nummern") und in
 # einer Betreffzeile als Anfrage oder Mitteilung ("AW: eVB-Anfrage – K7H3M9P"; nicht "eVB-Hotline"); nicht "EVB-IT"
 # (Vertragsbedingungen der IT-Beschaffung)
-_EVB = (rf"(?:(?i:e-?v[b8])|VB(?=[ \t]*[-.]?[ \t]*(?i:nr\b|nu{_M}{_M}er|no\b))"
+_EVB = (rf"(?:(?i:e-?v[b8])|VB(?=[ \t]*[-.]?[ \t]*(?i:nr\b|{_NU}|no\b))"
         rf"|(?i:(?:elektronische[nrs]?[ \t]+)?versicherungsbest{_AE}tigung)(?i:en|s)?)"
         rf"(?:[ \t]*[-.]?[ \t]*(?i:{_NUMMER}|code))?"
         r"(?:-(?:Anfrage|Anforderung|Bestätigung|Mitteilung|Zuteilung|Erteilung|Daten))?(?!-[A-Za-zÄÖÜäöü])")
@@ -73,38 +76,50 @@ _TICKET = (rf"(?:[A-Za-z]{{1,4}}-)?(?i:transfer[ \t]?-?[ \t]?tickets?)(?:[ \t]*[
 # ("Kartenprüfnr.", "Kreditkarten-Prüfnummer", "Kartensicherheitscode", "Kartenverifikationsnummer"), englisch "Card
 # Verification Code", "Prüfnummer der Karte" / "Sicherheitscode (der Kreditkarte)"; hinter CAV stehen drei Ziffern
 _KARTE_VOR = r"(?:kredit|debit|zahlungs|bank|giro|ec)?-?karten-?"
-_PRUEF_WORT = (rf"(?:pr{_UE}f(?:nu{_M}{_M}er|nr\.?|ziffer|zahl|code)|sicherheits-?(?:code|nu{_M}{_M}er)"
-               rf"|verifi(?:zierungs|kations)(?:nu{_M}{_M}er|code))")
-_CVC = (r"(?:(?i:c\.?v\.?[cv]\.?)(?:[ \t]?2(?![\d]))?|CAV2?"
-        rf"|(?i:{_KARTE_VOR}(?:pr{_UE}f|verifi(?:zierungs|kations)|sicherheits)-?(?:nu{_M}{_M}er|nr\.?|ziffer|zahl"
+_PRUEF_WORT = (rf"(?:pr{_UE}f(?:{_NU}|nr\.?|ziffer|zahl|code|z\.)|sicherheits-?(?:code|{_NU}|ziffer|zahl)"
+               rf"|kontroll-?(?:ziffer|{_NU}|zahl|code)|verifi(?:zierungs|kations)(?:{_NU}|code))")
+_CVC = (r"(?:(?i:c\.?v\.?[cv]\.?)(?:[ \t]?2(?![\d]))?|CAV2?|CSC"
+        rf"|(?i:{_KARTE_VOR}(?:pr{_UE}f|verifi(?:zierungs|kations)|sicherheits)-?(?:{_NU}|nr\.?|ziffer|zahl"
         r"|code|wert))"
         r"|(?i:card[ \t]+(?:verification|security)[ \t]+(?:code|value|number))"
         rf"|(?i:{_PRUEF_WORT}|security[ \t]+code)[ \t]*\(?[ \t]*(?i:der|ihrer|meiner|ihre|of[ \t]+the)[ \t]+"
         r"(?i:(?:kredit|debit|bank|zahlungs|giro|ec)-?)?(?i:karte|card)[ \t]*\)?)"
         r"(?:[ \t]*/[ \t]*(?i:cvc|cvv)2?)?"
-        rf"(?:[ \t]*-?[ \t]*(?i:code|nu{_M}{_M}er|nr\.?|pr{_UE}fnummer|pr{_UE}fziffer|pr{_UE}fcode|wert|zahl))?")
+        rf"(?:[ \t]*-?[ \t]*(?i:code|{_NU}|nr\.?|pr{_UE}fnummer|pr{_UE}fziffer|pr{_UE}fcode|wert|zahl))?")
 # Kartenprüfnummer nur mit Kartenangabe in der Nähe: "Prüfnummer", "Prüfnr.", "Sicherheitscode", "Security Code",
-# "CID" (American Express), "CVN", "CV2"
-_PRUEF = rf"(?<!-)(?i:{_PRUEF_WORT}|security[ \t]+code|cvn|cv2|cid)(?!-[A-Za-zÄÖÜäöü])"
+# "CID" (American Express), "CVN", "CV2" – und "CVC", wie die Texterkennung es auch liest ("CVG", "CV C")
+_PRUEF = rf"(?<!-)(?:(?i:{_PRUEF_WORT}|security[ \t]+code|cvn|cv2|cid)|KPN|CVG|CV[ ][CV])(?!-[A-Za-zÄÖÜäöü])"
 ETIKETT_RE = re.compile(
     r"(?<![\wäöüß])(?:"
     rf"(?P<evb>{_EVB})|(?P<ticket>{_TICKET})|(?P<cvc>{_CVC})|(?P<pruef>{_PRUEF})"
     r")(?![\wäöüß])")
-# Geburtsname als Feld-Etikett: "Geburtsname(n)", "Geb.-Name", "Geb.Name", "Geb. Name", "GEB.-NAME", OCR "Geburtsnarne";
-# die Kurzformen nur als Feld (Doppelpunkt, Zellgrenze, Klammer oder Zeilenende dahinter), nicht im Satz
+# Geburtsname als Feld-Etikett: "Geburtsname(n)", "Mädchenname(n)", "Name vor der Ehe", "Familienname vor der
+# Eheschließung", "Geb.-Name", "Geb.Name", "Geb. Name", "GEB.-NAME", "Geburtsn.", wie die Texterkennung es liest
+# ("Geburtsnarne", "Gcburtsname", "Geburlsname", "Geburtsnamc"); die Kurzformen nur als Feld (Doppelpunkt, Zellgrenze,
+# Klammer oder Zeilenende dahinter, oder ein Leerzeichen vor einem Namen: "Geb.-Name Quarnstedt"), nicht im Satz
+_E = r"[ec]"                      # die OCR liest "e" als "c" ("Gcburtsname", "Geburtsnamc", "eVB-Nummcr")
 GEBURTSNAME_ETIKETT_RE = re.compile(
-    rf"(?<![\wäöüß.\-])(?:(?i:geburtsna{_M}en?)|(?i:geb\.?[ \t]?-?[ \t]?na{_M}e)(?=[ \t]*(?::|\t\t|\(|\n|$)))"
+    rf"(?<![\wäöüß.\-])(?:(?i:(?:g{_E}bur[tl]s|m{_AE}dchen)na{_M}{_E}n?"
+    r"|(?:familien|nach)?name[ \t]+vor[ \t]+der[ \t]+(?:ehe(?:schlie(?:ß|ss)ung)?|heirat))"
+    rf"|(?i:geb\.?[ \t]?-?[ \t]?na{_M}e|geburtsn\.)(?=[ \t]*(?::|\t\t|\(|\n|$)|[ ][A-ZÄÖÜ][a-zäöüß]))"
     r"(?![\wäöüß])")
+# "geb.", wie die Texterkennung es liest ("gab.", "gcb.", "qeb."): nur zwischen zwei Namen ein Geburtsnamen-Etikett
+# (namen.geburtsnamen, restrisiko) – "gab." ist auch ein Wort ("… die ihm Frau Weber gab. Müller kam später")
+GEB_VERLESEN = r"gab|GAB|gcb|qeb|qcb|qab"
+# Etikett in der Mehrzahl: dahinter auch mehrere Namen ("Geburtsnamen: Quarnstedt, Ellerbrok")
+_GEBURTSNAMEN_MEHRZAHL_RE = re.compile(rf"(?i:(?:g{_E}bur[tl]s|m{_AE}dchen)na{_M}{_E}n)")
 
 # Wertformen: eVB 7 Zeichen aus Großbuchstaben und Ziffern (O/0 und I/1 gehören dazu: die OCR-Lesart hat dieselbe
 # Form); Transferticket 8 bis 20 Buchstaben/Ziffern, auch in Gruppen; Kartenprüfnummer 3 oder 4 Ziffern – auch
 # als Kammfeld mit einer Ziffer je Kästchen ("7 3 9", "7 | 3 | 9", untereinander)
-_KAMM_TRENNER = r"(?:[ ]{1,3}|[ \t]*[|\n][ \t]*|\t\t)"
+_KAMM_TRENNER = r"(?:[ ]{1,3}|[ \t]*[|\n][ \t]*|\t\t|\][ ]?\[)"
+_KAMM_TRENNER_ZEILE = r"(?:[ ]{1,3}|[ \t]*\|[ \t]*|\t\t)"      # Kammfeld in einer Zeile (eVB: 7 Kästchen nebeneinander)
 WERT_RE = {
-    "evb": re.compile(r"(?<![\w\-/.])[A-Z0-9]{7}(?![\w]|[-/.][A-Za-z0-9])"),
+    "evb": re.compile(rf"(?<![\w\-/.])(?:[A-Z0-9]{{7}}|[A-Z0-9](?:{_KAMM_TRENNER_ZEILE}[A-Z0-9]){{6}})"
+                      r"(?![\w]|[-/.][A-Za-z0-9])"),
     "ticket": re.compile(r"(?<![\w\-/.])[A-Za-z0-9](?:[A-Za-z0-9]|[-/.](?=[A-Za-z0-9])){7,25}"
                          r"(?![\w]|[-/.][A-Za-z0-9])"),
-    "cvc": re.compile(rf"(?<![\d.,/\-])(?:\d{{3,4}}|\d(?:{_KAMM_TRENNER}\d){{2,3}})(?![\d]|[-.,:/]\d)"),
+    "cvc": re.compile(rf"(?<![\d.,/\-])(?:\d{{3,4}}|\[?\d(?:{_KAMM_TRENNER}\d){{2,3}}\]?)(?![\d]|[-.,:/]\d)"),
 }
 WERT_RE["pruef"] = WERT_RE["cvc"]
 # eVB, wie die OCR sie mit eingefügten Zeichen liest ("K7/H3MY9P", "/RT4ZU9", "K7H3MJ9P"): 6 bis 9 Buchstaben/Ziffern
@@ -155,17 +170,80 @@ unsere die der das den dem des ein eine einer eines einem einen erste erster ers
 neu alt alte bitte hier dort siehe nicht kein keine keiner noch schon ja nein auch nur sehr so dann falls wenn
 sofern ggf jeweils
 """.split())
-# Spaltenköpfe und Sachwörter, die hinter einem leeren Feld "Geburtsname" oder in der Nachbarzelle eines Tabellenkopfs
-# stehen, nie ein Name ("Geburtsname ⇥⇥ Status", "Geburtsname:" ⏎ "Typ")
+# Spaltenköpfe, Feld-Etiketten und Sachwörter, die hinter einem leeren Feld "Geburtsname" oder in der Nachbarzelle eines
+# Tabellenkopfs stehen, nie ein Name ("Geburtsname ⇥⇥ Status", "Geburtsname:" ⏎ "Typ", "Geb.-Name ⇥⇥ Sport") – auch
+# wenn sie zugleich Nachnamen sind ("Grund", "Größe")
 _KOPFWOERTER = frozenset("""
 status art typ rolle bemerkung bemerkungen hinweis hinweise datum ort nummer nr beginn ende ablauf tarif beitrag
 summe betrag anzahl klasse gruppe kategorie sparte produkt wert code kennung stand angaben angabe feld unterschrift
-vermerk abschnitt teil seite anlage punkt ziffer
-""".split())
-# Abkürzungen mit Punkt, hinter denen ein Satz weitergeht ("amtl. Kennzeichen", "Kfz. M-AB 123", "lt. Ausweis")
+vermerk abschnitt teil seite anlage punkt ziffer größe groesse gewicht grund zweck anlass sport sportart hobby hobbys
+freizeit agentur geschäftsstelle geschaeftsstelle raucher nichtraucher kasse krankenkasse beruf tätigkeit
+taetigkeit branche einkommen gehalt familienstand geschlecht anrede sprache muttersprache religion konfession
+nationalität nationalitaet staatsangehörigkeit staatsangehoerigkeit land kreis bundesland ortsteil zusatz
+vorerkrankungen erkrankungen diagnose diagnosen medikamente allergien behinderung pflegegrad kinder eltern
+haarfarbe augenfarbe statur kfz pkw fahrzeug kennzeichen fahrerlaubnis führerschein fuehrerschein
+""".casefold().split())
+# Kopf eines zusammengesetzten Feld-Etiketts oder Sachworts – kein Nachname endet so ("Künstlername", "Ordensname",
+# "Geburtsland", "Doktorgrad", "Adresszusatz", "Vorerkrankungen", "Haarfarbe", "Schuhgröße", "Hauptversicherter")
+_SACH_KOPF_RE = re.compile(
+    r"(?i)^(?:[a-zäöüß]{3,}(?:name|namen|grad|titel|zusatz|zahl|datum|nummer|angabe|angaben|farbe|größe|groesse"
+    r"|gewicht|erkrankung|erkrankungen|krankheit|krankheiten|beschwerden|versicherte|versicherter|versicherten|status"
+    r"|nehmer|nehmerin|berechtigte|berechtigter)"
+    r"|[a-zäöüß]*(?:geburts|herkunfts|heimat|bundes|wohn|abstammungs|einsatz)(?:land|ort|staat))$")
+
+
+def etikettwort(wort: str) -> bool:
+    """Ist das Wort ein Spaltenkopf oder zusammengesetztes Feld-Etikett (_KOPFWOERTER, _SACH_KOPF_RE: "Sport",
+    "Agentur", "Künstlername", "Geburtsland") – kein Name, wenn es nicht als Nachname bekannt ist (Prüfung beim
+    Aufrufer)?"""
+    w = (wort or "").strip(".,;:()")
+    return bool(w) and (w.casefold() in _KOPFWOERTER or bool(_SACH_KOPF_RE.match(w)))
+
+
+def sachwort(wort: str) -> bool:
+    """Ist das Wort ein Feld-Etikett oder Sachwort statt eines Namens – Spaltenkopf (_KOPFWOERTER), zusammengesetztes
+    Etikett (_SACH_KOPF_RE) oder Sachwort der Namensprüfung (namen: "Pflichtangabe", "Folgendes", "Beruf",
+    "Abweichender")?"""
+    w = (wort or "").strip(".,;:()")
+    if not w:
+        return False
+    if w.casefold() in _KOPFWOERTER or _SACH_KOPF_RE.match(w):
+        return True
+    if herkunftsname(w):
+        return False                                    # "Landauer" endet auf "-dauer", ist aber ein Herkunftsname
+    try:
+        from .namen import _ist_sachwort
+        return bool(_ist_sachwort(_titelform(w)))
+    except Exception:  # pragma: no cover - Namensmodul nicht ladbar
+        return False
+
+
+def mehrdeutiger_geburtsname(wort: str, frage=None) -> bool:
+    """Bezeichnet der Geburtsname auch etwas anderes – einen Ort ("Linz", "Polen"), eine Herkunft ("Mainzer Straße"),
+    ein gewöhnliches Wort (mehrdeutiger Nachname "Deutsch", Allerweltswort) oder ein Feld-Etikett? Dann wird er nur an
+    seiner Stelle und in Personenkontext geschwärzt, nicht im übrigen Text ("Korrespondenzsprache: Deutsch")."""
+    frage = frage or _wissen_frage
+    k = _titelform((wort or "").strip(".,;:()"))
+    if not k or len(k.split()) != 1:
+        return False
+    return bool(frage("ist_ort", k) or herkunftsname(k, frage) or frage("ist_mehrdeutig", k)
+                or frage("ist_allerweltswort", k) or etikettwort(k))
+
+
+def herkunftsname(wort: str, frage=None) -> bool:
+    """Ist das Wort die Einwohnerbezeichnung eines Orts ("Mainzer", "Danziger", "Landauer", "Pariser") – als Name ein
+    Herkunftsname?"""
+    k = _titelform((wort or "").strip(".,;:()"))
+    if not k.endswith("er") or len(k) < 6:
+        return False
+    frage = frage or _wissen_frage
+    return bool(frage("ist_ort", k[:-2]) or frage("ist_nachname", k[:-2]))
+# Abkürzungen mit Punkt, hinter denen ein Satz weitergeht ("amtl. Kennzeichen", "Kfz. M-AB 123", "lt. Ausweis",
+# "Kennz. M-AB 123", "Fa. Humbaur", "auf der Rücks. ist …")
 _ABKUERZUNGEN = frozenset("""
 amtl kfz fzg gem lt nr bzw ggf evtl inkl zzgl ca vgl sog usw etc abs art str tel hr fr frl dr prof st vers kd geb
-ff bd jg lfd max min mind zul pkw lkw ust mwst ziff verw verh gesch eingetr reg ref betr bzgl abt
+ff bd jg lfd max min mind zul pkw lkw ust mwst ziff verw verh gesch eingetr reg ref betr bzgl abt kennz fa fam gebr
+inh kto rücks ruecks ehem stellv stv zt ges allg pers priv dipl ing spez vorm ehel led verst
 """.split())
 
 
@@ -194,7 +272,18 @@ version vers jahr jahre ab seit bis vom von am
 """.split())
 _FUELLWORT_RE = re.compile(r"(?i:lautet|lauten|lautend(?:[ \t]+auf)?|ist|sind|nr\.?|nummer|no\.?)(?![\wäöüß])")
 _ANKUENDIGUNG_RE = re.compile(r"(?i:lautet|lauten|lautend(?:[ \t]+auf)?|ist|sind|heißt|heisst|lautete)(?![\wäöüß])")
-_TRENNER = frozenset(" \t:.=#-–—*|→»>\"„“”'‚‘’;,_…)")
+# Ankündigung einer Kennung mitten im Satz: das Nummer-Wort ("hat die Nummer K7H3M9P", "trägt die Nr. …", "unter der
+# Kennung …") – und, schwächer, eine Präposition direkt vor dem Wert ("unter K7H3M9P erstellt", "mit K7H3M9P"): dort
+# zählt nur ein Wert aus Buchstaben UND Ziffern (nicht "unter 0800123")
+_ANKUENDIGUNG_KENNUNG_RE = re.compile(
+    r"(?:(?i:lautet|lauten|lautend(?:[ \t]+auf)?|ist|sind|heißt|heisst|lautete)"
+    r"|Nummer|Nr\.|NUMMER|NR\.|Kennung|KENNUNG|Code|CODE|ID)(?![\wäöüß])")
+_SCHWACHE_ANKUENDIGUNG_RE = re.compile(r"(?i:unter|mit)(?![\wäöüß])")
+# Füllung in einer Klammer vor dem Wert: "(Nr. K7H3M9P)", "(Nummer: K7H3M9P)", "(ID TT0815AB4711)"
+_KLAMMER_FUELLUNG_RE = re.compile(r"\([ \t]*(?i:nr\.?|nummer|no\.?|id|code)[ \t]*[:.#]?[ \t]*")
+_TRENNER = frozenset(" \t:.=#-–—*|→»>\"„“”'‚‘’;,_…)•·▪◦‣")
+# Aufzählungszeichen am Anfang einer Zeile ("•", "-", "1.", "2)", "a)")
+_LISTENZEICHEN_RE = re.compile(r"(?:[•·▪◦‣*–—-]|\d{1,2}[.)]|[a-z][.)])[ \t]+")
 _KURZE_KLAMMER_RE = re.compile(r"\([^()\n]{1,30}\)")
 _KLAMMER_RE = re.compile(r"\([^()]{1,%d}\)" % MAX_KLAMMER)
 _WORT_RE = re.compile(r"[^\s()]+")
@@ -220,6 +309,11 @@ def _fuellung(text: str, i: int, grenze: int, wert_re: re.Pattern):
                 return None, umbruch, zelle
             umbruch = True
             i += 1
+            while i < grenze and text[i] in " \t":
+                i += 1
+            n = _LISTENZEICHEN_RE.match(text, i, grenze)
+            if n is not None:
+                i = n.end()                             # "eVB-Nummern:" ⏎ "1. K7H3M9P"
         elif c == "\t" and text.startswith("\t\t", i):
             if umbruch or zelle:
                 return None, umbruch, zelle
@@ -228,6 +322,10 @@ def _fuellung(text: str, i: int, grenze: int, wert_re: re.Pattern):
         elif c in _TRENNER:
             i += 1
         elif c == "(":
+            f = _KLAMMER_FUELLUNG_RE.match(text, i)
+            if f is not None and wert_re.match(text, f.end()):
+                i = f.end()                             # "(Nr. K7H3M9P)": der Wert steht hinter "Nr." in der Klammer
+                break
             k = _KURZE_KLAMMER_RE.match(text, i)
             if k is None or wert_re.match(text, i + 1):
                 if wert_re.match(text, i + 1):
@@ -256,33 +354,100 @@ def _satzende(text: str, wort_start: int, wort_ende: int) -> bool:
         return not ist_abkuerzung(kern, "")
     if naechstes.islower() or naechstes.isdigit():
         return False                                    # "vom 12. März", "ca. drei": der Satz geht weiter
+    if _CODE_DANACH_RE.match(danach):
+        return False                                    # "Kennz. M-AB 123": ein Code beginnt keinen Satz
     return not ist_abkuerzung(kern, danach)
+
+
+# ein Code aus Großbuchstaben (mit Bindestrich oder Ziffer) – kein Satzanfang ("Kennz. M-AB 123", "FIN WVWZZZ1…")
+_CODE_DANACH_RE = re.compile(r"[ \t]*(?=[A-ZÄÖÜ0-9\-]*[\d\-])[A-ZÄÖÜ][A-ZÄÖÜ0-9]*-?[A-ZÄÖÜ0-9]+(?![a-zäöüß])")
 
 
 def _anderes_etikett(text: str, i: int, nach_komma: bool, ist_etikett) -> bool:
     """Beginnt bei i ein anderes Etikett: eines der Kennungs- oder Geburtsnamen-Etiketten, oder – hinter einem Komma,
     Semikolon oder einer breiten Lücke – ein Feld-Etikett der Wissensbasis mit Doppelpunkt dahinter ("…, Ihre
     Kundennummer: …")?"""
-    if ETIKETT_RE.match(text, i) or GEBURTSNAME_ETIKETT_RE.match(text, i):
-        return True
+    return _eigenes_etikett(text, i) or _fremdes_feld(text, i, nach_komma, ist_etikett) is not None
+
+
+def _eigenes_etikett(text: str, i: int) -> bool:
+    """Beginnt bei i eines der Kennungs- oder Geburtsnamen-Etiketten dieses Moduls (mit eigenem Wert)?"""
+    return bool(ETIKETT_RE.match(text, i) or GEBURTSNAME_ETIKETT_RE.match(text, i))
+
+
+def _fremdes_feld(text: str, i: int, nach_komma: bool, ist_etikett) -> int | None:
+    """Position hinter dem Doppelpunkt, wenn bei i – hinter einem Komma, Semikolon oder Zeilenumbruch – ein
+    Feld-Etikett der Wissensbasis mit Doppelpunkt beginnt ("…, Ihre Kundennummer: …", "…, Kennzeichen: …"), sonst
+    None."""
     if not nach_komma or ist_etikett is None:
-        return False
+        return None
     m = re.match(r"([^\s:()]{2,40}(?:[ ][^\s:()]{2,40}){0,2})[ \t]*:", text[i:i + 90])
     if m is None:
-        return False
+        return None
     teile = m.group(1).split(" ")
     for k in range(len(teile)):
         try:
             if ist_etikett(" ".join(teile[k:])):
-                return True
+                return i + m.end()
         except Exception:
-            return False
+            return None
+    return None
+
+
+# Gegenstände mit eigenen Nummern oder Codes: steht eines davon direkt vor einem Doppelpunkt hinter einem Kennungs-
+# Etikett, gehört der Wert ihm ("Transferticket für Tarif: PREMIUM2024", "Transferticket – Hotline: 0800-…") – ebenso
+# ein Kennungs- oder Kontakt-Etikett der Wissensbasis ("Kennzeichen:", "Kundennummer:"); nicht ein Zweck ("für die
+# Zulassung: …")
+_FREMDE_GEGENSTAENDE = frozenset("""
+tarif tarife tarifcode tarifkennung produkt hotline service servicetelefon kundenservice telefon tel fax telefax
+durchwahl rückfragen rueckfragen internet online homepage webseite website mail e-mail email portal postfach
+kennzeichen kennz typ modell fin laufzeit versicherungsjahr jahr zeitraum beitrag gebühr gebuehr klasse sf-klasse
+vertrag police konto iban kundennummer
+""".split())
+
+
+def fremder_gegenstand(wort: str) -> bool:
+    """Ist das Wort ein Gegenstand mit eigener Nummer oder eigenem Code ("Tarif", "Hotline", "Kennzeichen", "Laufzeit")
+    – dann gehört ein Wert hinter ihm nicht zu einem eVB- oder Transferticket-Etikett davor?"""
+    k = (wort or "").strip(".,;:()[]\"'„“").casefold()
+    if not k or not wort.strip(".,;:()[]\"'„“")[:1].isupper():
+        return False
+    if k in _FREMDE_GEGENSTAENDE or k.rsplit("-", 1)[-1] in _FREMDE_GEGENSTAENDE:
+        return True
+    try:
+        from . import wissen
+        for art in ("kennung", "kontakt"):
+            if wissen.index(f"etiketten_{art}").eintrag_fuer(wort.strip(".,;:()")) is not None:
+                return True
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return False
     return False
+
+
+def kennung_neutral(zwischen: str) -> bool:
+    """Ordnen die Zwischenwörter einen Wert ohne Ankündigung keinem anderen Gegenstand zu? Klein geschriebene Wörter,
+    Funktionswörter und Anreden ("bitte", "hinten", "erhalten Sie") – kein groß geschriebenes Sachwort ("Hotline",
+    "Tarif", "Versicherungsjahr", "Kfz": "Transferticket Hotline 0800-1234567")."""
+    for w in re.findall(r"[^\W\d_][\w\-]*", zwischen or ""):
+        if w[:1].isupper() and not ist_funktionswort(w) and w.casefold() not in ("nr", "nummer", "code", "id"):
+            return False
+    return True
+
+
+def _letztes_wort(text: str, pos: int, k: int) -> str:
+    teile = text[pos:k].split()
+    return teile[-1].strip(".,;:()") if teile else ""
+
+
+def _wert_ueberspringen(text: str, i: int, grenze: int) -> int:
+    """Ende des Werts eines fremden Felds ab i: bis zum nächsten Komma, Semikolon oder Zeilenende."""
+    m = re.compile(r"[^,;\n]*").match(text, i, grenze)
+    return m.end() if m else i
 
 
 def wert_hinter_etikett(text: str, pos: int, wert_re: re.Pattern, *, grenze: int | None = None, ist_etikett=None,
                         max_woerter: int = MAX_ZWISCHENWOERTER, zwischenwort=None,
-                        ohne_ankuendigung: int = 0) -> Wertfund | None:
+                        ohne_ankuendigung: int = 0, kennung: bool = False) -> Wertfund | None:
     """Wert der Form `wert_re` hinter einem Etikett, das bei `pos` endet (Regel im Modulkopf): direkt hinter Füllung
     oder hinter Zwischenwörtern desselben Satzes bis zu einer Ankündigung. ist_etikett(phrase): Feld-Etikett der
     Wissensbasis (für den Abbruch an einem anderen Etikett); ohne sie zählen nur die Etiketten dieses Moduls.
@@ -290,7 +455,12 @@ def wert_hinter_etikett(text: str, pos: int, wert_re: re.Pattern, *, grenze: int
     Zwischenwort ("GEBURTSNAME, FALLS ABWEICHEND: …", "eVB-Nummer ANGEBEN: …")? Dann gilt der Weg über die
     Zwischenwörter – wie bei klein geschriebenen Wörtern, die die Wertform gar nicht erst trifft.
     ohne_ankuendigung: hinter so vielen Zwischenwörtern ohne Ziffer gilt ein Wert der Form auch ohne Ankündigung,
-    wenn er in derselben Zeile steht und Zeile oder Satz beendet ("Prüfziffer hinten 739") – ankuendigung "frei"."""
+    wenn er in derselben Zeile steht und Zeile oder Satz beendet ("Prüfziffer hinten 739") – ankuendigung "frei".
+    kennung: der Wert ist eine Kennung (eVB, Transferticket, Kartenprüfnummer) – dann kündigt auch das Nummer-Wort
+    im Satz an ("hat die Nummer K7H3M9P"), schwächer eine Präposition direkt davor ("unter K7H3M9P erstellt": nur
+    ein Wert aus Buchstaben und Ziffern); ein Wert hinter einem Gegenstand mit eigener Nummer ("Transferticket für
+    Tarif: PREMIUM2024", "…, Kennzeichen: M-AB 123, lautet: …") gehört diesem, und ohne Ankündigung zählt ein Wert
+    nur hinter neutralen Zwischenwörtern (kennung_neutral: nicht "Transferticket Hotline 0800-1234567")."""
     ende_suche = min(len(text), grenze if grenze is not None else len(text), pos + _SUCHFENSTER)
     i, umbruch, zelle = _fuellung(text, pos, ende_suche, wert_re)
     if i is not None and i < ende_suche:
@@ -298,15 +468,17 @@ def wert_hinter_etikett(text: str, pos: int, wert_re: re.Pattern, *, grenze: int
         if m and not (zwischenwort is not None and zwischenwort(m.start(), m.end(), umbruch)):
             return Wertfund(m.start(), m.end(), umbruch, zelle, "", "")
     # Zwischenwörter desselben Satzes bis zu einer Ankündigung
-    k, woerter, umbruch, nach_komma = pos, 0, False, False
+    k, woerter, umbruch, nach_komma, fremd = pos, 0, False, False, False
+    ankuendigung_re = _ANKUENDIGUNG_KENNUNG_RE if kennung else _ANKUENDIGUNG_RE
     while k < ende_suche and woerter <= max_woerter:
         c = text[k]
         if c in " \t" and not text.startswith("\t\t", k):
             k += 1
             continue
         if text.startswith("\t\t", k):
-            if not woerter:
-                return None                             # Zellgrenze direkt hinter dem Etikett: oben geprüft
+            if not woerter or umbruch:
+                return None                             # Zellgrenze direkt hinter dem Etikett: oben geprüft; in der
+                                                        # nächsten Zeile ein anderes Feld ("Geburtsland ⇥⇥ Polen")
             return _nach_ankuendigung(text, k + 2, ende_suche, wert_re, pos, k, "zelle")
         if c == "\n":
             if umbruch:
@@ -315,6 +487,9 @@ def wert_hinter_etikett(text: str, pos: int, wert_re: re.Pattern, *, grenze: int
             k += 1
             continue
         if c in ":=":
+            if kennung and woerter and fremder_gegenstand(_letztes_wort(text, pos, k)):
+                k, fremd = _wert_ueberspringen(text, k + 1, ende_suche), True   # "Transferticket für Tarif: …"
+                continue
             fund = _nach_ankuendigung(text, k + 1, ende_suche, wert_re, pos, k, c)
             if fund is not None:
                 return fund
@@ -337,18 +512,35 @@ def wert_hinter_etikett(text: str, pos: int, wert_re: re.Pattern, *, grenze: int
         if w is None:
             k += 1
             continue
-        if woerter and _anderes_etikett(text, k, nach_komma, ist_etikett):
+        if woerter and _eigenes_etikett(text, k):
             return None
-        if 0 < woerter <= ohne_ankuendigung and not umbruch:
+        feld = _fremdes_feld(text, k, nach_komma, ist_etikett) if woerter else None
+        if feld is not None:
+            if not kennung:
+                return None
+            k, fremd = _wert_ueberspringen(text, feld, ende_suche), True     # "…, Kennzeichen: M-AB 123, lautet: …"
+            continue
+        if 0 < woerter <= ohne_ankuendigung and not umbruch and not fremd and (
+                not kennung or kennung_neutral(text[pos:k])):
             v = wert_re.match(text, k)
             if v is not None and WERT_ENDE_RE.match(text, v.end()) and not re.search(r"\d", text[pos:k]) \
                     and text[pos:k].split()[-1].strip(".,:").casefold() not in _VERWEISWOERTER:
                 return Wertfund(v.start(), v.end(), False, False, " ".join(text[pos:k].split()).strip(" ,"), "frei")
-        a = _ANKUENDIGUNG_RE.match(text, k)
+        a = ankuendigung_re.match(text, k)
         if a is not None:
             fund = _nach_ankuendigung(text, a.end(), ende_suche, wert_re, pos, k, a.group(0).casefold())
             if fund is not None:
                 return fund
+        if kennung and woerter:
+            a = _SCHWACHE_ANKUENDIGUNG_RE.match(text, k)
+            if a is not None:
+                j = a.end()
+                while j < ende_suche and text[j] in " \t":
+                    j += 1
+                v = wert_re.match(text, j)
+                if v is not None and re.search(r"[A-Za-z]", v.group(0)) and re.search(r"\d", v.group(0)):
+                    return Wertfund(v.start(), v.end(), False, False, " ".join(text[pos:k].split()).strip(" ,"),
+                                    a.group(0).casefold())
         wort_ende = w.end()
         roh = w.group(0)
         if roh.endswith(":") and len(roh) > 1:
@@ -362,10 +554,20 @@ def wert_hinter_etikett(text: str, pos: int, wert_re: re.Pattern, *, grenze: int
     return None
 
 
+_LEERZEILE_RE = re.compile(r"[ \t:]*\n[ \t]*\n[ \t]*")
+
+
 def _nach_ankuendigung(text: str, i: int, grenze: int, wert_re, pos: int, k: int, art: str) -> Wertfund | None:
-    """Wert direkt hinter einer Ankündigung (Füllzeichen davor erlaubt, ein Zeilenumbruch)."""
+    """Wert direkt hinter einer Ankündigung (Füllzeichen davor erlaubt, ein Zeilenumbruch – oder eine Leerzeile, wenn
+    der Wert dann allein in seiner Zeile steht: "Ihre eVB-Nummer lautet:" ⏎ ⏎ "K7H3M9P")."""
     j, umbruch, zelle = _fuellung(text, i, grenze, wert_re)
-    if j is None or j >= grenze:
+    if j is None:
+        leer = _LEERZEILE_RE.match(text, i, grenze)
+        m = wert_re.match(text, leer.end(), grenze) if leer is not None else None
+        if m is not None and WERT_ENDE_RE.match(text, m.end()) and text[m.end():m.end() + 1] in ("\n", ""):
+            return Wertfund(m.start(), m.end(), True, False, " ".join(text[pos:k].split()).strip(" ,"), art)
+        return None
+    if j >= grenze:
         return None
     m = wert_re.match(text, j)
     if m is None:
@@ -374,23 +576,86 @@ def _nach_ankuendigung(text: str, i: int, grenze: int, wert_re, pos: int, k: int
     return Wertfund(m.start(), m.end(), False, zelle or art == "zelle", zwischen, art)
 
 
-_AUFZAEHLUNG_RE = re.compile(r"[ \t]*(?:,|;|/|\bund\b|\bsowie\b|\n)[ \t]*")
+# Aufzählung hinter einem Wert: Zusatz zum Wert ("(Pkw)", "– VW Golf", "für den Golf"), Trenner (Komma, Semikolon,
+# Schrägstrich, "und", "sowie", Zeilenumbruch – auch zusammen: ",⏎"), Aufzählungszeichen am Zeilenanfang, Zuordnung vor
+# dem nächsten Wert ("Pkw: …", "Fahrzeug 2: …", "M-AB 123: …", "VW Golf (M-AB 123): …", "für den Polo: …") oder ein
+# Bezug ohne Doppelpunkt ("…, die für den Polo R7T2W9K")
+_ZUSATZ_RE = re.compile(
+    r"[ \t]*(?:\([^()\n]{1,40}\)"
+    r"|[–—-][ \t]+[^\n,;()]{1,40}?(?=[ \t]*(?:[,;]|\n|$))"
+    r"|(?i:für|fuer|zum|zur)[ \t]+(?:(?i:den|die|das|dem|ihren|ihr|ihre|ihrem)[ \t]+)?[^\s,;()]{1,30}"
+    r"(?=[ \t]*(?:[,;.]|\bund\b|\bsowie\b|\n|$)))")
+_FOLGE_TRENNER_RE = re.compile(r"[ \t]*(?:(?:[,;/]|\bund\b|\bsowie\b)[ \t]*(?:\n[ \t]*)?|\n[ \t]*)")
+_ZUORDNUNG_RE = re.compile(r"(?:(?i:für|fuer)[ \t]+(?:(?i:den|die|das|dem)[ \t]+)?)?[^\n:;,()]{1,30}"
+                           r"(?:[ \t]*\([^()\n]{1,30}\))?[ \t]*:[ \t]*")
+_BEZUG_RE = re.compile(r"(?i:die|der|das)[ \t]+(?i:für|fuer)[ \t]+(?:(?i:den|die|das|dem)[ \t]+)?[^\s,;()]{1,30}[ \t]+"
+                       r"(?:(?i:lautet|ist)[ \t]+)?")
+# Mehrzahl eines Etiketts ("eVB-Nummern", "eVB-Nummer(n)", "Transfertickets", "Versicherungsbestätigungen")
+_MEHRZAHL_RE = re.compile(r"(?i)(?:nummern|nummer\(n\)|nr\.?n|tickets|bestätigungen|bestaetigungen|codes)\b")
 
 
-def folgewerte(text: str, ende: int, wert_re: re.Pattern, grenze: int | None = None) -> list:
-    """Weitere Werte einer Aufzählung hinter einem Wert ("eVB-Nummern: M3N4P5Q, R7T2W9K", untereinander):
-    [(start, ende, Zeilenumbruch davor?)]."""
+def mehrzahl(etikett: str) -> bool:
+    return bool(_MEHRZAHL_RE.search(etikett or ""))
+
+
+def folgewerte(text: str, ende: int, wert_re: re.Pattern, grenze: int | None = None, zuordnung: bool = False) -> list:
+    """Weitere Werte einer Aufzählung hinter einem Wert ("eVB-Nummern: M3N4P5Q, R7T2W9K", untereinander, mit
+    Aufzählungszeichen, mit Zusatz "K7H3M9P (Pkw), R7T2W9K (Anhänger)", "K7H3M9P – VW Golf" ⏎ "R7T2W9K – BMW 320d",
+    "… lautet K7H3M9P, die für den Polo R7T2W9K"): [(start, ende, Zeilenumbruch davor?)]. zuordnung: auch hinter
+    einer Zuordnung mit Doppelpunkt ("Pkw: …", "für den Polo: …") – hinter einem Mehrzahl-Etikett oder wenn schon der
+    erste Wert so zugeordnet war; nie hinter einem Gegenstand mit eigener Nummer ("Tarif: KH2024A"). Eine Leerzeile
+    beendet die Aufzählung."""
     aus = []
     grenze = min(len(text), grenze if grenze is not None else len(text))
     for _ in range(12):
-        t = _AUFZAEHLUNG_RE.match(text, ende, grenze)
-        if t is None:
+        z = _ZUSATZ_RE.match(text, ende, grenze)
+        i = z.end() if z is not None else ende
+        t = _FOLGE_TRENNER_RE.match(text, i, grenze)
+        if t is None or t.end() == i:
             break
-        m = wert_re.match(text, t.end(), grenze)
+        neue_zeile = "\n" in t.group(0)
+        j = t.end()
+        if neue_zeile:
+            b = _LISTENZEICHEN_RE.match(text, j, grenze)
+            if b is not None:
+                j = b.end()
+        m = wert_re.match(text, j, grenze)
+        if m is None and zuordnung:
+            zu = _ZUORDNUNG_RE.match(text, j, grenze)
+            kopf = text[j:zu.end()].rstrip(" \t:").split() if zu is not None else []
+            if kopf and not fremder_gegenstand(kopf[-1].strip("()")):
+                m = wert_re.match(text, zu.end(), grenze)
+        if m is None:
+            bz = _BEZUG_RE.match(text, j, grenze)
+            if bz is not None:
+                m = wert_re.match(text, bz.end(), grenze)
         if m is None:
             break
-        aus.append((m.start(), m.end(), "\n" in t.group(0)))
+        aus.append((m.start(), m.end(), neue_zeile))
         ende = m.end()
+    return aus
+
+
+def blockwerte(text: str, etikett_ende: int, wert_re: re.Pattern, grenze: int | None = None) -> list:
+    """Werte einer Liste unter einer Titelzeile mit Mehrzahl-Etikett, deren Zeile selbst keinen Wert hat ("eVB-Nummern
+    Ihres Fuhrparks" ⏎ "M-AB 123 ⇥⇥ VW Golf ⇥⇥ K7H3M9P" ⏎ "M-CD 456 ⇥⇥ BMW 320d ⇥⇥ R7T2W9K"): je Zeile bis zur
+    Leerzeile (höchstens zwölf) jedes Wort einer Zelle mit genau der Wertform – [(start, ende)]; die Prüfung je Art
+    (mit Ziffer, kein Wort) macht der Aufrufer."""
+    grenze = min(len(text), grenze if grenze is not None else len(text))
+    i = text.find("\n", etikett_ende, grenze)
+    aus = []
+    for _ in range(12):
+        if i < 0 or i >= grenze:
+            break
+        i += 1
+        j = text.find("\n", i, grenze)
+        j = grenze if j < 0 else j
+        if not text[i:j].strip():
+            break
+        for w in re.finditer(r"[^\s|•·▪◦‣:;,()]+", text[i:j]):
+            if wert_re.fullmatch(w.group(0)):
+                aus.append((i + w.start(), i + w.end()))
+        i = j
     return aus
 
 
@@ -444,20 +709,47 @@ def _wortartig(wert: str, wortgestalt) -> bool:
         return False
 
 
+# Gestalten, die keine eVB und kein Transferticket sind: Telefonnummer ("0800-1234567", "0221/123456-0"),
+# Internetadresse ("www.huk24.de", "verti24.de"), Tarif- oder Produktcode aus einem Wort und einer Jahreszahl
+# ("PREMIUM2024", "KOMFORT-2025")
+_TELEFON_FORM_RE = re.compile(r"(?:(?:\+|00)\d{1,3}[-/]?\d{2,5}|0\d{2,5})[-/]\d{3,9}(?:-\d{1,5})?")
+_INTERNET_FORM_RE = re.compile(r"(?i)(?:^|[./])www\.|\.(?:de|com|net|org|eu|info|biz|at|ch|io|co|uk|fr|it|nl|es|be|lu"
+                               r"|pl|online|shop)$")
+_WORT_JAHR_RE = re.compile(r"(?:^|[^A-Za-zÄÖÜäöüß])([A-Za-zÄÖÜäöüß]{5,})[-]?(?:19|20)\d\d(?!\d)"
+                           r"|(?<!\d)(?:19|20)\d\d[-]?([A-Za-zÄÖÜäöüß]{5,})(?:$|[^A-Za-zÄÖÜäöüß])")
+
+
+def andere_gestalt(wert: str, wortgestalt=None) -> bool:
+    """Hat der Wert die Gestalt von etwas anderem als einer eVB-Nummer oder einem Transferticket – Telefonnummer,
+    Internetadresse, Zeitraum ("2024/2025", "2024-2026", "12/2025"), Datum, Betrag oder ein Tarif-/Produktcode aus einem
+    Wort und einer Jahreszahl ("PREMIUM2024")? (Gegenprüfung 4d: "Transferticket Hotline 0800-1234567",
+    "Transferticket Versicherungsjahr 2024/2025", "… anfordern unter www.huk24.de" waren Kennungen.)"""
+    w = (wert or "").strip()
+    if _TELEFON_FORM_RE.fullmatch(w) or _INTERNET_FORM_RE.search(w) or zeitraum(w) or _DATUM_RE.fullmatch(w) \
+            or _BETRAG_RE.fullmatch(w):
+        return True
+    m = _WORT_JAHR_RE.search(w)
+    return m is not None and _wortartig(m.group(1) or m.group(2), wortgestalt)
+
+
 def evb_gueltig(wert: str, versalien_umgebung: bool, wortgestalt=None) -> bool:
-    """eVB: mit Ziffer – ohne Ziffer nur in gemischt geschriebenem Text und nur, wenn der Wert kein Wort ist."""
+    """eVB: mit Ziffer – ohne Ziffer nur in gemischt geschriebenem Text und nur, wenn der Wert kein Wort ist; nie mit
+    der Gestalt von etwas anderem (andere_gestalt)."""
+    if andere_gestalt(wert, wortgestalt):
+        return False
     if any(c.isdigit() for c in wert):
         return True
     return not versalien_umgebung and not _wortartig(wert, wortgestalt)
 
 
 def ticket_gueltig(wert: str, versalien_umgebung: bool, wortgestalt=None) -> bool:
-    """Transferticket: 8 bis 20 Buchstaben/Ziffern, kein Datum, kein Betrag; gemischt geschrieben mit mindestens zwei
-    Ziffern ("beantragen" ist ein Wort), in Großbuchstaben mit Ziffer – ohne Ziffer nur in gemischt geschriebenem Text
-    und nur, wenn der Wert kein Wort ist ("ANGEFORDERT", "SF-KLASSE")."""
+    """Transferticket: 8 bis 20 Buchstaben/Ziffern, kein Datum, kein Betrag, keine Telefonnummer, keine
+    Internetadresse, kein Zeitraum (andere_gestalt); gemischt geschrieben mit mindestens zwei Ziffern ("beantragen" ist
+    ein Wort), in Großbuchstaben mit Ziffer – ohne Ziffer nur in gemischt geschriebenem Text und nur, wenn der Wert
+    kein Wort ist ("ANGEFORDERT", "SF-KLASSE")."""
     zeichen = [c for c in wert if c.isalnum()]
     ziffern = sum(c.isdigit() for c in zeichen)
-    if not 8 <= len(zeichen) <= 20 or _DATUM_RE.fullmatch(wert) or _BETRAG_RE.fullmatch(wert):
+    if not 8 <= len(zeichen) <= 20 or andere_gestalt(wert, wortgestalt):
         return False
     if any(c.islower() for c in wert):
         return ziffern >= 2
@@ -502,7 +794,12 @@ KARTENANGABE_RE = re.compile(
 # klein geschriebene Wörter, Kartenangaben, "Rückseite", "Ziffern", "stellig" ("Sicherheitscode (3 Ziffern):",
 # "Prüfnummer (3-stellig)") – nicht "(TÜV)", "der HU", "für Ihr Online-Postfach"
 _KARTEN_NEUTRAL_RE = re.compile(r"(?i:karte|card|kredit|debit|visa|master|maestro|amex|express|diners|jcb|cvc|cvv"
-                                r"|cav|cid|r(?:ü|ue|u)ckseite|vorderseite|ziffer|stellig|stellen|unterschrift)")
+                                r"|csc|cav|cid|r(?:ü|ue|u)cks|vorderseite|ziffer|stellig|stellen|unterschrift"
+                                r"|sicherheit|kontroll|pr(?:ü|ue|u)f)")
+# ganze Wörter, die eine Prüfnummer keinem anderen Gegenstand zuordnen ("Code: 739", "PIN: 739", "die drei Zahlen
+# hinten", "die 3-stellige Nummer") – nicht als Teil eines Worts ("Kundennummer")
+_KARTEN_NEUTRAL_WOERTER = frozenset({"code", "pin", "zahl", "zahlen", "nummer", "nr", "kpn", "gültig", "gueltig",
+                                     "ablauf"})
 # Gegenstände, deren Prüfnummer keine Kartenprüfnummer ist (in der Zeile des Etiketts, der Zeile davor, einer Klammer
 # oder hinter dem Wert: "Prüfbericht Nr. 4711, Prüfnummer 0815", "DIN EN ISO 9001" ⏎ "Prüfnummer 4102",
 # "Prüfnummer 4567 vom TÜV", "Sicherheitscode: 4711 (Tür)")
@@ -522,7 +819,8 @@ def kartenneutral(woerter: str) -> bool:
     if _FREMDER_GEGENSTAND_RE.search(woerter or ""):
         return False
     for w in re.findall(r"[^\W\d_][\w\-]*", woerter or ""):
-        if w[:1].isupper() and not ist_funktionswort(w) and not _KARTEN_NEUTRAL_RE.search(w):
+        if w[:1].isupper() and not ist_funktionswort(w) and not _KARTEN_NEUTRAL_RE.search(w) \
+                and w.casefold() not in _KARTEN_NEUTRAL_WOERTER:
             return False
     return True
 
@@ -541,13 +839,49 @@ def _luhn(ziffern: str) -> bool:
 
 
 _KARTENNUMMER_RE = re.compile(r"(?<!\d)\d(?:[ \-]?\d){12,18}(?!\d)")
-# Kartendaten ohne Etikett der Prüfnummer: Kartennummer, Ablaufdatum, dann drei oder vier Ziffern ("Visa 4111 1111 1111
-# 1111, gültig bis 12/27, 739", "5555 5555 5555 4444 11/26 739", "5555555555554444 1126 739")
-_KARTENFOLGE_RE = re.compile(
-    r"[ \t]*[,;/–\-]?[ \t]*"
-    r"(?:(?i:g(?:ü|ue|u)ltig[ \t]+bis|exp\.?|expiry|ablauf(?:datum)?|valid[ \t]+thru)[ \t]*:?[ \t]*)?"
-    r"(?:0[1-9]|1[0-2])(?:[ \t]?/[ \t]?(?:\d{2}|20\d{2})|\d{2})"
-    r"[ \t]*[,;/–\-]?[ \t]*(?P<cvc>\d{3,4})(?![\d]|[-.,:/]\d)")
+# Kartendaten ohne Etikett der Prüfnummer: Kartennummer, Ablaufdatum, dann drei oder vier Ziffern am Ende ihrer Zeile –
+# auch über Zeilen ("Mastercard" ⏎ "5555 5555 5555 4444" ⏎ "11/26" ⏎ "739", "Kartennummer: …" ⏎ "Gültig bis: 12/27" ⏎
+# "739") und hinter Etiketten, die eine Prüfnummer der Karte nicht fremd zuordnen ("Code: 739", "Rückseite: 739",
+# "Ziffern hinten: 739", "PIN: 739"); ohne Ablaufdatum nur mit einem Hinweis darauf ("…, die drei Zahlen hinten: 739")
+_KF_TRENNER = r"[ \t]*[,;/–\-]?[ \t]*\(?[ \t]*(?:\n[ \t]*)?"
+_KF_ABLAUF_RE = re.compile(
+    _KF_TRENNER + r"(?:(?i:g(?:ü|ue|u)ltig(?:[ \t]+bis)?|exp\.?|expiry|ablauf(?:datum)?|valid[ \t]+thru)"
+    r"[ \t]*:?[ \t]*)?"
+    r"(?:0[1-9]|1[0-2])(?:[ \t]?/[ \t]?(?:\d{2}|20\d{2})|\d{2})(?!\d)[ \t]*\)?")
+_KF_TRENNER_RE = re.compile(_KF_TRENNER)
+_KF_PRUEFNUMMER_RE = re.compile(r"(?<![\d/.,\-])(\d{3,4})(?=[ \t]*[.,;)]?[ \t]*$)")
+_KF_HINWEIS_RE = re.compile(r"(?i)r(?:ü|ue|u)cks|hinten|ziffer|zahl|code|csc|cvc|cvv|cid|pr(?:ü|ue|u)f|sicherheit"
+                            r"|kontroll|pin|stellig|nummer")
+
+
+def _kartenfolge(text: str, e: int, grenze: int) -> tuple | None:
+    """(start, ende) der Kartenprüfnummer in den Kartendaten hinter einer Kartennummer, die bei e endet, oder None."""
+    i = e
+    ablauf = _KF_ABLAUF_RE.match(text, i, grenze)
+    if ablauf is not None:
+        i = ablauf.end()
+    i = _KF_TRENNER_RE.match(text, i, grenze).end()
+    zeilenende = text.find("\n", i, grenze)
+    zeilenende = grenze if zeilenende < 0 else zeilenende
+    zelle = text.find("\t\t", i, zeilenende)
+    if zelle >= 0 and text[i:zelle].rstrip().endswith(":"):
+        zelle = text.find("\t\t", zelle + 2, zeilenende)  # "Code: ⇥⇥ 739": der Wert in der Zelle hinter dem Etikett
+    rest = text[i:zelle if zelle >= 0 else zeilenende]
+    p = _KF_PRUEFNUMMER_RE.search(rest)
+    if p is None:
+        return None
+    woerter = rest[:p.start()].strip(" \t:–-,(")
+    ohne_stellig = re.sub(r"\d-?stellig\w*", "", woerter)
+    if len(woerter.split()) > 8 or re.search(r"\d", ohne_stellig) or not kartenneutral(woerter):
+        return None
+    if woerter and woerter.split()[-1].strip(".,:").casefold() in _VERWEISWOERTER:
+        return None                                     # "Die CVC gibt es seit 2015."
+    if ablauf is None and (not _KF_HINWEIS_RE.search(woerter) or re.fullmatch(r"(?:19|20)\d\d", p.group(1))):
+        return None
+    s0, e0 = i + p.start(1), i + p.end(1)
+    if EINHEIT_DANACH_RE.match(text, e0):
+        return None
+    return s0, e0
 
 
 def _luhn_ende(text: str, s: int, e: int) -> int | None:
@@ -559,6 +893,14 @@ def _luhn_ende(text: str, s: int, e: int) -> int | None:
         if (n == len(stellen) or not text[ende].isdigit()) and _luhn("".join(text[i] for i in stellen[:n])):
             return ende
     return None
+
+
+def kartendaten(text: str) -> bool:
+    """Stehen in text Kartendaten – eine Kartenangabe ("Kreditkarte", "Kartennummer", "Visa", "Mastercard") oder eine
+    Kartennummer mit gültiger Prüfziffer?"""
+    if KARTENANGABE_RE.search(text):
+        return True
+    return any(_luhn(re.sub(r"\D", "", m.group(0))) for m in _KARTENNUMMER_RE.finditer(text))
 
 
 def kartenbezug(text: str, s: int, e: int, extra: re.Pattern | None = None) -> bool:
@@ -574,9 +916,7 @@ def kartenbezug(text: str, s: int, e: int, extra: re.Pattern | None = None) -> b
     if b >= 0:
         b = text.find("\n", b + 1)
     fenster = text[a:b if b >= 0 else len(text)]
-    if KARTENANGABE_RE.search(fenster) or (extra is not None and extra.search(fenster)):
-        return True
-    return any(_luhn(re.sub(r"\D", "", m.group(0))) for m in _KARTENNUMMER_RE.finditer(fenster))
+    return kartendaten(fenster) or (extra is not None and extra.search(fenster) is not None)
 
 
 def _fremder_bezug(text: str, s: int, e: int, wert_ende: int) -> bool:
@@ -598,21 +938,42 @@ def _fremder_bezug(text: str, s: int, e: int, wert_ende: int) -> bool:
     return bool(_FREMDER_GEGENSTAND_RE.search(rest[:60]))
 
 
-def kennungsform(wert: str) -> bool:
+# Monat/Jahr ("12/2025", "3/25", "12.2024") – nicht "12/345" (dreistelliges Jahr), nicht "42/2024" (kein Monat)
+_MONAT_JAHR_RE = re.compile(r"(?:0?[1-9]|1[0-2])[/.](?:\d{2}|(?:19|20)\d{2})")
+# Zwei Jahre ("2024-2026", "2024/2025") – ein Zeitraum, auch wenn sie nicht aufeinander folgen
+_JAHRESSPANNE_RE = re.compile(r"(?:19|20)\d\d[ ]?[/\-][ ]?(?:19|20)\d\d")
+# Kürzel vor einer Zifferngruppe ("KH 0815", "KFZ-VB 12345", "SF-TT 4711 0815", "KFZVB 12345")
+_KUERZEL_RE = re.compile(r"[A-ZÄÖÜ]{1,6}(?:-[A-ZÄÖÜ]{1,6})?")
+
+
+def zeitraum(wert: str) -> bool:
+    """Monat/Jahr ("12/2025"), Jahresbereich ("2024/25") oder zwei Jahre ("2024-2026")?"""
+    w = (wert or "").strip()
+    return bool(_MONAT_JAHR_RE.fullmatch(w) or jahresbereich(w) or _JAHRESSPANNE_RE.fullmatch(w))
+
+
+def kennungsform(wert: str, zeitraum_erlaubt: bool = False) -> bool:
+    """Siehe kennung_teil: hat der Wert die allgemeine Form einer Kennung?"""
+    return kennung_teil(wert, zeitraum_erlaubt) is not None
+
+
+def kennung_teil(wert: str, zeitraum_erlaubt: bool = False) -> str | None:
     """Hat ein Wert hinter dem Etikett einer eVB, eines Transfertickets oder einer Kartenprüfnummer die allgemeine Form
-    einer Kennung – das erste Wort mit Ziffer oder ein Kürzel aus höchstens vier Großbuchstaben vor einer Zifferngruppe,
-    zusammen mindestens drei Ziffern, keine Einheit dahinter ("12345", "TT-12345", "KH 0815 4471")? Nicht: "SF 12 /
-    SF 8", "Tarif KH 12", "Hotline 0800 1234567", "3-4 Ziffern", "250 Euro", "Capital Partners 2024"."""
+    einer Kennung – das erste Wort mit Ziffer oder ein Kürzel aus Großbuchstaben vor einer Zifferngruppe ("KFZ-VB
+    12345"), zusammen mindestens drei Ziffern, keine Einheit dahinter ("12345", "TT-12345", "KH 0815 4471", "12/345")?
+    Nicht: "SF 12 / SF 8", "Tarif KH 12", "Hotline 0800 1234567", "3-4 Ziffern", "250 Euro", "Capital Partners 2024",
+    ein Betrag, ein Datum und – außer mit zeitraum_erlaubt (hinter "Nr.": eine laufende Nummer mit Jahr) – ein
+    Zeitraum ("12/2025", "2024/2025")."""
     teile = (wert or "").split()
     kennung: list = []
     for i, t in enumerate(teile):
         kern = t.rstrip(".,;:)")
         if any(c.isdigit() for c in kern):
-            if _BETRAG_RE.fullmatch(kern) or _DATUM_RE.fullmatch(kern) or _DATUM_KURZ_RE.fullmatch(kern) \
-                    or jahresbereich(kern):
-                break                                   # Betrag, Datum ("12/2025"), Jahresbereich ("2024/2025")
+            if _BETRAG_RE.fullmatch(kern) or _DATUM_RE.fullmatch(kern) or (
+                    not zeitraum_erlaubt and zeitraum(kern)):
+                break                                   # Betrag, Datum, Zeitraum ("12/2025", "2024/2025")
             kennung.append(kern)
-        elif not kennung and re.fullmatch(r"[A-ZÄÖÜ]{1,4}", kern) and i + 1 < len(teile) \
+        elif not kennung and _KUERZEL_RE.fullmatch(kern) and i + 1 < len(teile) \
                 and any(c.isdigit() for c in teile[i + 1]):
             kennung.append(kern)
         else:
@@ -620,11 +981,37 @@ def kennungsform(wert: str) -> bool:
         if kern != t:
             break
     if not kennung or not any(c.isdigit() for c in kennung[0] + (kennung[1] if len(kennung) > 1 else "")):
-        return False
+        return None
     rest = " ".join(teile[len(kennung):])
     if rest and EINHEIT_DANACH_RE.match(" " + rest):
+        return None
+    return " ".join(kennung) if sum(c.isdigit() for c in "".join(kennung)) >= 3 else None
+
+
+# Nummer-Wort als Abkürzung ("Nr.", "-Nr.", "No.", "-ID") oder als Teil eines zusammengesetzten Worts
+# ("Versicherungsbestätigungsnummer", "Kartenprüfnummer", "Kartenprüfnr.")
+_ALLGEMEINES_NUMMER_WORT_RE = re.compile(r"(?i)(?:(?:nr|no)\.?|[-_]id|(?<=[a-zäöüß])nu(?:m|rn){2}ern?)$")
+
+
+def allgemeines_nummer_etikett(etikett: str) -> bool:
+    """Ist das Etikett mit eigener Wertform zugleich ein allgemeines Kennungs-Etikett – sein Nummer-Wort eine
+    Abkürzung oder Teil eines zusammengesetzten Worts ("Versicherungsbestätigung Nr.", "eVB-Nr.", "VB-Nr.",
+    "Transferticket-Nr.", "Versicherungsbestätigungsnummer", "Kartenprüfnummer")? Hinter diesen Etiketten las der
+    allgemeine Kennungsweg schon vor Runde 4 jede Kennung, auch eine laufende Nummer mit Jahr ("3/2025", "2024/25",
+    "12/345"); "eVB-Nummer", "VB-Nummer", "Transferticket-Nummer" (ausgeschriebenes Nummer-Wort hinter Bindestrich)
+    kennt erst die Runde 4."""
+    return bool(_ALLGEMEINES_NUMMER_WORT_RE.search((etikett or "").strip().rstrip(":").strip()))
+
+
+def allgemeiner_wert(etikett: str, wert: str) -> bool:
+    """Gilt hinter dem Etikett einer eigenen Wertform (eVB, Transferticket, Kartenprüfnummer) für `wert` ZUSÄTZLICH der
+    allgemeine Kennungsweg? Nur hinter einem Nummer-Etikett (nummer_etikett): hinter einem allgemeinen Nummer-Etikett
+    (allgemeines_nummer_etikett) jeder Wert, den der allgemeine Weg liest – wie vor Runde 4, auch "3/2025",
+    "2024/25", "KFZ-VB 12345" –, sonst nur ein Wert mit der Form einer Kennung ohne Zeitraum (kennungsform: nicht
+    "eVB-Nummer 2024/2025")."""
+    if not nummer_etikett(etikett):
         return False
-    return sum(c.isdigit() for c in "".join(kennung)) >= 3
+    return allgemeines_nummer_etikett(etikett) or kennungsform(wert)
 
 
 # ----------------------------------------------------------------------
@@ -639,6 +1026,26 @@ class Kennungsfund(NamedTuple):
     etikett: str            # Text des Etiketts ("eVB-Nummer")
     sicherheit: float
     rauschen: bool = False  # eVB mit Einfügungen der Texterkennung ("K7/H3MY9P")
+
+
+# Wert des allgemeinen Kennungswegs direkt hinter einem Nummer-Etikett ("VB-Nr. 2024/25", "eVB-Nr. KFZ-VB 12345")
+_ALLGEMEIN_WERT_RE = re.compile(r"[A-ZÄÖÜ0-9][A-Za-zÄÖÜ0-9\-./]*(?:[ ][A-ZÄÖÜ0-9][A-Za-zÄÖÜ0-9\-./]*){0,3}")
+
+
+def _allgemein(text: str, m: re.Match, grenze: int, neu) -> None:
+    """Wert des allgemeinen Kennungswegs hinter dem Nummer-Etikett m (allgemeiner_wert) als Art "allgemein"."""
+    if not nummer_etikett(m.group(0)):
+        return
+    i, umbruch, _ = _fuellung(text, m.end(), min(grenze, m.end() + 60), _ALLGEMEIN_WERT_RE)
+    if i is None or umbruch:
+        return                                          # nur in der Zeile des Etiketts ("Kartenprüfnummer:"
+                                                        # ⏎ "8001 Zürich")
+    w = _ALLGEMEIN_WERT_RE.match(text, i, grenze)
+    if w is None:
+        return
+    teil = kennung_teil(w.group(0), zeitraum_erlaubt=allgemeines_nummer_etikett(m.group(0)))
+    if teil:
+        neu("allgemein", w.start(), w.start() + len(teil), m, 0.7)
 
 
 def drei_ziffern(etikett: str) -> bool:
@@ -691,11 +1098,16 @@ _VORAUSWAHL_RE = re.compile(r"(?i)v[b8]|ticket|c\.?v|cav|cid|pr(?:ü|ue|u)f|sich
 
 
 def kennungen(text: str, *, ocr: bool = False, wortgestalt: Callable | None = None, ist_etikett=wissen_etikett,
-              kartenbezug_extra: re.Pattern | None = None, start: int = 0, ende: int | None = None) -> list:
+              kartenbezug_extra: re.Pattern | None = None, start: int = 0, ende: int | None = None,
+              allgemein: bool = False) -> list:
     """Alle eVB-Nummern, Transfertickets und Kartenprüfnummern hinter ihrem Etikett in text[start:ende] (Regel im
     Modulkopf) als [Kennungsfund]. ocr: auch die eVB mit Einfügungen der Texterkennung ("K7/H3MY9P").
     wortgestalt(wert): Wort statt Code (Standard wissen.ist_wortgestalt); ist_etikett(phrase): Feld-Etikett der
     Wissensbasis (Abbruch an einem anderen Etikett); kartenbezug_extra: weiteres Muster für die Kartenangabe.
+    allgemein: auch Werte des allgemeinen Kennungswegs hinter einem Nummer-Etikett ohne eigene Wertform ("VB-Nr.
+    2024/25", "eVB-Nr. 12/345": Art "allgemein", allgemeiner_wert) – für die Selbstkontrolle.
+    Aufzählungen hinter dem ersten Wert (folgewerte) und, hinter einem Mehrzahl-Etikett ohne Wert in seiner Zeile, die
+    Werte der Liste darunter (blockwerte).
 
     Prüfung je Art: eine eVB bzw. ein Transferticket in der Zeile unter dem Etikett nur mit Ziffer, ohne Ziffer nur in
     gemischt geschriebenem Text und nur, wenn der Wert kein Wort ist; eine Kartenprüfnummer nie vor einer Einheit, unter
@@ -727,17 +1139,21 @@ def kennungen(text: str, *, ocr: bool = False, wortgestalt: Callable | None = No
 
         t = wert_hinter_etikett(text, m.end(), WERT_RE[form], grenze=ende, ist_etikett=ist_etikett,
                                 zwischenwort=None if form == "cvc" else zwischenwort,
-                                ohne_ankuendigung=OHNE_ANKUENDIGUNG)
+                                ohne_ankuendigung=OHNE_ANKUENDIGUNG, kennung=True)
         if form == "cvc":
             if t is None or not _cvc_passt(text, m, t, art):
+                if allgemein:
+                    _allgemein(text, m, ende, neu)
                 continue
             if art == "pruef":
                 if _fremder_bezug(text, m.start(), m.end(), t.ende) or not kartenneutral(t.zwischen):
                     if not KARTENANGABE_RE.search(t.zwischen):
                         continue                        # "TÜV Prüfnummer", "Prüfnummer der HU:", "… vom TÜV"
+                klammer = _KLAMMER_DANACH_RE.match(text, m.end())
                 if not (kartenbezug(text, m.start(), t.ende, kartenbezug_extra)
-                        or re.search(r"(?i)karte|card", t.zwischen)):
-                    continue
+                        or re.search(r"(?i)karte|card", t.zwischen)
+                        or (klammer is not None and re.search(r"(?i)karte|card", klammer.group(1)))):
+                    continue                            # "Sicherheitscode (Rückseite der Karte): 739" zählt
             neu("cvc", t.start, t.ende, m, 0.9 if art == "cvc" else 0.75)
             continue
         if t is not None:
@@ -745,11 +1161,20 @@ def kennungen(text: str, *, ocr: bool = False, wortgestalt: Callable | None = No
             umgebung = t.darunter or _versalien_kontext(text, t.start, t.ende, m.start())
             if pruefen(wert, umgebung, wortgestalt):
                 neu(form, t.start, t.ende, m, 0.9)
-                for s2, e2, umbruch in folgewerte(text, t.ende, WERT_RE[form], ende):
+                zuordnung = mehrzahl(m.group(0)) or (t.ankuendigung == ":" and bool(t.zwischen))
+                for s2, e2, umbruch in folgewerte(text, t.ende, WERT_RE[form], ende, zuordnung):
                     w2 = text[s2:e2]
                     if pruefen(w2, umbruch or _versalien_kontext(text, s2, e2, m.start()), wortgestalt):
                         neu(form, s2, e2, m, 0.85)
                 continue
+        if mehrzahl(m.group(0)):
+            # Titelzeile über einer Liste ("eVB-Nummern Ihres Fuhrparks" ⏎ "M-AB 123 ⇥⇥ VW Golf ⇥⇥ K7H3M9P"):
+            # Werte mit Ziffer in den Zeilen darunter
+            for s2, e2 in blockwerte(text, m.end(), WERT_RE[form], ende):
+                if any(c.isdigit() for c in text[s2:e2]) and pruefen(text[s2:e2], True, wortgestalt):
+                    neu(form, s2, e2, m, 0.8)
+        if allgemein and t is None:
+            _allgemein(text, m, ende, neu)
         if ocr and form == "evb":
             # Einfügungen der Texterkennung ("K7/H3MY9P", "K7H3MJ9P"); die genaue Form prüft der Weg oben
             r = wert_hinter_etikett(text, m.end(), EVB_RAUSCH_RE, grenze=ende, ist_etikett=ist_etikett)
@@ -766,9 +1191,9 @@ def kennungen(text: str, *, ocr: bool = False, wortgestalt: Callable | None = No
     if kartenbezug_extra is not None:
         anker += [(k, k.end()) for k in kartenbezug_extra.finditer(text, start, ende)]
     for k, e in anker:
-        f = _KARTENFOLGE_RE.match(text, e, ende)
-        if f is not None and WERT_ENDE_RE.match(text, f.end()) and not EINHEIT_DANACH_RE.match(text, f.end()):
-            neu("cvc", f.start("cvc"), f.end("cvc"), k, 0.75)
+        f = _kartenfolge(text, e, ende)
+        if f is not None:
+            neu("cvc", f[0], f[1], k, 0.75)
     aus.sort(key=lambda f: (f.start, f.ende))
     return aus
 
@@ -789,11 +1214,12 @@ def _titelform(wort: str) -> str:
 
 
 def feld_etikett(text: str, s: int, e: int, ist_etikett=wissen_etikett) -> bool:
-    """Ist text[s:e] selbst ein Feld-Etikett – ein Doppelpunkt dahinter (auch hinter einer Klammer: "PLZ (Wohnort):"
-    oder hinter einer Ergänzung mit Funktionswort: "Art der Versicherung:") oder ein Etikett der Wissensbasis ("PLZ",
-    "Postleitzahl", "Status")? Hinter einem leeren Feld "Geburtsname:" steht oft das nächste Feld, nie ein
-    Geburtsname."""
-    if re.match(r"[ \t]*(?:\([^()\n]{0,40}\))?[ \t]*:", text[e:e + 50]) or _ERGAENZUNG_RE.match(text[e:e + 90]):
+    """Ist text[s:e] selbst ein Feld-Etikett – ein Doppelpunkt dahinter (auch hinter einer Klammer: "PLZ (Wohnort):",
+    hinter einer Ergänzung mit Funktionswort: "Art der Versicherung:" oder hinter einem weiteren Wort derselben Zeile:
+    "Abweichender Halter:", "Versichert seit:") oder ein Etikett der Wissensbasis ("PLZ", "Postleitzahl", "Status")?
+    Hinter einem leeren Feld "Geburtsname:" steht oft das nächste Feld, nie ein Geburtsname."""
+    if re.match(r"[ \t]*(?:\([^()\n]{0,40}\))?[ \t]*:", text[e:e + 50]) or _ERGAENZUNG_RE.match(text[e:e + 90]) \
+            or _ETIKETT_PHRASE_RE.match(text[e:e + 70]):
         return True
     wort = text[s:e]
     try:
@@ -804,6 +1230,9 @@ def feld_etikett(text: str, s: int, e: int, ist_etikett=wissen_etikett) -> bool:
 
 _ERGAENZUNG_RE = re.compile(r"[ \t]+(?i:der|des|die|dem|den|vom|zur|zum|für|im|am|bei)[ \t]+[^\s:()]{2,30}"
                             r"(?:[ \t]+[^\s:()]{2,30})?[ \t]*(?:\([^()\n]{0,40}\))?[ \t]*:")
+# ein Etikett aus zwei oder drei Wörtern: "Abweichender Halter:", "Versichert seit:", "Akad. Titel:" (Zeilenende
+# dahinter)
+_ETIKETT_PHRASE_RE = re.compile(r"\.?[ ]+[^\s:()]{2,30}(?:[ ]+[^\s:()]{2,30})?[ \t]*:[ \t]*(?:\n|\t\t|$)")
 
 
 def _ankuendigung_folgt(text: str, i: int) -> bool:
@@ -829,13 +1258,17 @@ def kopfzeile(text: str, s: int, ist_etikett=wissen_etikett) -> bool:
         return False
 
 
-def geburtsname_moeglich(text: str, s: int, e: int, frage=None) -> bool:
+def geburtsname_moeglich(text: str, s: int, e: int, frage=None, ort_erlaubt: bool = False) -> bool:
     """Kann das Wort text[s:e] hinter "geb." oder "Geburtsname" ein (Geburts-)Name sein? Nicht: ein Funktionswort ("geb.
     In Köln", "GEB. IN KÖLN", "geb. Laut Urkunde", "Erste"), eine Abkürzung mit Punkt ("geb. Lt. Ausweis"), ein Wort aus
-    zwei Buchstaben, das kein Nachname der Wissensbasis ist, ein Ort – Staat, Region, Stadt ("Polen", "Wien", "Marburg",
-    "Bad Homburg", "St. Ingbert"), außer er ist zugleich ein Nachname ("Hagen", "Landau") – und die Einwohnerbezeichnung
-    eines Orts ("Kölner", "Berliner"). frage(name, wort): Frage an die Wissensbasis (ist_nachname, ist_ort; Standard das
-    Modul wissen)."""
+    zwei Buchstaben, das kein Nachname der Wissensbasis ist, ein Kürzel aus drei Großbuchstaben ("GEB. KFZ"), ein
+    Feld-Etikett oder Sachwort (sachwort: "GEB. STATUS", "GEB. HAUPTVERSICHERTER", "Geburtsname ist Pflichtangabe"), ein
+    Ort aus mehreren Wörtern ("Bad Homburg", "St. Ingbert") und eine deutsche Großstadt ("Hamburg": der Geburtsort) –
+    außer sie ist zugleich ein Nachname ("Hagen", "Essen"). Ein anderer Ort ("Linz", "Polen") kann Geburtsname oder
+    Geburtsort sein: hinter "geb." nur mit ort_erlaubt (die Selbstkontrolle meldet ihn), hinter einem Geburtsnamen-
+    Etikett ja. Die Einwohnerbezeichnung eines Orts ("Mainzer", "Danziger", "Linzer") ist hier ein Herkunftsname, also
+    ein Name (Gegenprüfung 4d) – das Eigenschaftswort ("eine geborene Kölnerin") schließt der Zusammenhang aus.
+    frage(name, wort): Frage an die Wissensbasis (ist_nachname, ist_ort, ist_grossstadt; Standard das Modul wissen)."""
     frage = frage or _wissen_frage
     wort = text[s:e].strip()
     teile = wort.split()
@@ -843,7 +1276,8 @@ def geburtsname_moeglich(text: str, s: int, e: int, frage=None) -> bool:
         return False
     kern = teile[-1]
     buchstaben = sum(c.isalpha() for c in kern)
-    nachname = frage("ist_nachname", _titelform(kern))
+    k = _titelform(kern)
+    nachname = frage("ist_nachname", k)
     if ist_funktionswort(kern) and not nachname:
         return False
     if text[e:e + 1] == "." and buchstaben <= 3 and not nachname:
@@ -852,15 +1286,39 @@ def geburtsname_moeglich(text: str, s: int, e: int, frage=None) -> bool:
         return False
     if nachname:
         return True
+    if (kern.isupper() and buchstaben <= 3) or sachwort(k):
+        return False                                    # "GEB. KFZ", "GEB. STATUS", "Geburtsname ist Pflichtangabe"
     naechstes = re.match(r"[ \t]+([A-ZÄÖÜ][\wäöüß\-]+)", text[e:e + 40])
-    if naechstes is not None and frage("ist_ort", _titelform(kern) + " " + _titelform(naechstes.group(1))):
+    if naechstes is not None and frage("ist_ort", k + " " + _titelform(naechstes.group(1))):
         return False                                    # "Bad Homburg", "Frankfurt am Main" (erstes Wort)
-    if frage("ist_ort", _titelform(kern)):
+    if frage("ist_grossstadt", k):
+        return False                                    # "Anna Weber geb. Hamburg": der Geburtsort
+    return ort_erlaubt or not frage("ist_ort", k)
+
+
+def geburtsname_ort(text: str, s: int, e: int, frage=None) -> bool:
+    """Ist das Wort hinter "geb." ein Ort, der auch Geburtsname sein kann ("Anna Weber geb. Linz")? Dann wird es nicht
+    geschwärzt, aber gemeldet (geburtsname_moeglich mit ort_erlaubt)."""
+    frage = frage or _wissen_frage
+    kern = _titelform((text[s:e].split() or [""])[-1])
+    return bool(kern) and frage("ist_ort", kern) and geburtsname_moeglich(text, s, e, frage, ort_erlaubt=True)
+
+
+def _etikett_mit_wert(text: str, e: int, ist_etikett) -> bool:
+    """Steht hinter dem Wort (Ende e) in derselben Zeile eine weitere Zelle, die selbst kein Etikett ist ("Geburtsland
+    ⇥⇥ Polen", "Sport ⇥⇥ Tennis")? Dann ist das Wort das Etikett dieser Zelle – Etiketten und Werte wechseln sich in
+    einer Formularzeile ab; hinter einem Wert steht das nächste Etikett ("Quarnstedt ⇥⇥ Geburtsdatum ⇥⇥ …")."""
+    m = re.match(r"[ ]*\t\t[ \t]*([^\t\n]+)", text[e:e + 120])
+    if m is None:
         return False
-    k = _titelform(kern)
-    if k.endswith("er") and len(k) > 5 and (frage("ist_ort", k[:-2]) or frage("ist_ort", k[:-3])):
-        return False                                    # "Kölner", "Hamburger", "Bremer": Einwohner
-    return True
+    zelle = m.group(1).strip()
+    if not zelle or zelle.endswith(":") or zelle[:1].isdigit() or _SACH_KOPF_RE.match(zelle.split()[0]) \
+            or zelle.split()[0].casefold() in _KOPFWOERTER:
+        return False                                    # Etikett ("Geburtsdatum"), Datum oder Nummer: ein Wert davor
+    try:
+        return not (ist_etikett is not None and (ist_etikett(zelle) or ist_etikett(zelle.split()[0])))
+    except Exception:
+        return False
 
 
 class Geburtsnamenfund(NamedTuple):
@@ -903,7 +1361,7 @@ def _geburtsname_in_klammer(text: str, m: re.Match, name_re: re.Pattern, ist_eti
     n = name_re.match(text, k.end())
     if n is None or not re.match(r"[ \t]*\)", text[n.end():n.end() + 4]) \
             or feld_etikett(text, n.start(), n.end(), ist_etikett) \
-            or not geburtsname_moeglich(text, n.start(), n.end(), frage):
+            or not geburtsname_moeglich(text, n.start(), n.end(), frage, ort_erlaubt=True):
         return ""
     p = _PERSON_VOR_KLAMMER_RE.fullmatch(k.group("person"))
     return n.start(), n.end(), (k.start("person"), k.end("person")) if p is not None else None
@@ -935,7 +1393,7 @@ def geburtsname_hinter_etikett(text: str, m: re.Match, name_re: re.Pattern = NAM
         if ist_funktionswort(teile[0]):
             return len(teile) == 1 or (_ankuendigung_folgt(text, e)
                                        and not (frage or _wissen_frage)("ist_nachname", _titelform(teile[-1])))
-        return not geburtsname_moeglich(text, s, e, frage)
+        return not geburtsname_moeglich(text, s, e, frage, ort_erlaubt=True)
 
     t = wert_hinter_etikett(text, m.end(), name_re, ist_etikett=ist_etikett, zwischenwort=zwischenwort)
     if t is None:
@@ -945,7 +1403,8 @@ def geburtsname_hinter_etikett(text: str, m: re.Match, name_re: re.Pattern = NAM
         return None
     if t.zelle and kopfzeile(text, m.start(), ist_etikett):
         return None
-    if feld_etikett(text, t.start, t.ende, ist_etikett) or not geburtsname_moeglich(text, t.start, t.ende, frage):
+    if feld_etikett(text, t.start, t.ende, ist_etikett) \
+            or not geburtsname_moeglich(text, t.start, t.ende, frage, ort_erlaubt=True):
         return None
     if getrennt:
         frage = frage or _wissen_frage
@@ -953,6 +1412,8 @@ def geburtsname_hinter_etikett(text: str, m: re.Match, name_re: re.Pattern = NAM
         nachname = frage("ist_nachname", kern)
         if kern.casefold() in _KOPFWOERTER or (frage("ist_allerweltswort", kern) and not nachname):
             return None                                 # "Geburtsname ⇥⇥ Status", "Geburtsname:" ⏎ "Art"
+        if _etikett_mit_wert(text, t.ende, ist_etikett):
+            return None                                 # "Geb.-Name ⇥⇥ Geburtsland ⇥⇥ Polen": das nächste Feld
         rs, re_ = _rest_der_zelle(text, t.ende)
         rest = text[rs:re_]
         if rest:
@@ -961,3 +1422,31 @@ def geburtsname_hinter_etikett(text: str, m: re.Match, name_re: re.Pattern = NAM
                     or (erstes is not None and feld_etikett(text, rs, rs + erstes.end(), ist_etikett))):
                 return None                             # "Früherer Name", "Vorherige Anschrift:", "Akad. Grad"
     return Geburtsnamenfund(t.start, t.ende, getrennt)
+
+
+# Trenner zwischen mehreren Namen derselben Zelle: Komma, Schrägstrich, Semikolon, "und", "u.", "bzw.", "sowie"
+_NAMEN_TRENNER_RE = re.compile(r"[ ]*[,/;][ ]*(?:(?:und|u\.|bzw\.)[ ]+)?|[ ]+(?:und|u\.|bzw\.|sowie)[ ]+")
+
+
+def weitere_geburtsnamen(text: str, m: re.Match, ende: int, getrennt: bool, name_re: re.Pattern = NAME_RE,
+                         ist_etikett=wissen_etikett, frage=None, verlaengern=None) -> list:
+    """Weitere Namen hinter dem ersten (Ende `ende`), wenn das Etikett m in der Mehrzahl steht ("Geburtsnamen:
+    Quarnstedt, Ellerbrok", "Geburtsnamen der Eltern: Quarnstedt und Ellerbrok"): je ein Geburtsnamenfund, solange
+    hinter einem Trenner derselben Zelle ein möglicher Name steht – kein Feld-Etikett ("…, Geburtsort: Linz"), kein
+    Nicht-Name (geburtsname_moeglich); die Folge endet am ersten anderen Wort. Höchstens fünf. verlaengern(s, e):
+    Ende eines mehrteiligen Namens ("Garcia Lopez") oder None für ein Wort, das hier kein Name ist (eigene Prüfung
+    des Aufrufers); ohne verlaengern das Ende des Treffers von name_re."""
+    if not _GEBURTSNAMEN_MEHRZAHL_RE.fullmatch(m.group(0)):
+        return []
+    aus = []
+    while len(aus) < 5:
+        t = _NAMEN_TRENNER_RE.match(text, ende)
+        n = name_re.match(text, t.end()) if t is not None else None
+        if n is None or feld_etikett(text, n.start(), n.end(), ist_etikett) \
+                or not geburtsname_moeglich(text, n.start(), n.end(), frage, ort_erlaubt=True):
+            break
+        ende = verlaengern(n.start(), n.end()) if verlaengern is not None else n.end()
+        if ende is None:
+            break
+        aus.append(Geburtsnamenfund(n.start(), ende, getrennt))
+    return aus

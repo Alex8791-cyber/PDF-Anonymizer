@@ -17,16 +17,20 @@ Albanien
 Albstadt
 Aleppo
 Alexandria
+Algarve
 Algerien
 Algier
 Allenstein
+Allgäu
 Almaty
 Alsdorf
 Altenburg
 Amberg
 Amman
+Amrum
 Amsterdam
 Anatolien
+Andalusien
 Andernach
 Andorra
 Angola
@@ -68,7 +72,10 @@ Bagdad
 Bahamas
 Bahrain
 Baku
+Balearen
+Bali
 Balingen
+Baltrum
 Bamberg
 Banat
 Bangalore
@@ -101,11 +108,13 @@ Bischkek
 Bitterfeld
 Böblingen
 Bocholt
+Bodensee
 Bogotá
 Bolivien
 Bologna
 Bombay
 Bordeaux
+Borkum
 Bornheim
 Bosnien
 Bosnien und Herzegowina
@@ -133,6 +142,7 @@ Burkina Faso
 Bursa
 Burundi
 Buxtehude
+Capri
 Caracas
 Casablanca
 Castrop-Rauxel
@@ -151,6 +161,7 @@ Crailsheim
 Cuxhaven
 Dachau
 Dakar
+Dalmatien
 Damaskus
 Dänemark
 Danzig
@@ -170,6 +181,7 @@ Dhaka
 Dietzenbach
 Dinslaken
 Diyarbakir
+Djerba
 Dnipro
 Döbeln
 Doha
@@ -187,10 +199,12 @@ Eberswalde
 Ecuador
 Edinburgh
 Ehingen
+Eifel
 Eindhoven
 Eisenach
 Eisenhüttenstadt
 El Salvador
+Elba
 Elfenbeinküste
 Ellwangen
 Elmshorn
@@ -212,13 +226,17 @@ Eswatini
 Euskirchen
 Eutin
 Falkensee
+Fehmarn
 Fellbach
 Fidschi
 Filderstadt
 Finnland
 Flensburg
 Florenz
+Florida
+Föhr
 Forchheim
+Formentera
 Frankenthal
 Frankfurt am Main
 Frankfurt an der Oder
@@ -229,6 +247,7 @@ Freiburg im Breisgau
 Freising
 Friedberg
 Friedrichshafen
+Fuerteventura
 Fulda
 Fünfkirchen
 Fürstenfeldbruck
@@ -237,6 +256,7 @@ Gaggenau
 Galizien
 Gambia
 Garbsen
+Gardasee
 Garmisch-Partenkirchen
 Gaziantep
 Geesthacht
@@ -262,6 +282,7 @@ Görlitz
 Goslar
 Göteborg
 Gotha
+Gran Canaria
 Graz
 Greifswald
 Greven
@@ -284,10 +305,13 @@ Haltern am See
 Hameln
 Hanau
 Hanoi
+Harz
 Hattingen
 Havanna
+Hawaii
 Heidenheim
 Heinsberg
+Helgoland
 Helsinki
 Hemer
 Hennef
@@ -298,6 +322,7 @@ Herrenberg
 Herten
 Herzogenrath
 Hessen
+Hiddensee
 Hilden
 Hof
 Holland
@@ -309,6 +334,7 @@ Hückelhoven
 Hürth
 Husum
 Ibbenbüren
+Ibiza
 Idar-Oberstein
 Ilmenau
 Indien
@@ -323,6 +349,7 @@ Islamabad
 Island
 Israel
 Istanbul
+Istrien
 Italien
 Itzehoe
 Izmir
@@ -336,6 +363,7 @@ Jerusalem
 Johannesburg
 Jordanien
 Jugoslawien
+Juist
 Kaarst
 Kabul
 Kairo
@@ -346,6 +374,7 @@ Kamen
 Kamerun
 Kamp-Lintfort
 Kanada
+Kanaren
 Kandahar
 Kanton
 Kap Verde
@@ -357,6 +386,7 @@ Kärnten
 Kasachstan
 Kasan
 Kaschau
+Katalonien
 Katar
 Kathmandu
 Kattowitz
@@ -389,10 +419,14 @@ Konya
 Kopenhagen
 Korbach
 Korea
+Korfu
 Kornwestheim
+Korsika
+Kos
 Kosovo
 Krakau
 Krefeld
+Kreta
 Kreuztal
 Kroatien
 Kronstadt
@@ -403,6 +437,7 @@ Kurdistan
 Kurland
 Kuwait
 Kyoto
+La Palma
 Laatzen
 Lagos
 Lahore
@@ -415,6 +450,8 @@ Landshut
 Langen
 Langenfeld
 Langenhagen
+Langeoog
+Lanzarote
 Laos
 Lausanne
 Leer
@@ -461,6 +498,7 @@ Luxemburg
 Luzern
 Lyon
 Madagaskar
+Madeira
 Madras
 Madrid
 Mailand
@@ -469,6 +507,7 @@ Malawi
 Malaysia
 Malediven
 Mali
+Mallorca
 Malmö
 Malta
 Manchester
@@ -494,6 +533,7 @@ Melbourne
 Melle
 Memmingen
 Menden
+Menorca
 Merseburg
 Merzig
 Meschede
@@ -548,6 +588,7 @@ Nigeria
 Nizza
 Norden
 Nordenham
+Norderney
 Norderstedt
 Nordhausen
 Nordhorn
@@ -555,6 +596,7 @@ Nordirland
 Nordkorea
 Nordmazedonien
 Nordrhein-Westfalen
+Nordsee
 Northeim
 Norwegen
 Novi Sad
@@ -574,6 +616,7 @@ Osterholz-Scharmbeck
 Ostfildern
 Ostpreußen
 Ostrau
+Ostsee
 Osttimor
 Pakistan
 Palästina
@@ -586,9 +629,11 @@ Paris
 Passau
 Peine
 Peking
+Pellworm
 Peru
 Philadelphia
 Philippinen
+Phuket
 Pilsen
 Pinneberg
 Pirmasens
@@ -607,6 +652,7 @@ Posen
 Prag
 Pressburg
 Pristina
+Provence
 Pulheim
 Quedlinburg
 Rabat
@@ -623,12 +669,14 @@ Rheinberg
 Rheine
 Rheinfelden
 Rheinland-Pfalz
+Rhodos
 Riad
 Riesa
 Rietberg
 Riga
 Rijeka
 Rio de Janeiro
+Riviera
 Rodgau
 Rom
 Rosenheim
@@ -636,6 +684,7 @@ Rottenburg am Neckar
 Rotterdam
 Rottweil
 Ruanda
+Rügen
 Rumänien
 Rüsselsheim
 Russland
@@ -659,11 +708,14 @@ Sankt Petersburg
 Sankt Pölten
 Sankt Wendel
 Santiago de Chile
+Santorin
 São Paulo
 Saporischschja
 Sarajevo
 Saratow
+Sardinien
 Saudi-Arabien
+Sauerland
 Schlesien
 Schleswig-Holstein
 Schmallenberg
@@ -673,6 +725,7 @@ Schottland
 Schwabach
 Schwäbisch Gmünd
 Schwäbisch Hall
+Schwarzwald
 Schweden
 Schwedt
 Schweinfurt
@@ -695,6 +748,7 @@ Simbabwe
 Sindelfingen
 Singapur
 Singen
+Sizilien
 Skopje
 Slowakei
 Slowenien
@@ -705,6 +759,7 @@ Sonneberg
 Sowjetunion
 Spanien
 Speyer
+Spiekeroog
 Split
 Sri Lanka
 Stade
@@ -726,6 +781,7 @@ Suhl
 Sundern
 Suriname
 Sydney
+Sylt
 Syrien
 Täbris
 Tadschikistan
@@ -737,6 +793,7 @@ Taschkent
 Teheran
 Tel Aviv
 Temeswar
+Teneriffa
 Thailand
 Thessaloniki
 Thorn
@@ -751,6 +808,7 @@ Tonga
 Tönisvorst
 Torgau
 Toronto
+Toskana
 Toulouse
 Trabzon
 Traunstein
@@ -777,6 +835,7 @@ Unna
 Uruguay
 USA
 Usbekistan
+Usedom
 Utrecht
 Valencia
 Vancouver
@@ -801,6 +860,7 @@ Waldshut-Tiengen
 Wales
 Walsrode
 Wangen im Allgäu
+Wangerooge
 Warendorf
 Warna
 Warschau

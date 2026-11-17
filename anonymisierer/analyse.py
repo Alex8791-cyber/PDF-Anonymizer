@@ -76,7 +76,7 @@ from . import nebenkanaele as _nebenkanaele
 from . import ocr as _ocr
 from .detektoren import Kontext
 from .muster import KATEGORIE_PRIORITAET, KATEGORIEN
-from .namen import (ANREDEN, NAMEN_STOPPLISTE, PARTIKEL, TITEL, finde_personen,  # noqa: F401
+from .namen import (ANREDEN, GEBURTSNAME_QUELLE, NAMEN_STOPPLISTE, PARTIKEL, TITEL, finde_personen,  # noqa: F401
                     geburtsname_teilen, lade_ner, ner_fehler)
 from .seitenmodell import (Abgebrochen, dokument_aufbauen, dokument_aus_text, dokument_vorbereiten,
                            fund_schluessel, ganzwort_stellen, ganzwort_stellen_viele, hat_xfa, modus_fuer,
@@ -337,9 +337,31 @@ def _kontext_davor(fund: dict) -> str | None:
 
 def _nicht_weitergeben(fund: dict) -> bool:
     """Funde, die nie in andere Dokumente wandern: Titel ohne Namen (gehören zu keiner Person), angebotene
-    Firmenanschriften (sonst würden sie dort zu angehakten Stellen) und kurze Kartenprüfnummern (_kartenpruefnummer)."""
+    Firmenanschriften (sonst würden sie dort zu angehakten Stellen), kurze Kartenprüfnummern (_kartenpruefnummer) und
+    mehrdeutige Geburtsnamen (_mehrdeutiger_geburtsname: "geb. Deutsch" macht "Vertragssprache ist Deutsch." in einem
+    anderen Dokument nicht zur Person)."""
     return (fund.get("anzeige") == ANZEIGE_TITEL or QUELLE_FIRMENANSCHRIFT in (fund.get("quellen") or ())
-            or _kartenpruefnummer(fund.get("kategorie", ""), fund.get("text", ""), _kontext_davor(fund)))
+            or _kartenpruefnummer(fund.get("kategorie", ""), fund.get("text", ""), _kontext_davor(fund))
+            or (fund.get("kategorie") == "namen" and _mehrdeutiger_geburtsname(fund.get("text", ""),
+                                                                                fund.get("quellen") or ())))
+
+
+# Quellen, die einen Geburtsnamen nur über "geb."/sein Etikett finden (und seine Weitergabe)
+_NUR_GEBURTSNAME_QUELLEN = frozenset({GEBURTSNAME_QUELLE, "weitergabe", "bestandteil", "weitergabe.aehnlich"})
+
+
+def _mehrdeutiger_geburtsname(text: str, quellen) -> bool:
+    """Geburtsname, den nur die Regel "geb."/Geburtsnamen-Etikett gefunden hat und der zugleich ein Ort, eine
+    Herkunftsbezeichnung oder ein gewöhnliches Wort ist (kennungsformen.mehrdeutiger_geburtsname: "Deutsch",
+    "Mainzer", "Linz")? Er wird nur in Personenkontext weitergegeben (Gegenprüfung 4d, Befund 13)."""
+    quellen = set(quellen or ())
+    if GEBURTSNAME_QUELLE not in quellen or not quellen <= _NUR_GEBURTSNAME_QUELLEN:
+        return False
+    try:
+        from . import kennungsformen
+        return kennungsformen.mehrdeutiger_geburtsname(text)
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return False
 
 
 class LaufWissen:
@@ -795,6 +817,7 @@ GRUND_SATZANFANG = "mehrdeutiges Wort am Satzanfang"
 GRUND_KOMPOSITUM = "Teil eines fremden Bindestrich-Worts"
 GRUND_TITEL = "derselbe Titel bei einer anderen Person"
 GRUND_KARTENPRUEFNUMMER = "dieselben Ziffern wie eine Kartenprüfnummer, aber ohne ihr Etikett (Betrag, Seitenzahl …)"
+GRUND_GEBURTSNAME_MEHRDEUTIG = "Geburtsname, der zugleich Ort oder Wort ist – hier ohne Personenbezug"
 
 
 # ----------------------------------------------------------------------
@@ -1197,10 +1220,27 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
         liste = getattr(wissen, "ALLERWELTSWOERTER", None) if wissen is not None else None
         return bool(liste) and w in liste
 
+    # Geburtsnamen, die zugleich Ort oder Wort sind ("geb. Deutsch", "geb. Mainzer") und nur die Regel "geb." gefunden
+    # hat: weitergegeben nur in Personenkontext (Befund 13 der Gegenprüfung 4d: "Korrespondenzsprache: Deutsch")
+    quellen_je_name: dict = {}
+    text_je_name: dict = {}
+    for t in namen_treffer:
+        k = namensschluessel(fund_schluessel(text[t.start:t.ende], "name"))
+        quellen_je_name.setdefault(k, set()).add(t.quelle)
+        text_je_name.setdefault(k, text[t.start:t.ende])
+    geb_stellen = {(t.start, t.ende) for t in namen_treffer if t.quelle == GEBURTSNAME_QUELLE}
+    mehrdeutige_geb = {k for k, q in quellen_je_name.items() if q == {GEBURTSNAME_QUELLE}
+                       and _mehrdeutiger_geburtsname(text_je_name[k], q)}
+
     def ausschluss(s: int, e: int, wort: str):
         """Weitergabe eines einzelnen Namensworts: nicht als Teil eines fremden Bindestrich-Worts
         ("Kraftfahrt" in "Kraftfahrt-Versicherung"); mehrdeutige Wörter nicht am Satzanfang ohne
-        Personenkontext. Liefert den Grund des Ausschlusses oder None."""
+        Personenkontext; ein mehrdeutiger Geburtsname nur in Personenkontext. Liefert den Grund des Ausschlusses
+        oder None."""
+        if mehrdeutige_geb and (s, e) not in geb_stellen and \
+                namensschluessel(fund_schluessel(wort, "name")) in mehrdeutige_geb and \
+                not _personenkontext(text, s, e, personen.namensteile):
+            return GRUND_GEBURTSNAME_MEHRDEUTIG
         kompositum = _bindestrich_wort(text, s, e)
         if kompositum is not None:
             andere = [p for p in kompositum.split("-") if p and _schluessel(p) != _schluessel(wort)]

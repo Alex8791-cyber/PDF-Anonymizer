@@ -450,18 +450,25 @@ _KREDITKARTE_PLATZHALTER_RE = re.compile(r"\[KREDITKARTE\]")
 _GEBURTSNAME_DAVOR_RE = re.compile(
     r"(?:(?<![\wäöüß.\-])(?:geb|GEB)(?:\.:?|:|,)?|(?<=[A-Za-zÄÖÜäöüß\]][ ])Geb\.|(?<=[A-Za-zÄÖÜäöüß\]],[ ])Geb\.|"
     r"(?<![\wäöüß])(?P<geborene>geborene[rn]?|GEBORENE[RN]?|Geborene[rn]?)"
-    # "gab." – so liest die Texterkennung "geb." ("[PERSON A] gab. Quarnstedt"); nur zwischen zwei Namen
-    r"|(?<=[A-Za-zÄÖÜäöüß\]][ ])(?P<gab>gab|GAB)\.)"
+    # "gab.", "gcb.", "qeb." – so liest die Texterkennung "geb." ("[PERSON A] gab. Quarnstedt"); nur zwischen zwei
+    # Namen
+    r"|(?<=[A-Za-zÄÖÜäöüß\]][ ])(?P<gab>" + kennungsformen.GEB_VERLESEN + r")\.)"
     # Leerzeichen dahinter – direkt hinter "geb." / "geb:" auch keines ("geb.Quarnstedt")
     r"(?:[ ]{1,3}|(?<=[.:]))(?:(?:von|van|de|der|den|zu|zur|vom|ten|ter|da|di|dos|del|du|la|le|"
     r"VON|VAN|DE|DER|DEN|ZU|ZUR|VOM)[ ]+){0,2}$")
+# "[PERSON A] GEB. ⇥⇥ AMBERGER", "[PERSON A] ⇥⇥ GEB. ⇥⇥ ISRAEL": so liest die Texterkennung die Lücken einer
+# Festbreiten-Liste – hinter einem Namen oder Platzhalter (unten geprüft), nicht als Spaltenkopf ("Name ⇥⇥ geb. ⇥⇥
+# Ort"); am Zeilenanfang ("GEB. ⇥⇥ ISRAEL": die Kontroll-OCR einer geschwärzten Liste liest den Namen davor nicht)
+_GEBURTSNAME_DAVOR_ZELLE_RE = re.compile(r"(?:(?<=[A-Za-zÄÖÜäöüß\]][ ])|(?<=[A-Za-zÄÖÜäöüß\]]\t\t)|^)(?:geb|GEB|Geb)\."
+                                         r"(?P<zelle>[ ]?\t\t[ ]?)$")
 # Füllwörter hinter "geb." sind kein Geburtsname ("Familienstand: geb. Ledig", "Weber geb. Unbekannt")
 _GEBURTSNAME_FUELLWORT = frozenset({"siehe", "wie", "keiner", "keine", "kein", "unbekannt", "entfällt", "entfaellt",
                                     "ledig", "verheiratet", "geschieden", "verwitwet", "gleich", "identisch", "dito",
                                     "nein", "ja", "ohne", "nicht", "oben", "unten"})
-# hinter dem Wort geht ein Datum weiter ("geb. Mai 1980", "geb. Od. Dez. 1973" – OCR für "04. Dez. 1973")
-_DATUM_DAHINTER_RE = re.compile(r"[ \t]*(?:\d|\.[ \t]*(?:\d|(?i:" + "|".join(sorted(_MONATE, key=len, reverse=True))
-                                + r")(?![\wäöüß])))")
+# hinter dem Wort geht ein Datum weiter ("geb. Mai 1980", "geb. Od. Dez. 1973" – OCR für "04. Dez. 1973") – nicht in
+# der nächsten Zelle ("AMBERGER ⇥⇥ 12.03.1980": das Geburtsdatum der Liste)
+_DATUM_DAHINTER_RE = re.compile(r"(?![ ]*\t\t)[ \t]*(?:\d|\.[ \t]*(?:\d|(?i:"
+                                + "|".join(sorted(_MONATE, key=len, reverse=True)) + r")(?![\wäöüß])))")
 _URL_RE = re.compile(r"(?i)(?<![\w@])((?:https?://|www\.)[\w\-.~/%?#=&+]+|[\w\-]+\.(?:de|com|net|org|eu|info)"
                      r"(?:/[\w\-./~%?#=&+]*)?)(?![\w@])")
 _EMAIL_RE = re.compile(r"(?<![\w.+\-])([\w.+\-ÄÖÜäöüß]+)\s?(?:@|\(at\)|\[at\])\s?"
@@ -2041,8 +2048,10 @@ class _Seitenpruefung:
                     or self.ist_platzhalter_bei(o + s, o + s + len(w))):
                 continue
             if kennungsformen.etikett_art(v.text) is not None and not (
-                    kennungsformen.nummer_etikett(v.text) and kennungsformen.kennungsform(w)):
-                continue                                # eVB/Transferticket/CVC: eigene Regel ("SF 12", "250 Euro")
+                    kennungsformen.nummer_etikett(v.text) and kennungsformen.kennungsform(
+                        w, zeitraum_erlaubt=kennungsformen.allgemeines_nummer_etikett(v.text))):
+                continue                                # eVB/Transferticket/CVC: eigene Regel ("SF 12", "250 Euro");
+                                                        # hinter "eVB-Nr." auch "12/345", "2024/25" (Gegenprüfung 4d)
             if _UST_ID_RE.fullmatch(w) and _UST_ETIKETT_RE.search(zeile[:s]):
                 continue                                # USt-IdNr. hinter verlesenem Etikett ("uat-ıdNr."); hinter
                                                         # "Kundennummer" bleibt die Form DE + 9 Ziffern Verdacht
@@ -2061,14 +2070,20 @@ class _Seitenpruefung:
         for m in kennungsformen.GEBURTSNAME_ETIKETT_RE.finditer(self.text):
             sp = kennungsformen.geburtsname_hinter_etikett(self.text, m, ist_etikett=self.w.ist_etikett,
                                                            frage=self._wissen_frage)
-            if sp is None or self.ist_gesperrt(sp.start, sp.ende) or self.ist_platzhalter_bei(sp.start, sp.ende):
+            if sp is None:
                 continue
-            wort = self.text[sp.start:sp.ende].split()[-1]
-            if wort.casefold() in _GEBURTSNAME_FUELLWORT or self.w.art(_titel(wort))[4]:
-                continue                                # "Geburtsname: Siehe oben", Allerweltswort
-            if sp.getrennt and self._wort_harmlos(_titel(wort)):
-                continue                                # "Geburtsname:" ⏎ "Komfort", "Wohneigentum": kein Name
-            self.neu(sp.start, sp.ende, f"möglicher Geburtsname (hinter »{' '.join(m.group(0).split())}«)", "name")
+            # "Geburtsnamen: Quarnstedt, Ellerbrok": weitere Namen hinter einem Etikett in der Mehrzahl
+            weitere = kennungsformen.weitere_geburtsnamen(self.text, m, sp.ende, sp.getrennt,
+                                                          ist_etikett=self.w.ist_etikett, frage=self._wissen_frage)
+            for f in [sp, *weitere]:
+                if self.ist_gesperrt(f.start, f.ende) or self.ist_platzhalter_bei(f.start, f.ende):
+                    continue
+                wort = self.text[f.start:f.ende].split()[-1]
+                if wort.casefold() in _GEBURTSNAME_FUELLWORT or self.w.art(_titel(wort))[4]:
+                    continue                            # "Geburtsname: Siehe oben", Allerweltswort
+                if f.getrennt and self._wort_harmlos(_titel(wort)):
+                    continue                            # "Geburtsname:" ⏎ "Komfort", "Wohneigentum": kein Name
+                self.neu(f.start, f.ende, f"möglicher Geburtsname (hinter »{' '.join(m.group(0).split())}«)", "name")
 
     def _formen_hinter_etikett(self, z, zeile: str, maske: list):
         """Wert hinter dem Etikett einer eVB-Nummer, eines Transfertickets oder einer Kartenprüfnummer – mit der Form
@@ -2085,19 +2100,23 @@ class _Seitenpruefung:
             funde = {}
             for f in kennungsformen.kennungen(self.text, ocr=True, wortgestalt=self.w.wortgestalt,
                                               ist_etikett=self.w.ist_etikett,
-                                              kartenbezug_extra=_KREDITKARTE_PLATZHALTER_RE):
+                                              kartenbezug_extra=_KREDITKARTE_PLATZHALTER_RE, allgemein=True):
                 zf = self.zeile(f.start)
                 if zf is not None:
-                    funde.setdefault(zf.id, []).append(
-                        (f.start, f.ende, f"{_FORM_GRUND[f.art]} hinter Etikett »{' '.join(f.etikett.split())}«"))
+                    etikett = " ".join(f.etikett.split())
+                    grund = (f"Wert hinter Etikett »{etikett}«" if f.art == "allgemein"
+                             else f"{_FORM_GRUND[f.art]} hinter Etikett »{etikett}«")
+                    # hinter "Nr." ist "2024/25" eine laufende Nummer, kein Zeitraum: die Maske gilt dort nicht
+                    funde.setdefault(zf.id, []).append((f.start, f.ende, grund, f.art == "allgemein"))
             for s0, e0, grund in self._spalten_kennungen():
                 zf = self.zeile(s0)
                 if zf is not None:
-                    funde.setdefault(zf.id, []).append((s0, e0, grund))
+                    funde.setdefault(zf.id, []).append((s0, e0, grund, False))
             self._org["kennungsfunde"] = funde
-        for g_s, g_e, grund in funde.get(z.id, ()):
+        for g_s, g_e, grund, ohne_maske in funde.get(z.id, ()):
             ls, le = g_s - z.start, min(g_e, z.ende) - z.start
-            if any(maske[max(0, ls):max(0, le)]) or self.ist_gesperrt(g_s, g_e) or self.ist_platzhalter_bei(g_s, g_e):
+            if (not ohne_maske and any(maske[max(0, ls):max(0, le)])) or self.ist_gesperrt(g_s, g_e) \
+                    or self.ist_platzhalter_bei(g_s, g_e):
                 continue
             self.neu(g_s, g_e, grund, "etikett")
 
@@ -2145,8 +2164,11 @@ class _Seitenpruefung:
                             break
                 if art is None:
                     continue
-                if art == "pruef" and not kennungsformen.KARTENANGABE_RE.search(zt):
-                    continue                            # "Prüfnr." nur neben "Kartennummer"/"Kreditkarte"
+                if art == "pruef" and not kennungsformen.KARTENANGABE_RE.search(zt) and not any(
+                        kennungsformen.kartendaten(t) or _KREDITKARTE_PLATZHALTER_RE.search(t)
+                        for t in map(self.zeilen_text, zeilen[erste:erste + SPALTE_ZEILEN])):
+                    continue                            # "Prüfnr." nur neben "Kartennummer"/"Kreditkarte" oder über
+                                                        # Kartendaten ("Visa ⇥⇥ 4111 … ⇥⇥ 739", "[KREDITKARTE]")
                 form = "cvc" if art == "pruef" else art
                 hoehe = max(z.rect.height, 8.0)
                 unten_y = z.rect.y1 if erste == i + 1 else zeilen[i + 1].rect.y1
@@ -2518,23 +2540,29 @@ class _Seitenpruefung:
             z = self.zeile(s)
             if z is None:
                 return False
-            davor = text[max(z.start, s - 40):s]
-            m = _GEBURTSNAME_DAVOR_RE.search(davor)
+            davor_start = max(z.start, s - 40)
+            davor = text[davor_start:s]
+            m = _GEBURTSNAME_DAVOR_RE.search(davor) or _GEBURTSNAME_DAVOR_ZELLE_RE.search(davor)
             if m is None or _DATUM_DAHINTER_RE.match(text, e) or any(c.isdigit() for c in text[s:e]):
                 return False
+            gruppen = m.groupdict()
             wort = text[s:e]
             if wort.casefold() in _GEBURTSNAME_FUELLWORT:
                 return False                            # "geb. Ledig", "geb. Unbekannt"
             if self.w.grossstadt(wort) and not self.w.art(wort.title() if wort.isupper() else wort)[1]:
                 return False                            # "geb. Hamburg": der Geburtsort (Großstadt, kein Nachname)
-            if not kennungsformen.geburtsname_moeglich(text, s, e, self._wissen_frage) \
+            if not kennungsformen.geburtsname_moeglich(text, s, e, self._wissen_frage, ort_erlaubt=True) \
                     or kennungsformen.feld_etikett(text, s, e, self.w.ist_etikett):
-                return False                            # "geb. In Köln", "geb. Polen", "geb. Lt. Ausweis", "PLZ:"
-            if m.group("gab") and not kennungsformen.WERT_ENDE_RE.match(text, e):
+                return False                            # "geb. In Köln", "geb. Lt. Ausweis", "PLZ:" – ein Ort
+                                                        # ("geb. Linz") kann Geburtsname sein: Verdacht
+            if gruppen.get("gab") and not kennungsformen.WERT_ENDE_RE.match(text, e):
                 return False                            # "… die ihm Frau Weber gab. Müller kam später"
-            if m.group("geborene") or m.group("gab") or m.group(0).startswith("Geb."):
-                # "Geb." (Gebäude) und "geborene" (Eigenschaftswort) nur direkt hinter einem Namen oder Platzhalter
-                # ("[PERSON A], geb. Schulz") – nicht "Klinikum Mitte, Geb. Nord", "Geborene Zwillinge sind …"
+            zeilenanfang = gruppen.get("zelle") and m.start() == 0 and davor_start == z.start \
+                and not m.group(0).startswith("Geb.")
+            if not zeilenanfang and (gruppen.get("geborene") or gruppen.get("gab") or gruppen.get("zelle")
+                                     or m.group(0).startswith("Geb.")):
+                # "Geb." (Gebäude), "geborene" (Eigenschaftswort) und "geb. ⇥⇥" nur direkt hinter einem Namen oder
+                # Platzhalter ("[PERSON A], geb. Schulz") – nicht "Klinikum Mitte, Geb. Nord", "Geborene Zwillinge …"
                 vorher = re.search(r"([^\W\d_][\w'’\-]*|\])[ \t]*,?[ \t]*\(?[ \t]*$", davor[:m.start()])
                 if vorher is None or (vorher.group(1) != "]" and not any(self.w.art(_titel(vorher.group(1)))[:2])):
                     return False
@@ -2647,12 +2675,18 @@ class _Seitenpruefung:
                     grund = "Doppelname mit Namen aus der Wissensbasis"
                 self.neu(s, e, grund, "name")
                 continue
+            if geboren and not aw and not allow and len(w) >= 3:
+                # direkt hinter "geb." ein namenartiges Wort (geburtsname: kein Funktionswort, Sachwort, Datum, keine
+                # Großstadt): auch ein Ort ("geb. Linz"), ein kurzes Versalwort ("GEB. LINZ") oder ein Herkunftsname
+                self.neu(s, e, "möglicher Geburtsname (hinter »geb.«)", "name")
+                continue
             if not kontext and (vn or nn or not aw) and len(w) >= 4 and not allow and spalte_person(i):
                 kontext = etikett = True                # Tabellenspalte "Vorname", "Name", "Kunde"
             if len(w) < 2 or (w.isupper() and len(w) <= 3 and not kontext) or w.lower() in _ANREDE_ZUSATZ:
                 continue
-            if (vn or nn) and kontext and not allow and not self.w.ist_etikett(w):
-                self.neu(s, e, "mehrdeutiger Name im Personenkontext", "name")
+            if (vn or nn) and kontext and not allow and not self.w.ist_etikett(w) \
+                    and not text[e:e + 2].lstrip(")").startswith(":"):
+                self.neu(s, e, "mehrdeutiger Name im Personenkontext", "name")    # nicht "Größe:", "Alt:" (Etikett)
                 continue
             if links_vorname and not allow and (w.lower() in _KALENDERWOERTER or not aw) \
                     and not _NOMEN_ENDUNG.search(w) and not self.w.ist_etikett(w):
@@ -3129,6 +3163,12 @@ GRUND_UNTERSCHRIFT = "Unterschrift/Name unter der Grußformel nicht lesbar – b
 GRUND_UNTERSCHRIFTSFELD = "Unterschrift/Name am Unterschriftsfeld nicht lesbar – bitte ansehen"
 GRUND_PERSONENTINTE = "Schrift neben einer Personenangabe nicht verlässlich lesbar – bitte ansehen"
 GRUND_BANKTINTE = "Schrift neben einer Bank- oder Kontoangabe nicht verlässlich lesbar – bitte ansehen"
+GRUND_KENNUNGSTINTE = ("Schrift hinter einem Kennungs-Etikett (eVB, Transferticket, Kartenprüfnummer) nicht "
+                       "verlässlich lesbar – bitte ansehen")
+# Etikett einer Kennung, hinter dem ein Wert stehen sollte: Doppelpunkt (auch hinter einer Klammer: "Kartenprüfnummer
+# (CVC):") oder das Etikett beendet seine Zeile ("eVB-Nummer (7-stellig)" – der Wert steht darunter)
+_KENNUNG_DOPPELPUNKT_RE = re.compile(r"[ \t]*(?:\([^()\n]{0,40}\))?[ \t]*:")
+_KENNUNG_ZEILENENDE_RE = re.compile(r"[ \t]*(?:\([^()\n]{0,40}\))?[ \t:]*$")
 # Etiketten einer Bankverbindung mit Doppelpunkt (auch mit Zusatz in Klammern, wie die OCR sie liest: "Kreditinstitut
 # (Name und BIC}:") – oder allein in ihrer Zelle, ein Formularfeld ("IBAN")
 _BANK_ETIKETT_RE = re.compile(r"(?i)(?<![\w])(?:kreditinstitut|geldinstitut|name\s+der\s+bank|bankname|bank|iban|bic|"
@@ -3390,6 +3430,58 @@ class _Seitenbild:
         return daten, maske, x1 - x0, y1 - y0, genau
 
 
+KENNUNG_TINTE_PIXEL = 12       # Schrift hinter einem Kennungs-Etikett: ab so vielen Pixeln (72 dpi, ohne
+                               # Kästchenränder)
+KENNUNG_LINIE_PIXEL = 10       # waagerechte/senkrechte Läufe ab dieser Länge sind Kästchenränder, keine Ziffer
+
+
+def _kennungstinte(bild: _Seitenbild, bereich) -> list:
+    """Schrift im Bereich hinter (bzw. unter) einem Kennungs-Etikett, die keine Lesung erklärt – empfindlicher als
+    _tintengruppen: gedruckte Ziffern in einem Kammfeld (11 pt, je Kästchen eine) sind bei 72 dpi zu dünn für deren
+    Zellen. Gezählt werden Tintenpixel außerhalb der Maske (erklärte Rechtecke, Linien der Seite) ohne Kästchenränder
+    (gerade Läufe ab KENNUNG_LINIE_PIXEL Pixeln); ab KENNUNG_TINTE_PIXEL Pixeln ein Rechteck um sie, sonst []. Ein
+    leeres Kammfeld (nur Ränder) ist kein Verdacht."""
+    teil = bild.ausschnitt(fitz.Rect(bereich) & bild.rect)
+    if teil is None:
+        return []
+    daten, maske, breite, hoehe, genau = teil
+    tinte = bytearray(1 if daten[i] < bild.dunkel and not maske[i] else 0 for i in range(breite * hoehe))
+    rand = bytearray(breite * hoehe)
+    for y in range(hoehe):
+        x = 0
+        while x < breite:
+            if tinte[y * breite + x]:
+                x1 = x
+                while x1 < breite and tinte[y * breite + x1]:
+                    x1 += 1
+                if x1 - x >= KENNUNG_LINIE_PIXEL:
+                    rand[y * breite + x:y * breite + x1] = b"\x01" * (x1 - x)
+                x = x1
+            else:
+                x += 1
+    for x in range(breite):
+        y = 0
+        while y < hoehe:
+            if tinte[y * breite + x]:
+                y1 = y
+                while y1 < hoehe and tinte[y1 * breite + x]:
+                    y1 += 1
+                if y1 - y >= KENNUNG_LINIE_PIXEL:
+                    for k in range(y, y1):
+                        rand[k * breite + x] = 1
+                y = y1
+            else:
+                y += 1
+    pixel = [(i % breite, i // breite) for i in range(breite * hoehe) if tinte[i] and not rand[i]]
+    if len(pixel) < KENNUNG_TINTE_PIXEL:
+        return []
+    xs = [x for x, _ in pixel]
+    ys = [y for _, y in pixel]
+    sx, sy = bild.sx, bild.sy
+    return [fitz.Rect(genau.x0 + min(xs) / sx, genau.y0 + min(ys) / sy,
+                      genau.x0 + (max(xs) + 1) / sx, genau.y0 + (max(ys) + 1) / sy)]
+
+
 def _tintengruppen(bild: _Seitenbild, bereich) -> list:
     """Dichte, nicht erklärte Tinte im Bereich (Seitenkoordinaten; erklärt ist, was bild.erklaeren() und die Linien
     der Seite abdecken): Rechteck je zusammenhängender Gruppe von Tintenzellen (Zellen mit höchstens einer leeren
@@ -3603,6 +3695,7 @@ def _unterschrift_pruefen(seite, m, schwaerzungen, pruefung=None, gemeldet=(), a
         bereiche.append((fitz.Rect(r.x0 - 15, r.y1 + 1, r.x0 + UNTERSCHRIFT_BREITE,
                                    r.y1 + 1 + UNTERSCHRIFT_ZEILEN * h), GRUND_UNTERSCHRIFT))
     index = pruefung.w.index("person")
+    karten_seite = bool(kennungsformen.KARTENANGABE_RE.search(text) or _KREDITKARTE_PLATZHALTER_RE.search(text))
     for zid, z in folge:
         if zid in gruss:
             continue
@@ -3637,6 +3730,25 @@ def _unterschrift_pruefen(seite, m, schwaerzungen, pruefung=None, gemeldet=(), a
                 continue
             k = _lesekasten(m.zeichen[g].rect, winkel, schraeg)
             bereiche.append((fitz.Rect(k.x1 + 1, r.y0 - 0.2 * h, k.x1 + 250, r.y1 + 0.2 * h), GRUND_PERSONENTINTE))
+        # Kennungs-Etiketten (eVB, Transferticket, Kartenprüfnummer; "Prüfnummer", "CID" nur auf einer Seite mit
+        # Kartenangabe): ein Wert im Kammfeld (ein Zeichen je Kästchen) oder von Hand liest die OCR oft nicht ("[s]",
+        # nichts) – die Schrift rechts dahinter bzw. in der Zeile darunter ist dann Verdacht (Gegenprüfung 4d)
+        for k in kennungsformen.ETIKETT_RE.finditer(inhalt):
+            if (k.lastgroup == "pruef" and not karten_seite) or \
+                    inhalt.count("(", 0, k.start()) > inhalt.count(")", 0, k.start()):
+                continue                                # ohne Kartenangabe; Etikett in der Klammer eines anderen
+            dp = _KENNUNG_DOPPELPUNKT_RE.match(inhalt, k.end())
+            am_ende = _KENNUNG_ZEILENENDE_RE.match(inhalt, k.end())
+            if dp is None and am_ende is None:
+                continue                                # Etikett im Satz, der weitergeht
+            ende = dp.end() if dp is not None else len(inhalt.rstrip())
+            g = m.abbildung[z.start + ende - 1] if z.start + ende - 1 < len(m.abbildung) else -1
+            if g < 0:
+                continue
+            kk = _lesekasten(m.zeichen[g].rect, winkel, schraeg)
+            bereiche.append((fitz.Rect(kk.x1 + 1, r.y0 - 0.2 * h, kk.x1 + 250, r.y1 + 0.2 * h), GRUND_KENNUNGSTINTE))
+            if am_ende is not None:
+                bereiche.append((fitz.Rect(r.x0 - 5, r.y1 + 1, r.x0 + 300, r.y1 + 2.2 * h), GRUND_KENNUNGSTINTE))
         # Bank- und Kontoangaben des Kunden ("Kreditinstitut (Name und BIC):", "IBAN:"): handschriftlich ausgefüllt
         # liest die OCR dort oft nichts – die Tinte dahinter ist eine Bankverbindung
         for b in _BANK_ETIKETT_RE.finditer(inhalt):
@@ -3723,7 +3835,10 @@ def _unterschrift_pruefen(seite, m, schwaerzungen, pruefung=None, gemeldet=(), a
         if schluessel in gesehen:
             continue
         gesehen.add(schluessel)
-        gruppen = _tintengruppen(bild, _aus_lesekasten(bereich, winkel, schraeg))
+        if grund == GRUND_KENNUNGSTINTE:
+            gruppen = _kennungstinte(bild, _aus_lesekasten(bereich, winkel, schraeg))
+        else:
+            gruppen = _tintengruppen(bild, _aus_lesekasten(bereich, winkel, schraeg))
         neu = [g for g in gruppen if not any(abs(g & b) > 0.5 * abs(g) for b in bekannt)]
         zuege = [g for g in neu if zug_namen and zug_zum_namen(g, zug_namen)]
         if zuege:
@@ -3731,8 +3846,8 @@ def _unterschrift_pruefen(seite, m, schwaerzungen, pruefung=None, gemeldet=(), a
             neu = [g for g in neu if g not in zuege]
         if neu:
             bekannt += neu
-            text_v = {GRUND_PERSONENTINTE: "Personenangabe", GRUND_BANKTINTE: "Bankangabe"}.get(grund,
-                                                                                                "Unterschriftsbereich")
+            text_v = {GRUND_PERSONENTINTE: "Personenangabe", GRUND_BANKTINTE: "Bankangabe",
+                      GRUND_KENNUNGSTINTE: "Kennungsangabe"}.get(grund, "Unterschriftsbereich")
             verdacht.append(Verdacht(m.nr, -1, -1, text_v, grund, neu))
     return verdacht
 
