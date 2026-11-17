@@ -147,6 +147,9 @@ VORSCHAU_TEXT = "Vorschau …"
 KUERZEL = {"analyse": "a", "start": "s", "vorschau": "v"}
 SYMBOL_GROESSEN = (16, 32, 48, 64)        # Fenstersymbol (iconphoto); icon.ico enthält 16, 32, 48 und 256
 ERSTSTART_TITEL = "Bitte vor der ersten Nutzung lesen"
+# Unterschrift und Handschrift in „Maximal“: abgedeckt nur als eigenes Rasterbild einer digitalen Seite – auf Scans
+# und Fotos entfernt die Fotoerkennung Striche vorab (fotos.STRICH_MM), gezeichnete Linien (Vektorgrafik) sieht die
+# Bildprüfung gar nicht (fotos.bilder_der_seite)
 ERSTSTART_TEXT = (
     "Dieses Programm PSEUDONYMISIERT: Es ersetzt direkte Angaben wie Namen, Anschriften, Geburtsdaten, IBAN, "
     "Telefon- und Vertragsnummern durch Platzhalter wie [PERSON A].\n\n"
@@ -154,8 +157,8 @@ ERSTSTART_TEXT = (
     "Daraus kann eine Person unter Umständen noch zu erkennen sein.\n\n"
     "Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt – aber nicht immer gefunden. Andere Gesichter "
     "und Fotos deckt nur die Schutzstufe „Maximal“ ab, und auch sie nicht jedes Bild. Unterschriften und "
-    "Handschrift werden nicht erkannt – auf Scans und Fotos bleiben sie auch in „Maximal“ stehen. Was stehen "
-    "bleibt, decken Sie in der Vorschau mit einem Rahmen ab.\n\n"
+    "Handschrift werden nicht erkannt – auf Scans, Fotos und als Zeichnung bleiben sie auch in „Maximal“ stehen. "
+    "Was stehen bleibt, decken Sie in der Vorschau mit einem Rahmen ab.\n\n"
     "Keine automatische Erkennung ist fehlerfrei. Sehen Sie sich deshalb jedes Ergebnis in der Vorschau an, "
     "bevor Sie es weitergeben.\n\n"
     "Die Verantwortung für die Weitergabe an einen KI-Dienst bleibt bei Ihnen.")
@@ -224,25 +227,30 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
     Schutzstufen sind gleich (gui_attrappen.PROFILE) – „Maximal“ deckt dort keine Bilder ab."""
     if neue_kategorien:
         lesbar = "je nach Schutzstufe bleiben Diagnosen, Beruf, Arbeitgeber, Beträge und Orte lesbar"
-        kasten = ("Je nach Schutzstufe bleiben Diagnosen, Beruf und Arbeitgeber lesbar. Lichtbilder auf "
-                  "Ausweiskopien werden gesucht, aber nicht immer gefunden; andere Gesichter und Bilder deckt nur "
-                  "„Maximal“ ab. Nicht erkannt werden: Unterschriften, Handschrift, Freitext; Text in Bildern nur "
-                  "unsicher (OCR).")
+        # nicht länger als bisher: der Kasten darf auf kleinen Bildschirmen keine Zeile mehr brauchen (Layout-Tests)
+        kasten = ("Diagnosen, Beruf, Arbeitgeber bleiben je nach Schutzstufe lesbar. Lichtbilder auf Ausweiskopien "
+                  "werden gesucht, nicht immer gefunden. Andere Gesichter und Bilder bleiben, außer „Maximal“ "
+                  "erkennt sie. Nicht erkannt: Unterschriften, Handschrift, Freitext; Text in Bildern nur unsicher "
+                  "(OCR).")
         grenzen_kopf = "NICHT oder nur teilweise erkannt werden:\n"
         grenzen_umfang = ("  • Diagnosen, Krankheiten, Medikamente: nur bekannte Begriffe, angehakt erst in der "
                           "Schutzstufe „Maximal“ (sonst gemeldet und nicht angehakt in der Fundliste angeboten, "
                           "Zeichen ⚕)\n"
                           "  • Beruf, Arbeitgeber: nur mit Etikett oder Personenbezug (ab Schutzstufe „Hoch“); "
                           "Einkommen und Familienstand nicht\n")
-        # „Maximal“ (fotos.seite_pruefen): Rasterbilder auf Textseiten, Fotobereiche auf Scans und Bildseiten – nicht
-        # winzige Bilder (fotos.bild_winzig), Vektorgrafik, Text über einem Bild und ein Bild über die halbe Textseite
-        # (nur die Fotos darin); Striche (Unterschrift, Handschrift, Stempel) entfernt die Fotoerkennung vorab
+        # „Maximal“ (fotos.seite_pruefen): Rasterbilder auf Textseiten („digitale PDF-Seiten“), Fotobereiche auf Scans
+        # und Bildseiten – nicht winzige Bilder (fotos.bild_winzig), Vektorgrafik („gezeichnete Grafiken“), Text über
+        # einem Bild und ein Bild über die halbe Textseite (wie ein Scan: nur die Fotos darin). Unterschrift, Stempel
+        # und Handschrift deckt es also nur als eigenes Rasterbild ab: Striche entfernt die Fotoerkennung vorab, und
+        # gezeichnete Linien sieht die Bildprüfung nicht (fotos.bilder_der_seite: nur Rasterbilder)
         grenzen_bilder = (
             "  • Gesichter und Fotos: Lichtbilder auf Ausweiskopien werden gesucht und abgedeckt (Fund „Lichtbild“), "
-            "aber nicht immer gefunden; andere deckt nur die Schutzstufe „Maximal“ ab: Bilder auf Textseiten und "
-            "Fotobereiche auf Scans – nicht winzige Bilder und Vektorgrafiken; Text über einem Bild bleibt lesbar, "
-            "und von einem Bild über mindestens die halbe Textseite werden nur die Fotos darin abgedeckt\n"
-            "  • Unterschriften, Stempel, Handschrift – auf Scans und Fotos auch nicht in „Maximal“\n")
+            "aber nicht immer gefunden; andere bleiben in „Ausgewogen“ und „Hoch“ stehen\n"
+            "  • Gesichter und Fotos in „Maximal“: abgedeckt werden Bilder auf digitalen PDF-Seiten und erkannte "
+            "Fotobereiche auf Scans und Fotos – nicht winzige Bilder und gezeichnete Grafiken (z. B. Logos). Text über "
+            "einem Bild bleibt lesbar; ein Bild über mindestens die halbe Seite gilt als Scan\n"
+            "  • Unterschriften, Stempel, Handschrift – auch in „Maximal“ nur abgedeckt, wenn sie als eigenes Bild "
+            "eingefügt sind (nicht auf Scans und Fotos, nicht als Zeichnung)\n")
         fotos = ("Gesichter darauf werden nur abgedeckt, wenn sie als Lichtbild oder – in „Maximal“ – als Fotobereich "
                  "erkannt werden, Unterschriften und Handschrift NICHT:")
     else:
@@ -390,13 +398,25 @@ _FEHLERTEXT_MUSTER = (
      "umbenennen oder einen anderen Zielordner wählen."),
     (("no space left", "errno 28]", "winerror 112]", "nicht genügend speicherplatz"),
      "Kein Speicherplatz mehr auf dem Laufwerk – bitte Platz schaffen oder anderen Zielordner wählen."),
-    (("winerror 206]", "winerror 3]", "errno 36]", "file name too long"),
+    (("winerror 206]", "errno 36]", "file name too long"),
      "Der Dateipfad ist zu lang für Windows – bitte den Ordner näher an C:\\ kopieren oder einen kurzen "
      "Zielordner wählen."),
     (("as type pdf", "cannot open empty file", "no objects found", "not a pdf", "format error"),
      "Die Datei ist keine lesbare PDF-Datei (beschädigt, leer oder nur umbenannt) – bitte neu aus dem "
      "Ursprungsprogramm als PDF speichern."),
+    # „nicht gefunden“ (WinError 2: Datei, 3: Pfad) ist kein Längenproblem: lange Pfade öffnet das Programm mit „\\?\“
+    # (R-09). Befund: WinError 3 hieß hier „Dateipfad zu lang“ – auch für einen kurzen Pfad, einen verschobenen
+    # Ordner oder ein getrenntes Netzlaufwerk. Einen langen Pfad ohne Präfix erkennt _pfad_zu_lang an der Ausnahme.
+    (("winerror 2]", "winerror 3]"),
+     "Datei oder Ordner nicht gefunden – vermutlich verschoben, umbenannt oder gelöscht, oder ein Netzlaufwerk ist "
+     "getrennt. Bitte prüfen und erneut versuchen."),
 )
+
+
+def _mit_systemmeldung(meldung: str, text: str) -> str:
+    """Handlungsanweisung mit der gekürzten Systemmeldung in Klammern (GR-04)."""
+    kurz = text if len(text) <= 120 else text[:117] + "…"
+    return f"{meldung} (Systemmeldung: {kurz})"
 
 
 def _fehlertext_verstaendlich(text: str) -> str:
@@ -405,8 +425,7 @@ def _fehlertext_verstaendlich(text: str) -> str:
     tl = (text or "").lower()
     for muster, meldung in _FEHLERTEXT_MUSTER:
         if any(m in tl for m in muster):
-            kurz = text if len(text) <= 120 else text[:117] + "…"
-            return f"{meldung} (Systemmeldung: {kurz})"
+            return _mit_systemmeldung(meldung, text)
     return text
 
 
@@ -415,7 +434,8 @@ def _pfad_zu_lang(fehler: BaseException, pfad: Path | None) -> bool:
     ein langer Pfad allein erklärt also keinen Fehler mehr (Befund: bis dahin hieß unter Windows JEDE Ausnahme bei
     einem Pfad über 240 Zeichen „Dateipfad zu lang“ – auch eine beschädigte PDF oder Speichermangel). Es zählen nur
     „Name zu lang“ (ENAMETOOLONG, WinError 206) und bei einem langen Pfad OHNE „\\\\?\\“ (Dateidialog, Zielordner)
-    „nicht gefunden“: so meldet Windows einen Pfad über MAX_PATH."""
+    „nicht gefunden“: so meldet Windows einen Pfad über MAX_PATH. Jedes andere „nicht gefunden“ (WinError 2/3,
+    ENOENT) meldet _verstaendliche_fehlermeldung als solches."""
     if not isinstance(fehler, OSError):
         return False
     winfehler = getattr(fehler, "winerror", None)
@@ -437,6 +457,8 @@ def _verstaendliche_fehlermeldung(fehler: BaseException, pfad: Path | None = Non
         return _FEHLERTEXT_MUSTER[2][1]
     if _pfad_zu_lang(fehler, pfad):
         return _FEHLERTEXT_MUSTER[3][1]
+    if isinstance(fehler, FileNotFoundError):        # WinError 2/3, ENOENT – die Systemmeldung nennt den Pfad
+        return _mit_systemmeldung(_FEHLERTEXT_MUSTER[5][1], text)
     uebersetzt = _fehlertext_verstaendlich(text)
     if uebersetzt != text:
         return uebersetzt

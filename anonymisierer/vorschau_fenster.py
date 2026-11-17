@@ -54,9 +54,9 @@ HINWEIS_NACHHER = ("Ausgabe nach dem Schwärzen. Orange = Verdacht der Restrisik
                    "nachschwärzen – oder, wenn nichts Persönliches mehr zu sehen ist, „Freigeben“.")
 # Fotos und Ausweiskopien (Befund Runde 2): Gesicht/Lichtbild, Unterschrift und Handschrift erkennt das Programm nicht;
 # „Maximal“ deckt auf einem Foto nur erkannte Fotobereiche ab, nie Unterschrift oder Handschrift (fotos.STRICH_MM)
-HINWEIS_FOTO = ("Foto: Lichtbilder auf Ausweisen werden gesucht, andere Gesichter nur in „Maximal“ abgedeckt, "
-                "Unterschriften und Handschrift NICHT – unter „Geplante Schwärzung“ prüfen und einen Rahmen darüber "
-                "ziehen.")
+HINWEIS_FOTO = ("Foto: Lichtbilder auf Ausweisen werden gesucht, andere Gesichter nur in „Maximal“ (wenn erkannt) "
+                "abgedeckt, Unterschriften und Handschrift NICHT – unter „Geplante Schwärzung“ prüfen und einen Rahmen "
+                "darüber ziehen.")
 GANZE_SEITE_RAND = 3.0        # pt: Rahmen eines Seitenverdachts liegt knapp innerhalb des Seitenrands
 
 

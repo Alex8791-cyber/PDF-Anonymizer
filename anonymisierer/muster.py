@@ -1761,10 +1761,12 @@ PROFILE = {
         # hier aktiv; nur wer sie selbst abwählt (Benutzerdefiniert), bekommt sie gemeldet und abgewählt angeboten
         "hinweis": GESUNDHEIT,
         # bilder_schwaerzen (fotos.seite_pruefen): Bilder auf Textseiten, Fotobereiche auf Scans – Striche wie
-        # Unterschrift und Handschrift entfernt die Fotoerkennung vorab, sie bleiben auf Scans stehen
+        # Unterschrift und Handschrift entfernt die Fotoerkennung vorab, sie bleiben auf Scans und Fotos stehen, und
+        # gezeichnete Linien (Vektorgrafik) sieht die Bildprüfung nicht: abgedeckt nur als eigenes Rasterbild. Nicht
+        # länger als bisher (die Beschreibung steht im Hauptfenster über der Fundliste)
         "beschreibung": "Größter Schutz, weniger Zusammenhang für die KI. Zusätzlich: Diagnosen, Medikamente, "
-                        "alle plausiblen Geburtsdaten, unbekannte Eigennamen bei Personen sowie Bilder und "
-                        "Fotobereiche (Unterschriften und Handschrift auf Scans bleiben stehen).",
+                        "alle plausiblen Geburtsdaten, unbekannte Eigennamen bei Personen, Bilder und Fotobereiche "
+                        "(Unterschriften und Handschrift nur, wenn als eigenes Bild eingefügt).",
         "optionen": {"alle_geburtsdaten": True, "unbekannte_eigennamen": True, "bilder_schwaerzen": True},
     },
 }
