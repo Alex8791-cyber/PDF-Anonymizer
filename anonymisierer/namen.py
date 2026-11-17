@@ -218,6 +218,10 @@ _SACHWORT_ENDUNGEN = (
     "apotheke", "praxis", "klinik", "tag", "ort", "termin", "wert", "werte", "fall", "berechtigt",
     "pflichtig", "stand", "gebiet", "amt",
     "straße", "strasse", "str", "weg", "platz", "allee", "gasse",      # Straßennamen ohne Hausnummer (Hauptstr)
+    # Köpfe zusammengesetzter Feld-Etiketten, auf die kein Nachname endet ("Künstlername", "Ordensname",
+    # "Postleitzahl", "Adresszusatz", "Doktorgrad", "Haarfarbe", "Schuhgröße", "Vorerkrankungen", "Hauptversicherter")
+    "name", "namen", "zahl", "zusatz", "grad", "titel", "farbe", "größe", "groesse", "gewicht", "erkrankung",
+    "erkrankungen", "krankheit", "krankheiten", "beschwerden", "versicherte", "versicherter", "versicherten",
 )
 # Adjektiv-/Partizipstämme, die großgeschrieben vor Rollenwörtern stehen ("Betreuender Vermittler",
 # "Mitversichertes Kind", "Fälliger Beitrag", "Erstattungsfähig")
@@ -233,6 +237,7 @@ _SACHWORT_STAEMME = {
     "antragstellend", "leistend", "zahlend", "haftend", "mitwirkend", "erforderlich", "notwendig", "wichtig",
     # Feldbezeichner ohne passende Endung
     "optionen", "zahlweise", "dokumentart", "vorversicherer", "versicherer", "erwerbsminderung", "zahlungsart",
+    "geburtsland", "herkunftsland", "heimatland", "bundesland", "geburtsstaat",
 }
 # Etiketten, hinter denen kein Personenname steht (Beruf: Polier, Tarif: Komfort, Marke: Opel …)
 _SACHETIKETT_RE = re.compile(
@@ -706,6 +711,13 @@ def _ocr_rest(name: str) -> bool:
     return False
 
 
+# Etikett einer Kennung mit eigener Wertform am Ende eines Kandidaten (Prüfnummer, eVB, CVC, Transferticket) – nie ein
+# Name, auch wenn das KI-Modell es dafür hält ("Kreditkarte" ⏎ "Prüfnr.: 739": "[PERSON A].: …"; Gegenprüfung 4d)
+_KENNUNGS_ETIKETT_NAME_RE = re.compile(
+    r"(?i)(?:^|[-\s])(?:[a-zäöüß]*(?:pr(?:ü|ue|u)f|sicherheits|kontroll|verifikations)(?:nr|nummer|ziffer|zahl|code|z)"
+    r"|e-?v[b8](?:-?nr|-?nummer)?|cv[cv]2?|csc|transfer-?tickets?(?:-?nr|-?nummer)?)\.?$")
+
+
 def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
     """Plausibilitätsfilter: keine Ziffern/Kürzel, keine Feldbezeichner, keine Versicherer,
     keine Organisationen, mindestens ein großgeschriebenes Wort mit >= 3 Buchstaben (>= 2 hinter
@@ -719,6 +731,8 @@ def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
         return False
     if re.search(r"-(?:ID|Nr|No|Id)\.?$", name, re.IGNORECASE) or _KFZ_RE.match(name):
         return False
+    if _KENNUNGS_ETIKETT_NAME_RE.search(name) or kennungsformen.GEBURTSNAME_ETIKETT_RE.fullmatch(name.strip()):
+        return False                          # "Prüfnr.", "Kartenprüfnr.", "Geburtsnamc" (OCR): ein Etikett, kein Name
     norm = re.sub(r"\s+", " ", name.lower()).strip()
     if regel and _kalendername(text, start, norm):
         return True                           # "Frau Mai", "Nachname: Freitag"
@@ -959,8 +973,9 @@ def _regel_kandidaten(text: str) -> list:
 # Berlinerin") und Spaltenköpfe ("geb. ⇥⇥ Ort": hinter "geb." zählt nur dieselbe Zelle).
 _GEB_ETIKETT_RE = re.compile(
     r"(?<![\wäöüß.\-])(?:(?P<geb>geb|GEB|Geb)(?:\.:?|:|,)?|(?P<geborene>geborene[rn]?|GEBORENE[RN]?|Geborene[rn]?)"
-    # "gab." – so liest die Texterkennung "geb." ("Anna Weber gab. Quarnstedt"); nur zwischen zwei Namen (unten)
-    r"|(?P<gab>gab|GAB)\.)"
+    # "gab.", "gcb.", "qeb." – so liest die Texterkennung "geb." ("Anna Weber gab. Quarnstedt"); nur zwischen zwei
+    # Namen (unten)
+    r"|(?P<gab>" + kennungsformen.GEB_VERLESEN + r")\.)"
     # dahinter kein Wortzeichen – außer direkt hinter "geb." / "geb:" ein großer Anfangsbuchstabe ("geb.Schulz");
     # das Feld-Etikett "Geburtsname" liest kennungsformen.geburtsname_hinter_etikett (dieselbe Regel wie die
     # Selbstkontrolle)
@@ -977,12 +992,14 @@ _GEB_WEITER_RE = re.compile(r"[ ]+((?:" + _GEB_PARTIKEL_WORT + r"[ ]+)?[" + _GRO
 # Vorsilben, hinter denen ein Geburtsname immer weitergeht ("Mac Allister", "O' Brien", "San Martín")
 _GEB_VORSILBE = frozenset({"mac", "mc", "o'", "o’", "fitz", "san", "santa", "st.", "abu", "ben", "bin", "ibn"})
 _GEB_LUECKE_RE = re.compile(r"[ ]{0,8}")             # Festbreiten-Listen: "WEBER, ANNA GEB.    QUARNSTEDT"
+_GEB_ZELLE_RE = re.compile(r"[ ]?\t\t[ ]?")           # so liest die Texterkennung die Lücke ("ANNA GEB. ⇥⇥ AMBERGER")
 _GEB_UMBRUCH_RE = re.compile(r"[ ]*\n[ ]*")
 # hinter dem Wort geht ein Datum weiter: eine Ziffer (auch hinter einem Punkt: "Od.12.1973") oder ein Monatsname
-# hinter einem Punkt ("geb. Od. Dez. 1973" – so liest die OCR "geb. 04. Dez. 1973"; das Wort ist der Tag)
+# hinter einem Punkt ("geb. Od. Dez. 1973" – so liest die OCR "geb. 04. Dez. 1973"; das Wort ist der Tag) – nicht in
+# der nächsten Zelle ("AMBERGER ⇥⇥ 12.03.1980": das Geburtsdatum der Liste)
 _DATUM_DAHINTER_RE = re.compile(
-    r"[ \t]{0,2}(?:\d|\.[ \t]*(?:\d|(?i:jan(?:uar)?|jän(?:ner)?|feb(?:ruar)?|mär(?:z)?|maerz|mrz|apr(?:il)?|mai"
-    r"|jun(?:i)?|jul(?:i)?|aug(?:ust)?|sep(?:t(?:ember)?)?|okt(?:ober)?|nov(?:ember)?|dez(?:ember)?)(?![\wäöüß])))")
+    r"(?![ ]?\t\t)[ \t]{0,2}(?:\d|\.[ \t]*(?:\d|(?i:jan(?:uar)?|jän(?:ner)?|feb(?:ruar)?|mär(?:z)?|maerz|mrz"
+    r"|apr(?:il)?|mai|jun(?:i)?|jul(?:i)?|aug(?:ust)?|sep(?:t(?:ember)?)?|okt(?:ober)?|nov(?:ember)?|dez(?:ember)?)(?![\wäöüß])))")
 # Name (eines Kandidaten) direkt vor dem Etikett: nur Leerraum, Komma oder öffnende Klammer dazwischen
 _VOR_GEB_RE = re.compile(r"[ \t]*,?[ \t]*\(?[ \t]*$")
 _NAME_DAVOR_RE = re.compile(r"[" + _GROSS + r"][\wäöüß'’\-]+,?[ \t]*\(?$")
@@ -1035,7 +1052,7 @@ def _geburtsname_wort(text: str, s: int, e: int) -> bool:
         return False
     if re.search(r"-(?:ID|Nr|No|Id)\.?$", kern, re.IGNORECASE) or sum(c.isalpha() for c in kern) < 2:
         return False
-    return not _ist_sachwort(kern) or _wissen_wort("ist_nachname", kern)
+    return not _ist_sachwort(kern) or _wissen_wort("ist_nachname", kern) or kennungsformen.herkunftsname(kern)
 
 
 def _name_vor(text: str, pos: int, starts_je_ende: dict) -> tuple | None:
@@ -1133,8 +1150,10 @@ def geburtsnamen(text: str, kandidaten=()) -> list:
             wort_davor = re.search(r"([^\W\d_]+)[ \t]*$", davor)
             if wort_davor and wort_davor.group(1)[:1].islower():
                 continue                              # "eine geborene Berlinerin": Eigenschaftswort
-        # "Anna Weber geb." ⏎ "Schulz" (nur mit Name davor)
-        luecke = _GEB_UMBRUCH_RE.match(text, m.end()) or _GEB_LUECKE_RE.match(text, m.end())
+        # "Anna Weber geb." ⏎ "Schulz" und "ANNA GEB. ⇥⇥ AMBERGER" (Festbreiten-Liste auf einem Scan) nur mit Name
+        # davor
+        luecke = (_GEB_UMBRUCH_RE.match(text, m.end()) or _GEB_ZELLE_RE.match(text, m.end())
+                  or _GEB_LUECKE_RE.match(text, m.end()))
         n = _GEB_NAME_RE.match(text, luecke.end()) if luecke else None
         if n is None or not _geburtsname_wort(text, n.start(), n.end()) \
                 or not kennungsformen.geburtsname_moeglich(text, n.start(), n.end()) \
@@ -1144,8 +1163,10 @@ def geburtsnamen(text: str, kandidaten=()) -> list:
             continue                                  # "GEB.DAT.", "geb.Tag": Feldkürzel
         s, e = n.start(), _geburtsname_ende(text, n.start(), n.end())
         person = _name_vor(text, m.start(), starts_je_ende)
-        if person is None and (m.group("geb") == "Geb" or art in ("geborene", "gab") or "\n" in luecke.group(0)):
-            continue                                  # "Standort Köln, Geb. Kantine", "Als geborener Kölner …"
+        if person is None and (m.group("geb") == "Geb" or art in ("geborene", "gab") or "\n" in luecke.group(0)
+                               or len(luecke.group(0)) >= 2):
+            continue                                  # "Standort Köln, Geb. Kantine", "Als geborener Kölner …",
+                                                      # "NAME, VORNAME   GEB.   STATUS": Spaltenkopf (Festbreite)
         if art == "gab" and ("\n" in luecke.group(0) or not kennungsformen.WERT_ENDE_RE.match(text, e)):
             continue                                  # "… die ihm Frau Weber gab. Müller kam später"
         gruppe = None
@@ -1169,6 +1190,12 @@ def geburtsnamen(text: str, kandidaten=()) -> list:
             if ps not in starts_je_ende.get(pe, ()):
                 aus.append({"text": text[ps:pe], "start": ps, "ende": pe, "gruppe": gruppe})
         aus.append({"text": text[s:e], "start": s, "ende": e, "gruppe": gruppe, "quelle": GEBURTSNAME_QUELLE})
+        # "Geburtsnamen: Quarnstedt, Ellerbrok": weitere Namen hinter einem Etikett in der Mehrzahl (je eine Person)
+        for w in kennungsformen.weitere_geburtsnamen(
+                text, m, e, sp.getrennt, _GEB_NAME_RE,
+                verlaengern=lambda a, b: _geburtsname_ende(text, a, b) if _geburtsname_wort(text, a, b) else None):
+            aus.append({"text": text[w.start:w.ende], "start": w.start, "ende": w.ende, "gruppe": None,
+                        "quelle": GEBURTSNAME_QUELLE})
     return aus
 
 

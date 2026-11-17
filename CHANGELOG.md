@@ -157,6 +157,20 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   (falls vom Familiennamen abweichend): …“, „Geb.-Name ⇥⇥ …“, „Familienname (Geburtsname): Weber (Quarnstedt)“
   (derselbe Platzhalter wie „Weber“), Spaltenköpfe unter einer Titelzeile und Lesefehler wie „eVB-Nurnmer“ und
   „Anna Weber gab. Quarnstedt“.
+  Nach der zweiten Gegenprüfung außerdem: Herkunftsnamen hinter „geb.“ und Geburtsnamen-Etiketten („geb. Mainzer“,
+  „Danziger“, „Landauer“, „Geburtsname: Linz“); ein Ort direkt hinter „Name geb.“ („Anna Weber geb. Linz“) bleibt
+  stehen, weil er auch der Geburtsort sein kann, die Restrisiko-Prüfung meldet ihn. Weitere Etiketten: „Mädchenname“,
+  „Geburtsn.“, „Name vor der Ehe“, „Familienname vor der Eheschließung“, „Geb.-Name Quarnstedt“ und mehrere Namen
+  hinter „Geburtsnamen:“. eVB-Aufzählungen mit Aufzählungszeichen, Nummern und Zuordnungen („Pkw: …“, „… – VW Golf“,
+  „die für den Polo …“, eine Liste unter „eVB-Nummern Ihres Fuhrparks“), eVB in Briefsätzen („Die eVB (Nr. …)“, „hat
+  die Nummer …“, „unter … erstellt“), die Kartenprüfnummer hinter Kartendaten über mehrere Zeilen und hinter „Code:“,
+  „Rückseite:“, „CSC:“, „Sicherheitsziffer:“, „Kontrollziffer:“, „Prüfz.:“, in Kartentabellen ohne Kartenangabe im
+  Kopf („Karte ⇥ Nummer ⇥ Sicherheitscode“ über Kartendaten; ohne erkannte Tabelle meldet sie die Restrisiko-Prüfung),
+  Festbreiten-Listen auf Scans („ANNA GEB. ⇥ AMBERGER“), Kammfelder mit weit auseinander stehenden Kästchen auf der
+  Textebene (auch für die eVB) und Lesefehler wie „gcb.“, „qeb.“, „eVB-Nummcr“, „CVG“, „CV C“, „Gcburtsname“,
+  „Geburtsnamc“ und „[7][3][9]“. Auf Scans meldet die Restrisiko-Prüfung Schrift hinter einem
+  Kennungs-Etikett, die die Texterkennung nicht lesen konnte – etwa ein Kammfeld mit einer Ziffer je Kästchen
+  („Kennungsangabe: Schrift hinter einem Kennungs-Etikett … nicht verlässlich lesbar“, Ausgabe `_PRUEFEN`).
 
 ### Geändert
 - **Prüfziffern sind nur noch ein Indiz:** Eine IBAN mit falscher Prüfziffer wird trotzdem geschwärzt, wenn
@@ -218,6 +232,21 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Lauf geschwärzt wurde; hinter „geb.“ wurden auch Wörter wie „In“, „Lt.“, Länder und Orte („geb. Polen“, „geb.
   Wien“, „Als geborener Kölner …“) und „Geb.“ für Gebäude („Standort Köln, Geb. Kantine“) zum Namen. Ein Feld-Etikett
   ist nie ein Geburtsname; Orte erkennt die Wissensbasis (neue Liste `orte.txt`).
+- Hinter „Versicherungsbestätigung Nr.“, „VB-Nr.“, „eVB-Nr.“, „Transferticket-Nr.“, „…nummer:“ und
+  „Kartenprüfnummer:“ blieben laufende Nummern mit Jahr („3/2025“, „12/345“, „2024/25“, „2023/2024“, „2019-20“) und mit
+  Buchstabenvorsatz („KFZ-VB 12345“, „SF-TT 4711 0815“) auch nach der ersten Korrektur lesbar und ungemeldet; sie
+  werden wieder geschwärzt, und die Restrisiko-Prüfung meldet sie.
+- Hinter „Transferticket“ und „eVB“ wurden Telefonnummern, Internetadressen, Jahresbereiche, Datumsangaben, Beträge
+  und Tarifcodes („PREMIUM2024“, „Transferticket: 2024/2025“, auch in einer Spalte „Transferticket“) als Kennung
+  geschwärzt und im ganzen Lauf weitergegeben; der Wert eines anderen Etiketts davor („Hotline:“, „Tarif:“,
+  „Kennzeichen:“) gehört diesem.
+- Ein leeres Feld „Geb.-Name“ oder „Geburtsnamen“ machte das nächste Feld-Etikett („Geburtsland“, „Künstlername“)
+  zur Person, „GEB.“ als Spaltenkopf einer Festbreiten-Liste den nächsten Kopf („STATUS“, „KLASSE“), und das Etikett
+  „Prüfnr.“ wurde als Name geschwärzt – jeweils im ganzen Lauf. Ein Geburtsname, der zugleich ein Ort oder ein
+  gewöhnliches Wort ist („geb. Deutsch“, „geb. Mallorca“), wird nur an seiner Stelle und in Personenkontext
+  geschwärzt, nicht mehr in fremden Stellen („Korrespondenzsprache: Deutsch“). Die Restrisiko-Prüfung meldet keinen
+  „möglichen Geburtsnamen“ mehr in Erläuterungen („Geburtsname ist Pflichtangabe.“) und hinter leeren Feldern
+  („Geburtsname“ ⏎ „Beruf“, „Geburtsname: ⇥ Größe:“).
 - Die Restrisiko-Prüfung meldete hinter „Transferticket“, „eVB“ und „CVC“ Tarifangaben als Wert („SF 12 / SF 8“,
   „250 Euro“), eine TÜV- oder DIN-Prüfnummer neben einer Kartenangabe galt als Kartenprüfnummer, eine kurze
   Kartennummer („Karten-Nr.: 1234“) wurde nicht mehr weitergegeben, und große Tabellen mit eVB- oder CVC-Spalte

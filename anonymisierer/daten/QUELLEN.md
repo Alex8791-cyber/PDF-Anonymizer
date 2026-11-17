@@ -79,8 +79,12 @@ ersten Aufbau nach festen Regeln erzeugt und stehen ausgeschrieben in den Dateie
   Buchstaben zu etwa 4 % als Wort gelten.
 - **Großstädte** (`ist_grossstadt`): die deutschen Städte mit über 100 000 Einwohnern,
   als kurze Liste im Code (allgemein bekannte Ortsnamen). `ist_ort` fragt sie zusammen mit
-  `orte.txt` ab: hinter „geb.“ ist ein Ort der Geburtsort, kein Geburtsname („Anna Weber geb.
-  Polen“), außer er ist zugleich ein Familienname der Wissensbasis (Hagen, Landau). Die
+  `orte.txt` ab: hinter „geb.“ wird eine deutsche Großstadt nie als Geburtsname geschwärzt (der
+  Geburtsort: „Anna Weber geb. Hamburg“), außer sie ist zugleich ein Familienname der
+  Wissensbasis (Hagen, Essen); ein anderer Ort direkt hinter „Name geb.“ kann Geburtsname oder
+  Geburtsort sein („Anna Weber geb. Linz“) – er bleibt stehen, die Restrisiko-Prüfung meldet ihn.
+  Hinter einem Geburtsnamen-Etikett („Geburtsname: Linz“) ist er der Geburtsname; die
+  Einwohnerbezeichnung eines Orts („geb. Mainzer“, „Landauer“) ist immer ein Herkunftsname. Die
   Ortsnamen sind allgemein bekannte geografische Namen, 2026 aus allgemeinem Wissen
   zusammengestellt (kein Ortsverzeichnis übernommen); die Belegquote entfällt, weil viele
   Ortsnamen nicht im allgemeinen Vokabular stehen.
@@ -106,7 +110,7 @@ ersten Aufbau nach festen Regeln erzeugt und stehen ausgeschrieben in den Dateie
 | `etiketten_vertragsdaten.txt` | 213 | Feldbezeichner für Vertrags- und Vorgangsdaten (Beginn, Ablauf, Stand): ein Datum dahinter ist kein Geburtsdatum | 84,0 % |
 | `allerweltswoerter_gross.txt` | 9 296 | Großgeschriebene Wörter aus Versicherungs-, Rechts-, Medizin- und Verwaltungsschreiben, die eine Namenserkennung leicht für Personen hält; enthält **keine** Vor- und Nachnamen, Berufe, Diagnosen und Medikamente (maschinell geprüft) | 92,0 % |
 | `anreden_titel.txt` | 303 | Anreden, Grußformeln, akademische, berufliche und Adelstitel, Rollenkürzel (Herr, Frau, Dr. med., Prof., Dipl.-Ing., RA, i. A., gez.) | 93,4 % |
-| `orte.txt` | 843 | Orte (`ist_ort`): Staaten und Länder, historische Staaten und Herkunftsregionen (Polen, Türkei, USA, DDR, Schlesien, Siebenbürgen), Bundesländer, Hauptstädte und große Städte im Ausland in deutscher Schreibweise (Wien, Zürich, Istanbul, Warschau, Breslau), deutsche Mittelstädte (Marburg, Flensburg, Bad Homburg, Sankt Ingbert); dazu kommen die Großstädte aus `wissen.py` | – |
+| `orte.txt` | 903 | Orte (`ist_ort`): Staaten und Länder, historische Staaten und Herkunftsregionen (Polen, Türkei, USA, DDR, Schlesien, Siebenbürgen), Bundesländer, Hauptstädte und große Städte im Ausland in deutscher Schreibweise (Wien, Zürich, Istanbul, Warschau, Breslau), Inseln und Urlaubsregionen (Mallorca, Kreta, Sylt, Balearen), deutsche Mittelstädte (Marburg, Flensburg, Bad Homburg, Sankt Ingbert); dazu kommen die Großstädte aus `wissen.py` | – |
 
 ¹ Anteil der Einträge, deren Wörter (ab drei Buchstaben) alle im CC0-Vokabular vorkommen.
 Eine niedrige Quote heißt nicht „falsch“: lange Komposita, Abkürzungen, Handelsnamen und

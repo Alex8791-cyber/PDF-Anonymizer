@@ -898,6 +898,10 @@ def wort_namensartig(w: str) -> bool:
                 return False
     except Exception:
         return True
+    # Feld-Etiketten ohne Eintrag in der Wissensbasis: Spaltenköpfe und zusammengesetzte Etiketten ("Name ⇥⇥ Sport",
+    # "Name ⇥⇥ Künstlername", "Geb. Name ⇥⇥ Geburtsland" – das leere Feld davor; Gegenprüfung 4d)
+    if kennungsformen.etikettwort(titel):
+        return False
     return kern.casefold() not in NEUTRALE_KOEPFE
 
 
@@ -1317,10 +1321,11 @@ def allgemein_hinter(eintrag: str) -> bool:
     return kennungsformen.nummer_etikett(eintrag)
 
 
-def allgemeiner_wert_passt(wert: str) -> bool:
-    """Allgemeiner Kennungsweg hinter einem Etikett mit eigener Wertform: die Form einer Kennung, kein Jahresbereich
-    und kein kurzes Datum ("eVB-Nummer 2024/2025", "12/2025"; muster.kennungsform)."""
-    return _muster is None or _muster.kennungsform(wert)
+def allgemeiner_wert_passt(eintrag: str, wert: str) -> bool:
+    """Allgemeiner Kennungsweg hinter einem Etikett mit eigener Wertform (kennungsformen.allgemeiner_wert): hinter
+    "Versicherungsbestätigung Nr.", "eVB-Nr.", "Kartenprüfnummer" jeder Wert wie vor Runde 4 ("3/2025", "2024/25"),
+    hinter "eVB-Nummer", "Transferticket-Nummer" nur die Form einer Kennung ohne Zeitraum ("eVB-Nummer 2024/2025")."""
+    return kennungsformen.allgemeiner_wert(eintrag, wert)
 
 
 def eigener_wert(text: str, s: int, e: int, art: str, kategorie: str | None, versalien: bool = True,
@@ -1363,7 +1368,7 @@ def _kennungs_wert(text: str, s: int, e: int, kategorie: str, streng: bool, eint
             if a - s <= 2:
                 return [Wert(a, b, "iban")]
     sp = kennung_spanne(text, s, e, 2 if kategorie in ("mandat", "ausweis") else 3)
-    if sp is None or (art is not None and not allgemeiner_wert_passt(text[sp[0]:sp[1]])):
+    if sp is None or (art is not None and not allgemeiner_wert_passt(eintrag, text[sp[0]:sp[1]])):
         return []
     a, b = sp
     if streng:
@@ -1874,8 +1879,8 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
             return None                                 # Firma als Zahlungsempfänger/Versicherer
         if not _rohwert_passt(sauber, kat):
             return None
-        if art is not None and not _muster.eigener_rohwert(art, sauber) and not (
-                allgemein_hinter(et.eintrag) and _muster.kennungsform(sauber)):
+        if art is not None and not _muster.eigener_rohwert(art, sauber) and not \
+                allgemeiner_wert_passt(et.eintrag, sauber):
             return None                                 # eVB, Transferticket, CVC: "gültig bis 12/2025" ist keine
         return s, e
     art = eigene_wertform(et.eintrag)
@@ -1973,7 +1978,7 @@ def kennung_folgezeile(seite, lg: Lage, et: Etikett) -> list:
     m = re.match(r"[ \t]*(?:\S{1,2}[ \t]+)?", text[folge.start:folge.ende])
     for anfang in (folge.start, folge.start + (m.end() if m else 0)):
         sp = kennung_spanne(text, anfang, folge.ende, 3)
-        if sp and sp[0] - anfang <= 1 and (art is None or allgemeiner_wert_passt(text[sp[0]:sp[1]])):
+        if sp and sp[0] - anfang <= 1 and (art is None or allgemeiner_wert_passt(et.eintrag, text[sp[0]:sp[1]])):
             return [Wert(sp[0], sp[1], kategorie or "vertrag")]
     return []
 

@@ -5,7 +5,12 @@ Folge einzelner Zeichen, getrennt durch ein Leerzeichen oder – über leere Kä
 Spaltentrenner. Kein Muster und keine Namensliste erkennt "M A R K O V I Ć" als Namen.
 
 »struktur.kammfeld«: Folgen von mindestens drei Zeichen-Stücken (überwiegend einzelne Buchstaben/Ziffern, die OCR
-klebt manchmal zwei zusammen: "M A G D E B U RG") werden zu einem Wert verbunden. Die Kategorie kommt vom Feldnamen
+klebt manchmal zwei zusammen: "M A G D E B U RG") werden zu einem Wert verbunden. Stehen die Kästchen weit
+auseinander, trennt die Textebene jedes Zeichen wie eine Zelle ("W ⇥⇥ E ⇥⇥ B ⇥⇥ E ⇥⇥ R", ausgefüllte und
+eingebrannte Kammfelder); eine solche Folge nur aus Zellen zählt nur mit gleicher Teilung (Kästchen gleicher Breite,
+bei langen Folgen mit Gruppenlücken) – Tabellenspalten mit je einem Zeichen haben meist verschiedene Breiten – und als
+Name nur aus Buchstaben mit einem Selbstlaut ("1 ⇥⇥ 2 ⇥⇥ 3" unter "Versicherte Person" ist kein Name). Die Kategorie
+kommt vom Feldnamen
 (in derselben Zeile links oder allein in der Zeile darüber: Name/Vorname -> namen, Geburtsdatum -> geburt,
 Straße/Hausnummer -> strasse, PLZ/Ort -> plzort, Telefon/E-Mail, Kennungen nach ihrer Art); ohne Feldnamen zählt
 nur, was sich selbst ausweist (IBAN mit stimmender Prüfsumme, Steuer-ID mit Prüfziffer). Geschwärzt wird die
@@ -21,6 +26,9 @@ from .struktur import ALLE_KATEGORIEN, etiketten, lage
 
 QUELLE = "struktur.kammfeld"
 _STUECK_RE = re.compile(r"\S+")
+# Vorfilter je Seite: drei einzelne Zeichen, getrennt durch ein Leerzeichen oder einen Spaltentrenner
+_VORFILTER_RE = re.compile(r"(?:(?<!\S)\S(?: |[ ]?\t\t[ ]?)){3}")
+_SELBSTLAUT = frozenset("AEIOUÄÖÜYÀÁÂÃÅÈÉÊËÌÍÎÏÒÓÔÕØÙÚÛÆŒ")
 _PLZ_ORT_ETIKETT_RE = re.compile(r"(?i)^(?:plz|postleitzahl|ort|wohnort|plz[ ,/]*ort|postleitzahl und ort)\.?:?$")
 _ZEICHEN = re.compile(r"[^\W_]|[-/.]")
 
@@ -59,6 +67,40 @@ def _laeufe(text: str, start: int, ende: int) -> list:
     return aus
 
 
+def _nur_zellen(text: str, s: int, e: int) -> bool:
+    """Trennt zwischen allen Zeichen-Stücken von text[s:e] ein Spaltentrenner (kein einzelnes Leerzeichen)?"""
+    stuecke = [(m.start(), m.end()) for m in _STUECK_RE.finditer(text, s, e)]
+    return all("\t" in text[a[1]:b[0]] for a, b in zip(stuecke, stuecke[1:]))
+
+
+def gleiche_teilung(seite, text: str, s: int, e: int) -> bool:
+    """Stehen die Zeichen-Stücke von text[s:e] in gleichem Abstand, wie in den Kästchen eines Kammfelds – alle
+    Abstände höchstens 20 % über dem kleinsten, bei mindestens sechs Stücken auch mit Gruppenlücken (drei Viertel
+    gleich, keiner über dem 2,5-Fachen)? Tabellenspalten mit je einem Zeichen haben meist verschiedene Breiten."""
+    mitten = []
+    for m in _STUECK_RE.finditer(text, s, e):
+        g = seite.abbildung[m.start()] if m.start() < len(seite.abbildung) else -1
+        if g < 0:
+            return False
+        r = seite.zeichen[g].rect
+        mitten.append((r.x0 + r.x1) / 2)
+    abstaende = [b - a for a, b in zip(mitten, mitten[1:])]
+    if len(abstaende) < 2 or min(abstaende) <= 0:
+        return False
+    kleinster = min(abstaende)
+    gleich = sum(1 for d in abstaende if d <= 1.2 * kleinster)
+    if gleich == len(abstaende):
+        return True
+    return len(mitten) >= 6 and gleich >= 0.75 * len(abstaende) and max(abstaende) <= 2.5 * kleinster
+
+
+def _name_moeglich(wert: str) -> bool:
+    """Kann ein Kammfeld-Wert ein Name sein – nur Buchstaben (und Bindestrich/Apostroph), mindestens ein Selbstlaut?"""
+    kompakt = wert.replace(" ", "")
+    return (all(c.isalpha() or c in "-'’" for c in kompakt)
+            and any(c.upper() in _SELBSTLAUT for c in kompakt))
+
+
 def kategorie_fuer(et, etikett_text: str, wert: str) -> str | None:
     """Kategorie eines Werts hinter einem Feldnamen."""
     arten = et.arten
@@ -94,17 +136,20 @@ def kammfeld(dok, kontext):
     treffer = []
     for nr, seite in enumerate(dok.seiten):
         text = seite.text
-        if not text.strip() or not re.search(r"(?:(?<!\S)\S ){3}", text):
+        if not text.strip() or not _VORFILTER_RE.search(text):
             continue
         laeufe_je_zeile = []
         for z in seite.zeilen:
             for s, e, wert in _laeufe(text, z.start, z.ende):
-                laeufe_je_zeile.append((z, s, e, wert))
+                zellen = _nur_zellen(text, s, e)
+                if zellen and not gleiche_teilung(seite, text, s, e):
+                    continue                          # Tabellenzeile mit je einem Zeichen in Spalten
+                laeufe_je_zeile.append((z, s, e, wert, zellen))
         if not laeufe_je_zeile:
             continue
         lg = lage(seite)
         ets = [et for et in etiketten(seite) if et.arten]
-        for z, s, e, wert in laeufe_je_zeile:
+        for z, s, e, wert, zellen in laeufe_je_zeile:
             # Feldname: links in derselben Zeile (das nächste davor) oder allein in einer Zeile darüber
             et_wahl = None
             for et in ets:
@@ -128,6 +173,8 @@ def kammfeld(dok, kontext):
                 kat = _ohne_etikett(wert)
             if kat is None or (kontext.aktive and kat not in kontext.aktive):
                 continue
+            if zellen and kat == "namen" and not _name_moeglich(wert):
+                continue                              # "Versicherte Person ⇥⇥ 1 ⇥⇥ 2 ⇥⇥ 3": Spaltenköpfe
             treffer.append(Treffer(dok.global_(nr, s), dok.global_(nr, e), kat, QUELLE,
                                    0.85 if et_wahl is not None else 0.9))
     return treffer
