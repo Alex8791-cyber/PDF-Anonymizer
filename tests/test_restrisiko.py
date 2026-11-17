@@ -7,7 +7,10 @@ richtigen Stelle.
 """
 
 import datetime
+import random
 import re
+import statistics
+import sys
 import time
 from pathlib import Path
 
@@ -15,7 +18,7 @@ import pytest
 
 import pymupdf as fitz
 
-from anonymisierer import restrisiko
+from anonymisierer import analyse, restrisiko
 from anonymisierer.restrisiko import Verdacht, pruefe_text, restrisiko_pruefen, verdacht_als_dict
 from anonymisierer.schwaerzung import schwaerze_pdf
 
@@ -365,6 +368,124 @@ def test_ungelesene_scan_seite_ist_seitenverdacht(tmp_path):
     assert verdacht[0].grund == restrisiko.GRUND_SEITE_UNGELESEN
     # ohne OCR-Dienst genauso: eine Scan-Seite, die niemand gelesen hat, ist nie unverdächtig
     assert restrisiko_pruefen(pdf, ocr=None, ocr_modus={0: "seite"})[0].grund == restrisiko.GRUND_SEITE_UNGELESEN
+
+
+KUNDE_HELL = ["Versicherungsnehmer: Max Mustermann", "Hauptstrasse 12, 50667 Koeln", f"IBAN {IBAN}",
+              "Geburtsdatum 02.09.1983", "Telefon 0171 2345678"]
+
+
+def _heller_scan(pfad, grau, zeilen=KUNDE_HELL, groesse=11, dpi=150):
+    """Scan (nur ein Bild) mit Text im Grauwert `grau` – für Menschen gut lesbar (wie heller_scan in
+    test_ausgabe_status_befunde.py)."""
+    quelle = fitz.open()
+    s = quelle.new_page()
+    for i, z in enumerate(zeilen):
+        s.insert_text((60, 100 + 22 * i), z, fontsize=groesse, color=(grau / 255,) * 3)
+    pix = s.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY)
+    doc = fitz.open()
+    seite = doc.new_page(width=s.rect.width, height=s.rect.height)
+    seite.insert_image(seite.rect, stream=pix.tobytes("png"))
+    quelle.close()
+    doc.save(pfad)
+    doc.close()
+    return Path(pfad)
+
+
+def _papier_scan(pfad, papier=240, streuung=3.0, jpeg=None, seed=1, breite=827, hoehe=1169):
+    """Leere Seite wie vom Scanner: graues Papier mit Rauschen (normalverteilt), wahlweise als JPEG (wie papier_scan in
+    test_ausgabe_status_befunde.py)."""
+    verteilung = statistics.NormalDist(papier, streuung)
+    tabelle = bytes(max(0, min(255, round(verteilung.inv_cdf((i + 0.5) / 256)))) for i in range(256))
+    daten = random.Random(seed).randbytes(breite * hoehe).translate(tabelle)
+    pix = fitz.Pixmap(fitz.csGRAY, breite, hoehe, daten, False)
+    doc = fitz.open()
+    seite = doc.new_page()
+    seite.insert_image(seite.rect, stream=pix.tobytes("jpeg", jpg_quality=jpeg) if jpeg else pix.tobytes("png"))
+    doc.save(pfad)
+    doc.close()
+    return Path(pfad)
+
+
+# So bleibt eine Scan-Seite ungelesen: OCR-Dienst ohne Wörter, (leere) Wörter der Analyse, gar keine OCR – und eine
+# OCR, die nur zwei Bruchstücke liest (weniger als SCAN_MIN_WOERTER). Je Test frisch erzeugt (die Attrappe
+# protokolliert ihre Aufrufe).
+OHNE_WOERTER = {
+    "ocr_ohne_woerter": lambda: {"ocr": OcrAttrappe({0: []})},
+    "woerter_der_analyse": lambda: {"ocr_woerter": {0: []}},
+    "ohne_ocr": lambda: {"ocr": None},
+    "zwei_bruchstuecke": lambda: {"ocr": OcrAttrappe({0: [(60.0, 90.0, 64.0, 102.0, "|"),
+                                                          (70.0, 90.0, 100.0, 102.0, "Seite")]})},
+}
+
+
+@pytest.mark.parametrize("quelle", sorted(OHNE_WOERTER))
+@pytest.mark.parametrize("grau", [150, 160])
+def test_hell_gedruckte_ungelesene_scan_seite_ist_seitenverdacht(tmp_path, grau, quelle):
+    """Befund Runde 3b: ein hell gedruckter Scan (Grau 150/160, für Menschen gut lesbar), auf dem die OCR nichts las,
+    verließ die Prüfung ohne Seitenverdacht – ihr eigenes Maß (Pixel dunkler als Grau 180 bei 50 dpi über 0,0003) hielt
+    ihn für „keine Tinte“, während der Status der Schwärzung ihn schon richtig als nicht leer sah. Jetzt entscheidet
+    dasselbe Maß (analyse.seite_nachweislich_leer): genau ein Seitenverdacht „Seite selbst durchsehen“."""
+    pdf = _heller_scan(tmp_path / "hell.pdf", grau)
+    with fitz.open(pdf) as doc:
+        assert analyse.tintenanteil(doc[0]) <= analyse.LEER_DUNKEL_MAX     # der blinde Fleck des früheren Maßes
+        assert not analyse.seite_nachweislich_leer(doc[0])
+    verdacht = restrisiko_pruefen(pdf, ocr_modus={0: "seite"}, **OHNE_WOERTER[quelle]())
+    assert [(v.seite, v.start, v.ende, v.grund, v.rechtecke) for v in verdacht] == \
+        [(0, -1, -1, restrisiko.GRUND_SEITE_UNGELESEN, [])], verdacht
+
+
+@pytest.mark.parametrize("quelle", sorted(OHNE_WOERTER))
+@pytest.mark.parametrize("art", ["weiss", "papier_rauschen", "papier_jpeg"])
+def test_leere_gescannte_seite_ist_kein_seitenverdacht(tmp_path, art, quelle):
+    """Gegenprobe: eine nachweislich leere Scan-Seite (leere Rückseite: weißes Bild, graues Papier mit Scanner-Rauschen,
+    als JPEG) ist ohne OCR-Wörter kein Verdacht – auch ganz ohne OCR (dort brach die Prüfung früher ab: ohne Wörter
+    fragte die Rausch-Regel nach deren Anzahl)."""
+    pfad = tmp_path / "leer.pdf"
+    pdf = {"weiss": lambda: _heller_scan(pfad, 255, zeilen=[]), "papier_rauschen": lambda: _papier_scan(pfad),
+           "papier_jpeg": lambda: _papier_scan(pfad, papier=230, streuung=6, jpeg=40)}[art]()
+    with fitz.open(pdf) as doc:
+        assert analyse.seite_nachweislich_leer(doc[0])
+    assert restrisiko_pruefen(pdf, ocr_modus={0: "seite"}, **OHNE_WOERTER[quelle]()) == []
+
+
+@pytest.mark.parametrize("ausfall", ["mass_scheitert", "import_scheitert"])
+def test_ungelesene_scan_seite_ist_im_zweifel_nicht_leer(tmp_path, monkeypatch, ausfall):
+    """Im Zweifel Verdacht: scheitert das Maß „nachweislich leer“ (Rendern) oder schon sein Import, gilt auch eine
+    leere Seite ohne OCR-Wörter als ungelesen – nie still unverdächtig."""
+    pdf = _papier_scan(tmp_path / "leer.pdf")
+    if ausfall == "mass_scheitert":
+        def kaputt(seite):
+            raise RuntimeError("Rendern unmöglich")
+        monkeypatch.setattr(analyse, "seite_nachweislich_leer", kaputt)
+    else:
+        monkeypatch.setitem(sys.modules, "anonymisierer.analyse", None)
+    verdacht = restrisiko_pruefen(pdf, ocr=OcrAttrappe({0: []}), ocr_modus={0: "seite"})
+    assert [(v.seite, v.start, v.grund) for v in verdacht] == [(0, -1, restrisiko.GRUND_SEITE_UNGELESEN)]
+
+
+@pytest.mark.parametrize("rueckseite", ["hell", "leer"])
+def test_status_und_seitenverdacht_messen_leere_scan_seiten_gleich(tmp_path, rueckseite):
+    """Eine Regel für „leer“: Seite 1 Text, Seite 2 ein Scan, auf dem die OCR nichts liest. Der Status der Schwärzung
+    (Grund „kein Text erkannt“) und der Seitenverdacht der Prüfung kommen zum selben Ergebnis – beide beim hellen Scan
+    (Grau 160), keiner bei der leeren Rückseite mit Papierrauschen."""
+    doc = fitz.open()
+    doc.new_page().insert_text((60, 90), "Sehr geehrte Damen und Herren, anbei die Unterlagen.", fontsize=11)
+    scan = _heller_scan(tmp_path / "scan.pdf", 160) if rueckseite == "hell" else _papier_scan(tmp_path / "scan.pdf")
+    with fitz.open(scan) as s:
+        doc.insert_pdf(s)
+    pdf = tmp_path / "Brief_mit_Scan.pdf"
+    doc.save(pdf)
+    doc.close()
+    e = schwaerze_pdf(pdf, [], ocr=OcrAttrappe({1: []}), ziel_ordner=tmp_path / "aus")
+    assert e["fehler"] is None and e["ausgabe"] is not None
+    ungelesen = [g for g in e["pruefen_gruende"] if g.startswith("Seite 2: kein Text erkannt")]
+    seitenverdacht = [(v.seite, v.start, v.grund) for v in e["verdacht"] if v.start == -1]
+    if rueckseite == "hell":
+        assert e["status"] == "pruefen" and ungelesen, e["pruefen_gruende"]
+        assert seitenverdacht == [(1, -1, restrisiko.GRUND_SEITE_UNGELESEN)], e["verdacht"]
+    else:
+        assert e["status"] == "fertig" and not ungelesen, e["pruefen_gruende"]
+        assert seitenverdacht == [], e["verdacht"]
 
 
 def test_unplausible_lesung_einer_scan_seite_ist_seitenverdacht(tmp_path):

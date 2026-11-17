@@ -9,7 +9,9 @@ Verdacht macht die Ausgabe zu _PRUEFEN, die Vorschau zeigt ihn orange, „Nachsc
 Unabhängigkeit: Bewusst NICHT benutzt werden das Detektor-Register, namen.py, muster.py und das Sprachmodell –
 eine zweite Verteidigungslinie darf nicht dieselben blinden Flecken haben wie die erste. Benutzt werden nur die
 Listen der Wissensbasis (anonymisierer.wissen), das Seitenmodell (dieselbe Lesart der Seite) und eigene, einfache
-Formregeln mit eigenen Prüfziffer-Rechnungen.
+Formregeln mit eigenen Prüfziffer-Rechnungen – dazu für den Seitenverdacht das Pixelmaß „Seite nachweislich leer“
+(analyse.seite_nachweislich_leer, keine Erkennung: dieselbe Entscheidung „leere Rückseite“ wie beim Status der
+Schwärzung).
 
 Was gemeldet wird (jede Regel liefert Stelle + Grund):
   * Kennungen: Ziffernfolgen ab 5 Ziffern – auch in Gruppen ("6 259 674 059", "0170 318 40 11") und mit
@@ -75,10 +77,12 @@ Was gemeldet wird (jede Regel liefert Stelle + Grund):
     Personen-Platzhalter oder ihn kreuzend) ist kein Verdacht: ein Zug ist keine lesbare Angabe, und der Name, zu dem
     er gehört, ist schon ersetzt; ohne geschwärzten Namen daneben bleibt Tinte im Unterschriftsfeld Verdacht (dort kann
     ein ungelesener Name stehen).
-Seitenverdacht (ohne Rechteck, „Seite selbst durchsehen“): eine Scan-Seite mit Tinte, aber ohne gelesene Wörter,
-eine kaum lesbare Scan-Seite (mehr als 20 % OCR-Bruchstücke wie "|", "\\", ".", Einzelzeichen – Fax, starke
-Kompression) und eine Scan-Seite, deren Lesung nach dem Maß der OCR unplausibel ist (Buchstabensalat einer
-verdrehten Seite, Handschrift): dort kann die Prüfung nicht verlässlich lesen, also muss ein Mensch hinsehen.
+Seitenverdacht (ohne Rechteck, „Seite selbst durchsehen“): eine Scan-Seite, auf der die OCR (fast) nichts gelesen
+hat und die nicht nachweislich leer ist (analyse.seite_nachweislich_leer – sieht auch hell gedruckten Text und
+Bleistift: ein hellgrauer Scan ohne OCR-Wörter ist kein leeres Blatt), eine kaum lesbare Scan-Seite (mehr als 20 %
+OCR-Bruchstücke wie "|", "\\", ".", Einzelzeichen – Fax, starke Kompression) und eine Scan-Seite, deren Lesung nach
+dem Maß der OCR unplausibel ist (Buchstabensalat einer verdrehten Seite, Handschrift): dort kann die Prüfung nicht
+verlässlich lesen, also muss ein Mensch hinsehen.
 Nie Verdacht: Platzhaltertext ([PERSON A], [GESCHWÄRZT] …), die NIE-Liste der Nutzerin und bewusst abgewählte
 Stellen (Entscheidung der Nutzerin). Die Prüfung ist in jeder Schutzstufe gleich empfindlich (profil wird nur
 durchgereicht).
@@ -116,7 +120,7 @@ ALTER_MIN = 14                 # plausibles Geburtsjahr: Alter 14 bis 110 Jahre 
 ALTER_MAX = 110
 MIN_ZIFFERN = 5                # Ziffernfolgen ab so vielen Ziffern sind ein Verdacht
 SPALTE_ZEILEN = 40             # so weit sucht die Spaltenkopf-Regel nach oben (Zeilen)
-SCAN_MIN_WOERTER = 3           # liefert die OCR einer Scan-Seite weniger Wörter: Seite gilt als ungelesen
+SCAN_MIN_WOERTER = 3           # weniger OCR-Wörter: Scan-Seite gilt als ungelesen, außer sie ist nachweislich leer
 SCAN_RAUSCHEN_MAX = 0.20       # mehr OCR-Bruchstücke ("|", "\\", "u", "0.") als dieser Anteil: Scan kaum lesbar
 SCAN_RAUSCHEN_MIN_WOERTER = 40  # … erst ab so vielen OCR-Wörtern bewertet
 FUELLFARBE = (0.92, 0.92, 0.92)  # Füllfarbe der Schwärzungsrechtecke (schwaerzung.FUELLFARBE)
@@ -3494,14 +3498,20 @@ def _unterschrift_pruefen(seite, m, schwaerzungen, pruefung=None, gemeldet=(), a
     return verdacht
 
 
-def _tintenanteil(seite) -> float:
-    """Anteil dunkler Pixel der Seite (grob gerendert) – eine leere Scan-Seite ohne Text ist kein Verdacht."""
+def _seite_nachweislich_leer(seite) -> bool:
+    """Steht auf der Scan-Seite nachweislich nichts (leere Rückseite)? Nur dann ist „die OCR hat (fast) nichts
+    gelesen“ kein Seitenverdacht. Dasselbe Maß wie beim Status der Schwärzung (analyse.seite_nachweislich_leer: jedes
+    Pixel deutlich dunkler als das Papier, mit einem ebensolchen Nachbarn – sieht auch hell gedruckten Text und
+    Bleistift). Befund Runde 3b: das frühere eigene Maß (Anteil der Pixel dunkler als Grau 180 bei 50 dpi über 0,0003)
+    hielt gut lesbaren hellen Druck (Grau 150/160) für „keine Tinte“ – ein solcher Scan, auf dem die OCR nichts las,
+    verließ die Prüfung ohne Seitenverdacht. Ein Pixelmaß, keine Erkennung: die Unabhängigkeit der Prüfung (Modulkopf)
+    bleibt gewahrt. Spät importiert (kein Importzyklus mit analyse); im Zweifel (jeder Fehler, auch beim Import, und
+    jede Antwort außer einem klaren Ja): nicht leer – die Seite bleibt Verdacht."""
     try:
-        pix = seite.get_pixmap(dpi=50, colorspace=fitz.csGRAY, alpha=False)
+        from .analyse import seite_nachweislich_leer
+        return seite_nachweislich_leer(seite) is True
     except Exception:
-        return 1.0
-    daten = pix.samples
-    return sum(1 for b in daten if b < 180) / max(1, len(daten))
+        return False
 
 
 def _rauschanteil(woerter: list) -> float:
@@ -3612,8 +3622,11 @@ def restrisiko_pruefen(ausgabe_pfad, ocr=None, platzhalter=None, profil: str = "
             if modus in ("seite", "bilder"):
                 if woerter:
                     woerter = _ohne_platzhalter(woerter, _platzhalter_boxen(seite, nr, platzhalter) + schwaerzungen)
-                if modus == "seite" and len(woerter or []) < SCAN_MIN_WOERTER and _tintenanteil(seite) > 0.0003:
-                    verdacht.append(Verdacht(nr, -1, -1, f"Seite {nr + 1}", GRUND_SEITE_UNGELESEN, []))
+                if modus == "seite" and len(woerter or []) < SCAN_MIN_WOERTER:
+                    # (fast) nichts gelesen – auch ganz ohne OCR (woerter None): Verdacht, außer die Seite ist
+                    # nachweislich leer. Rauschen und Buchstabensalat bewerten erst ab viel mehr Wörtern.
+                    if not _seite_nachweislich_leer(seite):
+                        verdacht.append(Verdacht(nr, -1, -1, f"Seite {nr + 1}", GRUND_SEITE_UNGELESEN, []))
                 elif modus == "seite" and len(woerter) >= SCAN_RAUSCHEN_MIN_WOERTER \
                         and _rauschanteil(woerter) > SCAN_RAUSCHEN_MAX:
                     verdacht.append(Verdacht(nr, -1, -1, f"Seite {nr + 1}", GRUND_SEITE_RAUSCHEN, []))
