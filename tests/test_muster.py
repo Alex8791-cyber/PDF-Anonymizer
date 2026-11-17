@@ -376,16 +376,20 @@ def test_laufzeit_lange_zeile(funktion):
     """M-69: alle Wiederholungen sind nach oben begrenzt, eine lange Zeile kostet linear. Lastunabhängig (Runde 3b),
     mit der CPU-Zeit des eigenen Prozesses statt der Wanduhr:
     (1) Wachstum auf einer Zeile ohne Leerzeichen und ohne Treffer, 8 x 3 750 gegen 30 000 Zeichen – dort zählt allein
-        das Abtasten der Zeile (gemessen 0,7 bis 1,2, auch unter Last und mit der Windows-Zählung). Eine Wiederholung
-        ohne Obergrenze und ohne Rückblick (jede Position liest bis zum Ende des Tokens, der Befund M-69) hebt es auf 8
-        – Schranke 1,5. Anders als die absolute Schranke hängt das nicht von der Geschwindigkeit des Rechners ab;
+        das Abtasten der Zeile (gemessen meist 0,7 bis 1,2, mit genauer und mit Windows-Uhr, auch unter vier
+        Busy-Loops; neben anderer Last einzelne erste Messungen bis 1,62, nachgemessen höchstens 1,08). Eine
+        Wiederholung ohne Obergrenze und ohne Rückblick (jede Position liest bis zum Ende des Tokens, der Befund M-69)
+        hebt es auf 8 – Schranke 1,5. Anders als die absolute Schranke hängt das nicht von der Geschwindigkeit des
+        Rechners ab. Jede Messung dauert mindestens 20 Schritte der Prozessuhr (unter Windows 0,31 s), ein Wert an der
+        Schranke wird einmal nachgemessen (Befund der Gegenprüfung: mit 0,1 s je Messung und ohne Nachmessung las sich
+        unter der Windows-Zählung einmal 1,57 ohne jede Regression; zeitmessung.py);
     (2) die bisherigen Schranken als CPU-Zeit: 30 000 Zeichen ohne Leerzeichen unter 1 s, 160 000 Zeichen Fließtext mit
         2 000 Treffern unter 2 s. Dort keine Wachstumsprüfung: finde_telefon prüft jede Fundstelle gegen alle bisherigen
         auf Überlappung und wächst deshalb mit der Trefferzahl quadratisch (gemessen 0,26 s für 2 000 Treffer)."""
     import zeitmessung
     zeile = "Aa-" * 10_000                                      # 30.000 Zeichen ohne Leerzeichen
     kurz = zeile[:len(zeile) // 8]
-    wachstum, _, zeit = zeitmessung.wachstum_messen(lambda: funktion(kurz), lambda: funktion(zeile), 8)
+    wachstum, _, zeit = zeitmessung.wachstum_messen(lambda: funktion(kurz), lambda: funktion(zeile), 8, schranke=1.5)
     print(f"{funktion.__name__} CPU: 30 000 Zeichen {zeit * 1000:.2f} ms, wachstum {wachstum:.2f}")
     assert wachstum < 1.5, f"{funktion.__name__}: Laufzeit wächst auf einer langen Zeile um {wachstum:.2f} x linear"
     assert zeit < 1.0, f"{funktion.__name__}: {zeit:.2f} s CPU-Zeit für 30 000 Zeichen"
@@ -509,15 +513,18 @@ def test_vertragsnummern_phase3(text, erwartet):
 def test_vertragsnummern_lineare_laufzeit():                                # EQ-17 / PERF-07
     """Gutachten EQ-17/PERF-07: 3 000 Etiketten auf einer Zeile – je Etikett zählt nur ein begrenztes Fenster dahinter,
     verschachtelte Werte fallen in einem Durchlauf weg. Lastunabhängig (Runde 3b), CPU-Zeit statt Wanduhr:
-    (1) Wachstum 8 x 375 gegen 3 000 Etiketten, je Messung mindestens 0,2 s (gemessen 0,9 bis 1,1); ohne das
-        Fenster (je Etikett der ganze Rest der Zeile) 7,6 – Schranke 1,5; dazu die bisherige Schranke 1 s als CPU-Zeit;
+    (1) Wachstum 8 x 375 gegen 3 000 Etiketten, je Messung mindestens 0,2 s und 20 Schritte der Prozessuhr (unter
+        Windows 0,31 s), ein Wert an der Schranke wird einmal nachgemessen (gemessen 0,7 bis 1,35; einmal 1,56 mit
+        Windows-Uhr neben anderer Last, nachgemessen 1,08); ohne das Fenster (je Etikett der ganze Rest der Zeile) 7 bis
+        8,2 – Schranke 1,5; dazu die bisherige Schranke 1 s als CPU-Zeit;
     (2) BIC hinter 2 000 IBANs unter 2 s CPU-Zeit (gemessen 0,25 s). Nur diese Schranke: _iban_spannen prüft jede
         OCR-Lesart einer IBAN gegen alle bisherigen Treffer, die Laufzeit wächst mit der Zahl der IBANs quadratisch."""
     import zeitmessung
     text = "Kunden-Nr.: 4711 " * 3000
     kurz = text[:len(text) // 8]
     wachstum, _, zeit = zeitmessung.wachstum_messen(lambda: mu.finde_vertragsnummern(kurz),
-                                                    lambda: mu.finde_vertragsnummern(text), 8, mindestens=0.2)
+                                                    lambda: mu.finde_vertragsnummern(text), 8, mindestens=0.2,
+                                                    schranke=1.5)
     print(f"Vertragsnummern CPU: 3 000 Etiketten {zeit * 1000:.2f} ms, wachstum {wachstum:.2f}")
     assert wachstum < 1.5, f"Vertragsnummern: Laufzeit wächst um {wachstum:.2f} x linear"
     assert zeit < 1.0, f"Vertragsnummern: {zeit:.2f} s CPU-Zeit für 3 000 Etiketten"
