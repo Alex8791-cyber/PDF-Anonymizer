@@ -275,6 +275,13 @@ sehr hellen Scans (blasser Druck, Bleistift). Deshalb jede Seite selbst ansehen.
   x64-Emulation.
 - Python 3.10 bis 3.15 – wird vom Installationsskript automatisch mitinstalliert
   (Python 3.12, nur für das eigene Benutzerkonto, keine Administratorrechte nötig).
+- Die **Visual-C++-Laufzeit** von Microsoft („Microsoft Visual C++ 2015-2022 Redistributable (x64)“):
+  PyMuPDF braucht daraus `msvcp140.dll` und `vcruntime140_1.dll`, bringt sie aber nicht mit. Auf den
+  meisten Rechnern ist sie schon da; auf frisch eingerichteten Rechnern, in der Windows-Sandbox und
+  auf schlanken Firmen-Rechnern fehlt sie oft. `Installieren.bat` prüft das und bietet die
+  Installation an (`winget install --id Microsoft.VCRedist.2015+.x64 -e`, einmalig, braucht
+  Administratorrechte); alternativ `vc_redist.x64.exe` von Microsoft
+  (<https://aka.ms/vs/17/release/vc_redist.x64.exe>). Die EXE-Version bringt die Laufzeit mit.
 - Etwa 1 GB freier Festplattenplatz (Sprachmodell und Bibliotheken), Internet nur während der
   Installation. Große Handyfotos und sehr große Seiten brauchen beim Lesen und Schwärzen
   deutlich mehr Arbeitsspeicher als gewöhnliche PDFs.
@@ -302,7 +309,8 @@ sehr hellen Scans (blasser Druck, Bleistift). Deshalb jede Seite selbst ansehen.
 4. Das Skript erledigt in **einem** Lauf:
    1. Python finden oder installieren (Python 3.12 über den Windows-Paketmanager
       `winget`; ohne Administratorrechte),
-   2. Rechner prüfen (64-Bit, Prozessor),
+   2. Rechner prüfen (64-Bit, Prozessor, Visual-C++-Laufzeit – fehlt sie, bietet das Skript die
+      Installation an),
    3. Pakete installieren (PyMuPDF, spaCy, tkinterdnd2 und das deutsche Sprachmodell
       aus `requirements.txt`) – sind sie schon in passender Version da, wird nichts geladen,
    4. Installation prüfen,
@@ -314,6 +322,11 @@ sehr hellen Scans (blasser Druck, Bleistift). Deshalb jede Seite selbst ansehen.
 5. Starten: Doppelklick auf die Desktop-Verknüpfung oder auf **`Starten.bat`** im
    Programmordner. Wird der Ordner später verschoben, einfach `Installieren.bat` noch
    einmal ausführen (geht dann schnell, es wird nichts erneut heruntergeladen).
+
+Der Programmordner darf auch auf einer Netzwerkfreigabe liegen, die im Explorer über ihren
+Pfad (`\\server\freigabe\…`) geöffnet ist: `Installieren.bat` verbindet sie dafür vorübergehend
+mit einem freien Laufwerksbuchstaben und gibt ihn am Ende wieder frei; `Starten.bat` arbeitet mit
+vollständigen Pfaden.
 
 **Ohne Zugang zu github.com (Offline-Weg für das Sprachmodell):** Das deutsche Sprachmodell
 kommt von github.com, das manche Firmennetze sperren. Dann entweder die Installation einmalig
@@ -534,7 +547,8 @@ Hochladen nicht mit auszuwählen.
 `dist\PDF-Anonymisierer\` (mit `PDF-Anonymisierer.exe`, Sprachmodell, OCR-Sprachdatei, den
 Wortlisten und allen Erkennungsmodulen sowie den Lizenztexten) und packt ihn als
 `dist\PDF-Anonymisierer-<Version>-windows-x64.zip`. Empfänger brauchen **weder Python noch
-Tesseract** – nur den entpackten Ordner.
+Tesseract** – nur den entpackten Ordner. Auch die Visual-C++-Laufzeit liegt darin
+(`_internal\msvcp140.dll`, `_internal\vcruntime140_1.dll`); `EXE-bauen.bat` prüft das nach dem Bau.
 
 - Den Bau macht ein Rechner, auf dem `Installieren.bat` gelaufen ist (x64-Windows).
   Das Skript prüft vorher, dass Sprachmodell und Sprachdatei vorhanden sind – eine EXE
@@ -576,13 +590,15 @@ Tesseract** – nur den entpackten Ordner.
 |---|---|
 | `Installieren.bat` meldet „Pakete konnten nicht installiert werden“ | Die eigentliche pip-Meldung steht darüber. **Kein Internet** → Verbindung prüfen. **`CERTIFICATE_VERIFY_FAILED` / `ProxyError`** → Firmen-Proxy oder TLS-Prüfung; IT bitten, `pypi.org`, `files.pythonhosted.org` und `github.com` freizugeben, oder die EXE-Version nutzen. **`No matching distribution found`** → meist erreicht pip `pypi.org` nicht (Proxy, siehe davor); seltener gibt es für dieses Python bzw. diesen Prozessor kein fertiges Paket (z. B. ARM64 mit Python 3.10) → Python 3.12 (64-Bit) installieren oder die EXE-Version nutzen. **`PermissionError` / `Access is denied`** → Ordner z. B. nach `Dokumente` verschieben, Virenscanner prüfen. |
 | „Sprachmodell konnte nicht installiert werden“ | Das Modell kommt von `github.com` – auch der zweite Versuch über `spacy download`. Im Firmennetz gesperrt → einmalig über ein anderes Netz (Hotspot) installieren, den [Offline-Weg](#installation-windows) nutzen (Datei `de_core_news_md-3.8.0-py3-none-any.whl` in den Programmordner legen) oder die EXE-Version nutzen. Ohne Modell gibt es keine Namenserkennung, deshalb bricht die Installation hier bewusst ab; schon installierte Pakete werden beim nächsten Lauf nicht neu geladen. |
+| `Installieren.bat` meldet „Die Visual-C++-Laufzeit von Microsoft fehlt“; beim Start erscheint „PyMuPDF lässt sich nicht laden“ oder oben steht „DLL load failed“ | Auf dem Rechner fehlt die Laufzeit, die PyMuPDF braucht („Microsoft Visual C++ 2015-2022 Redistributable (x64)“, Dateien `msvcp140.dll` und `vcruntime140_1.dll` im Windows-Systemordner), oder sie ist veraltet – typisch für frisch eingerichtete Rechner, die Windows-Sandbox und schlanke Firmen-Rechner. Pakete neu zu installieren hilft dann nicht. Einmalig mit Administratorrechten installieren: `winget install --id Microsoft.VCRedist.2015+.x64 -e` (bietet `Installieren.bat` selbst an) oder `vc_redist.x64.exe` von Microsoft (<https://aka.ms/vs/17/release/vc_redist.x64.exe>), danach `Installieren.bat` erneut starten. Ohne Administratorrechte: die IT fragen oder die EXE-Version nutzen – sie bringt die Laufzeit mit. `python werkzeuge\pruefe_installation.py` zeigt unter „Visual C++“, ob die Dateien da sind. |
+| `Installieren.bat` meldet „Der Programmordner lässt sich nicht als Arbeitsordner öffnen“ | Der Ordner liegt auf einer Netzwerkfreigabe (`\\server\freigabe\…`), und Windows konnte ihr keinen freien Laufwerksbuchstaben zuordnen oder hat den Zugriff verweigert (die Meldung von Windows steht darüber). Den Ordner auf den eigenen Rechner kopieren (z. B. nach `Dokumente`) oder die Freigabe als Netzlaufwerk verbinden (Explorer: Dieser PC → „Netzlaufwerk verbinden“) und von dort starten. |
 | „Python konnte nicht automatisch installiert werden“ | `winget` fehlt oder ist gesperrt, oder `python` ist nur der Store-Alias von Windows. Python 3.12 (64-Bit) von [python.org](https://www.python.org/downloads/windows/) installieren (Haken „Add python.exe to PATH“), dann `Installieren.bat` erneut starten. Den Store-Alias schaltet man unter Einstellungen → Apps → Erweiterte App-Einstellungen → „Aliase für die App-Ausführung“ aus. |
-| Keine Desktop-Verknüpfung, obwohl alles andere lief | PowerShell ist durch Firmenrichtlinien eingeschränkt. Programm über `Starten.bat` starten (Rechtsklick → „Senden an“ → „Desktop (Verknüpfung erstellen)“). |
+| Keine Desktop-Verknüpfung, obwohl alles andere lief | Die Ursache steht im Fenster in der Zeile „FEHLER:“ – meist ist PowerShell durch Firmenrichtlinien eingeschränkt, seltener fehlt der Desktop-Ordner oder ist nicht beschreibbar. Programm über `Starten.bat` starten (Rechtsklick → „Senden an“ → „Desktop (Verknüpfung erstellen)“). Ein schreibgeschützter Programmordner (z. B. Netzlaufwerk nur mit Leserecht) verhindert die Verknüpfung nicht: Dann fehlt nur `.python_pfad.txt` (Hinweis im Fenster), und `Starten.bat` sucht Python in den üblichen Installationsordnern. |
 | Doppelklick auf die Verknüpfung – nichts passiert | Ordner verschoben oder Python aktualisiert. `Installieren.bat` erneut ausführen, oder `Starten.bat` benutzen. Steht in `fehler.log` etwas? (siehe unten) |
 | Meldung „PDF-Anonymisierer läuft bereits“ | Das Programm ist schon geöffnet (Taskleiste). Es läuft bewusst nur einmal je Benutzer, damit sich Einstellungen und Ausgabenummern nicht gegenseitig überschreiben. |
 | Protokoll meldet „Namenserkennung inaktiv“ oder „Namenserkennung konnte nicht geladen werden“ | Sprachmodell fehlt oder ist beschädigt; Ausgaben heißen dann immer `_PRUEFEN`. Skript-Version: `Installieren.bat` erneut ausführen. EXE-Version: den kompletten Programmordner neu entpacken bzw. eine neue ZIP anfordern – der Ordner `_internal` gehört dazu. |
 | Meldung „Erkennungsmodul … fehlt in diesem Programmordner“ | Der Programmordner ist unvollständig; die Angaben dieses Moduls wurden nicht gesucht, die Ausgaben heißen `_PRUEFEN`. Skript-Version: die ZIP neu herunterladen und entpacken, dann `Installieren.bat`. EXE-Version: den Ordner vollständig neu entpacken. |
-| OCR liest Scans auf Englisch / Umlaute falsch | Die deutsche Sprachdatei fehlt: in der Skript-Version `tessdata\deu.traineddata` im Programmordner, in der EXE-Version `_internal\tessdata\deu.traineddata`. Den Ordner vollständig (neu) entpacken. |
+| OCR liest Scans auf Englisch / Umlaute falsch | Die deutsche Sprachdatei fehlt: in der Skript-Version `tessdata\deu.traineddata` im Programmordner, in der EXE-Version `_internal\tessdata\deu.traineddata`. Den Ordner vollständig (neu) entpacken. Das Programm nimmt immer zuerst diese mitgelieferte Datei; eine andere Tesseract-Installation auf dem Rechner (Umgebungsvariable `TESSDATA_PREFIX`) dient nur als Ersatz, wenn sie fehlt. Die Warnung nennt den Ordner, aus dem die OCR tatsächlich liest; `python werkzeuge\pruefe_installation.py` zeigt ihn unter „OCR liest mit“. |
 | Datei wird als „keine PDF“ / „NICHT geprüft“ gemeldet | Das Programm prüft am Inhalt: Word, Excel, Mails, HEIC-, WEBP- und GIF-Bilder werden nicht verarbeitet – auch mit der Endung `.pdf`. Im Ursprungsprogramm als PDF speichern (z. B. Drucken → „Microsoft Print to PDF“) und diese PDF hinzufügen. |
 | Fast jede Ausgabe heißt `_PRUEFEN` | So gewollt: „Freigabe vor Weitergabe erforderlich“ ist eingeschaltet (Standard). In der Vorschau prüfen und „Freigeben“ drücken. Ohne die Option heißt eine Ausgabe nur bei einem konkreten Grund `_PRUEFEN` (Fotos immer). |
 | Eine `_PRUEFEN`-Datei lässt sich nicht (mehr) freigeben | Freigeben geht nur in der Sitzung, in der geschwärzt wurde, solange die Datei in der Liste steht. Original erneut hinzufügen, analysieren, schwärzen, prüfen und freigeben; die alte `_PRUEFEN`-Datei nicht weitergeben. |
@@ -590,7 +606,7 @@ Tesseract** – nur den entpackten Ordner.
 | Geschwärztes Foto ist kleiner als das Original | Geschwärzte Bilder werden neu als JPEG gespeichert, Fotos über 24 Megapixel dabei auf 24 Megapixel verkleinert. |
 | Fenster zu groß für den Bildschirm | Das Fenster passt sich dem Bildschirm an und startet auf kleinen Bildschirmen (z. B. Laptops mit 1366 × 768) und bei hoher Windows-Skalierung maximiert. Wird es eng, blendet das Programm Überschriften und Bedienhinweise aus und rückt zusammen; die Zeile mit den NICHT geprüften Dateien bleibt sichtbar. Alle Hinweise stehen weiter unter Hilfe → „Was wird nicht erkannt?“ und „Hinweise vor der Nutzung …“. |
 | `fehler.log` finden | Skript-Version: neben `pdf_anonymisierer.py`, wenn der Ordner beschreibbar ist, sonst `%LOCALAPPDATA%\PDF-Anonymisierer\fehler.log`. EXE-Version: immer `%LOCALAPPDATA%\PDF-Anonymisierer\fehler.log`, nie neben der EXE. Hilfe → „Ordner des Fehlerprotokolls öffnen“ öffnet den Ordner; der Fehlerdialog und Hilfe → „Über PDF-Anonymisierer“ nennen den genauen Pfad. Ordner sind darin gekürzt, Dateinamen nicht. |
-| Für Rückfragen | Skript-Version: `python werkzeuge\pruefe_installation.py` im Programmordner ausführen und die Ausgabe mitschicken (Python-Version, Pakete und ob ihre Versionen zu `requirements.txt` passen, Sprachdatei, Log-Pfad). EXE-Version: den Text aus Hilfe → „Über PDF-Anonymisierer“ und die `fehler.log` mitschicken. Hilfreich ist auch das Laufprotokoll (Datei → „Protokoll speichern …“) – es enthält keine Dokumentinhalte und keine Original-Dateinamen. |
+| Für Rückfragen | Skript-Version: `python werkzeuge\pruefe_installation.py` im Programmordner ausführen und die Ausgabe mitschicken (Python-Version, Visual-C++-Laufzeit, Pakete und ob ihre Versionen zu `requirements.txt` passen, Sprachdatei und mit welcher Sprache aus welchem Ordner die OCR liest, Log-Pfad). EXE-Version: den Text aus Hilfe → „Über PDF-Anonymisierer“ und die `fehler.log` mitschicken. Hilfreich ist auch das Laufprotokoll (Datei → „Protokoll speichern …“) – es enthält keine Dokumentinhalte und keine Original-Dateinamen. |
 
 ## Technik
 

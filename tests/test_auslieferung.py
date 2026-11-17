@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import importlib.util
+import os
 import re
 import subprocess
 import sys
@@ -121,9 +122,329 @@ def test_batch_grundgeruest(name):
     text = _lies(name)  # read_text normalisiert CRLF zu LF; CRLF prueft test_batch_ist_ascii_und_crlf
     assert text.startswith("@echo off\n")
     assert "chcp 65001" in text
-    assert 'cd /d "%~dp0"' in text
+    # kein "cd /d" mehr: es scheitert an UNC-Pfaden (test_batch_arbeitsordner_auch_auf_netzwerkfreigaben)
+    befehle = [z.strip() for z in text.splitlines() if z.strip() and not z.strip().upper().startswith("REM")]
+    assert not any(re.match(r"(cd|chdir)\b", z, re.IGNORECASE) for z in befehle)
     # "!" in Pfaden ueberlebt nur ohne verzoegerte Variablenerweiterung (M-26)
     assert "EnableDelayedExpansion" not in text
+
+
+# ----------------------------------------------------------------------
+# Kleiner cmd-Nachbau für Abschnitte der Batch-Dateien (cmd selbst gibt es hier nicht)
+# ----------------------------------------------------------------------
+CMD_BEFEHLE = (  # Stichwort in der Zeile -> Name im nachgebauten Ablauf (erstes passendes zählt)
+    ("pushd ", "pushd"), ("popd", "popd"), ("where winget", "where_winget"), ("choice ", "choice"),
+    ("winget install --id Microsoft.VCRedist", "winget_vc"),
+)
+_CMD_IF = re.compile(r'if\s+(/i\s+)?(not\s+)?(?:exist\s+("[^"]*"|\S+)|defined\s+(\w+)|errorlevel\s+(\d+)'
+                     r'|("[^"]*")==("[^"]*"))\s+(.+)', re.IGNORECASE)
+
+
+def _cmd(name: str, start: str, ende_labels: set[str], *, variablen: dict | None = None, dateien=(),
+         ergebnisse: dict | None = None, effekte: dict | None = None, ende_zeile: str | None = None):
+    """Spielt einen Abschnitt einer Batch-Datei ab der Zeile `start` durch: Labels, goto, call :label / goto :eof,
+    set "X=…" mit %X%-Erweiterung (undefiniert = leer, je Zeile vor der Ausführung wie cmd), if [/i] [not]
+    exist/defined/errorlevel N/"a"=="b" (auch verkettet) und "befehl || anweisung". Befehle aus CMD_BEFEHLE liefern
+    den Errorlevel aus `ergebnisse` (Standard 0); `effekte` legt danach Dateien an (z. B. die DLLs nach winget).
+    Unbekannte Befehle und Klammerblöcke sind ein Testfehler – der Nachbau soll nichts stillschweigend übergehen.
+    Rückgabe: (ausgeführte Befehle, erreichtes Label | "weiter" an `ende_zeile`)."""
+    zeilen = [z.strip() for z in _lies(name).splitlines()]
+    labels = {z[1:].lower(): i for i, z in enumerate(zeilen) if re.fullmatch(r":\w+", z)}
+    werte = {k.upper(): v for k, v in (variablen or {}).items()}
+    vorhanden = {d.lower() for d in dateien}
+    ergebnisse, effekte = dict(ergebnisse or {}), dict(effekte or {})
+    zustand = {"errorlevel": 0, "zeile": ""}
+    ausgefuehrt, stapel = [], []
+
+    def befehl(text):
+        art = next((a for stichwort, a in CMD_BEFEHLE if stichwort.lower() in zustand["zeile"].lower()), None)
+        assert art, f"{name}: unbekannter Befehl im nachgebauten Ablauf: {text!r}"
+        ausgefuehrt.append(art)
+        zustand["errorlevel"] = ergebnisse.get(art, 0)
+        vorhanden.update(d.lower() for d in effekte.get(art, ()))
+
+    def anweisung(text):
+        """Führt eine (schon erweiterte) Anweisung aus; Rückgabe None, ("goto", i), ("call", i) oder "eof"."""
+        text = text.strip()
+        if not text or re.match(r"(rem\b|echo[ .]|echo$|pause$)", text, re.IGNORECASE):
+            return None
+        assert not text.endswith("("), f"{name}: Klammerblock im nachgebauten Ablauf: {text!r}"
+        m = _CMD_IF.fullmatch(text)
+        if m:
+            if m.group(3):
+                wahr = m.group(3).strip('"').lower() in vorhanden
+            elif m.group(4):
+                wahr = bool(werte.get(m.group(4).upper()))
+            elif m.group(5):
+                wahr = zustand["errorlevel"] >= int(m.group(5))
+            else:
+                a, b = m.group(6), m.group(7)
+                wahr = a.lower() == b.lower() if m.group(1) else a == b
+            return anweisung(m.group(8)) if wahr != bool(m.group(2)) else None
+        if " || " in text:
+            links, rechts = text.split(" || ", 1)
+            befehl(links)
+            return anweisung(rechts) if zustand["errorlevel"] else None
+        m = re.fullmatch(r"goto\s+(:?\w+)", text, re.IGNORECASE)
+        if m:
+            return "eof" if m.group(1).lower() == ":eof" else ("goto", labels[m.group(1).lower()])
+        m = re.fullmatch(r"call\s+:(\w+)", text, re.IGNORECASE)
+        if m:
+            return "call", labels[m.group(1).lower()]
+        m = re.fullmatch(r'set\s+"(\w+)=(.*)"', text, re.IGNORECASE)
+        if m:
+            werte[m.group(1).upper()] = m.group(2)
+            return None
+        befehl(text)
+        return None
+
+    i = zeilen.index(start)
+    for _ in range(2000):
+        z = zeilen[i]
+        if re.fullmatch(r":\w+", z) and z[1:].lower() in ende_labels:
+            return ausgefuehrt, z[1:].lower()
+        if z == ende_zeile:
+            return ausgefuehrt, "weiter"
+        zustand["zeile"] = z
+        if re.fullmatch(r":\w+", z):
+            ziel = None
+        else:   # %~dp0 (Ordner der Batch-Datei) hat kein schließendes %, Variablen schon
+            ziel = anweisung(re.sub(r"%~dp0|%(\w+)%", lambda m: werte.get((m.group(1) or "~dp0").upper(), ""), z))
+        if ziel is None:
+            i += 1
+        elif ziel == "eof":
+            assert stapel, f"{name}: goto :eof außerhalb eines Unterprogramms beendet die Batch-Datei"
+            i = stapel.pop()
+        elif ziel[0] == "call":
+            stapel.append(i + 1)
+            i = ziel[1]
+        else:
+            i = ziel[1]
+    raise AssertionError("Endlosschleife im nachgebauten Ablauf")
+
+
+# ----------------------------------------------------------------------
+# Netzwerkfreigaben (\\server\freigabe\…): cmd kann UNC nicht als aktuellen Ordner setzen
+# ----------------------------------------------------------------------
+def _bloecke_bis_exit(name: str):
+    """[(Label des Abschnitts oder None, Zeilen bis einschließlich 'exit /b …')] einer Batch-Datei."""
+    bloecke, label, zeilen = [], None, []
+    for z in (z.strip() for z in _lies(name).splitlines()):
+        if re.fullmatch(r":\w+", z):
+            label, zeilen = z[1:].lower(), []
+            continue
+        zeilen.append(z)
+        if z.lower().startswith("exit /b"):
+            bloecke.append((label, zeilen))
+            zeilen = []
+    return bloecke
+
+
+@pytest.mark.parametrize("name", ("Installieren.bat", "EXE-bauen.bat"))
+def test_batch_arbeitsordner_auch_auf_netzwerkfreigaben(name):
+    """Befund: 'cd /d "%~dp0"' scheitert auf einer per UNC-Pfad geöffneten Freigabe; danach prüften die relativen
+    Pfade C:\\Windows und meldeten fälschlich „Dateien fehlen – ZIP komplett entpacken“. pushd ordnet der Freigabe
+    einen freien Laufwerksbuchstaben zu; scheitert auch das, kommt eine eigene Meldung."""
+    zeilen = [z.strip() for z in _lies(name).splitlines()]
+    assert 'pushd "%~dp0" || goto fehler_ordner' in zeilen
+    pushd = zeilen.index('pushd "%~dp0" || goto fehler_ordner')
+    erste_relative = next(i for i, z in enumerate(zeilen) if z.startswith('if not exist "'))
+    assert pushd < erste_relative, "der Arbeitsordner muss vor der ersten relativen Prüfung stehen"
+    assert all(re.match(r"(@echo off|chcp |title |setlocal$|$)", z) for z in zeilen[:pushd])
+    bloecke = _bloecke_bis_exit(name)
+    assert bloecke and any(label == "fehler_ordner" for label, _ in bloecke)
+    for label, block in bloecke:
+        if label == "fehler_ordner":
+            # pushd ist gescheitert: popd würde einen Eintrag des Aufrufers entfernen
+            assert "popd" not in block and "pause" in block and block[-1] == "exit /b 1"
+            text = "\n".join(block)
+            for begriff in ("Netzwerkfreigabe", "Laufwerksbuchstaben", "%~dp0", "kopieren", "Netzlaufwerk"):
+                assert begriff in text, f"{name}: :fehler_ordner erklärt '{begriff}' nicht"
+            assert "ZIP" not in text, "die Meldung darf nicht zum Neu-Entpacken raten"
+        else:
+            # popd gibt den vorübergehenden Laufwerksbuchstaben wieder frei
+            assert "popd" in block, f"{name}: Ausgang nach :{label} ohne popd"
+
+
+@pytest.mark.parametrize("name, erste_pruefung", [
+    ("Installieren.bat", 'if not exist "werkzeuge\\verknuepfung.py" goto fehler_unvollstaendig'),
+    ("EXE-bauen.bat", 'if not exist "pdf_anonymisierer.py" goto fehler_unvollstaendig'),
+])
+@pytest.mark.parametrize("pushd, erwartet", [(0, "weiter"), (1, "fehler_ordner")])
+def test_batch_arbeitsordner_ablauf(name, erste_pruefung, pushd, erwartet):
+    befehle, ende = _cmd(name, 'pushd "%~dp0" || goto fehler_ordner', {"fehler_ordner", "fehler_unvollstaendig"},
+                         variablen={"~dp0": "\\\\server\\freigabe\\PDF-Anonymisierer\\"}, ergebnisse={"pushd": pushd},
+                         ende_zeile=erste_pruefung)
+    assert (befehle, ende) == (["pushd"], erwartet)
+
+
+def test_installieren_startet_das_programm_nicht_vom_voruebergehenden_laufwerk():
+    """Der Laufwerksbuchstabe von pushd verschwindet mit popd. Das Programm wird deshalb erst danach gestartet –
+    sonst stünde sein Arbeitsordner auf einem Laufwerk, das es nicht mehr gibt (neue OCR-Prozesse starten dort
+    nicht mehr)."""
+    zeilen = [z.strip() for z in _lies("Installieren.bat").splitlines()]
+    autostart = next(i for i, z in enumerate(zeilen) if z.startswith('start "" "%PYW%"'))
+    assert "popd" in zeilen[autostart - 3:autostart]
+    assert '"%~dp0pdf_anonymisierer.py"' in zeilen[autostart]
+
+
+def test_starten_bat_braucht_keinen_arbeitsordner():
+    """Starten.bat liest .python_pfad.txt und startet das Programm über absolute Pfade (%~dp0) – auch von einer
+    Netzwerkfreigabe, ohne vorübergehendes Laufwerk, das beim Beenden wieder verschwinden müsste."""
+    zeilen = [z.strip() for z in _lies("Starten.bat").splitlines()]
+    assert not any(re.match(r"(cd|chdir|pushd|popd)\b", z, re.IGNORECASE) for z in zeilen)
+    code = [z for z in zeilen if z and not z.upper().startswith("REM")]
+    for datei in (".python_pfad.txt", "pdf_anonymisierer.py"):
+        stellen = [z for z in code if datei in z]
+        assert stellen, datei
+        for z in stellen:
+            assert z.count(datei) == z.count("%~dp0" + datei), f"Starten.bat: {datei} relativ in {z!r}"
+
+
+# ----------------------------------------------------------------------
+# Visual-C++-Laufzeit: PyMuPDF lädt msvcp140.dll und vcruntime140_1.dll aus dem Windows-Systemordner
+# ----------------------------------------------------------------------
+VC_WINGET = "winget install --id Microsoft.VCRedist.2015+.x64 -e"
+VC_LINK = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+VC_NAME = "Microsoft Visual C++ 2015-2022 Redistributable (x64)"
+SYS32, NATIV = "C:\\Windows\\System32\\", "C:\\Windows\\Sysnative\\"
+VC_DLLS = ("msvcp140.dll", "vcruntime140_1.dll")
+
+
+def _block(name: str, label: str) -> str:
+    text = _lies(name)
+    block = text[text.index(f"\n:{label}\n"):]
+    return block[:block.index("exit /b")]
+
+
+def test_installieren_prueft_vc_laufzeit_vor_den_paketen():
+    """Befund: Ohne „Visual C++ Redistributable“ scheitert 'import fitz' mit „DLL load failed“ – die Vorab-Prüfung
+    schlug deshalb bei jedem Lauf fehl, pip installierte alles neu, und Schritt 4 nannte eine falsche Ursache."""
+    text = _lies("Installieren.bat")
+    pruefung = text.index("call :pruefe_vc_laufzeit")
+    assert text.index("echo [2/5]") < pruefung < text.index("echo [3/5]")
+    assert pruefung < text.index('"%PY%" -W ignore -c "import fitz, spacy'), "vor der Vorab-Prüfung der Pakete"
+    unter = text[text.index("\n:pruefe_vc_laufzeit\n"):]
+    unter = unter[:unter.index("goto :eof")]
+    assert 'set "SYSDLL=%SystemRoot%\\System32"' in unter
+    assert 'if exist "%SystemRoot%\\Sysnative\\cmd.exe" set "SYSDLL=%SystemRoot%\\Sysnative"' in unter
+    for dll in VC_DLLS:
+        assert f'if not exist "%SYSDLL%\\{dll}"' in unter
+    assert VC_WINGET in text and "choice /c JN" in text
+    meldung = _block("Installieren.bat", "fehler_vc_laufzeit")
+    for begriff in (VC_NAME, VC_WINGET, "vc_redist.x64.exe", VC_LINK, "DLL load failed", "Administratorrechte",
+                    "EXE-Version", "msvcp140.dll", "vcruntime140_1.dll", "erneut starten"):
+        assert begriff in meldung, f":fehler_vc_laufzeit erklärt '{begriff}' nicht"
+    # Schritt 4 nennt bei „DLL load failed“ die Laufzeit statt nur Virenscanner/zwei Pythons
+    pruefung = _block("Installieren.bat", "fehler_pruefung")
+    assert "DLL load failed" in pruefung and VC_WINGET in pruefung and VC_LINK in pruefung
+
+
+def _vc(*namen, ordner=SYS32):
+    return {ordner + n for n in namen}
+
+
+@pytest.mark.parametrize("arch, dateien, ergebnisse, effekte, erwartet_befehle, erwartet_ende", [
+    # alles da: keine Rückfrage, weiter zu pip
+    ("AMD64", _vc(*VC_DLLS), {}, {}, [], "vc_ok"),
+    # eine DLL fehlt und kein winget: Meldung mit Abhilfe, kein Paket-Schritt
+    ("AMD64", _vc("vcruntime140_1.dll"), {"where_winget": 1}, {}, ["where_winget"], "fehler_vc_laufzeit"),
+    ("AMD64", _vc("msvcp140.dll"), {"where_winget": 1}, {}, ["where_winget"], "fehler_vc_laufzeit"),
+    # winget da, Installation abgelehnt (N = Errorlevel 2), choice nicht bedienbar (255) oder mit Strg+C
+    # unterbrochen, ohne die Batch-Datei abzubrechen (0): nichts installieren
+    ("AMD64", set(), {"choice": 2}, {}, ["where_winget", "choice"], "fehler_vc_laufzeit"),
+    ("AMD64", set(), {"choice": 255}, {}, ["where_winget", "choice"], "fehler_vc_laufzeit"),
+    ("AMD64", set(), {"choice": 0}, {}, ["where_winget", "choice"], "fehler_vc_laufzeit"),
+    # angenommen: winget installiert die Laufzeit, danach geht es weiter
+    ("AMD64", set(), {"choice": 1}, {"winget_vc": _vc(*VC_DLLS)}, ["where_winget", "choice", "winget_vc"], "vc_ok"),
+    # winget scheitert (z. B. keine Administratorrechte) oder meldet Erfolg ohne Dateien: Meldung, keine Schleife
+    ("AMD64", set(), {"choice": 1, "winget_vc": 1}, {}, ["where_winget", "choice", "winget_vc"],
+     "fehler_vc_laufzeit"),
+    ("AMD64", set(), {"choice": 1}, {"winget_vc": _vc("msvcp140.dll")}, ["where_winget", "choice", "winget_vc"],
+     "fehler_vc_laufzeit"),
+    # 32-Bit-cmd auf 64-Bit-Windows: System32 zeigt dort auf SysWOW64 (32-Bit-DLLs) – maßgeblich ist Sysnative
+    ("AMD64", _vc("cmd.exe", *VC_DLLS, ordner=NATIV), {}, {}, [], "vc_ok"),
+    ("AMD64", _vc("cmd.exe", ordner=NATIV) | _vc(*VC_DLLS), {"where_winget": 1}, {}, ["where_winget"],
+     "fehler_vc_laufzeit"),
+    # ARM64 (ungetestet): nur ein Hinweis, die Installation läuft weiter
+    ("ARM64", set(), {}, {}, [], "vc_ok"),
+])
+def test_installieren_ablauf_vc_laufzeit(arch, dateien, ergebnisse, effekte, erwartet_befehle, erwartet_ende):
+    befehle, ende = _cmd("Installieren.bat", "call :pruefe_vc_laufzeit", {"vc_ok", "fehler_vc_laufzeit"},
+                         variablen={"SystemRoot": "C:\\Windows", "ARCH": arch}, dateien=dateien,
+                         ergebnisse=ergebnisse, effekte=effekte)
+    assert (befehle, ende) == (erwartet_befehle, erwartet_ende)
+
+
+def test_installieren_vc_ok_fuehrt_zu_pip_und_paketen():
+    """Nach der Laufzeit-Prüfung geht es mit pip weiter – nicht an der Prüfung vorbei und nicht doppelt."""
+    zeilen = [z.strip() for z in _lies("Installieren.bat").splitlines()]
+    vc_ok = zeilen.index(":vc_ok")
+    assert zeilen[vc_ok + 1].startswith('"%PY%" -m pip --version')
+    assert zeilen.index("call :pruefe_vc_laufzeit") < vc_ok < zeilen.index(next(z for z in zeilen
+                                                                                if z.startswith("echo [3/5]")))
+
+
+def test_exe_bauen_behaelt_die_vc_laufzeit_im_programmordner():
+    """Die EXE braucht keine installierte Laufzeit: PyInstaller (6.x, depend/dylib.py: _win_includes) packt
+    msvcp140.dll und vcruntime140_1.dll in _internal. EXE-bauen.bat prüft das nach dem Bau, damit es so bleibt."""
+    text = _lies("EXE-bauen.bat")
+    bau = text.index("-m PyInstaller")
+    zip_schritt = text.index("Compress-Archive")
+    for dll in VC_DLLS:
+        pruefung = f'if not exist "dist\\PDF-Anonymisierer\\_internal\\{dll}" goto fehler_vc_im_ordner'
+        assert pruefung in text and bau < text.index(pruefung) < zip_schritt
+    # nichts vom Bau ausschließen außer den spaCy-Tests (kein --exclude für DLLs, kein --upx-exclude o. Ä.)
+    assert re.findall(r"--\w*exclude\S*\s+\S+", text) == ["--exclude-module spacy.tests"]
+    meldung = _block("EXE-bauen.bat", "fehler_vc_im_ordner")
+    assert "msvcp140.dll" in meldung and VC_NAME in meldung
+    lauf = _lies(".github/workflows/tests.yml")
+    for dll in VC_DLLS:
+        assert f'"_internal\\{dll}"' in lauf, f"EXE-Job prüft _internal\\{dll} nicht"
+
+
+def _ohne_rem(block: str) -> list[str]:
+    return [z.strip() for z in block.splitlines() if z.strip() and not z.strip().upper().startswith("REM")]
+
+
+def test_exe_bauen_prueft_vc_laufzeit_vor_den_paketen():
+    """Dieselbe Vorab-Prüfung der Pakete steht in EXE-bauen.bat: Ohne Laufzeit hätte auch dort jeder Bau vergeblich
+    neu installiert. Geprüft wird mit demselben Unterprogramm wie in Installieren.bat."""
+    text = _lies("EXE-bauen.bat")
+    pruefung = text.index("call :pruefe_vc_laufzeit")
+    assert text.index("goto fehler_32bit") < pruefung < text.index("echo [1/4]")
+    assert pruefung < text.index('"%PY%" -W ignore -c "import fitz, spacy')
+    def unter(name):
+        block = _lies(name)[_lies(name).index("\n:pruefe_vc_laufzeit\n"):]
+        return _ohne_rem(block[:block.index("goto :eof")])
+    assert unter("EXE-bauen.bat") == unter("Installieren.bat")
+    meldung = _block("EXE-bauen.bat", "fehler_vc_laufzeit")
+    for begriff in (VC_NAME, VC_WINGET, VC_LINK, "%VC_FEHLT%", "DLL load failed", "Installieren.bat",
+                    "Administratorrechte"):
+        assert begriff in meldung, f"EXE-bauen.bat, :fehler_vc_laufzeit: '{begriff}' fehlt"
+
+
+@pytest.mark.parametrize("dateien, erwartet", [
+    (_vc(*VC_DLLS), "weiter"),
+    (_vc("msvcp140.dll"), "fehler_vc_laufzeit"),
+    (set(), "fehler_vc_laufzeit"),
+    (_vc("cmd.exe", *VC_DLLS, ordner=NATIV), "weiter"),                        # 32-Bit-cmd: Sysnative zählt
+    (_vc("cmd.exe", ordner=NATIV) | _vc(*VC_DLLS), "fehler_vc_laufzeit"),
+])
+def test_exe_bauen_ablauf_vc_laufzeit(dateien, erwartet):
+    zeilen = [z.strip() for z in _lies("EXE-bauen.bat").splitlines()]
+    weiter = next(z for z in zeilen if z.startswith("echo [1/4]"))
+    befehle, ende = _cmd("EXE-bauen.bat", "call :pruefe_vc_laufzeit", {"fehler_vc_laufzeit"},
+                         variablen={"SystemRoot": "C:\\Windows"}, dateien=dateien, ende_zeile=weiter)
+    assert (befehle, ende) == ([], erwartet)
+
+
+def test_installieren_meldet_fehlende_verknuepfung_passend():
+    """Befund: Die Meldung nannte pauschal PowerShell als Ursache – auch als nur .python_pfad.txt im
+    schreibgeschützten Programmordner scheiterte (das bricht die Verknüpfung jetzt gar nicht mehr ab)."""
+    meldung = _block("Installieren.bat", "fehler_verknuepfung")
+    assert "steht oben" in meldung and "PowerShell" in meldung and "Desktop-Ordner" in meldung
+    assert "Starten.bat" in meldung
 
 
 @pytest.mark.parametrize("name", BATCHES)
@@ -749,6 +1070,58 @@ def test_verknuepfung_main_ausserhalb_windows():
     assert v.main([]) == 2
 
 
+def _als_windows(v, monkeypatch):
+    """main() so aufrufen, als liefe es unter Windows (nur das Modul sieht sys.platform == 'win32')."""
+    monkeypatch.setattr(v, "sys", types.SimpleNamespace(platform="win32", executable=sys.executable, argv=[]))
+
+
+def test_verknuepfung_trotz_schreibgeschuetztem_programmordner(tmp_path, monkeypatch, capsys):
+    """Befund: .python_pfad.txt wurde vor dem try geschrieben – im schreibgeschützten Programmordner (z. B.
+    Netzlaufwerk nur mit Leserecht) brach main() mit Traceback ab, ohne Desktop-Verknüpfung."""
+    v = _verknuepfung()
+    _als_windows(v, monkeypatch)
+
+    def verweigert(pythonw, datei=None):
+        raise PermissionError(13, "Zugriff verweigert", str(datei or v.PFAD_DATEI))
+
+    angelegt = []
+
+    def anlegen(pythonw, desktop=None):
+        angelegt.append(pythonw)
+        lnk = tmp_path / f"{v.NAME}.lnk"
+        lnk.write_bytes(b"lnk")
+        return lnk
+
+    monkeypatch.setattr(v, "schreibe_python_pfad", verweigert)
+    monkeypatch.setattr(v, "verknuepfung_anlegen", anlegen)
+    assert v.main([]) == 0
+    ausgabe = capsys.readouterr().out
+    assert angelegt == [v.pythonw_pfad()]
+    assert ".python_pfad.txt" in ausgabe and "Starten.bat" in ausgabe and "Zugriff verweigert" in ausgabe
+    assert "Verknüpfung angelegt" in ausgabe and "FEHLER" not in ausgabe
+
+
+@pytest.mark.parametrize("fehler", [RuntimeError("PowerShell konnte die Verknüpfung nicht anlegen.\nZugriff"),
+                                    PermissionError(13, "Zugriff verweigert"),
+                                    OSError(28, "Kein Speicherplatz")])
+def test_verknuepfung_exit_1_nur_ohne_verknuepfung(tmp_path, monkeypatch, capsys, fehler):
+    """Exit-Code 1 (Installieren.bat: „OHNE Desktop-Verknüpfung“) nur, wenn die .lnk wirklich fehlt – auch ein
+    OSError beim Anlegen (Temp-Ordner, Desktop) endet mit Meldung statt Traceback."""
+    v = _verknuepfung()
+    _als_windows(v, monkeypatch)
+    pfad_datei = tmp_path / ".python_pfad.txt"
+    monkeypatch.setattr(v, "PFAD_DATEI", pfad_datei)
+
+    def anlegen(pythonw, desktop=None):
+        raise fehler
+
+    monkeypatch.setattr(v, "verknuepfung_anlegen", anlegen)
+    assert v.main([]) == 1
+    ausgabe = capsys.readouterr().out
+    assert "FEHLER" in ausgabe and "Starten.bat" in ausgabe
+    assert pfad_datei.read_text(encoding="utf-8") == str(v.pythonw_pfad())   # Starten.bat findet Python trotzdem
+
+
 def test_pruefe_installation_laeuft():
     lauf = subprocess.run([sys.executable, "-W", "ignore", str(WURZEL / "werkzeuge" / "pruefe_installation.py")],
                           capture_output=True, text=True, timeout=180, cwd=str(WURZEL))
@@ -778,6 +1151,190 @@ def test_pruefe_installation_nennt_arm64_nicht_mehr_pauschal_als_problem():
     text = _lies("werkzeuge/pruefe_installation.py")
     assert "ARM64 wird nicht unterstützt" not in text
     assert "sysconfig.get_platform()" in text   # Paketauswahl hängt am Python, nicht am Prozessor
+
+
+DLL_FEHLER = "DLL load failed while importing _mupdf: Das angegebene Modul wurde nicht gefunden."
+
+
+def _pruefe_installation():
+    sys.path.insert(0, str(WURZEL))
+    import werkzeuge.pruefe_installation as p
+    return p
+
+
+def test_pruefe_installation_nennt_vc_laufzeit_bei_dll_ladefehler(monkeypatch):
+    """Befund: „DLL load failed“ stand nur als Importfehler im Bericht – die Ursache (fehlende Visual-C++-Laufzeit)
+    und die Abhilfe nicht. Gemeldet wird sie einmal, auch wenn PyMuPDF und spaCy beide scheitern."""
+    p = _pruefe_installation()
+    monkeypatch.setattr(p, "_version", lambda paket: VERSIONEN_OK.get(paket))
+    monkeypatch.setattr(p, "_importierbar", lambda modul: (False, f"ImportError: {DLL_FEHLER}")
+                        if modul in ("fitz", "spacy") else (True, "ok"))
+    monkeypatch.setitem(sys.modules, "spacy", types.SimpleNamespace(load=lambda *a, **k: None))
+    _zeilen, probleme = p.pakete_bericht()
+    laufzeit = [pr for pr in probleme if "Visual C++" in pr]
+    assert len(laufzeit) == 1, probleme
+    for begriff in ("DLL load failed", VC_WINGET, "vc_redist.x64.exe", VC_LINK):
+        assert begriff in laufzeit[0], laufzeit[0]
+    # ein gewöhnlicher Importfehler bleibt, was er ist
+    monkeypatch.setattr(p, "_importierbar", lambda modul: (False, "ModuleNotFoundError: No module named 'fitz'")
+                        if modul == "fitz" else (True, "ok"))
+    _zeilen, probleme = p.pakete_bericht()
+    assert probleme and not any("Visual C++" in pr for pr in probleme)
+    # unter Windows mit Blick in den Systemordner: fehlt die Laufzeit, oder ist sie da und vermutlich veraltet?
+    fehlt = p._dll_problem(["fitz"], ["msvcp140.dll"])
+    assert "'fitz' lässt sich" in fehlt and "fehlt (msvcp140.dll" in fehlt and VC_WINGET in fehlt
+    veraltet = p._dll_problem(["fitz", "spacy"], [])
+    assert "'fitz' und 'spacy' lassen sich" in veraltet and "veraltet" in veraltet and VC_WINGET in veraltet
+    # pip hielte das installierte PyMuPDF für vollständig – deshalb ausdrücklich --force-reinstall, mit den Grenzen
+    assert f'--force-reinstall --no-deps --only-binary=:all: "pymupdf{_pins()["pymupdf"]}"' in veraltet
+    assert "Installieren.bat erneut" not in veraltet
+
+
+def test_pruefe_installation_vc_laufzeit_bericht(tmp_path, monkeypatch):
+    p = _pruefe_installation()
+    system32 = tmp_path / "System32"
+    system32.mkdir()
+    zeilen, probleme = p.laufzeit_bericht(windows=True, system_ordner=system32)
+    assert len(probleme) == 1 and "msvcp140.dll" in probleme[0] and "vcruntime140_1.dll" in probleme[0]
+    assert VC_NAME in probleme[0] and VC_WINGET in probleme[0] and VC_LINK in probleme[0]
+    assert "FEHLT" in "\n".join(zeilen)
+    (system32 / "msvcp140.dll").write_bytes(b"x")
+    zeilen, probleme = p.laufzeit_bericht(windows=True, system_ordner=system32)
+    assert len(probleme) == 1 and "vcruntime140_1.dll" in probleme[0] and "msvcp140.dll," not in probleme[0]
+    (system32 / "vcruntime140_1.dll").write_bytes(b"x")
+    zeilen, probleme = p.laufzeit_bericht(windows=True, system_ordner=system32)
+    assert probleme == [] and "vorhanden" in "\n".join(zeilen)
+    assert p.laufzeit_bericht(windows=False) == ([], [])
+    # Ohne Angabe: %SystemRoot%\System32, so wie das prüfende Python ihn sieht (es lädt die DLLs ja selbst)
+    monkeypatch.setenv("SystemRoot", str(tmp_path))
+    assert p.vc_laufzeit_fehlt() == []
+    (system32 / "msvcp140.dll").unlink()
+    assert p.vc_laufzeit_fehlt() == ["msvcp140.dll"]
+
+
+def test_pruefe_installation_meldet_den_benutzten_ocr_ordner(tmp_path, monkeypatch):
+    """Befund: Bei einer fremden Tesseract-Installation ($TESSDATA_PREFIX nur mit eng.traineddata) las das Programm
+    englisch, der Bericht zeigte aber „deu.traineddata vorhanden“. Jetzt nennt er Ordner und Sprache, mit denen
+    die OCR wirklich liest, und dass $TESSDATA_PREFIX nicht benutzt wird."""
+    p = _pruefe_installation()
+    from anonymisierer import ocr
+    programm = tmp_path / "programm"
+    (programm / "tessdata").mkdir(parents=True)
+    (programm / "tessdata" / "deu.traineddata").write_bytes(b"x" * 4096)
+    fremd = tmp_path / "Tesseract-OCR" / "tessdata"
+    fremd.mkdir(parents=True)
+    (fremd / "eng.traineddata").write_bytes(b"x")
+    monkeypatch.setattr(p, "PROGRAMM_ORDNER", programm)
+    monkeypatch.setattr(ocr, "PROJEKTWURZEL", programm)
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    monkeypatch.setenv("TESSDATA_PREFIX", str(fremd))
+    zeilen, probleme = p.tessdata_bericht()
+    text = "\n".join(zeilen)
+    assert probleme == [], probleme
+    assert f"OCR liest mit:  deu aus {programm / 'tessdata'}" in text, text
+    assert f"TESSDATA_PREFIX zeigt auf {fremd}" in text and "nicht benutzt" in text, text
+    assert "die mitgelieferte deutsche Sprachdatei geht vor" in text
+    # mitgelieferte Datei fehlt, eine andere Tesseract-Installation hat Deutsch: der Grund passt dazu
+    (programm / "tessdata" / "deu.traineddata").rename(programm / "deu.traineddata")
+    system = tmp_path / "Programme" / "Tesseract-OCR" / "tessdata"
+    system.mkdir(parents=True)
+    (system / "deu.traineddata").write_bytes(b"x")
+    monkeypatch.setattr(ocr, "_system_tessdata", lambda: [str(system)])
+    monkeypatch.setenv("TESSDATA_PREFIX", str(fremd))
+    zeilen, probleme = p.tessdata_bericht()
+    text = "\n".join(zeilen)
+    assert probleme == [] and f"OCR liest mit:  deu aus {system}" in text, text
+    assert "nicht benutzt, dort liegt keine deu.traineddata" in text, text
+    (programm / "deu.traineddata").rename(programm / "tessdata" / "deu.traineddata")
+    # Fehlt die mitgelieferte Datei, liest die OCR aus der fremden Installation englisch: Problem mit dem Ordner
+    (programm / "tessdata" / "deu.traineddata").unlink()
+    monkeypatch.setattr(ocr, "_system_tessdata", lambda: [])
+    monkeypatch.setenv("TESSDATA_PREFIX", str(fremd))
+    zeilen, probleme = p.tessdata_bericht()
+    assert f"OCR liest mit:  eng aus {fremd}" in "\n".join(zeilen)
+    assert len(probleme) == 1 and str(fremd) in probleme[0] and "Englisch" in probleme[0], probleme
+    assert "tessdata" in probleme[0] and "deu.traineddata" in probleme[0]
+
+
+# ----------------------------------------------------------------------
+# Startskript: Meldung, wenn PyMuPDF fehlt oder sich nicht laden lässt
+# ----------------------------------------------------------------------
+def _startskript():
+    sys.path.insert(0, str(WURZEL))
+    import pdf_anonymisierer as pa
+    return pa
+
+
+def test_startskript_nennt_vc_laufzeit_bei_dll_ladefehler(monkeypatch):
+    """Befund: „DLL load failed“ (Visual-C++-Laufzeit fehlt) meldete das Startskript als „Paket fehlt – Installieren.bat
+    ausführen“; das installiert nur erneut, ohne etwas zu ändern."""
+    pa = _startskript()
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    meldung = pa._meldung_paket_fehlt(ImportError(DLL_FEHLER))
+    for begriff in (VC_NAME, VC_WINGET, "vc_redist.x64.exe", VC_LINK, "Administratorrechte", "DLL load failed"):
+        assert begriff in meldung, meldung
+    # dieselbe Ursache als OSError (ctypes/os.add_dll_directory: WinError 126 „Modul nicht gefunden“)
+    fehler = OSError("[WinError 126] Das angegebene Modul wurde nicht gefunden")
+    fehler.winerror = 126
+    assert VC_WINGET in pa._meldung_paket_fehlt(fehler)
+    # der Rückfall auf den alten Namen „fitz“ verdeckt die Ursache nicht (Ausnahmekette)
+    try:
+        try:
+            raise ImportError(DLL_FEHLER)
+        except ImportError:
+            raise ModuleNotFoundError("No module named 'fitz'")
+    except ImportError as e:
+        verkettet = e
+    assert VC_WINGET in pa._meldung_paket_fehlt(verkettet)
+    # ein wirklich fehlendes Paket: wie bisher Installieren.bat
+    gewoehnlich = pa._meldung_paket_fehlt(ModuleNotFoundError("No module named 'pymupdf'"))
+    assert "Installieren.bat" in gewoehnlich and "Visual C++" not in gewoehnlich
+    assert pa._meldung_paket_fehlt() == gewoehnlich
+    # EXE: Die Laufzeit liegt im Programmordner – fehlt sie dort, hilft neu entpacken
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    exe = pa._meldung_paket_fehlt(ImportError(DLL_FEHLER))
+    assert "neu entpacken" in exe and "Installieren.bat" not in exe
+
+
+@pytest.mark.parametrize("ausloesen", [
+    f"raise ImportError({DLL_FEHLER!r})\n",
+    "e = OSError('[WinError 126] Das angegebene Modul wurde nicht gefunden')\ne.winerror = 126\nraise e\n",
+])
+def test_startskript_meldet_dll_ladefehler_beim_start(tmp_path, ausloesen):
+    """Das echte Startskript mit einem PyMuPDF, das sich nicht laden lässt: Meldung statt Traceback, Exit-Code 1.
+    Vorher fing es OSError gar nicht ab (Traceback), ImportError nur mit falscher Abhilfe. Die tkinter-Attrappe
+    verhindert den Fehlerdialog – unter Windows bliebe er sonst offen stehen (dort gibt es kein DISPLAY)."""
+    attrappe = tmp_path / "attrappe"
+    for paket, code in (("pymupdf", ausloesen), ("fitz", "from pymupdf import *\n"),
+                        ("tkinter", "raise ImportError('Testattrappe: kein Fehlerdialog')\n")):
+        (attrappe / paket).mkdir(parents=True)
+        (attrappe / paket / "__init__.py").write_text(code, encoding="utf-8")
+    umgebung = dict(os.environ, PYTHONPATH=str(attrappe), DISPLAY="", PYTHONIOENCODING="utf-8")
+    lauf = subprocess.run([sys.executable, "-W", "ignore", str(WURZEL / "pdf_anonymisierer.py")], capture_output=True,
+                          text=True, encoding="utf-8", timeout=120, cwd=str(tmp_path), env=umgebung)
+    assert lauf.returncode == 1, lauf.stderr[-2000:]
+    assert "Traceback" not in lauf.stderr, lauf.stderr[-2000:]
+    assert lauf.stdout.startswith("FEHLER: ") and VC_WINGET in lauf.stdout, lauf.stdout
+
+
+def test_vc_laufzeit_ueberall_gleich_benannt():
+    """Name, winget-Befehl und Microsoft-Link der Laufzeit stehen in Batch, Startskript, Prüfskript und README
+    gleich da (auseinanderlaufende Abhilfen verwirren am Telefon)."""
+    for datei in ("Installieren.bat", "EXE-bauen.bat", "pdf_anonymisierer.py", "werkzeuge/pruefe_installation.py",
+                  "README.md"):
+        text = _lies(datei)
+        for begriff in (VC_NAME, VC_WINGET, VC_LINK):
+            assert begriff in text, f"{datei}: '{begriff}' fehlt"
+
+
+def test_readme_vc_laufzeit_netzwerkfreigabe_und_ocr_ordner():
+    text = _lies("README.md")
+    voraus = text[text.index("## Voraussetzungen"):text.index("## Installation (Windows)")]
+    assert VC_NAME in voraus and VC_WINGET in voraus and "EXE-Version" in voraus
+    loesung = text[text.index("## Problemlösung"):text.index("## Technik")]
+    for begriff in ("DLL load failed", "vc_redist.x64.exe", VC_WINGET, "TESSDATA_PREFIX", "\\\\server",
+                    "schreibgeschützt", "pruefe_installation.py"):
+        assert begriff in loesung, f"README, Problemlösung: '{begriff}' fehlt"
 
 
 def test_readme_tabelle_skript_ohne_schreiben():

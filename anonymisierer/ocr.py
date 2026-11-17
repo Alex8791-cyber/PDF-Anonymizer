@@ -344,37 +344,51 @@ def _hat_sprachdaten(ordner) -> bool:
         return False
 
 
-def _tessdata_finden():
-    """Sucht den Tesseract-Sprachdaten-Ordner.
+def _hat_deutsch(ordner) -> bool:
+    try:
+        return (Path(ordner) / "deu.traineddata").is_file()
+    except OSError:
+        return False
 
-    Reihenfolge: $TESSDATA_PREFIX (nur, wenn dort *.traineddata liegt), <Projektwurzel>/tessdata
-    (mitgelieferte deu.traineddata), sys._MEIPASS/tessdata (PyInstaller), dann die üblichen
-    Installationspfade. Rückgabe: Pfad als str oder None.
+
+def _system_tessdata() -> list:
+    """Übliche Sprachdaten-Ordner einer fremden Tesseract-Installation – nur Ersatz für den mitgelieferten Ordner."""
+    if sys.platform == "win32":
+        return [r"C:\Program Files\Tesseract-OCR\tessdata",
+                r"C:\Program Files (x86)\Tesseract-OCR\tessdata",
+                str(Path.home() / r"AppData\Local\Programs\Tesseract-OCR\tessdata")]
+    return ["/usr/share/tesseract-ocr/5/tessdata", "/usr/share/tesseract-ocr/4.00/tessdata",
+            "/usr/share/tessdata", "/usr/local/share/tessdata"]
+
+
+def _tessdata_finden():
+    """Sucht den Tesseract-Sprachdaten-Ordner. Rückgabe: Pfad als str oder None.
+
+    Reihenfolge:
+    1. der mitgelieferte Ordner mit deu.traineddata: <Projektwurzel>/tessdata, in der EXE sys._MEIPASS/tessdata,
+    2. $TESSDATA_PREFIX, aber nur mit deu.traineddata,
+    3. die üblichen Installationsordner von Tesseract mit deu.traineddata,
+    4. erst danach – als Ersatz, _ocr_sprache warnt dann – der erste dieser Ordner mit irgendeiner *.traineddata.
+    Eine fremde Tesseract-Installation, deren $TESSDATA_PREFIX z. B. nur auf eng.traineddata zeigt, verdrängt so die
+    mitgelieferte deutsche Sprachdatei nicht mehr (vorher lasen dann alle Scans englisch). Der gewählte Ordner steht
+    danach auch in $TESSDATA_PREFIX (für PyMuPDF-Aufrufe ohne tessdata=).
     """
-    kandidaten = []
-    umgebung = os.environ.get("TESSDATA_PREFIX")
-    if umgebung:
-        kandidaten.append(umgebung)
-    kandidaten.append(PROJEKTWURZEL / "tessdata")
+    kandidaten = [PROJEKTWURZEL / "tessdata"]
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         kandidaten.append(Path(meipass) / "tessdata")
-    if sys.platform == "win32":
-        kandidaten += [
-            r"C:\Program Files\Tesseract-OCR\tessdata",
-            r"C:\Program Files (x86)\Tesseract-OCR\tessdata",
-            str(Path.home() / r"AppData\Local\Programs\Tesseract-OCR\tessdata"),
-        ]
-    else:
-        kandidaten += ["/usr/share/tesseract-ocr/5/tessdata",
-                       "/usr/share/tesseract-ocr/4.00/tessdata",
-                       "/usr/share/tessdata", "/usr/local/share/tessdata"]
-    for k in kandidaten:
-        if k and _hat_sprachdaten(k):
-            pfad = str(Path(k))
-            os.environ["TESSDATA_PREFIX"] = pfad
-            return pfad
-    return None
+    umgebung = os.environ.get("TESSDATA_PREFIX")
+    if umgebung:
+        kandidaten.append(Path(umgebung))
+    kandidaten += [Path(k) for k in _system_tessdata()]
+    gewaehlt = next((k for k in kandidaten if _hat_deutsch(k)), None)
+    if gewaehlt is None:
+        gewaehlt = next((k for k in kandidaten if _hat_sprachdaten(k)), None)
+    if gewaehlt is None:
+        return None
+    pfad = str(gewaehlt)
+    os.environ["TESSDATA_PREFIX"] = pfad
+    return pfad
 
 
 def _sprachdatei_hilfe() -> str:
@@ -389,16 +403,18 @@ def _sprachdatei_hilfe() -> str:
 
 
 def _ocr_sprache(tessdata):
-    """Liefert (Sprachkürzel oder None, Warnung oder None) für den Sprachdaten-Ordner."""
+    """Liefert (Sprachkürzel oder None, Warnung oder None) für den Sprachdaten-Ordner. Die Warnung nennt den Ordner,
+    aus dem die OCR wirklich liest (z. B. eine fremde Tesseract-Installation, wenn die mitgelieferte Datei fehlt)."""
     if tessdata is None:
         return None, ("Tesseract-Sprachdaten nicht gefunden – Scans können nicht gelesen werden. "
                       + _sprachdatei_hilfe())
     if (Path(tessdata) / "deu.traineddata").exists():
         return "deu", None
     if (Path(tessdata) / "eng.traineddata").exists():
-        return "eng", ("Deutsche OCR-Sprachdatei fehlt – nutze Englisch (Umlaute werden evtl. falsch erkannt). "
-                       + _sprachdatei_hilfe())
-    return None, "Keine OCR-Sprachdatei gefunden – Scans können nicht gelesen werden. " + _sprachdatei_hilfe()
+        return "eng", (f"Deutsche OCR-Sprachdatei fehlt – nutze Englisch aus {tessdata} (Umlaute werden evtl. falsch "
+                       f"erkannt). " + _sprachdatei_hilfe())
+    return None, (f"Keine deutsche oder englische OCR-Sprachdatei in {tessdata} – Scans können nicht gelesen werden. "
+                  + _sprachdatei_hilfe())
 
 
 def traineddata_mit_einstellungen(daten: bytes, einstellungen: dict) -> bytes:

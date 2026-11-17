@@ -8,9 +8,10 @@ Warum ein Python-Skript statt echo-Zeilen in der Batch-Datei?
   Quoting), die .ps1 enthält keinen einzigen Pfad und wird als UTF-8 mit BOM
   geschrieben, und am Ende wird geprüft, ob die .lnk wirklich existiert.
 
-Nebenbei wird .python_pfad.txt (Pfad zu pythonw.exe) für Starten.bat geschrieben.
+Nebenbei wird .python_pfad.txt (Pfad zu pythonw.exe) für Starten.bat geschrieben. Ist der
+Programmordner schreibgeschützt, bleibt es bei einem Hinweis – Starten.bat sucht Python dann selbst.
 
-Exit-Codes: 0 = Verknüpfung liegt auf dem Desktop, 1 = fehlgeschlagen (Meldung
+Exit-Codes: 0 = Verknüpfung liegt auf dem Desktop, 1 = Verknüpfung fehlt (Meldung
 steht in der Ausgabe), 2 = nicht unter Windows aufgerufen.
 """
 
@@ -140,16 +141,22 @@ def verknuepfung_anlegen(pythonw: Path, desktop: Path | None = None) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Exit-Code 1 nur, wenn die Verknüpfung fehlt. Ein schreibgeschützter Programmordner (.python_pfad.txt lässt
+    sich nicht schreiben) ist nur ein Hinweis: Starten.bat sucht Python dann in den üblichen Installationsordnern."""
     if sys.platform != "win32":
         print("Dieses Skript legt eine Windows-Desktop-Verknüpfung an und läuft nur unter Windows.")
         return 2
     pythonw = pythonw_pfad()
-    schreibe_python_pfad(pythonw)
     print(f"      Python für den Start: {pythonw}")
     try:
+        schreibe_python_pfad(pythonw, PFAD_DATEI)
+    except OSError as e:
+        print(f"      HINWEIS: {PFAD_DATEI.name} ließ sich nicht im Programmordner speichern ({e}).")
+        print("      Kein Problem: Starten.bat findet Python dann über die üblichen Installationsordner.")
+    try:
         lnk = verknuepfung_anlegen(pythonw)
-    except RuntimeError as e:
-        print(f"      FEHLER: {e}")
+    except (RuntimeError, OSError) as e:
+        print(f"      FEHLER: Die Desktop-Verknüpfung ließ sich nicht anlegen: {e}")
         print("      Das Programm lässt sich trotzdem per Doppelklick auf Starten.bat starten.")
         return 1
     print(f"      Verknüpfung angelegt: {lnk}")

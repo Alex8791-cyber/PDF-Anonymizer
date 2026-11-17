@@ -179,6 +179,25 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - Statuszeile: Nach dem Hinzufügen von Dateien zu einer schon analysierten Liste blieb dort „Dateien werden
   geprüft …“ stehen. Jetzt steht dort, wie viele Dateien noch nicht analysiert sind; kam keine neue Datei
   hinzu, bleibt die Meldung der Analyse stehen.
+- **Visual-C++-Laufzeit (Skript-Version):** PyMuPDF lädt `msvcp140.dll` und `vcruntime140_1.dll` aus dem
+  Windows-Systemordner, bringt sie aber nicht mit. Fehlte die „Microsoft Visual C++ 2015-2022 Redistributable
+  (x64)“ (frisch eingerichtete Rechner, Windows-Sandbox, schlanke Firmen-Rechner), installierte
+  `Installieren.bat` bei jedem Lauf alles neu und nannte eine falsche Ursache; das Startskript meldete „Paket
+  fehlt“. Jetzt prüft `Installieren.bat` die Laufzeit vor den Paketen und bietet die Installation per winget
+  an (sonst Hinweis auf `vc_redist.x64.exe` von Microsoft), `EXE-bauen.bat` prüft sie vor dem Bau; Startskript
+  und `werkzeuge/pruefe_installation.py` nennen bei „DLL load failed“ die Laufzeit als Ursache. Die EXE bringt
+  die Laufzeit weiterhin mit; `EXE-bauen.bat` und der EXE-Job der GitHub-Action prüfen das jetzt.
+- **OCR-Sprachdatei:** Die mitgelieferte `deu.traineddata` geht wieder vor (wie seit 0.2.0 beschrieben). Hatte
+  der Rechner eine andere Tesseract-Installation, deren `TESSDATA_PREFIX` nur `eng.traineddata` enthielt, las
+  das Programm alle Scans englisch, jede Scan-Ausgabe hieß `_PRUEFEN`, und die Warnung riet fälschlich zum
+  Neu-Entpacken. `TESSDATA_PREFIX` ist jetzt nur Ersatz, wenn die mitgelieferte Datei fehlt; die Warnung und
+  `pruefe_installation.py` nennen den Ordner, aus dem die OCR tatsächlich liest.
+- **Netzwerkfreigaben:** `Installieren.bat` und `EXE-bauen.bat` laufen auch aus einem per UNC-Pfad
+  (`\\server\freigabe\…`) geöffneten Ordner (`pushd` statt `cd /d`); vorher meldeten sie fälschlich „Dateien
+  fehlen – ZIP komplett entpacken“. `Starten.bat` arbeitet mit vollständigen Pfaden.
+- **Schreibgeschützter Programmordner:** Ließ sich `.python_pfad.txt` nicht schreiben, brach die Einrichtung
+  der Desktop-Verknüpfung mit einem Python-Fehler ab, und `Installieren.bat` nannte PowerShell als Ursache.
+  Jetzt bleibt es bei einem Hinweis (`Starten.bat` sucht Python selbst), und die Verknüpfung wird angelegt.
 
 ### Sicherheit
 - Manche PDFs (z. B. aus LibreOffice) enthielten nach dem Schwärzen das ungeschwärzte Originalbild unsichtbar

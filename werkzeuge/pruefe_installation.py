@@ -23,6 +23,14 @@ PROGRAMM_ORDNER = Path(__file__).resolve().parent.parent
 REQUIREMENTS = PROGRAMM_ORDNER / "requirements.txt"
 PAKETE = ("pymupdf", "spacy", "tkinterdnd2", "de_core_news_md")
 
+# PyMuPDF (und spaCy) laden msvcp140.dll und vcruntime140_1.dll aus dem Windows-Systemordner: Python bringt nur
+# vcruntime140*.dll mit, die Pakete gar keine. Die EXE-Version hat beide im Ordner _internal.
+VC_LAUFZEIT = "Microsoft Visual C++ 2015-2022 Redistributable (x64)"
+VC_DLLS = ("msvcp140.dll", "vcruntime140_1.dll")
+VC_ABHILFE = (f"„{VC_LAUFZEIT}“ einmalig mit Administratorrechten installieren – "
+              "winget install --id Microsoft.VCRedist.2015+.x64 -e oder vc_redist.x64.exe von Microsoft "
+              "(https://aka.ms/vs/17/release/vc_redist.x64.exe) –, danach erneut prüfen")
+
 
 def _version(paket: str) -> str | None:
     try:
@@ -86,6 +94,56 @@ def _importierbar(modul: str) -> tuple[bool, str]:
         return False, f"{type(e).__name__}: {e}"
 
 
+def _dll_ladefehler(info: str) -> bool:
+    """„DLL load failed“ (Erweiterungsmodul) bzw. WinError 126/127 (ctypes): eine DLL fehlt oder passt nicht –
+    meist die Visual-C++-Laufzeit."""
+    return "DLL load failed" in info or "WinError 126" in info or "WinError 127" in info
+
+
+def _system_ordner() -> Path:
+    """Windows-Systemordner, so wie dieses Python ihn sieht (dort sucht Windows die Laufzeit-DLLs)."""
+    return Path(os.environ.get("SystemRoot") or os.environ.get("windir") or r"C:\Windows") / "System32"
+
+
+def vc_laufzeit_fehlt(system_ordner: Path | None = None) -> list[str]:
+    """Die DLLs der Visual-C++-Laufzeit, die im Windows-Systemordner fehlen (leer = beide da)."""
+    ordner = Path(system_ordner) if system_ordner is not None else _system_ordner()
+    return [dll for dll in VC_DLLS if not (ordner / dll).is_file()]
+
+
+def laufzeit_bericht(windows: bool | None = None, system_ordner: Path | None = None) -> tuple[list[str], list[str]]:
+    """Visual-C++-Laufzeit (nur unter Windows): fehlt sie, scheitert jeder Import von PyMuPDF mit „DLL load failed“
+    – Pakete neu zu installieren hilft dann nicht."""
+    if not (sys.platform == "win32" if windows is None else windows):
+        return [], []
+    ordner = Path(system_ordner) if system_ordner is not None else _system_ordner()
+    fehlt = vc_laufzeit_fehlt(ordner)
+    if not fehlt:
+        return [f"Visual C++:    {' und '.join(VC_DLLS)} vorhanden ({ordner})"], []
+    return ([f"Visual C++:    FEHLT {', '.join(fehlt)} (in {ordner})"],
+            [f"Die Visual-C++-Laufzeit fehlt ({', '.join(fehlt)}) – ohne sie lässt sich PyMuPDF nicht laden "
+             f"(„DLL load failed“). Abhilfe: {VC_ABHILFE}."])
+
+
+def _dll_problem(module: list[str], fehlt: list[str] | None) -> str:
+    """Eine Meldung für alle Module, die an einer DLL scheitern – mit der wahrscheinlichen Ursache. fehlt: fehlende
+    Laufzeit-DLLs (vc_laufzeit_fehlt) oder None, wenn das nicht prüfbar ist (nicht unter Windows)."""
+    namen = " und ".join(f"'{m}'" for m in module)
+    verb = "lässt" if len(module) == 1 else "lassen"
+    if fehlt:
+        ursache = f"Die Visual-C++-Laufzeit fehlt ({', '.join(fehlt)} im Windows-Systemordner)."
+    elif fehlt == []:
+        # pip hält ein installiertes Paket für vollständig, auch wenn Dateien fehlen: ausdrücklich neu installieren
+        angabe = versionsgrenzen().get("pymupdf", (">=1.24.10,<3",))[0]
+        ursache = ("Die Visual-C++-Laufzeit ist zwar vorhanden, vermutlich aber veraltet. Hilft die aktuelle Version "
+                   "nicht, hat wohl ein Virenscanner Dateien von PyMuPDF entfernt (Quarantäne prüfen); dann neu "
+                   f'installieren: "{sys.executable}" -m pip install --force-reinstall --no-deps '
+                   f'--only-binary=:all: "pymupdf{angabe}".')
+    else:
+        ursache = "Meist fehlt die Visual-C++-Laufzeit oder sie ist veraltet."
+    return f"{namen} {verb} sich nicht laden („DLL load failed“). {ursache} Abhilfe: {VC_ABHILFE}."
+
+
 def python_bericht() -> tuple[list[str], list[str]]:
     zeilen, probleme = [], []
     bits = struct.calcsize("P") * 8
@@ -125,11 +183,16 @@ def pakete_bericht() -> tuple[list[str], list[str]]:
     probleme += versions_probleme(versionen)
     import warnings
     warnings.simplefilter("ignore")
+    dll_fehler = []
     for modul in ("fitz", "spacy", "tkinter", "tkinterdnd2"):
         ok, info = _importierbar(modul)
         zeilen.append(f"import {modul + ':':<13}{info}")
-        if not ok:
+        if not ok and _dll_ladefehler(info):
+            dll_fehler.append(modul)
+        elif not ok:
             probleme.append(f"'{modul}' lässt sich nicht importieren ({info}).")
+    if dll_fehler:
+        probleme.append(_dll_problem(dll_fehler, vc_laufzeit_fehlt() if sys.platform == "win32" else None))
     try:
         import spacy
         spacy.load("de_core_news_md", disable=["lemmatizer", "tagger"])
@@ -142,10 +205,14 @@ def pakete_bericht() -> tuple[list[str], list[str]]:
 
 
 def tessdata_bericht() -> tuple[list[str], list[str]]:
+    """Wo Sprachdateien liegen und – entscheidend – mit welcher Sprache aus welchem Ordner die OCR wirklich liest.
+    Eine fremde Tesseract-Installation ($TESSDATA_PREFIX) zählt nur, wenn die mitgelieferte Datei fehlt."""
     zeilen, probleme = [], []
+    prefix = os.environ.get("TESSDATA_PREFIX")   # vor _tessdata_finden(): das setzt die Variable auf seine Wahl
+    meipass = getattr(sys, "_MEIPASS", None)
     kandidaten = [("Programmordner", PROGRAMM_ORDNER / "tessdata"),
-                  ("TESSDATA_PREFIX", Path(os.environ["TESSDATA_PREFIX"]) if os.environ.get("TESSDATA_PREFIX") else None),
-                  ("PyInstaller", Path(getattr(sys, "_MEIPASS", "")) / "tessdata" if getattr(sys, "_MEIPASS", None) else None)]
+                  ("TESSDATA_PREFIX", Path(prefix) if prefix else None),
+                  ("PyInstaller", Path(meipass) / "tessdata" if meipass else None)]
     gefunden = False
     for name, ordner in kandidaten:
         if ordner is None:
@@ -156,13 +223,24 @@ def tessdata_bericht() -> tuple[list[str], list[str]]:
         zeilen.append(f"tessdata ({name}): {ordner} – {status}")
         gefunden = gefunden or deu.exists()
     try:
-        from anonymisierer.ocr import _tessdata_finden
-        zeilen.append(f"_tessdata_finden(): {_tessdata_finden()}")
-    except Exception as e:  # noqa: BLE001
-        zeilen.append(f"_tessdata_finden(): nicht prüfbar ({type(e).__name__}: {e})")
-    if not gefunden:
-        probleme.append("Keine deutsche OCR-Sprachdatei gefunden – Scans würden nur auf Englisch gelesen. "
-                        "Der Ordner tessdata mit deu.traineddata gehört in den Programmordner.")
+        from anonymisierer.ocr import _ocr_sprache, _tessdata_finden
+        benutzt = _tessdata_finden()
+        sprache, warnung = _ocr_sprache(benutzt)
+    except Exception as e:  # noqa: BLE001 - z. B. PyMuPDF lässt sich nicht laden (steht dann schon oben)
+        zeilen.append(f"OCR liest mit:  nicht prüfbar ({type(e).__name__}: {e})")
+        if not gefunden:
+            probleme.append("Keine deutsche OCR-Sprachdatei gefunden – Scans würden nur auf Englisch gelesen. "
+                            "Der Ordner tessdata mit deu.traineddata gehört in den Programmordner.")
+        return zeilen, probleme
+    zeilen.append(f"OCR liest mit:  {sprache or 'keiner Sprache'} aus {benutzt or '(kein Ordner)'}")
+    if prefix and benutzt and Path(prefix) != Path(benutzt):
+        mitgeliefert = {ordner for name, ordner in kandidaten if name != "TESSDATA_PREFIX" and ordner is not None}
+        grund = ("die mitgelieferte deutsche Sprachdatei geht vor" if Path(benutzt) in mitgeliefert
+                 else "dort liegt keine deu.traineddata")
+        zeilen.append(f"Hinweis:       TESSDATA_PREFIX zeigt auf {prefix} (andere Tesseract-Installation?) – "
+                      f"wird nicht benutzt, {grund}.")
+    if sprache != "deu":
+        probleme.append(warnung)
     return zeilen, probleme
 
 
@@ -186,9 +264,10 @@ def main() -> int:
     print(f"Programmordner: {PROGRAMM_ORDNER}")
     print("-" * 72)
     probleme: list[str] = []
-    for bericht in (python_bericht, pakete_bericht, tessdata_bericht):
+    for bericht in (python_bericht, laufzeit_bericht, pakete_bericht, tessdata_bericht):
         zeilen, neue = bericht()
-        print("\n".join(zeilen))
+        if zeilen:                       # laufzeit_bericht hat außerhalb von Windows nichts zu sagen
+            print("\n".join(zeilen))
         probleme += neue
     print("\n".join(fehlerlog_bericht()))
     print("-" * 72)

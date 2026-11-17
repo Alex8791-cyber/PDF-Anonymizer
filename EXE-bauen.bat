@@ -2,14 +2,17 @@
 chcp 65001 >nul
 title PDF-Anonymisierer - EXE bauen
 setlocal
-cd /d "%~dp0"
+pushd "%~dp0" || goto fehler_ordner
 
 REM ==============================================================
 REM  Baut einen eigenstaendigen Programmordner (onedir) mit
 REM  PDF-Anonymisierer.exe fuer Kollegen ohne Python - inklusive
-REM  Sprachmodell, OCR-Sprachdatei und Lizenztexten. Empfaenger
-REM  brauchen KEIN Tesseract und keine Installation.
+REM  Sprachmodell, OCR-Sprachdatei, Visual-C++-Laufzeit und
+REM  Lizenztexten. Empfaenger brauchen KEIN Tesseract und keine
+REM  Installation.
 REM  Reines ASCII + CRLF, keine verzoegerte Variablenerweiterung.
+REM  pushd statt "cd /d", damit es auch auf einer per UNC-Pfad
+REM  geoeffneten Netzwerkfreigabe geht; popd vor jedem "exit /b".
 REM  Die GitHub-Action (.github\workflows\tests.yml, Job "exe")
 REM  ruft genau diese Datei auf.
 REM ==============================================================
@@ -44,6 +47,10 @@ if not exist "%PY%" goto fehler_kein_python
 echo Verwende Python: "%PY%"
 "%PY%" -c "import struct,sys;sys.exit(0 if struct.calcsize('P')==8 else 1)" >nul 2>&1
 if errorlevel 1 goto fehler_32bit
+REM Ohne Visual-C++-Laufzeit laesst sich PyMuPDF nicht laden ("DLL load failed"): Die Vorab-Pruefung
+REM schlug dann bei jedem Bau fehl, und pip lief jedes Mal vergeblich - deshalb vorher pruefen.
+call :pruefe_vc_laufzeit
+if defined VC_FEHLT goto fehler_vc_laufzeit
 
 REM --- [1/4] Pakete ------------------------------------------------
 echo [1/4] Pruefe Pakete und PyInstaller ...
@@ -99,6 +106,11 @@ REM PyInstaller-Hooks; nur das Sprachmodell braucht --collect-all.
 if errorlevel 1 goto fehler_bau
 if not exist "dist\PDF-Anonymisierer\PDF-Anonymisierer.exe" goto fehler_bau
 if not exist "dist\PDF-Anonymisierer\_internal\tessdata\deu.traineddata" goto fehler_tessdata
+REM Die Visual-C++-Laufzeit (msvcp140.dll, vcruntime140_1.dll) packt PyInstaller selbst in den
+REM Ordner _internal. Deshalb laeuft die EXE auch auf Rechnern ohne "Visual C++ Redistributable" -
+REM anders als die Skript-Version. Damit das so bleibt, wird es hier geprueft.
+if not exist "dist\PDF-Anonymisierer\_internal\msvcp140.dll" goto fehler_vc_im_ordner
+if not exist "dist\PDF-Anonymisierer\_internal\vcruntime140_1.dll" goto fehler_vc_im_ordner
 
 REM Lizenz- und Hilfetexte in den Programmordner: Er wird weitergegeben, und fuer
 REM PyMuPDF/MuPDF (AGPL-3.0) muessen Empfaenger Lizenztext und Quellenhinweis bekommen.
@@ -153,24 +165,52 @@ echo   - Lizenz: Der Ordner enthaelt PyMuPDF/MuPDF ^(AGPL-3.0^). LICENSE.txt,
 echo     THIRD_PARTY_NOTICES.md und der AGPL-Text ^(licenses\AGPL-3.0.txt^) liegen
 echo     im Ordner und damit in der ZIP - beim Weitergeben nicht herausnehmen.
 pause
+popd
 exit /b 0
 
+
+:pruefe_vc_laufzeit
+REM Wie in Installieren.bat: setzt VC_FEHLT auf die fehlenden DLLs der Visual-C++-Laufzeit
+REM (nicht gesetzt = beide da). Ein 32-Bit-cmd sieht unter System32 die 32-Bit-DLLs aus
+REM SysWOW64 - die 64-Bit-DLLs liegen fuer ihn unter Sysnative.
+set "VC_FEHLT="
+set "SYSDLL=%SystemRoot%\System32"
+if exist "%SystemRoot%\Sysnative\cmd.exe" set "SYSDLL=%SystemRoot%\Sysnative"
+if not exist "%SYSDLL%\vcruntime140_1.dll" set "VC_FEHLT=vcruntime140_1.dll"
+if not exist "%SYSDLL%\msvcp140.dll" if defined VC_FEHLT set "VC_FEHLT=msvcp140.dll, %VC_FEHLT%"
+if not exist "%SYSDLL%\msvcp140.dll" if not defined VC_FEHLT set "VC_FEHLT=msvcp140.dll"
+goto :eof
+
+
+:fehler_ordner
+REM pushd ist gescheitert: kein popd (es wuerde einen Eintrag des Aufrufers entfernen).
+echo FEHLER: Der Projektordner laesst sich nicht als Arbeitsordner oeffnen:
+echo   "%~dp0"
+echo Liegt er auf einer Netzwerkfreigabe ^(\\server\freigabe\...^), konnte Windows ihr
+echo keinen freien Laufwerksbuchstaben zuordnen, oder der Zugriff wurde verweigert
+echo ^(die Meldung von Windows steht oben^). Loesung: den Ordner auf diesen Rechner
+echo kopieren ^(z. B. nach Dokumente^) oder die Freigabe als Netzlaufwerk verbinden.
+pause
+exit /b 1
 
 :fehler_unvollstaendig
 echo FEHLER: Dateien fehlen ^(pdf_anonymisierer.py, tessdata\deu.traineddata,
 echo werkzeuge\version_info.txt, LICENSE, THIRD_PARTY_NOTICES.md, README.md oder
 echo licenses\AGPL-3.0.txt^). Bitte den kompletten Ordner verwenden.
 pause
+popd
 exit /b 1
 
 :fehler_kein_python
 echo FEHLER: Python nicht gefunden - bitte zuerst "Installieren.bat" ausfuehren.
 pause
+popd
 exit /b 1
 
 :fehler_32bit
 echo FEHLER: Dieses Python ist 32-Bit. Fuer den Bau wird 64-Bit-Python ^(x64^) benoetigt.
 pause
+popd
 exit /b 1
 
 :fehler_pakete
@@ -181,6 +221,7 @@ echo fehlende Schreibrechte. Scheitert nur das Sprachmodell ^(github.com gesperr
 echo zuerst Installieren.bat ausfuehren - dort gibt es den Offline-Weg - und dann
 echo EXE-bauen.bat erneut starten; vorhandene Pakete werden nicht neu geladen.
 pause
+popd
 exit /b 1
 
 :fehler_modell
@@ -189,6 +230,7 @@ echo FEHLER: Sprachmodell, PyMuPDF oder tkinterdnd2 lassen sich nicht laden.
 echo Ohne Sprachmodell wuerde die EXE KEINE Namen erkennen - deshalb wird nicht gebaut.
 echo Bitte "Installieren.bat" ausfuehren und die Meldungen dort beachten.
 pause
+popd
 exit /b 1
 
 :fehler_bau
@@ -197,6 +239,7 @@ echo FEHLER beim Bauen - die Meldungen von PyInstaller stehen oben.
 echo Haeufig: Virenscanner blockiert den Ordner build\ oder dist\ ^(Ausnahme eintragen
 echo oder den Ordner nach Dokumente verschieben^), oder zu wenig Speicherplatz ^(ca. 1 GB^).
 pause
+popd
 exit /b 1
 
 :fehler_tessdata
@@ -204,6 +247,31 @@ echo.
 echo FEHLER: Die OCR-Sprachdatei fehlt im gebauten Ordner ^(_internal\tessdata^).
 echo Bitte pruefen, ob tessdata\deu.traineddata im Projektordner liegt, und erneut bauen.
 pause
+popd
+exit /b 1
+
+:fehler_vc_laufzeit
+echo.
+echo FEHLER: Auf diesem Rechner fehlt die Visual-C++-Laufzeit von Microsoft ^(nicht gefunden:
+echo %VC_FEHLT%^). Ohne die "Microsoft Visual C++ 2015-2022 Redistributable (x64)" laesst sich
+echo PyMuPDF nicht laden ^("DLL load failed"^) - so kann nicht gebaut werden, und die Pakete
+echo erneut zu installieren hilft nicht. Abhilfe ^(einmalig, braucht Administratorrechte^):
+echo zuerst Installieren.bat ausfuehren ^(bietet die Installation an^), oder
+echo   winget install --id Microsoft.VCRedist.2015+.x64 -e
+echo bzw. vc_redist.x64.exe von https://aka.ms/vs/17/release/vc_redist.x64.exe
+pause
+popd
+exit /b 1
+
+:fehler_vc_im_ordner
+echo.
+echo FEHLER: Im gebauten Ordner fehlt die Visual-C++-Laufzeit ^(_internal\msvcp140.dll
+echo bzw. _internal\vcruntime140_1.dll^). Ohne sie startet die EXE nur auf Rechnern, auf
+echo denen die "Microsoft Visual C++ 2015-2022 Redistributable (x64)" installiert ist.
+echo PyInstaller packt beide sonst selbst ein - bitte die Meldungen von PyInstaller oben
+echo pruefen und erneut bauen.
+pause
+popd
 exit /b 1
 
 :fehler_lizenz
@@ -213,4 +281,5 @@ echo kopiert werden ^(Virenscanner? Schreibrechte?^). Ohne LICENSE.txt,
 echo THIRD_PARTY_NOTICES.md und licenses\AGPL-3.0.txt darf der Ordner nicht an Dritte
 echo weitergegeben werden ^(PyMuPDF/MuPDF stehen unter AGPL-3.0^).
 pause
+popd
 exit /b 1
