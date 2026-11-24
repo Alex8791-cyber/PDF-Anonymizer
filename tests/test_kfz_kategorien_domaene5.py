@@ -282,6 +282,27 @@ def test_b23_gegenprobe_ohne_wert():
     assert not [f for f in _funde(text) if f["kategorie"] in ("kfz", "international")]
 
 
+@pytest.mark.parametrize("zeile", [
+    # Korpus-Messung s3x (Dokument 078, Kündigung): in der geschwärzten Ausgabe folgt auf das Etikett direkt
+    # „AM 29.03.2025“ – die ausländische Form las „AM“ (Versalien der Texterkennung) mit dem Datum als Kennzeichen
+    "Ich habe mein Fahrzeug mit dem amtlichen Kennzeichen AM 29.03.2025 verkauft.",
+    "ICH HABE MEIN FAHRZEUG MIT DEM AMTLICHEN KENNZEICHEN AM 29.03.2025 VERKAUFT.",
+    # abgewandelt
+    "Kennzeichen: AM 29.03.2025 abgemeldet",
+    "Kfz-Kennzeichen VOM 01.02.24 bis heute ruhend",
+])
+def test_b23_datum_hinter_kfz_etikett_ist_kein_kennzeichen(zeile):
+    datum = re.search(r"\d{1,2}\.\d{2}\.\d{2,4}", zeile).group(0)
+    funde = _funde(zeile)
+    assert not [f for f in funde if f["kategorie"] in ("kfz", "international")], _paare(funde)
+    assert _nicht_gemeldet(zeile, datum), [(v.text, v.grund) for v in pruefe_text(zeile)]
+    # Gegenprobe: echte ausländische Kennzeichen hinter demselben Etikett bleiben erkannt
+    for wert in ("WGM 4471K", "FX 482 KL"):
+        text = zeile.replace(re.search(r"(?:AM|VOM) " + re.escape(datum), zeile).group(0), wert)
+        funde = _funde(text)
+        assert _abgedeckt(text, wert, funde) and _gemeldet(text, wert), (text, _paare(funde))
+
+
 # ======================================================================
 # Befund 24: ausländische Kennzeichen im Fließtext – mit Länderhinweis geschwärzt, sonst mindestens Verdacht
 # ======================================================================
@@ -720,8 +741,8 @@ PROFIL = [
      "Profilname auf Vinted: HildeR1957", ["rumpelmayr_hilde", "hilde.rumpel57", "HildeR1957"]),
     ("Kleinanzeigen-Profil: zeitlhofer_korbi\neBay-Name: korbinian.z84\nNutzer-Name bei Vinted: KorbiZ1984",
      ["zeitlhofer_korbi", "korbinian.z84", "KorbiZ1984"]),
-    ("Erreichbarkeit des Kunden\nTelegram: t.me/lenchen_wiese82\nSnapchat: lenchenwiese\nSignal-Benutzername: lenchen.82",
-     ["lenchen_wiese82", "lenchenwiese", "lenchen.82"]),
+    ("Erreichbarkeit des Kunden\nTelegram: t.me/lenchen_wiese82\nSnapchat: lenchenwiese\n"
+     "Signal-Benutzername: lenchen.82", ["lenchen_wiese82", "lenchenwiese", "lenchen.82"]),
     ("Kontaktwege laut Kundenbogen\nTelegram-Name: korbi_zeitl84\nSnapchat-Name: korbizeitl\nSignal: korbi.84",
      ["korbi_zeitl84", "korbizeitl", "korbi.84"]),
     ("Kontakt: Instagram @lena.wiesengrund, WhatsApp +49 151 23456789", ["@lena.wiesengrund"]),
@@ -811,7 +832,8 @@ IP = [
     ("Unterzeichnet am 12.03.2025 14:08, IP: 2003:c2:7f1a:9e00:b5d4:3c2e:8e7f:42a1",
      ["2003:c2:7f1a:9e00:b5d4:3c2e:8e7f:42a1"]),
     ("erteilt am 12.03.2025 von fe80::1c4b:a2ff:fe3d:9b7e (Mobilgerät)", ["fe80::1c4b:a2ff:fe3d:9b7e"]),
-    ("Signaturprotokoll\nIP-Adresse: 2a01:598:b1a2:4c3d:1d2e:3f4a:5b6c:7d8e", ["2a01:598:b1a2:4c3d:1d2e:3f4a:5b6c:7d8e"]),
+    ("Signaturprotokoll\nIP-Adresse: 2a01:598:b1a2:4c3d:1d2e:3f4a:5b6c:7d8e",
+     ["2a01:598:b1a2:4c3d:1d2e:3f4a:5b6c:7d8e"]),
     ("Signaturprotokoll\nIPv6: 2a00:20:c0d2:ee1f:b9a1:fe5c:a3d4:e8f2", ["2a00:20:c0d2:ee1f:b9a1:fe5c:a3d4:e8f2"]),
     # abgewandelt
     ("Zugriff von 192.168.178.23 am 12.03.2024 um 09:15 Uhr", ["192.168.178.23"]),

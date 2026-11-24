@@ -2314,6 +2314,8 @@ _KFZ_KLEIN_SPERRE = frozenset(FUNKTIONSWOERTER | {"ca", "tag", "tage", "km", "mi
                                                   "wo", "ob", "es", "er", "je", "pro", "mal", "nr", "s", "z", "u",
                                                   "o", "d", "v", "kg", "mm", "cm", "nm", "ps", "kw"})
 _DEZIMAL_DANACH_RE = re.compile(r"[.,]\d")
+# ein Datum im Wert der ausländischen Form: "AM 29.03.2025", "VOM 01.02.24" (Versalien der Texterkennung)
+_DATUM_IN_WERT_RE = re.compile(r"(?<!\d)\d{1,2}\.\d{1,2}\.(?:\d{4}|\d{2})(?!\d)")
 
 
 def _kfz_einheit(teile) -> bool:
@@ -2376,8 +2378,8 @@ def kfz_wert(text: str, pos: int, grenze: int | None = None):
     if len(alnum) < 4 or not any(c.isdigit() for c in alnum) or not any(c.isalpha() for c in alnum):
         return None
     if _kfz_einheit(gruppen) or ist_datum_text(wert) or ist_betrag(wert) or _DEZIMAL_DANACH_RE.match(text, ende) \
-            or EINHEIT_DANACH_RE.match(text, ende):
-        return None
+            or EINHEIT_DANACH_RE.match(text, ende) or _DATUM_IN_WERT_RE.search(wert):
+        return None                                     # "AM 29.03.2025" (OCR in Versalien): ein Datum
     return i, ende
 
 
