@@ -401,6 +401,7 @@ Matrikel-Nr.
 Matrikel-Nummer
 Matrikelnr.
 Matrikelnummer
+Mein Zeichen
 Messlokations-ID
 Mieter Nr.
 Mieter-Nr

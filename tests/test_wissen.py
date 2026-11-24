@@ -34,6 +34,7 @@ MINDESTGROESSE = {
     "orte_at_ch_mehrdeutig": 12,
     "kfz_unterscheidungszeichen": 700,
     "fahrzeugmarken": 180,
+    "sachnamen": 200,
 }
 
 

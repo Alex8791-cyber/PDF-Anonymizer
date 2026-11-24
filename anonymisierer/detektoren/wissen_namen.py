@@ -2,14 +2,21 @@
 
 Regeln (jede liefert Stellen der Kategorie "namen", Quelle "wissen.namen"):
   R1  "Nachname, Vorname" – auch in Versalien, mit Laufnummer davor ("2 Aßmann, Torsten"), Partikel vorn
-      oder hinten ("van Dijk, Maarten", "Heyde, Anna von der"); der Vorname steht in der Liste
+      oder hinten ("van Dijk, Maarten", "Heyde, Anna von der"); der Vorname steht in der Liste; in Listen auch
+      "Nachname, V." am Zellen- bzw. Zeilenanfang ("Oberprieler, S."), "Nachname/Vorname" in Versalien
+      ("KRANICH/BIRGIT MRS", R1b) und Aufzählungen mit ";" ("Kranich, Detlef, 12.04.1969; Kranich, Jona") oder
+      mit Laufnummern in einer Zeile ("1. Kranich, Detlef 2. Kranich, Birgit")
   R2  Vorname (Liste) + Nachname: "Sana Siddiqui", "Eckhard Freitag", "Erika Mai" (mehrdeutige Wörter nur, wenn
       der andere Teil eindeutig ein Name ist), auch über EINEN Zeilenumbruch ("Faisal⏎Patel"), unbekannter
       Vorname + bekannter Nachname ("Conceição Ferreira"), Initiale + Nachname ("A. Schmid", "V. De Luca")
-  R3  Anrede/Titel + Name: "Herr Ågren", "Frau de Vries", "Frau Dr. rer. nat. von Stetten", "Herr Li"
-  R4  Namen in Firmenbezeichnungen: "Werkstatt Berger", "Siddiqui & Partner GmbH", "Becker GmbH"
+  R3  Anrede/Titel + Name: "Herr Ågren", "Frau de Vries", "Frau Dr. rer. nat. von Stetten", "Herr Li";
+      Dienstgrad oder Amtsbezeichnung davor bzw. dahinter ("KHKin Sedlmayr", "Eibl, JAng")
+  R4  Namen in Firmenbezeichnungen: "Werkstatt Berger", "Siddiqui & Partner GmbH", "Becker GmbH"; der
+      Familienname einer GbR oder Erbengemeinschaft auch unbekannt ("Felsberger GbR")
   R5  Personenlisten hinter Vorstand/Aufsichtsrat/Geschäftsführer (Fußzeilen der Versicherer)
-  R6  Rolle + Name im Satz: "Der Zeuge Patel", "der Geschäftsführer Sana Siddiqui"
+  R6  Rolle + Name im Satz: "Der Zeuge Patel", "der Geschäftsführer Sana Siddiqui"; Parteien im Kurzrubrum
+      ("Kranzbühler ./. Felsberger"), Namen in Wohnungs- und Nachbarschaftsangaben ("unseres Nachbarn
+      Felsberger"), die Felder C.1.1/C.1.2 der Zulassungsbescheinigung Teil I
   R7  Nachnamen in Internetadressen ("www.praxis-yilmaz.de")
 Mehrdeutige Nachnamen (Klein, Wolf, Koch …) zählen nur mit Zusammenhang (Anrede, Vorname, Rolle).
 Versicherer, Banken und Behörden der Erlaubnisliste werden nie als Name gemeldet.
@@ -20,7 +27,7 @@ from __future__ import annotations
 import functools
 import re
 
-from .. import namen, wissen
+from .. import namen, personenkontext, wissen
 from . import ALLE_PROFILE, Treffer, detektor
 
 _GROSS = "A-ZÄÖÜÀ-ÖØ-ÞĀĂĄĆČĎĐĒĖĘĚĞĢĪĮİĶĹĻĽŁŃŅŇŌŐŒŔŘŚŞŠŢŤŪŮŰŲŹŻŽȘȚ"
@@ -29,6 +36,9 @@ _TOKEN_RE = re.compile(f"(?<![{_KLEIN}{_GROSS}0-9])[{_KLEIN}{_GROSS}][{_KLEIN}{_
 _PARTIKEL = {"von", "van", "de", "der", "den", "dem", "di", "da", "del", "della", "du", "le", "la", "ter", "ten",
              "zu", "zum", "zur", "vom", "dos", "das", "al", "el", "bin", "ibn", "y", "freiherr", "freifrau", "graf",
              "gräfin", "und", "op", "het", "'t", "d'", "mac", "mc", "st."}
+# Artikel gehören nur hinter einem anderen Partikel zum Namen ("van den Berg", "von der Leyen"), nie allein ("Lukas den
+# Ball")
+_ARTIKEL = frozenset({"der", "den", "dem", "des", "die", "das"})
 _PARTIKEL_GROSS = {"De", "Di", "Da", "Del", "Della", "Van", "Von", "Dos", "Du", "Le", "La", "El", "Al", "Ter", "Ten",
                    "Mac", "Mc", "Bin", "Ibn"}
 _ANREDE_RE = re.compile(r"(?<![\wäöüß])(?:Herrn?|Frau|Fräulein|Hr\.|Fr\.|HERRN?|FRAU|Mr\.|Mrs\.|Ms\.|Monsieur|Madame|"
@@ -106,6 +116,17 @@ _SACH_ETIKETT_RE = re.compile(
     r"Modell|Hersteller|Fahrzeug|Fahrzeugtyp|Diagnose|Verwendungszweck|Leistungsart|Optionen|Bausteine?|"
     r"Deckung|Zahlweise|Vertragsart|Versicherungsart|Dokumentart|Status|Kostenträger|Versicherer|Gesellschaft|"
     r"Krankenkasse|Bank|Kreditinstitut|Arbeitgeber|Firma)(?:[ \t]*/[ \t]*[\wäöüß]+)?[ \t]*:?[ \t]*$")
+
+
+def _in_sachnamen(text: str, start: int, ende: int) -> bool:
+    """Liegt die Stelle in einer Marke, einem Modell oder einer Tierrasse der Wissensbasis, die über sie hinausreicht
+    oder sie genau abdeckt ("Charles Spaniel" in "Cavalier King Charles Spaniel", "Jack Russell" in "Jack Russell
+    Terrier", "Junghans Max Bill")? Nur die Zeile der Stelle wird durchsucht."""
+    a = text.rfind("\n", 0, start) + 1
+    b = text.find("\n", ende)
+    zeile = text[a:len(text) if b < 0 else b]
+    # je Zelle (personenkontext.sachnamen_stellen, wie die Selbstkontrolle): "Seat ⇥⇥ Leon …" ist keine Marke
+    return any(x <= start - a and ende - a <= y for x, y in personenkontext.sachnamen_stellen(zeile, wissen))
 
 
 def _sach_etikett_davor(text: str, start: int) -> bool:
@@ -203,12 +224,29 @@ def _treffer(s, e, text, si, gruppe=None) -> Treffer:
 # R1 "Nachname, Vorname"
 # ----------------------------------------------------------------------
 _W = f"[{_GROSS}][{_KLEIN}{_GROSS}'’]*(?:-[{_GROSS}{_KLEIN}][{_KLEIN}{_GROSS}'’]*)*"
+# Lücke zwischen Namenswörtern: Leerzeichen oder ein einzelner Tabulator – nie der Spaltentrenner "\t\t" (Befund 91:
+# "Mooslechner, Anton ⇥⇥ PHV" – die Sparte der Nachbarspalte ist kein zweiter Vorname)
+_LUECKE = r"(?:[ ]|(?<!\t)\t(?!\t))+"
 _PART_RE = r"(?:(?:von|van|de|der|den|di|da|del|della|du|le|la|ter|ten|zu|zum|zur|vom|al|el|Freiherr|Freifrau|Graf|" \
-           r"VON|VAN|DE|DER|DEN|FREIHERR|FREIFRAU|GRAF|ZU|VOM)[ \t]+)"
+           r"VON|VAN|DE|DER|DEN|FREIHERR|FREIFRAU|GRAF|ZU|VOM)" + _LUECKE + ")"
 _KOMMA_RE = re.compile(
-    rf"(?<![{_KLEIN}{_GROSS}\-])(?P<nach>{_PART_RE}*{_W}(?:[ \t]+{_W})?)[ \t]*,[ \t]*(?:\n[ \t]*)?"
-    rf"(?P<vor>{_W}(?:[ \t]+{_W})?)(?P<partikel>(?:[ \t]+(?:von|van|de|der|den|di|da|zu|zum|zur|vom|ter|ten)"
-    rf"(?:[ \t]+(?:der|den|dem|de|la))?)?)(?![{_KLEIN}{_GROSS}])")
+    rf"(?<![{_KLEIN}{_GROSS}\-])(?P<nach>{_PART_RE}*{_W}(?:{_LUECKE}{_W})?)[ \t]*,[ \t]*(?:\n[ \t]*)?"
+    rf"(?P<vor>{_W}(?:{_LUECKE}{_W})?)(?P<partikel>(?:{_LUECKE}(?:von|van|de|der|den|di|da|zu|zum|zur|vom|ter|ten)"
+    rf"(?:{_LUECKE}(?:der|den|dem|de|la))?)?)(?![{_KLEIN}{_GROSS}])")
+
+
+_LAUFNUMMER_IN_ZEILE_RE = re.compile(r"(?:^|[ \t])(?P<nr>[2-9]|[1-9]\d)\.[ \t]+$")
+
+
+def _laufnummer_in_zeile(davor: str) -> bool:
+    """Steht direkt vor dem Namen die Laufnummer einer Aufzählung in derselben Zeile ("Teilnehmer: 1. Kranich,
+    Detlef 2. Kranich, Birgit")? Die vorige Nummer muss in der Zeile vor einem großgeschriebenen Wort stehen – eine
+    einzelne Zahl mit Punkt ("Seite 2.") ist kein Aufzählungsanfang."""
+    m = _LAUFNUMMER_IN_ZEILE_RE.search(davor)
+    if not m:
+        return False
+    vorige = int(m.group("nr")) - 1
+    return re.search(rf"(?:^|[ \t:;]){vorige}\.[ \t]+[{_GROSS}]", davor[:m.start()]) is not None
 
 
 def _komma_namen(text: str) -> list:
@@ -222,6 +260,24 @@ def _komma_namen(text: str) -> list:
         if not nach_woerter or not vor_woerter:
             continue
         erster_vor = vor_woerter[0]
+        if len(vor_woerter) == 1 and len(nach_woerter) == 1 and _rang(erster_vor):
+            # "Eibl, JAng", "Kollmannsberger, JOSin": Nachname und Amtsbezeichnung statt Vorname
+            kern = nach_woerter[0]
+            if _rang_name_moeglich(kern) and not _sach_etikett_davor(text, m.start("nach")):
+                s = m.start("nach") + nach.rindex(kern)
+                aus.append(_treffer(s, s + len(kern), text, 0.65))
+            continue
+        if len(vor_woerter) == 1 and len(erster_vor) == 1 and text[m.end("vor"):m.end("vor") + 1] == "." \
+                and len(nach_woerter) == 1:
+            # "Oberprieler, S.", "Pichlmeier, N.": Nachname und Initiale am Anfang einer Zeile, Zelle oder Liste
+            zeilenanfang = text.rfind("\n", 0, m.start()) + 1
+            davor = text[zeilenanfang:m.start("nach")]
+            if (not davor.strip() or davor.endswith("\t") or davor.rstrip().endswith((":", ";"))
+                    or re.fullmatch(r"[ \t]*\d{1,4}\.?[ \t]+", davor)) and _rang_name_moeglich(nach_woerter[0]) \
+                    and not _sach_etikett_davor(text, m.start("nach")):
+                s = m.start("nach") + nach.rindex(nach_woerter[0])
+                aus.append(_treffer(s, m.end("vor") + 1, text, 0.65, text[s:m.end("vor") + 1]))
+            continue
         if not (_art(erster_vor)[0] and not _art(erster_vor)[5]):
             continue                                       # Vorname muss bekannt sein
         s = m.start("nach")
@@ -235,9 +291,11 @@ def _komma_namen(text: str) -> list:
         if any(w.casefold() in _KEIN_NAME or _art(w)[4] and not _art(w)[2] for w in nach_woerter):
             continue
         # zweites Wort hinter dem Vornamen nur, wenn es ein Vorname sein kann – nie ein Wort wie "GEB" ("WEBER, ANNA
-        # GEB. SCHULZ": dahinter steht der Geburtsname, namen.geburtsnamen)
-        vor_gekuerzt = len(vor_woerter) == 2 and (vor_woerter[1].casefold() in _KEIN_NAME
-                                                   or not (_art(vor_woerter[1])[0] or _versal(vor_woerter[1])))
+        # GEB. SCHULZ": dahinter steht der Geburtsname, namen.geburtsnamen); ein Wort in Versalien nur, wenn auch der
+        # erste Vorname in Versalien steht ("MOOSLECHNER, ANTON JOSEF") – sonst ist es ein Kürzel der Nachbarspalte
+        # ("Mooslechner, Anton PHV" einer OCR-Zeile ohne Tabulator, Befund 91)
+        vor_gekuerzt = len(vor_woerter) == 2 and (vor_woerter[1].casefold() in _KEIN_NAME or not (
+            _art(vor_woerter[1])[0] or (_versal(vor_woerter[1]) and _versal(vor_woerter[0]))))
         if vor_gekuerzt:
             vor_ende = m.start("vor") + len(vor_woerter[0])
         else:
@@ -246,8 +304,11 @@ def _komma_namen(text: str) -> list:
         vor_mehrdeutig = _art(erster_vor)[1]
         zeilenanfang = text.rfind("\n", 0, m.start()) + 1
         davor = text[zeilenanfang:m.start()]
+        # Anfang eines Segments: Zeile, Zelle, hinter einer Laufnummer (auch der nächsten einer Aufzählung in derselben
+        # Zeile), einem Etikett, in einer Liste hinter ";" und im Kurzrubrum hinter "./." ("Kranzbühler, Josef ./.
+        # Felsberger, Rainer"; "Reisende: …; Kranich, Jona, …"; "1. Kranich, Detlef 2. Kranich, Birgit")
         zellenanfang = (not davor.strip() or davor.endswith("\t") or re.fullmatch(r"[ \t]*\d{1,4}\.?[ \t]+", davor)
-                        or davor.rstrip().endswith(":"))
+                        or davor.rstrip().endswith((":", ";", "./.")) or _laufnummer_in_zeile(davor))
         if vor_mehrdeutig and not nach_bekannt:
             continue
         if not nach_bekannt and not zellenanfang:
@@ -302,6 +363,8 @@ def _vorname_nachname(text: str, tokens: list) -> list:
         partikel = []
         while k + 1 < n and _trenner_ok(tokens[k].naechster_trenner, False) and _partikel(tokens[k + 1].text) \
                 and len(partikel) < 3:
+            if tokens[k + 1].text in _ARTIKEL and not partikel:
+                break                                        # "Lukas den Ball": Artikel nur hinter "van", "von", "de"
             k += 1
             partikel.append(k)
         if k + 1 >= n:
@@ -325,13 +388,18 @@ def _vorname_nachname(text: str, tokens: list) -> list:
             continue                                         # "Rosa Beispiel": mehrdeutig ohne bekannten Nachnamen
         versal = _versal(t.text) or _versal(nw)
         gemischt = (not _versal(t.text) and _versal(nw) and not alle_vor_mehrdeutig and len(nw) >= 3
-                    and nw.isalpha() and not _art(nw)[5])           # "Holger EHRLICH": Nachname in Versalien
+                    and nw.isalpha() and not _art(nw)[5]             # "Holger EHRLICH": Nachname in Versalien
+                    and (nach_bekannt or (len(nw) >= 4 and wissen.ist_wortgestalt(nw))))  # nicht "Logan MCV"
         if versal and not gemischt and not (nach_bekannt and _art(w)[0] and _versal(t.text) == _versal(nw)):
             i = j + 1
             continue                                         # Versalien nur, wenn beide Teile Listen-Namen sind
-        if not _nachname_moeglich(nw, streng=False) or w.casefold() in _MARKEN or _sach_etikett_davor(text, t.start):
+        marke_davor = i > 0 and tokens[i - 1].naechster_trenner == " " \
+            and tokens[i - 1].text.rstrip(".").casefold() in _MARKEN                # "Seat Leon Sportstourer"
+        if not _nachname_moeglich(nw, streng=False) or w.casefold() in _MARKEN or _sach_etikett_davor(text, t.start) \
+                or marke_davor or _in_sachnamen(text, t.start, nt.ende) or personenkontext.tierangabe(text, t.start) \
+                or personenkontext.organisations_spalte(text, t.start):
             i = j + 1
-            continue
+            continue                                         # "Versicherer" ⏎ "Adam Riese": ein Versicherer
         if not nach_bekannt and (partikel == [] and _art(nw)[0] and not _art(nw)[2]):
             i = j + 1
             continue                                         # zwei Vornamen ohne Nachnamen
@@ -352,6 +420,36 @@ def _vorname_nachname(text: str, tokens: list) -> list:
 
 _INITIALE_RE = re.compile(rf"(?<![{_KLEIN}{_GROSS}.])([{_GROSS}])\.(?:[ \t]?[{_GROSS}]\.)?[ \t]?"
                           rf"((?:(?:de|De|di|Di|van|Van|von|da|Da|del|Del|le|Le|La)[ \t]+)?{_W})")
+
+
+# ----------------------------------------------------------------------
+# R1b Flugschein-Format "NACHNAME/VORNAME [MR|MRS|MS]" ("KRANICH/BIRGIT MRS", "OSTERKAMP/JULIANE MS"): beide Teile
+#     sind Namen, wenn der Vorname eindeutig in der Liste steht; die Anrede dahinter bleibt stehen
+# ----------------------------------------------------------------------
+_FLUG_ANREDEN = frozenset({"MR", "MRS", "MS", "MISS", "MSTR", "CHD", "INF"})
+_SCHRAEG_NAME_RE = re.compile(rf"(?<![\w/])(?P<nach>{_W})/(?P<vor>{_W}(?:[ ]{_W})?)(?![\w/])")
+
+
+def _schraegstrich_namen(text: str) -> list:
+    aus = []
+    if "/" not in text:
+        return aus
+    for m in _SCHRAEG_NAME_RE.finditer(text):
+        vor = m.group("vor").split()
+        if vor[-1] in _FLUG_ANREDEN:
+            vor = vor[:-1]
+        if not vor or vor[0] in _FLUG_ANREDEN:
+            continue
+        art = _art(vor[0].title() if vor[0].isupper() else vor[0])
+        if not art[0] or art[1] or art[4]:
+            continue                                   # Vorname eindeutig aus der Liste ("Hin/Rückflug" nicht)
+        nach = m.group("nach")
+        if not _rang_name_moeglich(nach.title() if nach.isupper() else nach):
+            continue
+        aus.append(_treffer(m.start("nach"), m.end("nach"), text, 0.7))
+        ende = m.start("vor") + len(" ".join(vor))
+        aus.append(_treffer(m.start("vor"), ende, text, 0.7))
+    return aus
 
 
 def _initiale_nachname(text: str) -> list:
@@ -383,8 +481,9 @@ def _unbekannter_vorname(text: str, tokens: list) -> list:
             continue
         if w.endswith(".") or _TITEL_RE.match(w + " ") or wissen.ist_anrede_titel(w):
             continue                                         # "Dr. Müller": Titel, kein Vorname
-        if w.casefold() in _MARKEN or _sach_etikett_davor(text, a.start):
-            continue                                         # "Hersteller/Typ: Seat Leon"
+        if w.casefold() in _MARKEN or _sach_etikett_davor(text, a.start) or _in_sachnamen(text, a.start, b.ende) \
+                or w.casefold() in namen._MEDIZIN_ANFANG:
+            continue                                         # "Hersteller/Typ: Seat Leon", "Morbus Scheuermann"
         if _art(w)[0] or _art(w)[2]:
             continue                                         # bekannte Namen erledigt R2
         if wissen.ist_beruf(w) or re.match(_FIRMA_KOPF + r"$", w) or re.search(
@@ -433,8 +532,105 @@ def _anrede_namen(text: str) -> list:
 
 
 # ----------------------------------------------------------------------
+# R3b Dienstgrad/Amtsbezeichnung + Name (ohne Anrede, ohne Pflichtpunkt): "KHKin Sedlmayr", "PHK Reithmeier",
+#     "RA Rauchenberger", "Rechtspflegerin Gstettner"; R1 kennt "Eibl, JAng"
+# ----------------------------------------------------------------------
+# Kürzel einer Amts- oder Dienstbezeichnung: zwei bis sechs Buchstaben, mindestens zwei groß (PM, POM, PHKin, JAng,
+# RA, RAin, StB, OStA), auch mit "'in"; Langformen auf typische Endungen (Kriminalhauptkommissar, Polizeiobermeister,
+# Rechtspflegerin, Urkundsbeamtin, Justizangestellte, Oberstaatsanwalt)
+_RANG_KUERZEL_RE = re.compile(r"[A-ZÄÖÜ][A-Za-zÄÖÜäöü]{1,5}(?:['’]in)?")
+_RANG_LANG_RE = re.compile(r"[A-ZÄÖÜ][a-zäöüß]{2,}(?:kommissar|meister|rat|direktor|sekretär|inspektor|pfleger|"
+                           r"beamter|beamtin|angestellte|angestellter|beschäftigte|beschäftigter|anwalt|anwältin|"
+                           r"vollzieher|berater)(?:in)?")
+
+
+@functools.lru_cache(maxsize=8192)
+def _rang(wort: str) -> bool:
+    """Ist das Wort eine Amts- oder Dienstbezeichnung der Wissensbasis (anreden_titel) in Kürzel- oder Langform?"""
+    w = wort.rstrip(".,;:")
+    if not w or not wissen.ist_anrede_titel(w):
+        return False
+    if _RANG_KUERZEL_RE.fullmatch(w) and sum(c.isupper() for c in w) >= 2:
+        return True                                        # "JAng" (Schreibweise des Kürzels, nicht "Jang")
+    return bool(_RANG_LANG_RE.fullmatch(w)) and not _art(w)[2]    # "Graf", "Ritter": auch Nachnamen
+
+
+def _rang_name_moeglich(wort: str) -> bool:
+    """Kann das Wort hinter einer Amtsbezeichnung ein Nachname sein: großgeschrieben, kein Allerwelts-, Etikett- oder
+    Organisationswort, kein Ort (außer es ist ein Nachname der Wissensbasis) und selbst keine Amtsbezeichnung?"""
+    w = wort.rstrip(".,;:")
+    if len(w) < 3 or not _ist_gross(w) or w.casefold() in _KEIN_NAME or _versal(w) and len(w) <= 4:
+        return False
+    vor, vor_m, nach, nach_m, allerwelt, allow = _art(w)
+    if allow or wissen.ist_anrede_titel(w) or _STRASSENENDE_RE.search(w):
+        return False
+    if nach or vor:
+        return True
+    if allerwelt or wissen.ist_ort(w) or namen._ist_sachwort(w):
+        return False
+    return True
+
+
+def _rang_namen(text: str, tokens: list) -> list:
+    aus = []
+    n = len(tokens)
+    for i, t in enumerate(tokens):
+        if not _rang(t.text) or i + 1 >= n or t.naechster_trenner not in (" ", "\t"):
+            continue
+        if re.search(r"\d[ \t]*$", text[max(0, t.start - 4):t.start]):
+            continue                                       # "um 3 PM Abfahrt": Uhrzeit, kein Dienstgrad
+        j = i + 1
+        while j < n and _TITEL_RE.fullmatch(tokens[j].text + " ") and tokens[j - 1].naechster_trenner == " ":
+            j += 1                                         # "RA Dr. Moosreiner"
+        if j >= n or not _rang_name_moeglich(tokens[j].text):
+            continue
+        s, e = tokens[j].start, tokens[j].ende - (1 if tokens[j].text.endswith(".") else 0)
+        if namen._rang_kuerzel(t.text):
+            s = t.start                                    # das Kürzel davor gehört zur Stelle ("POK Ludwig")
+        if j + 1 < n and tokens[j].naechster_trenner == " " and _art(tokens[j].text.rstrip("."))[0] \
+                and _rang_name_moeglich(tokens[j + 1].text):
+            e = tokens[j + 1].ende - (1 if tokens[j + 1].text.endswith(".") else 0)   # "KHK Hans Sedlmayr"
+        aus.append(_treffer(s, e, text, 0.7))
+    return aus
+
+
+# ----------------------------------------------------------------------
+# R8 Parteien im Kurzrubrum: "In Sachen Kranzbühler ./. Felsberger", "Weber ./. Riedlinger wegen …" – beide Seiten
+#    sind Personen, außer Firma, Behörde oder Versicherer ("./. Allianz Versicherungs-AG", "./. Stadt Ebersberg")
+# ----------------------------------------------------------------------
+_RUBRUM_RE = re.compile(rf"(?P<a>{_W})(?:[ \t]*,[ \t]*(?P<av>{_W}))?[ \t]+\./\.[ \t]+(?P<b>{_W})"
+                        rf"(?:[ \t]*,[ \t]*(?P<bv>{_W}))?")
+_RECHTSFORM_DANACH_RE = re.compile(r"[ ,]*(?:GmbH|mbH|AG|SE|KG|OHG|UG|e\.[ \t]?V\.|eG|VVaG|Versicherungs-AG|"
+                                   r"Versicherung|Versicherungen|&)(?![\wäöüß])")
+
+
+def _rubrum_namen(text: str) -> list:
+    aus = []
+    if "./." not in text:
+        return aus
+    for m in _RUBRUM_RE.finditer(text):
+        for g in ("a", "b"):
+            wort = m.group(g)
+            ende = m.end(g)
+            if not _rang_name_moeglich(wort) or wissen.ist_allowlist(wort) or _RECHTSFORM_DANACH_RE.match(text, ende):
+                continue
+            aus.append(_treffer(m.start(g), ende, text, 0.65))
+    return aus
+
+
+# ----------------------------------------------------------------------
 # R4 Namen in Firmenbezeichnungen
 # ----------------------------------------------------------------------
+def _sachwort(wort: str) -> bool:
+    """Allerweltswort, Ort oder Organisation der Erlaubnisliste – kein Familienname einer GbR."""
+    return wissen.ist_allerweltswort(wort) or wissen.ist_ort(wort) or wissen.ist_allowlist(wort)
+
+
+def _gemeinschaft_namen(text: str) -> list:
+    """R4b: Familienname einer GbR oder Erbengemeinschaft ("Felsberger GbR", auch unbekannt)."""
+    return [_treffer(s, e, text, 0.65) for s, e in personenkontext.gemeinschaft_namen(text, _sachwort)]
+
+
 def _firmen_namen(text: str, tokens: list) -> list:
     aus = []
     for t in tokens:
@@ -442,9 +638,15 @@ def _firmen_namen(text: str, tokens: list) -> list:
         if len(w) < 3:
             continue
         vor, vor_m, nach, nach_m, allerwelt, allow = _art(w)
+        davor = text[max(0, t.start - 40):t.start]
+        if not nach and not allow and w.casefold() not in _KEIN_NAME and _FIRMA_VOR_RE.search(davor) \
+                and personenkontext.namensgestalt(w, wissen):
+            # unbekannter Familienname hinter einer Geschäftsbezeichnung ("Physiotherapie Oberprieler") – wie die
+            # Selbstkontrolle (restrisiko: Name in einer Firmenbezeichnung)
+            aus.append(_treffer(t.start, t.ende - (1 if t.text.endswith(".") else 0), text, 0.6))
+            continue
         if not nach or allow or w.casefold() in _KEIN_NAME:
             continue
-        davor = text[max(0, t.start - 40):t.start]
         danach = text[t.ende:t.ende + 40]
         gross = _ist_gross(w)
         if _FIRMA_VOR_RE.search(davor) and (gross or not nach_m):
@@ -547,6 +749,23 @@ def _rollen_namen(text: str) -> list:
 
 
 # ----------------------------------------------------------------------
+# R6b Namen in Wohn- und Nachbarschaftsangaben: hinter einer Rolle im Satz, auch gebeugt ("unseres Nachbarn
+#     Felsberger", "Die Mieterin Riedlinger", "Beim Nachbarn Unterholzner"), "Bei Felsberger im 1. OG", "EG links
+#     (Hackenschmied)" – nur mit der Gestalt eines Familiennamens (personenkontext.namensgestalt, dieselbe Regel wie die
+#     Selbstkontrolle); weitere Vorkommen im Dokument schwärzt die Weitergabe
+# ----------------------------------------------------------------------
+def _wohn_namen(text: str) -> list:
+    return [_treffer(s, e, text, 0.6) for s, e in personenkontext.wohn_kontext_namen(text)]
+
+
+# ----------------------------------------------------------------------
+# R6c Felder C.1.1/C.1.2 der Zulassungsbescheinigung Teil I (Name oder Firma, Vornamen)
+# ----------------------------------------------------------------------
+def _zb1_namen(text: str) -> list:
+    return [_treffer(s, e, text, 0.7) for s, e in personenkontext.zb1_personenfelder(text)]
+
+
+# ----------------------------------------------------------------------
 # R7 Internetadressen
 # ----------------------------------------------------------------------
 def _url_namen(text: str) -> list:
@@ -566,19 +785,25 @@ def _url_namen(text: str) -> list:
 
 
 def namen_stellen(text: str) -> list:
-    """Alle Namens-Treffer der Regeln R1–R7 (Treffer mit Offsets im Text)."""
+    """Alle Namens-Treffer der Regeln R1–R8 (Treffer mit Offsets im Text)."""
     if not text:
         return []
     tokens = _tokens(text)
     treffer = []
     treffer += _komma_namen(text)
+    treffer += _schraegstrich_namen(text)
     treffer += _vorname_nachname(text, tokens)
     treffer += _initiale_nachname(text)
     treffer += _unbekannter_vorname(text, tokens)
     treffer += _anrede_namen(text)
+    treffer += _rang_namen(text, tokens)
+    treffer += _rubrum_namen(text)
     treffer += _firmen_namen(text, tokens)
+    treffer += _gemeinschaft_namen(text)
     treffer += _personenlisten(text)
     treffer += _rollen_namen(text)
+    treffer += _wohn_namen(text)
+    treffer += _zb1_namen(text)
     treffer += _url_namen(text)
     aus, gesehen = [], set()
     for t in sorted(treffer, key=lambda t: (t.start, t.ende, -t.sicherheit)):

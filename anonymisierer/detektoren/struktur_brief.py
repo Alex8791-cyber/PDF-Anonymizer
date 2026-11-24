@@ -157,8 +157,10 @@ def _namen_ueber_rollen(seite, lg) -> list:
         if zelle is None or zelle.zeile in gesehen:
             continue
         rest = text[zelle.start:zelle.ende]
-        # die Zelle besteht nur aus Rollenwörtern ("Mandant", "(Unterschrift Versicherungsnehmer)")
-        if len(rest.split()) > 4 or any(c.isdigit() for c in rest):
+        # die Zelle besteht nur aus Rollenwörtern ("Mandant", "(Unterschrift Versicherungsnehmer)"); ein ausgefülltes
+        # Feld ("Versicherungsnehmer: Theodor Weber") ist keine Beschriftung einer Unterschriftszeile – die Zeile
+        # darüber ist dann eine Überschrift ("Diebstahlanzeige Kfz"), kein Name
+        if len(rest.split()) > 4 or any(c.isdigit() for c in rest) or re.search(r":[ \t]*\S", rest):
             continue
         h = max(zelle.hoehe, 4.0)
         for zid in lg.zeilen_darueber(zelle.zeile, 2.2 * h):

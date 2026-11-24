@@ -15,7 +15,7 @@ from __future__ import annotations
 import bisect
 import re
 
-from .. import muster, namen
+from .. import muster, namen, personenkontext
 from ..seitenmodell import SPALTENTRENNER, ganzwort_stellen, ganzwort_stellen_viele, modus_fuer
 from . import ALLE_PROFILE, Treffer, detektor, registrieren
 
@@ -211,6 +211,8 @@ def _zellen_kandidaten(text: str, kandidaten: list) -> list:
             continue
         if len(woerter) == 1 and k["text"].isupper() and len(k["text"]) <= 3:
             continue                                   # "RLV", "PKV": Abkürzungen, keine Namen
+        if personenkontext.organisations_spalte(text, s):
+            continue                                   # Spalte "Versicherer": "Adam Riese", "Roland" (Befund 92)
         aus.append(dict(k, quelle="ner.zelle"))
     if aus:
         bestaetigt = _zellen_namen_bestaetigen({k["text"] for k in aus})

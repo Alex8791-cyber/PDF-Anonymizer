@@ -27,6 +27,9 @@ Ausgabedatum
 ausgefertigt am
 ausgestellt am
 Ausstellungsdatum
+Austritt
+Austritt am
+Austrittsdatum
 Beginn
 Beginn der Versicherung
 Behandlungsdatum
@@ -42,8 +45,10 @@ Beitragszahlungsdauer
 Beitragszeitraum
 Belegdatum
 Berechnungsstichtag
+beschäftigt seit
 Bescheid vom
 Bescheiddatum
+Betriebszugehörigkeit seit
 Bewertungsstichtag
 bis
 bis spätestens
@@ -64,6 +69,10 @@ Effective date
 Eingang
 Eingangsdatum
 eingegangen am
+Einstellungsdatum
+Eintritt
+Eintritt am
+Eintrittsdatum
 Einzug am
 End date
 Ende

@@ -87,6 +87,7 @@ LISTEN = {
     "orte_at_ch_mehrdeutig": "orte_at_ch_mehrdeutig.txt",
     "kfz_unterscheidungszeichen": "kfz_unterscheidungszeichen.txt",
     "fahrzeugmarken": "fahrzeugmarken.txt",
+    "sachnamen": "sachnamen.txt",
 }
 # Kurznamen (bequemer in Regeln)
 _ALIAS = {
@@ -399,8 +400,72 @@ class Phrasenindex:
         return all(any(t.start <= w.start() and w.end() <= t.ende for t in treffer) for w in teile)
 
 
+# Personen-Etiketten "Name des/der <Rolle>" (auch Vor-, Nach-, Familien-, Rufname und Unterschrift): abgeleitet aus
+# jeder Rolle der Liste etiketten_person im Genitiv ("Name des Hundehalters", "Name der Geschädigten", "NAME DES
+# TIERHALTERS") – statt jede Verbindung einzeln zu listen. "Name des Hundes", "Name der Bank" entstehen nicht: Hund
+# und Bank sind keine Rollen der Liste.
+_GENITIV_KOPF = (r"Vor-[ ]und[ ]Zuname|Vor-[ ]und[ ]Nachname|Name[ ]und[ ]Vorname|Name,[ ]Vorname|"
+                 r"Nachname,[ ]Vorname|Familienname|Nachname|Vorname|Rufname|Name|Unterschrift")
+_GENITIV_RE = re.compile(rf"(?<![^\W\d_])(?:{_GENITIV_KOPF})[ ]+(?:des|der)[ ]+"
+                         r"([^\W\d_][\w\-]*)(?![\w\-])(?:[ ]+([^\W\d_][\w\-]*)(?![\w\-]))?", re.IGNORECASE)
+_GENITIV_ENDUNGEN = ("", "s", "es", "n", "en")
+_GENITIV_KOEPFE = frozenset({"name", "vorname", "nachname", "familienname", "rufname", "unterschrift"})
+
+
+class _PersonenEtiketten(Phrasenindex):
+    """Suchindex der Personen-Etiketten: die Einträge der Liste und die abgeleiteten Etiketten "Name des/der
+    <Rolle>" (_GENITIV_RE). Ein abgeleitetes Etikett verdrängt das kürzere "Name" an seinem Anfang."""
+
+    def _rolle(self, wort: str) -> bool:
+        """Ist `wort` (mit Genitiv-Endung: "Hundehalters", "Geschädigten", "Kindes") eine Rolle der Liste?"""
+        for endung in _GENITIV_ENDUNGEN:
+            if endung and not normalisieren(wort).endswith(endung):
+                continue
+            stamm = wort[:len(wort) - len(endung)] if endung else wort
+            if len(stamm) < 3 or normalisieren(stamm) in _GENITIV_KOEPFE:
+                continue
+            if Phrasenindex.eintrag_fuer(self, stamm) is not None:
+                return True
+        return False
+
+    def _abgeleitet(self, text: str) -> list[Vorkommen]:
+        if "des " not in text and "der " not in text and "DES " not in text and "DER " not in text:
+            return []
+        aus = []
+        for m in _GENITIV_RE.finditer(text):
+            if m.group(2) and m.group(1).islower() and self._rolle(m.group(2)):
+                ende = m.end(2)                              # "Name des mitversicherten Kindes"
+            elif self._rolle(m.group(1)):
+                ende = m.end(1)                              # "Name des Hundehalters"
+            else:
+                continue
+            aus.append(Vorkommen(m.start(), ende, text[m.start():ende], text[m.start():ende]))
+        return aus
+
+    def eintrag_fuer(self, phrase: str) -> str | None:
+        eintrag = super().eintrag_fuer(phrase)
+        if eintrag is not None or not phrase:
+            return eintrag
+        sauber = " ".join(phrase.split())
+        if len(woerter(sauber)) == 1 and len(sauber) >= 5 and self._rolle(sauber):
+            return sauber                                    # gebeugte Rolle als Wort: "Nachbarn", "Mieters"
+        abgeleitet = self._abgeleitet(sauber)
+        return sauber if abgeleitet and abgeleitet[0].start == 0 and abgeleitet[0].ende == len(sauber) else None
+
+    def finde(self, text: str, *, zeilenuebergreifend: bool = False,
+              nur_gross: bool = False) -> list[Vorkommen]:
+        gefunden = super().finde(text, zeilenuebergreifend=zeilenuebergreifend, nur_gross=nur_gross)
+        abgeleitet = self._abgeleitet(text)
+        if not abgeleitet:
+            return gefunden
+        rest = [v for v in gefunden if not any(a.start < v.ende and v.start < a.ende for a in abgeleitet)]
+        return sorted(rest + abgeleitet, key=lambda v: v.start)
+
+
 @functools.lru_cache(maxsize=None)
 def _index(name: str) -> Phrasenindex:
+    if name == "etiketten_person":
+        return _PersonenEtiketten(_liste(name), name=name)
     return Phrasenindex(_liste(name), name=name)
 
 
@@ -640,6 +705,48 @@ def ist_ort(phrase: str) -> bool:
     if teile[0].casefold() in ("st.", "st") and len(teile) > 1:
         p = " ".join(["Sankt"] + teile[1:])            # "St. Ingbert" wie "Sankt Ingbert"
     return _im_index("orte", p.title() if p.isupper() else p)
+
+
+# Endungen von Gattungswörtern für Orte ("Turnhalle", "Skigebiet", "Mittelschule", "Spielplatz", "Bergstation"); keine
+# Endungen, mit denen oft Ortsnamen enden (-heim, -hof, -haus, -bad, -feld, -see, -burg, -kirchen)
+_ORTSGATTUNG_RE = re.compile(r"(?:halle|gebiet|schule|platz|piste|loipe|lift|garage|gelände|anlage|zentrum|center|"
+                             r"bahnhof|flughafen|klinik|kreuzung|einmündung|stelle|bahn|park|wohnung|station|markt)$",
+                             re.IGNORECASE)
+# Wörter, mit denen Gemeindenamen beginnen ("Markt Schwaben", "Markt Indersdorf") – vorn kein Gattungswort
+_ORTSNAMEN_ANFANG = frozenset({"markt"})
+# Verbindungswörter zwischen Gattungswort und Ort ("Turnhalle der Mittelschule Erding", "Parkplatz am Rathaus")
+ORTS_VERBINDER = frozenset({"der", "des", "dem", "den", "die", "am", "an", "im", "in", "bei", "beim", "vor", "hinter",
+                            "neben", "auf", "zum", "zur", "von", "vom"})
+
+
+def ist_ortsgattung(wort: str) -> bool:
+    """Gattungswort für einen Ort ("Turnhalle", "Skigebiet", "Tiefgarage", "Parkplatz"), kein Ortsname: der Kopf einer
+    Ortsangabe wie "Unfallort: Skigebiet Sudelfeld" – der Ort ist der Eigenname dahinter. Bekannte Orte und Nachnamen
+    sind nie Gattungswörter, ebenso wenig "Markt" allein: "Markt Schwaben", "Markt Indersdorf" sind Gemeindenamen."""
+    w = (wort or "").strip(".,;:")
+    if len(w) < 4 or not w[:1].isupper() or ist_ort(w) or ist_nachname(w) or w.casefold() in _ORTSNAMEN_ANFANG:
+        return False
+    return bool(_ORTSGATTUNG_RE.search(w)) or ist_allerweltswort(w)
+
+
+_STRASSEN_ENDE_RE = re.compile(r"(?i)(?:str|straße|strasse|weg|platz|allee|gasse|ring|damm|ufer)\.?$")
+
+
+def ortsname_hinter_gattung(woerter: list) -> int | None:
+    """Index des Ortsnamens in einer Ortsangabe aus Wörtern ("Skigebiet Sudelfeld" -> 1, "Turnhalle der Mittelschule
+    Erding" -> 3): 0, wenn vorn kein Gattungswort steht oder es nur ein Wort ist; None, wenn nur Gattungswörter folgen
+    oder dahinter eine Einrichtung bzw. Straße steht ("Parkplatz Rewe-Markt", "Kreuzung Hauptstraße / Kirchenweg") –
+    dann ist kein Ort genannt. Eine Regel für die Erkennung (detektoren/struktur.py) und die Selbstkontrolle."""
+    if len(woerter) < 2 or not ist_ortsgattung(woerter[0]):
+        return 0
+    for n, wort in enumerate(woerter):
+        if n > 0 and wort.casefold() in ORTS_VERBINDER or ist_ortsgattung(wort):
+            continue
+        if any(ist_ortsgattung(t) for t in wort.split("-") if t) \
+                or any(_STRASSEN_ENDE_RE.search(w) for w in woerter[n:]):
+            return None                      # Einrichtung oder Straße ("Kreuzung Bamberger Straße / Am Anger")
+        return n
+    return None
 
 
 # ----------------------------------------------------------------------

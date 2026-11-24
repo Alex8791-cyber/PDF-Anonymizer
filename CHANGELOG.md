@@ -356,6 +356,48 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - **Schreibgeschützter Programmordner:** Ließ sich `.python_pfad.txt` nicht schreiben, brach die Einrichtung
   der Desktop-Verknüpfung mit einem Python-Fehler ab, und `Installieren.bat` nannte PowerShell als Ursache.
   Jetzt bleibt es bei einem Hinweis (`Starten.bat` sucht Python selbst), und die Verknüpfung wird angelegt.
+- **Personen und Geburtsdaten (Domänen-Durchsicht, Runde 5):** Geburtsdaten von Kindern und Mitversicherten ohne
+  „geb.“ („Kind 2: Bastian Leutgeb, 30.06.2018“, Kinderlisten mit Tabstopps, „Reisende: Kranich, Detlef, 12.04.1969;
+  …“), „Geburt des Kindes am …“, „Entbindung am …“ und das Geburtsjahr werden geschwärzt; Behandlungs-, Rechnungs-
+  und Vertragsdaten hinter Ärzten und Familienrollen bleiben stehen. Namen hinter rund 240 weiteren Rollen
+  (Leasingnehmerin, Sozius, Gegner, Beklagte, Tierhalter, Rechnungsempfänger, „Name des Hundehalters“ …), hinter
+  Dienstgraden und Amtsbezeichnungen („KHKin Sedlmayr“ samt Kürzel, „Eibl, JAng“), im Kurzrubrum („Kranzbühler ./.
+  Felsberger“), in Nachbarschaftsangaben, als „Nachname, V.“ in Listen, in den Feldern C.1.1/C.1.2 der
+  Zulassungsbescheinigung Teil I und vor „GbR“ werden erkannt; die Anschrift in derselben Zeile hinter einem solchen
+  Etikett gilt nicht mehr als Firmenanschrift. Die USt-IdNr. von Einzelkaufleuten und Freiberuflern wird geschwärzt,
+  Berufe auch in der Spalte „Beruf“/„Tätigkeit“ und im Kastenformular. Nicht mehr als Namen geschwärzt werden
+  Marken, Modelle und Tierrassen (neue Wortliste `sachnamen.txt`), medizinische Fachwörter, Firmen hinter
+  Rollen-Etiketten, Partizipien wie „Ausgefertigt“ und Gattungswörter vor einem Unfallort („Turnhalle der
+  Mittelschule Erding“) – Marke, Modellcode und Rechtsform zählen dabei nur in derselben Tabellenzelle
+  („Tschernyschow ⇥ PHV“ bleibt ein Name), und Familiennamen wie „Petraitis“, „Klose“ oder die Initiale in „M.
+  Weber“ gelten nie als Diagnose. Die Restrisiko-Prüfung kennt dieselben Regeln und meldet weniger Fehlverdacht
+  (TAN-Komposita, „Die Scheibe …“, Miteigentumsanteile, Modellnummern, „Ihnen“).
+  Nachgezogen: die Anschrift im Feld C.1.3 der Zulassungsbescheinigung (Feldcode allein ist kein Rest), Namen im
+  Flugschein-Format „KRANICH/BIRGIT MRS“, Teilnehmerlisten mit Laufnummern in einer Zeile („1. Kranich, Detlef
+  2. Kranich, Birgit“), unbekannte Familiennamen hinter einer Geschäftsbezeichnung („Physiotherapie Oberprieler“)
+  und der Beruf unter seinem Feldbezeichner, wenn die OCR das Kastenformular als Zeile aus Feldbezeichnern liest
+  („Telefon ⇥ Beruf“ ⏎ „08631 98765 ⇥ Pflegehelferin“). Personennamen in einer Versicherer-, Bank- oder
+  Krankenkassen-Spalte („Adam Riese“ unter „Versicherer“) gelten als Organisation – in Erkennung und
+  Restrisiko-Prüfung. Behoben wurden dabei Rückschritte derselben Runde: ein Name vor einem Datum, Jahr, einer
+  Telefonnummer oder Zahl galt als Modellbezeichnung, „Max Mustermann, 02.09.1961: …“ und Geburtsdaten hinter
+  „Dr.“ galten als Behandlungsdatum, Doppelnamen wie „Schmidt-Wald“ wurden nicht mehr gemeldet, und „Markt
+  Schwaben“ verlor seinen Ortsnamen.
+- **Tabellen und Scans (Domänen-Durchsicht, Runde 5):** Bricht eine Tabellenzelle in eine zweite Zeile um
+  („Eheleute“ ⏎ „Gstettner“, „Am Gänsbichl“ ⏎ „4, 84453 Mühldorf a. Inn“), wird sie als Ganzes gelesen: Namen und
+  Anschriften darin werden geschwärzt, beide Teile einer Person tragen denselben Platzhalter, und ein Bruchstück wie
+  die Hausnummer „4“ wird nicht an anderen Stellen geschwärzt. Leicht schief eingezogene Scans (unter 1°) behalten
+  in Kastenformularen und kleinen Tabellen ihre Spalten (PLZ, Ort, Arbeitgeber, Vers.-Nr., Geburtsdatum unter
+  „geb. am“). In Kastenformularen und Abrechnungen mit mehreren Etikett- und Wertzeilen beginnt jede Etikettzeile
+  einen neuen Kopf: „Kreditinstitut“ und die Sparkasse werden nicht mehr zum Arbeitgeber, das Etikett „Beruf“ nicht
+  mehr Teil der Telefonnummer, die Beitragsgruppe „1111“ keine SV-Nummer; Berufe unter „Beruf des Ehepartners“
+  werden geschwärzt. Namen enden am Spaltentrenner („Mooslechner, Anton ⇥ PHV“: die Sparte ist kein Vorname und
+  trägt nicht mehr den Platzhalter des Kunden), eine Vertragsnummer mit Tausenderpunkten („7.712.345“) unter einem
+  Kennungs-Spaltenkopf wird geschwärzt. Feld-Etiketten eines Ausweises („Given names“, „Nationality“) werden auch
+  dann nicht als Namen geschwärzt, wenn die Texterkennung den Ausweis als Tabelle liest. Die Restrisiko-Prüfung meldet
+  keinen Fehlverdacht mehr für Spaltenköpfe und Etikettwörter („Sparte“, „Ausgeübter Beruf“, „Given names“, „Lieu de
+  naissance“), Ortsnamen in Firmennamen („Hausverwaltung Inntal GmbH“) und Fließtext unter einer Tabelle – ein solcher
+  Verdacht machte die Datei `_PRUEFEN`, lag aber nicht auf dem Leck; umbrochene Straßen und Nummern mit
+  Tausenderpunkten unter einem Kennungskopf meldet sie dagegen.
 
 ### Sicherheit
 - Manche PDFs (z. B. aus LibreOffice) enthielten nach dem Schwärzen das ungeschwärzte Originalbild unsichtbar
@@ -382,7 +424,7 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 ### Für Entwickler (Tests, CI, Messwerkzeuge)
 - Neuer Aufbau: ein Seitenmodell für Analyse, Schwärzung und Selbstkontrolle (`seitenmodell.py`),
   Erkennungsregeln als Module mit Register und Rückfallliste für die EXE (`anonymisierer/detektoren/`),
-  Wissensbasis (`wissen.py`, 17 Wortlisten in `anonymisierer/daten/`), dazu `kundenliste.py`,
+  Wissensbasis (`wissen.py`, 23 Wortlisten in `anonymisierer/daten/`), dazu `kundenliste.py`,
   `restrisiko.py`, `nebenkanaele.py`, `bilder.py`, `fotos.py`, `vorschau.py`, `vorschau_fenster.py` und
   `auftrag.py` (welche Funde und Stellen die Oberfläche an die Schwärzung gibt; auch für
   `werkzeuge/benchmark.py --weg oberflaeche`).
@@ -410,6 +452,13 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   `werkzeuge/wissen_pflegen.py` (Wortlisten) und `werkzeuge/programmsymbol.py` (`icon.ico`).
 - Kommentare im Code verweisen auf Entwicklungsunterlagen (`CONTRACT_V2.md`, `BENCHMARK_SCHEMA.md`, „Vertrag
   Abschnitt …“), die nicht im Repository liegen.
+- Zusammenführung der Runde 5 (Pakete Kennungen/Kfz und Personen/Tabellen): Regeln, die beide Pakete getrennt
+  eingeführt hatten, gibt es nur einmal – für Erkennung und Restrisiko-Prüfung gemeinsam die USt-IdNr. und
+  HRA-Nummer von Einzelkaufleuten, Inhabern und Freiberuflern (`kennungsformen.einzelkaufmann_block`,
+  `kennungsformen.ust_id_der_firma`; ein Trennpunkt „·“ allein macht eine Fußzeile nicht zur Firmenangabe) und
+  Nummern mit Tausenderpunkten unter einem Kennungs-Spaltenkopf (`kennungsformen.kennungswert`); „Marke und Modell
+  sind kein Name“ prüft eine Funktion (`namen._ner_sachtreffer`). Plattformnamen (Instagram, WhatsApp …) stehen
+  nur in `allerweltswoerter_gross.txt`, nicht zusätzlich in `sachnamen.txt`.
 
 Auslieferung und Dokumentation nach dem Review „Auslieferung/Doku“ (AD-01 … AD-08):
 

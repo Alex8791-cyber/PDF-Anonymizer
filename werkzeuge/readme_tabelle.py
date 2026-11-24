@@ -64,19 +64,20 @@ ERLAEUTERUNG = {
              "für den Geburtsnamen hinter „geb.“/„geborene“ („Anna Weber geb. Schulz“)",
     "iban": "auch mit falscher Prüfziffer, wenn sie eindeutig wie eine IBAN aussieht (Hinweis „Lesefehler?“)",
     "email": "auch verschleiert („name (at) web (punkt) de“, „name [at] gmx [dot] de“)",
-    "geburt": "hinter „geb.“, „Geburtsdatum“ … oder hinter einem Namen mit Komma, Stern oder Klammer („Max "
-              "Mustermann, 02.09.1983“); in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre "
+    "geburt": "hinter „geb.“, „Geburtsdatum“, „Geburt des Kindes am“ … oder hinter einem Namen mit Komma, Stern "
+              "oder Klammer („Max Mustermann, 02.09.1983“) – bei Kindern und Mitversicherten („Kind 2: Lea Brandl, "
+              "30.06.2018“) in jedem Alter; in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre "
               "zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“",
-    "vertrag": "Nummer hinter einem Etikett wie „Vertrags-Nr.“ – auch hinter Zwischenwörtern („Personalnummer beim "
-               "Arbeitgeber: 4711“), mit Tausenderpunkten („Kundennummer: 4.711.208“) oder als Code („Geräte-ID: "
-               "TLX-KQ8B-ZR3M“); auch eVB-Nummer (elektronische Versicherungsbestätigung) und Transferticket der "
-               "Kfz-Versicherung; ohne Etikett MAC-Adresse, EID einer eSIM, Nummer im Marktstammdatenregister, "
-               "Aktenzeichen eines Gerichts („3 C 456/24“), Flurstück und Grundbuchblatt; nicht Gebühren- und "
-               "Katalogziffern (GOZ, GOÄ, PZN), "
+    "vertrag": "Nummer hinter einem Etikett wie „Vertrags-Nr.“ oder in einer Tabellenspalte mit solchem Kopf – auch "
+               "hinter Zwischenwörtern („Personalnummer beim Arbeitgeber: 4711“), mit Tausenderpunkten („Kundennummer: "
+               "4.711.208“, „7.712.345“ unter „Vertrag“) oder als Code („Geräte-ID: TLX-KQ8B-ZR3M“); auch eVB-Nummer "
+               "(elektronische Versicherungsbestätigung) und Transferticket der Kfz-Versicherung; ohne Etikett "
+               "MAC-Adresse, EID einer eSIM, Nummer im Marktstammdatenregister, Aktenzeichen eines Gerichts („3 C "
+               "456/24“), Flurstück und Grundbuchblatt; nicht Gebühren- und Katalogziffern (GOZ, GOÄ, PZN), "
                "Fahrzeugschlüssel (HSN/TSN) und Paragrafen („§ 34d GewO“)",
     "steuerid": "ohne Beschriftung nur mit gültiger Prüfziffer, auch gruppiert („30 268 175 922“)",
-    "steuernr": "ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma (die "
-                "eines Einzelkaufmanns schon)",
+    "steuernr": "ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma (die von "
+                "Einzelkaufleuten, Inhabern und Freiberuflern schon)",
     "ausweis": "mit Etikett; Ausweis- und Passnummern auch ohne Etikett, wenn die Prüfziffer stimmt; auf "
                "Ausweiskopien auch die maschinenlesbare Zone",
     "mandat": "nur hinter einem Etikett",
@@ -100,7 +101,9 @@ ERLAEUTERUNG = {
                      "vierstellige PLZ mit Ort hinter einer Straße oder mit Länderhinweis („8002 Zürich“), "
                      "sechsstellige PLZ mit Länderhinweis und ausländische Kennzeichen im Satz mit Länderhinweis",
     "ort": "Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“",
-    "beruf": "hinter „Beruf:“ oder im Satz („arbeitet als …“)",
+    "beruf": "hinter „Beruf:“, im Satz („arbeitet als …“), in der Spalte „Beruf“/„Tätigkeit“ einer "
+             "Personenliste und im Beruf-Feld eines Kastenformulars (Wert unter dem Feldbezeichner, auch unter „Beruf "
+             "des Ehepartners“)",
     "arbeitgeber": "hinter „Arbeitgeber:“ oder im Satz; bekannte Versicherer, Banken und Behörden bleiben stehen",
     "diagnose": "nur bekannte Begriffe und ICD-Codes mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten "
                 "(⚕, nicht angehakt)",

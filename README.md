@@ -109,13 +109,13 @@ steht unter [Was NICHT erkannt wird](#was-nicht-erkannt-wird).
 | IBANs | DE89 3704 0044 0532 0130 00 | `[IBAN]` | Ausgewogen | auch mit falscher Prüfziffer, wenn sie eindeutig wie eine IBAN aussieht (Hinweis „Lesefehler?“) |
 | E-Mail-Adressen | max.mustermann@example.de | `[E-MAIL]` | Ausgewogen | auch verschleiert („name (at) web (punkt) de“, „name [at] gmx [dot] de“) |
 | Telefonnummern | 0171 2345678 | `[TELEFON]` | Ausgewogen |  |
-| Geburtsdaten | geb. am 02.09.1983 | `[GEB-DATUM]` | Ausgewogen | hinter „geb.“, „Geburtsdatum“ … oder hinter einem Namen mit Komma, Stern oder Klammer („Max Mustermann, 02.09.1983“); in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“ |
+| Geburtsdaten | geb. am 02.09.1983 | `[GEB-DATUM]` | Ausgewogen | hinter „geb.“, „Geburtsdatum“, „Geburt des Kindes am“ … oder hinter einem Namen mit Komma, Stern oder Klammer („Max Mustermann, 02.09.1983“) – bei Kindern und Mitversicherten („Kind 2: Lea Brandl, 30.06.2018“) in jedem Alter; in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“ |
 | Straße + Hausnummer, Postfach | Hauptstraße 12a | `[ADRESSE]` | Ausgewogen |  |
 | PLZ + Ort | 90402 Nürnberg | `[PLZ ORT]` | Ausgewogen |  |
-| Vertrags-/Kunden-/Schein-/Aktenzeichen | Versicherungsschein-Nr. LV-2024-887766 | `[VERTRAGS-NR]` | Ausgewogen | Nummer hinter einem Etikett wie „Vertrags-Nr.“ – auch hinter Zwischenwörtern („Personalnummer beim Arbeitgeber: 4711“), mit Tausenderpunkten („Kundennummer: 4.711.208“) oder als Code („Geräte-ID: TLX-KQ8B-ZR3M“); auch eVB-Nummer (elektronische Versicherungsbestätigung) und Transferticket der Kfz-Versicherung; ohne Etikett MAC-Adresse, EID einer eSIM, Nummer im Marktstammdatenregister, Aktenzeichen eines Gerichts („3 C 456/24“), Flurstück und Grundbuchblatt; nicht Gebühren- und Katalogziffern (GOZ, GOÄ, PZN), Fahrzeugschlüssel (HSN/TSN) und Paragrafen („§ 34d GewO“) |
+| Vertrags-/Kunden-/Schein-/Aktenzeichen | Versicherungsschein-Nr. LV-2024-887766 | `[VERTRAGS-NR]` | Ausgewogen | Nummer hinter einem Etikett wie „Vertrags-Nr.“ oder in einer Tabellenspalte mit solchem Kopf – auch hinter Zwischenwörtern („Personalnummer beim Arbeitgeber: 4711“), mit Tausenderpunkten („Kundennummer: 4.711.208“, „7.712.345“ unter „Vertrag“) oder als Code („Geräte-ID: TLX-KQ8B-ZR3M“); auch eVB-Nummer (elektronische Versicherungsbestätigung) und Transferticket der Kfz-Versicherung; ohne Etikett MAC-Adresse, EID einer eSIM, Nummer im Marktstammdatenregister, Aktenzeichen eines Gerichts („3 C 456/24“), Flurstück und Grundbuchblatt; nicht Gebühren- und Katalogziffern (GOZ, GOÄ, PZN), Fahrzeugschlüssel (HSN/TSN) und Paragrafen („§ 34d GewO“) |
 | Sozialversicherungsnummern | 12 345678 A 123 | `[SV-NR]` | Ausgewogen |  |
 | Steuer-IDs | 91064389278 | `[STEUER-ID]` | Ausgewogen | ohne Beschriftung nur mit gültiger Prüfziffer, auch gruppiert („30 268 175 922“) |
-| Steuernummern / USt-IdNr. | Steuernummer: 181/815/08155 | `[STEUER-NR]` | Ausgewogen | ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma (die eines Einzelkaufmanns schon) |
+| Steuernummern / USt-IdNr. | Steuernummer: 181/815/08155 | `[STEUER-NR]` | Ausgewogen | ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma (die von Einzelkaufleuten, Inhabern und Freiberuflern schon) |
 | Krankenversichertennummern | A123456780 | `[KV-NR]` | Ausgewogen |  |
 | Kindergeldnummern | 009FK407160 | `[KINDERGELD-NR]` | Ausgewogen |  |
 | Kfz-Kennzeichen | N-XY 123 | `[KENNZEICHEN]` | Ausgewogen | nur mit amtlichem Unterscheidungszeichen (nicht Modellcodes wie „KTM RC 390“), auch „RO - KL 2207“ und klein geschrieben; hinter einem Kfz-Etikett („Versicherungskennzeichen:“, „Kurzzeitkennzeichen“, „Versicherungsplakette Nr.“) auch Versicherungs-, Kurzzeit-, rote und Ausfuhrkennzeichen („435 GHT“, „RO-04 1287“) und ausländische Kennzeichen |
@@ -130,7 +130,7 @@ steht unter [Was NICHT erkannt wird](#was-nicht-erkannt-wird).
 | Standort/Koordinaten (GPS) | GPS: 48.13715, 11.57612 | `[STANDORT]` | Ausgewogen | Koordinaten als Dezimalgrad-Paar oder in Grad/Minuten/Sekunden |
 | Ausländische Anschriften und Kennzeichen | Kerkstraat 12, 1017 GC Amsterdam | `[AUSLAND]` | Hoch | auch Straßen mit vorangestelltem Straßentyp („Str. Memorandumului nr. 27“, „Calea …“), vierstellige PLZ mit Ort hinter einer Straße oder mit Länderhinweis („8002 Zürich“), sechsstellige PLZ mit Länderhinweis und ausländische Kennzeichen im Satz mit Länderhinweis |
 | Orte ohne PLZ (Ort-Datum-Zeile, Geburtsort) | Musterstadt, 03.04.2025 | `[ORT]` | Hoch | Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“ |
-| Beruf (bei Personen) | Beruf: Elektriker | `[BERUF]` | Hoch | hinter „Beruf:“ oder im Satz („arbeitet als …“) |
+| Beruf (bei Personen) | Beruf: Elektriker | `[BERUF]` | Hoch | hinter „Beruf:“, im Satz („arbeitet als …“), in der Spalte „Beruf“/„Tätigkeit“ einer Personenliste und im Beruf-Feld eines Kastenformulars (Wert unter dem Feldbezeichner, auch unter „Beruf des Ehepartners“) |
 | Arbeitgeber (bei Personen) | Arbeitgeber: Muster Bau GmbH | `[ARBEITGEBER]` | Hoch | hinter „Arbeitgeber:“ oder im Satz; bekannte Versicherer, Banken und Behörden bleiben stehen |
 | Diagnosen, ICD-Codes (Gesundheitsdaten) | Diagnose: Diabetes mellitus (E11.9) | `[DIAGNOSE]` | Maximal | nur bekannte Begriffe und ICD-Codes mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten (⚕, nicht angehakt) |
 | Medikamente (Gesundheitsdaten) | Medikation: Metformin 500 mg | `[MEDIKAMENT]` | Maximal | nur bekannte Begriffe mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten (⚕, nicht angehakt) |
@@ -671,9 +671,11 @@ Tesseract** – nur den entpackten Ordner. Auch die Visual-C++-Laufzeit liegt da
   der Ausgabe (bei Scans per erneuter OCR). Die Restrisiko-Prüfung (`restrisiko.py`) liest die
   Ausgabe als unabhängige zweite Linie mit eigenen Regeln – ohne die Erkennungsregeln und ohne
   das Sprachmodell – und meldet, was nach Personendaten aussieht. Gemeinsam mit der
-  Erkennung nutzt sie nur die Regel „Etikett + Wert“ für eVB-Nummer, Transferticket,
-  Kartenprüfnummer und Geburtsname (`kennungsformen.py`), damit beide dieselben Schreibweisen
-  kennen. Eine zentrale
+  Erkennung nutzt sie nur die Regel „Etikett + Wert“ für jedes Kennungs-Etikett, die
+  Kennungsformen ohne Etikett und die USt-IdNr. von Einzelkaufleuten (`kennungsformen.py`)
+  sowie die Personenregeln für Geburtsdaten im Familienkontext, Nachbarschaftsangaben, die
+  Zulassungsbescheinigung und GbR-Namen (`personenkontext.py`), damit beide dieselben
+  Schreibweisen kennen. Eine zentrale
   Statusregel (`analyse.WARNUNGS_CODES`, `analyse.ist_leckrelevant`) entscheidet für jede
   Meldung, ob die Ausgabe `_PRUEFEN` heißt.
 - **Bilder:** `fotos.py` (Fotobereiche und Lichtbilder), `bilder.py` (Neukodierung,
@@ -694,7 +696,8 @@ Tesseract** – nur den entpackten Ordner. Auch die Visual-C++-Laufzeit liegt da
   höchstens zwei Zeilen mit den Kernaussagen; ein Klick zeigt alle Grenzen.
 - Code und Oberfläche sind deutsch. Paketaufbau `anonymisierer/`: `analyse.py`,
   `schwaerzung.py`, `seitenmodell.py`, `detektoren/`, `muster.py` (Kategorien, Muster,
-  Schutzstufen), `kennungsformen.py`, `namen.py` (spaCy), `wissen.py` + `daten/`, `kundenliste.py`,
+  Schutzstufen), `kennungsformen.py`, `personenkontext.py`, `namen.py` (spaCy), `wissen.py` +
+  `daten/`, `kundenliste.py`,
   `restrisiko.py`, `ocr.py`, `fotos.py`, `bilder.py`, `nebenkanaele.py`, `vorschau.py`,
   `vorschau_fenster.py`, `gui.py`, `gui_attrappen.py`, `auftrag.py` (welche Funde und Stellen
   die Oberfläche an die Schwärzung gibt), `dateien.py`; Startskript `pdf_anonymisierer.py`.

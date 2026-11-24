@@ -61,6 +61,8 @@ Meldeadresse
 Meldeanschrift
 Name und Anschrift
 Nationalität
+Nationalité
+Nationality
 Nebenwohnsitz
 neue Anschrift
 Nr.

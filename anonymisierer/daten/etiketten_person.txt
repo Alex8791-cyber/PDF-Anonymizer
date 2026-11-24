@@ -42,11 +42,23 @@ Anspruchsteller(in)
 Anspruchsteller/-in
 Anspruchsteller/in
 Anspruchstellerin
+Antragsgegner
+Antragsgegner(in)
+Antragsgegner/-in
+Antragsgegner/in
+Antragsgegnerin
 Antragsteller
 Antragsteller(in)
 Antragsteller/-in
 Antragsteller/in
 Antragstellerin
+Anwalt der Gegenseite
+Anwältin der Gegenseite
+Anzeigeerstatter
+Anzeigeerstatter(in)
+Anzeigeerstatter/-in
+Anzeigeerstatter/in
+Anzeigeerstatterin
 Anzeigende
 Anzeigender
 Arbeitgeber
@@ -110,14 +122,22 @@ Beitragszahler(in)
 Beitragszahler/-in
 Beitragszahler/in
 Beitragszahlerin
+Beklagte
+Beklagte(r)
+Beklagter
 Beneficiary
 Berater
 Berater(in)
 Berater/-in
 Berater/in
 Beraterin
+berechtigte Fahrerin
+berechtigter Fahrer
 Beschäftigte
 Beschäftigter
+Beschuldigte
+Beschuldigte(r)
+Beschuldigter
 Besitzer
 Besitzer(in)
 Besitzer/-in
@@ -131,6 +151,7 @@ Betreuer(in)
 Betreuer/-in
 Betreuer/in
 Betreuerin
+Betroffene(r)
 Bevollmächtigte
 Bevollmächtigter
 Bezugsberechtigte
@@ -149,6 +170,9 @@ Datenschutzbeauftragte
 Datenschutzbeauftragter
 Depotinhaber
 Depotinhaberin
+Dienstwagenberechtigte
+Dienstwagenberechtigte(r)
+Dienstwagenberechtigter
 Ehefrau
 Ehegatte
 Ehegattin
@@ -168,6 +192,9 @@ Eigentümer/in
 Eigentümerin
 eingetragene Lebenspartnerin
 eingetragener Lebenspartner
+Einweisende Ärztin
+Einweisende(r)
+Einweisender Arzt
 Eltern
 Elternteil
 Empfänger
@@ -186,6 +213,8 @@ Erblasser/-in
 Erblasser/in
 Erblasserin
 Ergotherapie
+Erstbehandelnde Ärztin
+Erstbehandelnder Arzt
 Ersteller
 Ersteller(in)
 Ersteller/-in
@@ -202,6 +231,11 @@ Fahrer(in)
 Fahrer/-in
 Fahrer/in
 Fahrerin
+Fahrzeugbenutzer
+Fahrzeugbenutzer(in)
+Fahrzeugbenutzer/-in
+Fahrzeugbenutzer/in
+Fahrzeugbenutzerin
 Fahrzeugeigentümer
 Fahrzeugeigentümer(in)
 Fahrzeugeigentümer/-in
@@ -217,11 +251,22 @@ Fahrzeughalter(in)
 Fahrzeughalter/-in
 Fahrzeughalter/in
 Fahrzeughalterin
+Fahrzeugnutzer
+Fahrzeugnutzer(in)
+Fahrzeugnutzer/-in
+Fahrzeugnutzer/in
+Fahrzeugnutzerin
 Familienangehörige
+Familienmitglied
+Familienmitglieder
 Familienname
+Familienversicherte
+Familienversicherte(r)
+Familienversicherter
 Family name
 Firma/Name
 First name
+Fluggast
 Friseursalon
 frühere Namen
 früherer Name
@@ -234,6 +279,15 @@ Fußgänger/in
 Fußgängerin
 Geburtsname
 Gefahrperson
+Gegenseite
+Gegner
+Gegner(in)
+Gegner/-in
+Gegner/in
+Gegnerin
+Gegnerische Anwältin
+gegnerische Partei
+Gegnerischer Anwalt
 Gemeinschaftspraxis
 Generalagentur
 Generalbevollmächtigte
@@ -262,6 +316,11 @@ Gläubiger/in
 Gläubigerin
 Großmutter
 Großvater
+Grundstückseigentümer
+Grundstückseigentümer(in)
+Grundstückseigentümer/-in
+Grundstückseigentümer/in
+Grundstückseigentümerin
 Gutachter
 Gutachter(in)
 Gutachter/-in
@@ -273,9 +332,22 @@ Halter(in)
 Halter/-in
 Halter/in
 Halterin
+Hauptfahrer
+Hauptfahrer(in)
+Hauptfahrer/-in
+Hauptfahrer/in
+Hauptfahrerin
+Hauptversicherte
+Hauptversicherte(r)
+Hauptversicherter
 Hausarzt
 Hausärztin
 Hausarztpraxis
+Hauseigentümer
+Hauseigentümer(in)
+Hauseigentümer/-in
+Hauseigentümer/in
+Hauseigentümerin
 Hausmeister
 Hausmeister(in)
 Hausmeister/-in
@@ -295,6 +367,11 @@ Heilpraktiker/in
 Heilpraktikerin
 Hinterbliebene
 Hinterbliebener
+Hundebesitzer
+Hundebesitzer(in)
+Hundebesitzer/-in
+Hundebesitzer/in
+Hundebesitzerin
 Hundehalter
 Hundehalter(in)
 Hundehalter/-in
@@ -331,12 +408,26 @@ Käufer(in)
 Käufer/-in
 Käufer/in
 Käuferin
+Kfz-Halter
+Kfz-Halter(in)
+Kfz-Halter/-in
+Kfz-Halter/in
+Kfz-Halterin
 Kfz-Werkstatt
 Kind
 Kind 1
 Kind 2
 Kind 3
 Kinder
+Kindergeldberechtigte
+kindergeldberechtigte Person
+Kindergeldberechtigte(r)
+Kindergeldberechtigter
+Kläger
+Kläger(in)
+Kläger/-in
+Kläger/in
+Klägerin
 Kontakt im Notfall
 Kontaktperson
 Kontoinhaber
@@ -361,6 +452,11 @@ Kundenbetreuerin
 Kundenname
 Kundin
 Last name
+Leasingnehmer
+Leasingnehmer(in)
+Leasingnehmer/-in
+Leasingnehmer/in
+Leasingnehmerin
 Lebensgefährte
 Lebensgefährtin
 Lebenspartner
@@ -368,6 +464,10 @@ Lebenspartner(in)
 Lebenspartner/-in
 Lebenspartner/in
 Lebenspartnerin
+Leistungsberechtigte
+leistungsberechtigte Person
+Leistungsberechtigte(r)
+Leistungsberechtigter
 Leistungsempfänger
 Leistungsempfänger(in)
 Leistungsempfänger/-in
@@ -410,16 +510,44 @@ Mitarbeiter/-in
 Mitarbeiter/in
 Mitarbeiterin
 Mitarbeitername
+Miteigentümer
+Miteigentümer(in)
+Miteigentümer/-in
+Miteigentümer/in
+Miteigentümerin
 Miterbe
 Miterbin
+Mitfahrer
+Mitfahrer(in)
+Mitfahrer/-in
+Mitfahrer/in
+Mitfahrerin
 Mitreisende
+mitreisende Person
+mitreisende Personen
 Mitreisender
+Mitreisendes Kind
+Mitreiter
+Mitreiter(in)
+Mitreiter/-in
+Mitreiter/in
+Mitreiterin
 Mitschuldner
 Mitschuldnerin
 Mitversicherte
 mitversicherte Person
 mitversicherte Personen
 Mitversicherter
+Mitzuversichernde
+mitzuversichernde Kinder
+Mitzuversichernde(r)
+Mitzuversichernder
+mitzuversicherndes Kind
+Motorradfahrer
+Motorradfahrer(in)
+Motorradfahrer/-in
+Motorradfahrer/in
+Motorradfahrerin
 Mutter
 Nachbar
 Nachbar(in)
@@ -453,6 +581,7 @@ Name des Versicherten
 Name des Versicherungsnehmers
 Name des Zahlungspflichtigen
 Name des Zeugen
+Name of passenger
 Name und Anschrift
 Name und Vorname
 Name VN
@@ -470,16 +599,37 @@ Partner(in)
 Partner/-in
 Partner/in
 Partnerin
+Passagier
+Passagiere
+Passagierin
+Passenger
+Passenger name
 Patient
+Patient name
 Patient(in)
 Patient/-in
 Patient/in
+Patientenbesitzer
+Patientenbesitzer(in)
+Patientenbesitzer/-in
+Patientenbesitzer/in
+Patientenbesitzerin
 Patientenname
 Patientin
 Person
 Personalien
 Personendaten
 Persönliche Daten
+Pferdebesitzer
+Pferdebesitzer(in)
+Pferdebesitzer/-in
+Pferdebesitzer/in
+Pferdebesitzerin
+Pferdehalter
+Pferdehalter(in)
+Pferdehalter/-in
+Pferdehalter/in
+Pferdehalterin
 Pflegebedürftige
 Pflegebedürftiger
 pflegende Person
@@ -503,19 +653,49 @@ Prokurist(in)
 Prokurist/-in
 Prokurist/in
 Prokuristin
+Prozessbevollmächtigte
+Prozessbevollmächtigter
+Prozessgegner
+Prozessgegner(in)
+Prozessgegner/-in
+Prozessgegner/in
+Prozessgegnerin
 Radfahrer
 Radfahrer(in)
 Radfahrer/-in
 Radfahrer/in
 Radfahrerin
+Rechnungsadressat
+Rechnungsadressat(in)
+Rechnungsadressat/-in
+Rechnungsadressat/in
+Rechnungsadressatin
 Rechnungsaussteller
 Rechnungsausstellerin
+Rechnungsempfänger
+Rechnungsempfänger(in)
+Rechnungsempfänger/-in
+Rechnungsempfänger/in
+Rechnungsempfängerin
 Rechnungssteller
 Rechnungsstellerin
 Rechtsanwalt
 Rechtsanwältin
+Rehabilitand
+Rehabilitandin
+Reiseanmelder
+Reiseanmelder(in)
+Reiseanmelder/-in
+Reiseanmelder/in
+Reiseanmelderin
 Reisende
 Reisender
+Reiseteilnehmer
+Reiseteilnehmer(in)
+Reiseteilnehmer/-in
+Reiseteilnehmer/in
+Reiseteilnehmerin
+Reitbeteiligung
 Rentenempfänger
 Rentenempfänger(in)
 Rentenempfänger/-in
@@ -558,19 +738,33 @@ Signature
 Sohn
 Sorgeberechtigte
 Sorgeberechtigter
+Sozia
+Sozius
+Sozius/Sozia
 Spender
 Spender(in)
 Spender/-in
 Spender/in
 Spenderin
+Stammversicherte
+Stammversicherte(r)
+Stammversicherter
 Steuerberater
 Steuerberaterin
+Streitverkündete
+Streitverkündete(r)
+Streitverkündeter
 Student
 Student(in)
 Student/-in
 Student/in
 Studentin
 Surname
+Teilnehmer
+Teilnehmer(in)
+Teilnehmer/-in
+Teilnehmer/in
+Teilnehmerin
 Testamentsvollstrecker
 Testamentsvollstrecker(in)
 Testamentsvollstrecker/-in
@@ -582,6 +776,11 @@ Therapeut/-in
 Therapeut/Arzt
 Therapeut/in
 Therapeutin
+Tierbesitzer
+Tierbesitzer(in)
+Tierbesitzer/-in
+Tierbesitzer/in
+Tierbesitzerin
 Tierhalter
 Tierhalter(in)
 Tierhalter/-in
@@ -589,13 +788,20 @@ Tierhalter/in
 Tierhalterin
 Titel, Vorname, Name
 Tochter
+Traveller
 Treuhänder
 Treuhänder(in)
 Treuhänder/-in
 Treuhänder/in
 Treuhänderin
 überweisende Ärztin
+Überweisende(r)
 überweisender Arzt
+Überweiser
+Überweiser(in)
+Überweiser/-in
+Überweiser/in
+Überweiserin
 Unfallbeteiligte
 Unfallbeteiligter
 Unfallgegner
@@ -627,6 +833,11 @@ Unterzeichner/-in
 Unterzeichner/in
 Unterzeichnerin
 Vater
+Verfahrensgegner
+Verfahrensgegner(in)
+Verfahrensgegner/-in
+Verfahrensgegner/in
+Verfahrensgegnerin
 Verfasser
 Verfasser(in)
 Verfasser/-in
@@ -639,6 +850,7 @@ Verkäufer(in)
 Verkäufer/-in
 Verkäufer/in
 Verkäuferin
+Verletzte(r)
 Vermieter
 Vermieter(in)
 Vermieter/-in
@@ -714,9 +926,29 @@ Vorstandsvorsitzende
 Vorstandsvorsitzender
 VP
 Waise
+weitere Fahrerin
+weiterer Fahrer
 Werkstatt
+Widerbeklagte
+Widerbeklagte(r)
+Widerbeklagter
+Widerkläger
+Widerkläger(in)
+Widerkläger/-in
+Widerkläger/in
+Widerklägerin
 Witwe
 Witwer
+Wohnungseigentümer
+Wohnungseigentümer(in)
+Wohnungseigentümer/-in
+Wohnungseigentümer/in
+Wohnungseigentümerin
+Wohnungsnutzer
+Wohnungsnutzer(in)
+Wohnungsnutzer/-in
+Wohnungsnutzer/in
+Wohnungsnutzerin
 Zahlungsempfänger
 Zahlungsempfänger(in)
 Zahlungsempfänger/-in
@@ -733,5 +965,15 @@ Zeugen
 Zeugin
 zu versichernde Person
 Zuname
+Zusatzfahrer
+Zusatzfahrer(in)
+Zusatzfahrer/-in
+Zusatzfahrer/in
+Zusatzfahrerin
 Zustellungsbevollmächtigte
 Zustellungsbevollmächtigter
+Zweitfahrer
+Zweitfahrer(in)
+Zweitfahrer/-in
+Zweitfahrer/in
+Zweitfahrerin

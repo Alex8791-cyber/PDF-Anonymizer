@@ -2730,6 +2730,15 @@ class OcrDienst:
             return None
         return eintrag["winkel"]
 
+    def schraeglage_falls_bekannt(self, pdf_pfad, seite_nr0: int, dpi: int = OCR_DPI, clip=None):
+        """(geschätzte Schräglage in Grad, tatsächlich herausgedrehte Korrektur) aus dem Zwischenspeicher – startet
+        KEINE OCR; None, wenn die Seite noch nicht gelesen wurde."""
+        with self._lock:
+            eintrag = self._cache.get(self._schluessel(pdf_pfad, seite_nr0, dpi, clip, None))
+        if eintrag is None or eintrag.get("fehler"):
+            return None
+        return float(eintrag.get("schraeg") or 0.0), float(eintrag.get("korrektur") or 0.0)
+
     def text(self, pdf_pfad, seite_nr0: int, dpi: int = OCR_DPI, winkel=None, clip=None) -> str:
         """OCR-Text einer Seite (Kontroll-OCR), zeilenweise in Lesefolge. winkel: Ausrichtung des Originals
         übernehmen – die Ausgabe enthält zu wenige Wörter, um sie neu zu bestimmen (Gutachten S-08)."""

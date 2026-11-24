@@ -56,6 +56,7 @@ Regel „Etikett + Wert“ (wert_hinter_etikett):
     katalognummer(text, s, e)          Pharmazentralnummer (PZN) – keine Telefonnummer, keine Kennung einer Person
     einzelkaufmann_block(text, pos), einzelkaufmann_register(text)   HRA/USt-IdNr. eines Einzelkaufmanns (Person)
     einzelkaufmann_erwaehnt(text)      Vorprüfung: "e.K.", "Inhaber:" im Text
+    ust_id_der_firma(text, pos)        USt-IdNr. einer Firma (Erkennung: dann keine Angabe einer Person)
     vorschrift(text, s, e)             Nummer einer Vorschrift ("§ 34d", "8 34d Abs. 1 GewO") – kein Wert
   Kfz, Anschriften und neue Kategorien (Runde 5, Paket K2):
     KFZ_ETIKETT_RE, kfz_etikett(etikett), kfz_wert(text, pos, grenze), KFZ_WERTFORM   Kfz-Etiketten mit Fahrzeugbezug
@@ -1826,11 +1827,19 @@ def kennungen_ohne_etikett(text: str) -> list:
 
 
 # Einzelkaufmann (e.K., e.Kfm., e.Kfr.) bzw. Betrieb mit Inhaber: Handelsregisternummer (HRA) und USt-IdNr. sind dort
-# Angaben einer natürlichen Person (Domänen-Befund 55) – nicht im Block einer Kapitalgesellschaft (GmbH, AG, SE, UG,
-# KGaA, "GmbH & Co. KG", HRB) und nicht in einer Fußzeile mit Pflichtangaben ("Amtsgericht … · USt-IdNr. …")
-_EINZELKAUFMANN_RE = re.compile(r"(?<![\w])(?:e\.[ ]?K(?:fm|fr)?\.|Inhaber(?:in)?[ \t]*:|Inh\.[ \t]*[A-ZÄÖÜ])")
-_KAPITALGESELLSCHAFT_RE = re.compile(r"(?<![\w])(?:GmbH|gGmbH|mbH|AG(?![ \t]+[A-ZÄÖÜ][a-zäöü])|SE|UG|KGaA|eG|"
-                                     r"e\.[ ]?V\.|VVaG|Ltd\.?|Inc\.|HR[ ]?B)(?![\w])")   # "AG Traunstein": Amtsgericht
+# Angaben einer natürlichen Person (Domänen-Befunde 55 und 77) – nicht im Block einer juristischen Person bzw.
+# Handelsgesellschaft (GmbH, AG, SE, UG, KG, OHG, KGaA, "GmbH & Co. KG", HRB). Ein Trennpunkt ("·") allein ist kein
+# Firmenmerkmal: auch die Fußzeile eines Handwerkers ("Malerbetrieb Huberle e.K. · Gartenweg 3 · …", "Inhaber: … ·
+# USt-IdNr. …") nennt die Angaben einer Person. Eine Regel für Erkennung (muster) und Selbstkontrolle (restrisiko).
+_EINZELKAUFMANN_RE = re.compile(r"(?<![\w])(?:e\.[ ]?K(?:fm|fr)?\.|Inhaber(?:in)?(?:[ \t]*:|[ \t]+[A-ZÄÖÜ])|"
+                                r"Inh\.[ \t]*[A-ZÄÖÜ])")
+_KAPITALGESELLSCHAFT_RE = re.compile(r"(?<![\w])(?:GmbH|gGmbH|mbH|AG(?![ \t]+[A-ZÄÖÜ][a-zäöü])|SE|UG|KG|KGaA|OHG|eG|"
+                                     r"e\.[ ]?V\.|VVaG|a\.[ ]?G\.|gAG|Ltd\.?|Inc\.|HR[ ]?B)(?![\w])")
+#                                                                        "AG Traunstein": Amtsgericht, keine Rechtsform
+# Register- und Organisationswörter einer USt-IdNr. ohne Einzelkaufmann (Fußzeile des Versicherers, Gutachten EQ-16)
+_ORGANISATION_UST_RE = re.compile(r"(?<![\wäöüß])(?:Versicherung\w*|Versicherer|Bank|Sparkasse|HRB|HRA|Registergericht|"
+                                  r"Amtsgericht|Handelsregister|Vorstand|Aufsichtsrat\w*|Geschäftsführ\w*|"
+                                  r"Sitz(?:[ \t]+der[ \t]+Gesellschaft)?)(?![\wäöüß])")
 _HRA_RE = re.compile(r"(?<![\w])HR[ ]?A[ ]?\d{1,6}(?:[ ]?[A-Z])?(?![\w])")
 UST_ID_WERT_RE = re.compile(r"(?<![\w])DE[ \t]?\d{3}[ \t]?\d{3}[ \t]?\d{3}(?![\w])")
 _BLOCK_ZEILEN = 8                 # so viele Zeilen um die Stelle gehören höchstens zu ihrem Angabenblock
@@ -1838,13 +1847,11 @@ _BLOCK_ZEILEN = 8                 # so viele Zeilen um die Stelle gehören höch
 
 def einzelkaufmann_block(text: str, pos: int) -> bool:
     """Steht pos im Angabenblock eines Einzelkaufmanns bzw. Betriebs mit Inhaber (Zeilen bis zur nächsten Leerzeile,
-    höchstens _BLOCK_ZEILEN davor und danach): "e.K."/"Inhaber:" darin, keine Kapitalgesellschaft, und die Zeile ist
-    keine Fußzeile mit Trennpunkten?"""
+    höchstens _BLOCK_ZEILEN davor und danach): "e.K."/"Inhaber:" darin und keine juristische Person bzw.
+    Handelsgesellschaft?"""
     zeilenanfang = text.rfind("\n", 0, pos) + 1
     zeilenende = text.find("\n", pos)
     zeilenende = len(text) if zeilenende < 0 else zeilenende
-    if re.search(r"[·•|]", text[zeilenanfang:zeilenende]):
-        return False
     a = zeilenanfang
     for _ in range(_BLOCK_ZEILEN):
         if a <= 0:
@@ -1864,6 +1871,29 @@ def einzelkaufmann_block(text: str, pos: int) -> bool:
         b = nach
     block = text[a:b]
     return bool(_EINZELKAUFMANN_RE.search(block)) and not _KAPITALGESELLSCHAFT_RE.search(block)
+
+
+def _ust_umgebung(text: str, pos: int) -> str:
+    """Zeile der Stelle und die zwei Zeilen davor."""
+    anfang = pos
+    for _ in range(3):
+        anfang = text.rfind("\n", 0, max(0, anfang - 1))
+        if anfang < 0:
+            anfang = 0
+            break
+    ende = text.find("\n", pos)
+    return text[anfang:len(text) if ende < 0 else ende]
+
+
+def ust_id_der_firma(text: str, pos: int) -> bool:
+    """Gehört die USt-IdNr. an pos einer Firma (Erkennung: dann keine Angabe einer Person)? Nein im Angabenblock eines
+    Einzelkaufmanns bzw. Inhabers (einzelkaufmann_block); sonst ja mit der Rechtsform einer juristischen Person bzw.
+    Handelsgesellschaft oder einem Register- bzw. Organisationswort in der Zeile und den zwei Zeilen davor. Ohne jedes
+    Firmenmerkmal (Freiberufler: "Quirin Zwackelhuber · Fotografie · …") eine Angabe der Person."""
+    if einzelkaufmann_block(text, pos):
+        return False
+    umgebung = _ust_umgebung(text, pos)
+    return bool(_KAPITALGESELLSCHAFT_RE.search(umgebung) or _ORGANISATION_UST_RE.search(umgebung))
 
 
 def einzelkaufmann_erwaehnt(text: str) -> bool:

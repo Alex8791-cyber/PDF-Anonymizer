@@ -11,9 +11,12 @@ eine zweite Verteidigungslinie darf nicht dieselben blinden Flecken haben wie di
 Listen der Wissensbasis (anonymisierer.wissen), das Seitenmodell (dieselbe Lesart der Seite), die gemeinsame Regel
 „Etikett + Wert“ für eVB-Nummer, Transferticket, Kartenprüfnummer und Geburtsname (anonymisierer.kennungsformen –
 mit der Erkennung geteilt, damit beide dieselben Schreibweisen kennen: getrennt gebaut, hatten beide dieselben
-Lücken, Gegenprüfung Runde 4c) und eigene, einfache Formregeln mit eigenen Prüfziffer-Rechnungen – dazu für den
-Seitenverdacht das Pixelmaß „Seite nachweislich leer“ (analyse.seite_nachweislich_leer, keine Erkennung: dieselbe
-Entscheidung „leere Rückseite“ wie beim Status der Schwärzung).
+Lücken, Gegenprüfung Runde 4c), der Familien- und Versichertenkontext für Geburtsdaten ohne Stichwort, Wohn- und
+Nachbarschaftsangaben, Tierangaben, die USt-IdNr. von Einzelkaufleuten, die Felder C.1.1/C.1.2 der
+Zulassungsbescheinigung und Namen einer GbR (anonymisierer.personenkontext, ebenso geteilt), die Gattungswörter vor
+einem Ort (wissen.ortsname_hinter_gattung) und eigene, einfache Formregeln mit eigenen Prüfziffer-Rechnungen – dazu
+für den Seitenverdacht das Pixelmaß „Seite nachweislich leer“ (analyse.seite_nachweislich_leer, keine Erkennung:
+dieselbe Entscheidung „leere Rückseite“ wie beim Status der Schwärzung).
 
 Was gemeldet wird (jede Regel liefert Stelle + Grund):
   * Kennungen: Ziffernfolgen ab 5 Ziffern – auch in Gruppen ("6 259 674 059", "0170 318 40 11") und mit
@@ -51,10 +54,13 @@ Was gemeldet wird (jede Regel liefert Stelle + Grund):
     Internetadressen.
   * Datum mit plausiblem Geburtsjahr (Alter 14-110), außer hinter Vertragsdaten-Etiketten (Beginn, Ablauf,
     Datum …, auch als Tabellenspalte) und in Zeiträumen; hinter Geburtsdatum-Etiketten jedes vergangene Datum.
-    Bekannte Lücke: das Geburtsdatum eines Kindes unter 14 Jahren OHNE Geburtsdatum-Etikett ("Mitversichert: Tochter
-    14.03.2015") meldet die Prüfung nicht – jedes Datum der letzten 14 Jahre (Rechnungs-, Schadens-, Vertragsdaten)
-    wäre sonst Verdacht; dort bleibt die Erkennung die einzige Linie (mit "geb." davor oder einem Namen daneben
-    meldet die Prüfung).
+    Jünger als 14 Jahre nur im Familien- und Versichertenkontext (personenkontext: "Kind 2:", "Tochter:",
+    "Mitversicherte Person:", "Reisende:" in der Zeile vor dem Namen oder als Überschrift des Blocks) direkt an einer
+    Person – einem Personen-Platzhalter oder einem Vor-/Nachnamen der Wissensbasis, getrennt durch Komma, Klammer,
+    Stern oder Tabulator ("Kind 2: [PERSON A], 30.06.2018"); nicht an einem Behandler (Titel, Praxis, Klinik davor)
+    und nicht vor einem Behandlungstext ("…, 03.11.2012: Meniskusoperation"). Jedes andere Datum der letzten 14 Jahre
+    (Rechnungs-, Schadens-, Vertragsdaten) bleibt ohne Verdacht. Dazu ein Geburtsjahr hinter "Geburtsjahr",
+    "Geb.-Jahr", "Jahrgang" ("Geburtsjahr der versicherten Person: 1979").
   * Namen: Vor- und Nachnamen der Wissensbasis (eindeutige immer, mehrdeutige mit Personenkontext; nicht als
     Modellname hinter einer Marke: "Seat Leon"), unbekannte Eigennamen in Personenkontext (Herr/Frau/Titel,
     Etiketten wie "Name:", "Vorstand:", direkt hinter einem Vornamen, neben einem Personen-Platzhalter, im
@@ -125,6 +131,7 @@ except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
     import fitz
 
 from . import kennungsformen
+from . import personenkontext
 from . import ocr as _ocr
 from . import seitenmodell as sm
 
@@ -188,10 +195,15 @@ _KALENDERWOERTER = frozenset({
     "dezember", "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonnabend", "sonntag",
     "ostern", "pfingsten", "weihnachten"})
 # Großgeschriebene Funktionswörter und allgemeine Personenwörter: nie ein Name (auch nicht am Satzanfang)
+# Artikel und Begleiter direkt vor einem großgeschriebenen Wort: ein Substantiv, kein Name ("Die Scheibe ist …")
+_ARTIKEL = frozenset({"der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "eines",
+                      "kein", "keine", "keinen", "keinem", "keiner", "diese", "dieser", "dieses", "diesen", "jede",
+                      "jeder", "jedes", "unsere", "unser", "ihre", "seine", "meine", "deren", "dessen"})
 _STOPPWOERTER = frozenset("""
 der die das den dem des ein eine einen einem einer eines und oder aber doch sondern denn weil da dass daß wenn
 als wie ob mit ohne für gegen um durch bis von vom zu zum zur bei beim nach aus auf an am in im über unter vor
-hinter neben zwischen seit ab wegen trotz während ich du er sie es wir ihr ihre ihren ihrem ihres ihrer sein
+hinter neben zwischen seit ab wegen trotz während ich du er sie es wir ihr ihre ihren ihrem ihres ihrer ihnen ihm
+ihn mich mir dich dir uns euch sich sein
 seine seinen seinem seiner mein meine meinen meinem meiner unser unsere unseren unserem unserer euer eure dieser
 diese dieses diesen diesem jeder jede jedes jeden alle allen keine kein keinen bitte danke sehr herzliche
 herzlichen freundliche freundlichen viele vielen beste besten liebe lieber hallo guten tag ja nein nicht auch
@@ -232,6 +244,10 @@ _FUNKTIONSPOSTFAECHER = frozenset({
     "ombudsmann", "aufsicht", "kanzlei", "praxis", "team",
 })
 # Rechtsformen und Wörter, die eine Organisation kennzeichnen (Briefkopf/Fußzeile eines Unternehmens)
+# Rechtsform einer juristischen Person direkt hinter dem Wort ("Hausverwaltung Inntal GmbH": ein Firmenname, kein
+# Familienname einer Person; Personengesellschaften wie KG, OHG, GbR, e.K. nennen oft Personen)
+_JURISTISCH_DANACH_RE = re.compile(r"[ \t]+(?:GmbH|gGmbH|AG|SE|KGaA|mbH|UG|e\.[ \t]?V\.|eG|VVaG|a\.[ \t]?G\.)"
+                                   r"(?![\wäöüß])")
 _RECHTSFORM_RE = re.compile(
     r"(?<![\w])(?:AG|GmbH|mbH|SE|KG|KGaA|OHG|GbR|e\.\s?V\.|eG|e\.\s?G\.|VVaG|V\.V\.a\.G\.|a\.\s?G\.|AöR|KdöR|"
     r"Ltd\.?|S\.A\.|N\.V\.|B\.V\.|Inc\.|PartG(?:mbB)?|UG|(?i:v{1,3}a[gq]|gmbh|kgaa))(?![\w])")
@@ -354,6 +370,14 @@ _STRASSE_PRAEP_RE = re.compile(
 # "siehe Platz 2") – eine Straße schreibt ihren Artikel groß ("Am Feld 5", "Im Grund 3")
 _VERWEIS_STRASSE_RE = re.compile(r"(?:^|[ \t])(?:laut|lt\.|gem\.|gemäß|siehe|vgl\.|aus|in|im|nach|unter)[ \t]+"
                                  + r"(?i:" + _STRASSEN_ENDUNG + r")$")
+# Straßenname ohne Hausnummer als ganze Zelle (Zellumbruch: die Hausnummer steht am Anfang der Zeile darunter)
+_STRASSENNAME_ZELLE_RE = re.compile(
+    r"(?:[A-ZÄÖÜ][\wäöüßÄÖÜ'.]*[\s\-]){0,3}[A-ZÄÖÜ]?[\wäöüßÄÖÜ\-]*" + _STRASSEN_ENDUNG + r"\.?"
+    r"|(?:Am|An der|An den|An dem|Auf der|Auf dem|Auf den|Im|In der|In den|In dem|Zum|Zur|Hinter der|Hinter dem|"
+    r"Hinter den|Unter den|Unter der|Vor dem|Vor den|Über der|Bei der|Platz der|Platz des|Alt|Neue|Alte|Obere|"
+    r"Untere|Kleine|Große|Lange|Hohe)[\s\-](?:[A-ZÄÖÜ][\wäöüßÄÖÜ\-]+[ ]){0,2}[A-ZÄÖÜ][\wäöüßÄÖÜ\-]+",
+    re.IGNORECASE)
+_HAUSNUMMER_VORN_RE = re.compile(r"[ \t]*(\d{1,4}(?:[ ]?[a-zA-Z])?)(?![\w.])")
 # Wörter, mit denen ein Straßenname beginnen kann, die aber auch gewöhnliche Wörter sind ("Straße des 17. Juni")
 _STRASSEN_ANFANG = frozenset({"straße", "strasse", "str", "platz", "weg", "allee", "gasse", "ring", "damm", "ufer",
                               "chaussee", "am", "an", "auf", "im", "in", "zum", "zur", "unter", "hinter", "vor",
@@ -394,6 +418,14 @@ _OCR_RAND = " \t‚„,.'’`´|;:"           # Krümel der OCR vor/hinter einem
 # Diagnosekontext für Diagnoseschlüssel ohne Buchstaben ("125.11" als OCR-Lesung von "I25.11")
 _DIAGNOSE_RE = re.compile(r"(?i)diagnos|icd|befund|krankheit|erkrankung|syndrom|störung|leiden|beschwerden|"
                           r"hypertonie|insuffizienz|fraktur|arthrose|entzündung|infekt")
+# Geburtsjahr hinter seinem Etikett ("Geburtsjahr: 1983", "Geb.-Jahr 1979", "Geburtsjahr der versicherten Person:
+# 1979", "Jahrgang 1961", "Jg. 1961") – dieselben Etiketten wie die Erkennung (muster._JAHRGANG_RE)
+_GEBURTSJAHR_RE = re.compile(
+    r"(?<![\wäöüß])(?:(?i:jg\.|jahrgang)[ \t]*|(?i:geburtsjahr(?:gang)?|geb\.-?[ \t]?jahr)"
+    r"(?:[ \t]+(?:des|der)[ \t]+[^\W\d_]+(?:[ \t]+[^\W\d_]+)?)?[ \t]*:?[ \t]*)((?:19|20)\d{2})(?![\d/\-]|[.,]\d)")
+# Datum direkt an einer Person (Familienkontext): Trenner zwischen Name/Platzhalter und Datum
+_FAMILIE_TRENNER_RE = re.compile(r"(?:[ \t]*(?:,|\(|\*)[ \t]*|[ \t]*\t[ \t]*|[ \t]+[-–][ \t]+|[ \t]+)$")
+_PERSON_PLATZHALTER_ENDE_RE = re.compile(r"\[(?:PERSON|P|FAMILIE|F|NAME)\b[^\]\n]{0,12}\]$")
 _BEREICH_DANACH_RE = re.compile(r"^\s?(?:-|–|—|bis(?:\s+zum)?|to)\s?\d")
 _BEREICH_DAVOR_RE = re.compile(r"(?:-|–|—|\bbis(?:\s+zum)?|\bvon|\bvom|\bab|\bseit|\bzwischen|\bperiod)\s?$",
                                re.IGNORECASE)
@@ -723,8 +755,8 @@ class _Wissen:
         return self._cache[schluessel]
 
     def index(self, art: str):
-        """Phrasenindex: Etiketten einer Art ("person", "adresse" …), "rollen", "allowlist" oder "berufe" (oder
-        None)."""
+        """Phrasenindex: Etiketten einer Art ("person", "adresse" …), "rollen", "allowlist", "berufe" oder
+        "sachnamen" (oder None)."""
         if art not in self._indizes:
             index = None
             if self.modul is not None:
@@ -733,8 +765,8 @@ class _Wissen:
                         index = self.modul.Phrasenindex(_ROLLEN, name="rollen")
                     elif art == "allowlist":
                         index = self.modul.index("versicherer_und_organisationen")
-                    elif art == "berufe":
-                        index = self.modul.index("berufe")
+                    elif art in ("berufe", "sachnamen"):
+                        index = self.modul.index(art)
                     else:
                         index = self.modul.index(f"etiketten_{art}")
                 except Exception:
@@ -1233,7 +1265,16 @@ class _Seitenpruefung:
             return False
         if _RECHTSFORM_RE.search(t):
             return len(woerter) <= 6
+        if len(woerter) <= 2 and t.isupper() and len(t) >= 3 and self._ganz_allowlist(t):
+            return True                     # Name des Versicherers in Versalien ("HUK-COBURG", "ARAG"; Befund 66)
         return bool(_ORG_WORT_RE.search(t)) and len(woerter) <= 4
+
+    def _ganz_allowlist(self, t: str) -> bool:
+        """Ist der ganze Text ein Eintrag der Allowlist (Versicherer, Banken, Behörden)?"""
+        try:
+            return bool(self.w.modul is not None and self.w.modul.ist_allowlist(t))
+        except Exception:
+            return False
 
     # -- Organisationsbereiche: Fußzeile und Briefkopf eines Unternehmens --------------------------------
     def _herkunft(self, z) -> str:
@@ -1682,6 +1723,72 @@ class _Seitenpruefung:
             self._org[schluessel] = treffer >= 2 and treffer >= 0.4 * len(zellen)
         return self._org[schluessel]
 
+    def _datenzeile(self, z) -> bool:
+        """Datenzeile einer Tabelle: mehrere Zellen, Ziffern oder Platzhalter darin, keine Kopfzeile – ihre Zellen
+        sind Werte ihrer Spalten, auch die ohne Ziffern (erste Zeile einer umbrochenen Zelle, Befund 84)."""
+        schluessel = ("daten", z.id)
+        if schluessel not in self._org:
+            zeile = self.zeilen_text(z)
+            zellen = [t for t in re.split(r"\t+", zeile) if t.strip()]
+            self._org[schluessel] = (len(zellen) >= 2 and not self._kopfzeile(z)
+                                     and (any(c.isdigit() for c in zeile) or bool(_PLATZHALTER_RE.search(zeile))))
+        return self._org[schluessel]
+
+    def _schriftgroesse(self, z) -> float:
+        """Median der Schriftgröße einer Zeile ohne Platzhalter (0.0, wenn dort nur Platzhalter stehen)."""
+        zeile = self.zeilen_text(z)
+        gesperrt = [(m.start(), m.end()) for m in _PLATZHALTER_RE.finditer(zeile)]
+        abb, zeichen = self.m.abbildung, self.m.zeichen
+        groessen = []
+        for i in range(z.start, min(z.ende, len(abb))):
+            if self.text[i].isspace() or any(a <= i - z.start < b for a, b in gesperrt):
+                continue
+            g = abb[i]
+            if g >= 0 and zeichen[g].groesse:
+                groessen.append(zeichen[g].groesse)
+        groessen.sort()
+        return groessen[len(groessen) // 2] if groessen else 0.0
+
+    def _etikettzeile(self, z) -> bool:
+        """Etikettzeile eines Kastenformulars ("Ausgeübter Beruf ⇥⇥ Arbeitgeber" über den Werten): mehrere Zellen, keine
+        Ziffern und keine Platzhalter, ein Etikett der Wissensbasis in einer Zelle – und darunter die Werte: kleiner
+        gesetzt als die nächste Zeile darunter oder darunter nur Platzhalter (die geschwärzten Werte). Ihre Wörter sind
+        Feldbezeichner, keine Werte der Tabellenspalte darüber (Befund 90; die Erkennung beendet dort die Tabelle,
+        struktur_tabelle)."""
+        schluessel = ("etikettzeile", z.id)
+        if schluessel in self._org:
+            return self._org[schluessel]
+        self._org[schluessel] = False
+        zeile = self.zeilen_text(z)
+        zellen = [t.strip().rstrip(":") for t in re.split(r"\t+", zeile) if t.strip()]
+        if (len(zellen) < 2 or z.rect is None or any(c.isdigit() for c in zeile) or _PLATZHALTER_RE.search(zeile)
+                or not any(self.w.ist_etikett(t) for t in zellen)):
+            return False
+        unten = self.zeile_darunter(z, z.rect.x0, z.rect.x1)
+        if unten is None:
+            return False
+        eigen, darunter = self._schriftgroesse(z), self._schriftgroesse(unten)
+        werte = re.sub(r"[\s,.;:]+", "", _PLATZHALTER_RE.sub("", self.zeilen_text(unten)))
+        self._org[schluessel] = (not werte and _PLATZHALTER_RE.search(self.zeilen_text(unten)) is not None) \
+            or (eigen > 0 and darunter > 0 and eigen <= 0.85 * darunter)
+        return self._org[schluessel]
+
+    def zeile_darunter(self, z, x0: float, x1: float):
+        """Nächste Zeile unter z nach der Lage auf der Seite (höchstens eine Zeilenhöhe Abstand), die im x-Bereich
+        [x0, x1] Zeichen hat (dieselbe Tabellenspalte), oder None."""
+        if z is None or z.rect is None:
+            return None
+        hoehe = max(z.rect.height, 4.0)
+        beste = None
+        for y in self.m.zeilen:
+            r = y.rect
+            if r is None or y.id == z.id or r.y0 < z.rect.y1 - 0.3 * hoehe or r.y0 - z.rect.y1 > hoehe \
+                    or r.x1 < x0 or r.x0 > x1:
+                continue
+            if (beste is None or r.y0 < beste.rect.y0) and any(x0 - 2 <= xm <= x1 + 2 for _, xm in self.zeichen_x(y)):
+                beste = y
+        return beste
+
     def spaltenkopf(self, s: int, e: int, arten, streng: bool = True):
         """Tabellenspalte: (Art, Etikett) des Spaltenkopfs über der Stelle – die Zellen darüber werden nach
         oben durchgegangen, solange sie Werte (Ziffern, Platzhalter) tragen; die erste Zelle mit einem Etikett
@@ -1693,6 +1800,14 @@ class _Seitenpruefung:
         eigene = self.zeilen_text(z)
         if re.match(r"\s*[^\t:]{1,40}:\s*\t", eigene) and not self._kopfzeile(z):
             return None                        # Schlüssel-Wert-Zeile ("Tarif:  ZahnPlus 80"), keine Tabelle
+        if self._etikettzeile(z):
+            return None                        # selbst eine Etikettzeile (Kastenformular), kein Wert der Spalte
+        # eigene Zelle (zwischen Tabulatoren): ein kurzer Wert darf über Datenzeilen hinweg zu seinem Kopf, Fließtext
+        # unter der Tabelle nicht ("Die Erstattung … überweisen wir auf Ihr Konto" unter "Leistungserbringer")
+        rel_s, rel_e = max(0, s - z.start), max(0, e - z.start)
+        ende_zelle = eigene.find("\t", rel_e)
+        eigene_zelle = eigene[eigene.rfind("\t", 0, rel_s) + 1:ende_zelle if ende_zelle >= 0 else len(eigene)]
+        kurzer_wert = len(eigene_zelle.split()) <= 5
         leer = 0
         oben = z.rect.y0
         hoehe = max(z.rect.height, 8.0)
@@ -1713,6 +1828,8 @@ class _Seitenpruefung:
             if not kurz and (zelle.endswith(":") or not self._kopfzeile(y)):
                 if any(c.isdigit() for c in zelle) or self.ist_platzhalter_bei(zs, ze):
                     continue
+                if kurzer_wert and not zelle.endswith(":") and self._datenzeile(y):
+                    continue                   # Wert einer Datenzeile derselben Spalte ("Eheleute" ⏎ "Gstettner")
                 return None
             for art in arten:
                 index = self.w.index(art)
@@ -1747,8 +1864,12 @@ class _Seitenpruefung:
             self._daten(z, zeile)
             self._kontakt(z, zeile)
             self._anschriften(z, zeile)
+            if "\t" in zeile:
+                self._umbrochene_strasse(z, zeile)
         self._namen()
         self._geburtsname_etiketten()
+        self._zb1_felder()
+        self._gemeinschaften()
         self._reste_neben_platzhaltern()
         self._ort_datum()
         self._seitenformen()
@@ -1841,6 +1962,15 @@ class _Seitenpruefung:
                 self._kennung_bewerten(z, zeile, anfang, tokens[j][1])
             i = j + 1
 
+    def _modellnummer(self, z, zeile: str, s: int) -> bool:
+        """Steht die Ziffernfolge direkt hinter einer Marke oder einem Modell der Wissensbasis (sachnamen: "Dell XPS",
+        "Samsung Galaxy") – höchstens ein Modellwort dazwischen ("Dell XPS 13 9340", "Lenovo ThinkPad T14")? Befund 66
+        der Domänen-Durchsicht."""
+        basis = max(0, s - 40)
+        stellen = personenkontext.sachnamen_stellen(zeile[basis:s], self.w.modul)
+        # nur Leerzeichen dazwischen: dieselbe Zelle (eine Nummer in der nächsten Spalte gehört nicht zur Marke)
+        return any(re.fullmatch(r" +(?:[A-Za-z][\w\-]{0,14} +)?", zeile[basis + b:s]) for _, b in stellen)
+
     @staticmethod
     def _hausnummer_plz(zeile: str, s: int, e: int, ns: int, ne: int) -> bool:
         """Sind die Ziffern s:e eine Hausnummer und ns:ne die Postleitzahl dahinter ("Prinzregentenplatz 21 - 81675
@@ -1899,14 +2029,17 @@ class _Seitenpruefung:
         g_s, g_e = z.start + s, z.start + e
         davor = zeile[max(0, s - 40):s]
         if _ORG_NUMMER_RE.search(davor) or _GLAEUBIGER_ID_RE.match(stueck):
-            return                                   # Handelsregister, USt-IdNr., BLZ, Gläubiger-ID, Formular
+            return                                   # Handelsregister, USt-IdNr., BLZ, Gläubiger-ID, Formular (die
+                                                     # eines Einzelkaufmanns meldet _formen: _einzelkaufmann)
         if kennungsformen.katalognummer(self.text, g_s, g_e):
             return                                   # Pharmazentralnummer (PZN): Katalognummer eines Arzneimittels
         if _EINHEIT_RE.match(zeile[e:e + 14]) or _WAEHRUNG_VOR_RE.search(davor.rsplit("\t", 1)[-1]):
             return                                   # Währung davor nur in derselben Zelle ("449,00 EUR ⇥⇥ 62231874":
                                                      # die Seriennummer steht in der Zelle hinter dem Preis)
-        if re.fullmatch(r"\d{1,3}/\d{1,3}", stueck):
-            return                                   # Verhältnis/Tarifstufe "300/150"
+        if re.fullmatch(r"\d{1,3}/\d{1,3}", stueck) or re.fullmatch(r"\d{1,5}/(?:100|1000|10000|100000)", stueck):
+            return                                   # Verhältnis/Tarifstufe "300/150", Miteigentumsanteil "125/1000"
+        if self._modellnummer(z, zeile, s):
+            return                                   # Modellnummer hinter Marke/Modell ("Dell XPS 13 9340")
         if _ICD_RE.fullmatch(stueck) and self._diagnoseschluessel(z, zeile, s, e, g_s, g_e):
             return                                   # Diagnoseschlüssel, auch verlesen ("(125.11" für "(I25.11")
         if self._datumsform(z, stueck, g_s, g_e):
@@ -2070,11 +2203,12 @@ class _Seitenpruefung:
                 if art == "kontakt" and self.org_kontext(o + s):
                     continue                         # Auftritt der Organisation (Briefkopf, Fußzeile)
                 self.neu(o + s, o + e, grund, art)
-        # Handelsregisternummer (HRA) und USt-IdNr. im Angabenblock eines Einzelkaufmanns: Angaben einer Person (die
-        # Ausnahmen der Organisation gelten dort nicht, kennungsformen.einzelkaufmann_block)
+        # Handelsregisternummer (HRA) und USt-IdNr. im Angabenblock eines Einzelkaufmanns bzw. Inhabers: Angaben einer
+        # Person (die Ausnahmen der Organisation gelten dort nicht; dieselbe Regel wie die Erkennung,
+        # kennungsformen.einzelkaufmann_block und ust_id_der_firma, Domänen-Befunde 55 und 77)
         for g_s, g_e in self._einzelkaufmann():
             if z.start <= g_s < z.ende and not self.ist_platzhalter_bei(g_s, g_e):
-                self.neu(g_s, g_e, "Register- bzw. USt-Nummer eines Einzelkaufmanns (Person)", "form")
+                self.neu(g_s, g_e, "Register- bzw. USt-Nummer eines Einzelkaufmanns oder Inhabers (Person)", "form")
         # Kennungen mit eigener Wertform hinter ihrem Etikett (eVB-Nummer, Transferticket, Kartenprüfnummer)
         self._formen_hinter_etikett(z, zeile, maske)
         # Kennungs-Etikett + Wert mit Ziffern (auch kurze: "Az. 123 C 45/24")
@@ -2097,6 +2231,9 @@ class _Seitenpruefung:
             mindest = 1 if re.search(r"(?i)kennz|kfz", v.text) else 2
             if re.match(r"(?i)(?:seite|blatt|page|s\.)\s?\d", w) or self.w.ist_etikett((w.split() or [w])[0]):
                 continue
+            kopf = re.match(r"([^\W\d_][\w\-]*(?:[ ][^\W\d_][\w\-]*){0,2})[ ]?:", w)
+            if kopf and self.w.ist_etikett(kopf.group(1)):
+                continue                                # das nächste Etikett ("Mein Zeichen: …", Befund 83)
             if (_ziffern(w) < mindest or len(w) < 3 or _ORG_NUMMER_RE.search(zeile[:v.ende])
                     or re.fullmatch(r"[\d\s.,]+[€%]?", w) or any(maske[s:s + len(w)]) or _GLAEUBIGER_ID_RE.match(w)
                     or self.ist_platzhalter_bei(o + s, o + s + len(w))):
@@ -2141,6 +2278,36 @@ class _Seitenpruefung:
                 if f.getrennt and self._wort_harmlos(_titel(wort)):
                     continue                            # "Geburtsname:" ⏎ "Komfort", "Wohneigentum": kein Name
                 self.neu(f.start, f.ende, f"möglicher Geburtsname (hinter »{' '.join(m.group(0).split())}«)", "name")
+
+    def _zb1_felder(self):
+        """Name oder Vornamen in den Feldern C.1.1/C.1.2 einer Zulassungsbescheinigung Teil I – dieselbe Regel wie die
+        Erkennung (personenkontext.zb1_personenfelder), auch ein einzelner Nachname in Versalien."""
+        for s, e in personenkontext.zb1_personenfelder(self.text):
+            stueck = self.text[s:e]
+            if self.ist_platzhalter_bei(s, e) or not any(c.isalpha() for c in stueck):
+                continue
+            self.neu(s, e, "Name im Feld C.1.1/C.1.2 der Zulassungsbescheinigung", "name")
+        # Anschrift im Feld C.1.3 (dasselbe Anschrift-Etikett wie in der Erkennung): jedes lesbare Wort außerhalb der
+        # Platzhalter ("C.1.3  HOFMARK 7, [PLZ ORT]" -> "HOFMARK 7")
+        for s, e in personenkontext.zb1_anschriftfelder(self.text):
+            woerter = [(s + m.start(), s + m.end()) for m in re.finditer(r"[^\W_][\w.\-/]*", self.text[s:e])
+                       if not (self.ist_platzhalter_bei(s + m.start(), s + m.end())
+                               or self.ist_gesperrt(s + m.start(), s + m.end()))]
+            if woerter:
+                self.neu(woerter[0][0], woerter[-1][1], "Anschrift im Feld C.1.3 der Zulassungsbescheinigung",
+                         "anschrift")
+
+    def _sachwort(self, wort: str) -> bool:
+        """Allerweltswort, Ort oder Organisation der Erlaubnisliste (wie wissen_namen._sachwort)."""
+        art = self.w.art(wort)
+        return art[4] or art[6] or self.w.frage("ist_ort", wort)
+
+    def _gemeinschaften(self):
+        """Familienname einer GbR oder Erbengemeinschaft ("Felsberger GbR") – dieselbe Regel wie die Erkennung
+        (personenkontext.gemeinschaft_namen)."""
+        for s, e in personenkontext.gemeinschaft_namen(self.text, self._sachwort):
+            if not self.ist_platzhalter_bei(s, e):
+                self.neu(s, e, "Name einer GbR oder Gemeinschaft", "name")
 
     def _formen_hinter_etikett(self, z, zeile: str, maske: list):
         """Wert hinter dem Etikett einer eVB-Nummer, eines Transfertickets oder einer Kartenprüfnummer – mit der Form
@@ -2324,6 +2491,11 @@ class _Seitenpruefung:
 
     def _daten(self, z, zeile: str):
         heute = _heute()
+        for m in _GEBURTSJAHR_RE.finditer(zeile):
+            if heute.year - ALTER_MAX <= int(m.group(1)) <= heute.year:
+                s, e = z.start + m.start(1), z.start + m.end(1)
+                if not (self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e)):
+                    self.neu(s, e, "Geburtsjahr hinter Etikett", "datum")
         alle = []
         for regex, art in self._datumsformen(z):
             for m in regex.finditer(zeile):
@@ -2354,14 +2526,30 @@ class _Seitenpruefung:
                 etikett = ("datum_geburt", "geboren")
             if etikett is None:
                 etikett = self.etikett_davor(s, e, ("datum_geburt", "vertragsdaten"))
+                if etikett is not None and etikett[0] == "vertragsdaten" and etikett[1].islower() \
+                        and len(etikett[1]) <= 4:
+                    # "am"/"vom" sind Füllwörter: "die Geburt unserer Tochter am 14.09.2026" – das Geburts-Etikett
+                    # davor zählt, wenn es im selben Satzteil steht (kein Komma dazwischen) und nicht selbst schon
+                    # sein Datum ankündigt ("geboren am [GEB-DATUM] ist am 31.03.2025 verstorben")
+                    geburt = self.etikett_davor(s, e, ("datum_geburt",))
+                    if geburt is not None and re.search(r"(?i)(?<![^\W\d_])(?:am|vom|den)$", geburt[1].strip()):
+                        geburt = None
+                    pos = zeile.rfind(geburt[1], 0, ms) if geburt is not None else -1
+                    if pos >= 0 and not re.search(r"[,;:]", zeile[pos + len(geburt[1]):ms]):
+                        etikett = geburt
             if etikett is None:
                 etikett = self.spaltenkopf(s, e, ("datum_geburt", "vertragsdaten"), streng=False)
             if etikett is not None and etikett[0] == "datum_geburt":
                 if alter <= 120:
                     self.neu(s, e, f"Datum hinter Etikett »{etikett[1]}«", "datum")
                 continue
+            if etikett is None and 0 <= alter < ALTER_MIN and self._familien_datum(z, ms, me):
+                self.neu(s, e, "Datum an einer Person im Familien-/Versichertenkontext (Geburtsdatum?)", "datum")
+                continue
             if etikett is not None or not (ALTER_MIN <= alter <= ALTER_MAX):
                 continue
+            if personenkontext.behandlungsdatum(zeile[:ms].rstrip(" \t,(*-–"), zeile, me):
+                continue                    # "Dr. [PERSON A], 03.11.2012: Meniskusoperation": Behandlungsdatum
             # Zeitraum: "01.09.1985 – 31.08.1988", "von … bis …", zwei Daten nebeneinander in einer Tabellenzeile
             if _BEREICH_DANACH_RE.match(zeile[me:me + 8]) or _BEREICH_DAVOR_RE.search(zeile[max(0, ms - 10):ms]):
                 continue
@@ -2372,6 +2560,59 @@ class _Seitenpruefung:
             if not zeile[:ms].strip(_OCR_RAND) and not zeile[me:].strip(_OCR_RAND) and self._datum_daneben(z, datum):
                 continue                    # Datum allein in seiner Zelle, rechts daneben das Ende des Zeitraums
             self.neu(s, e, "Datum mit möglichem Geburtsjahr", "datum")
+
+    def _familien_datum(self, z, ms: int, me: int) -> bool:
+        """Steht das Datum (Zeile z, Spanne ms:me) im Familien-/Versichertenkontext direkt an einer Person: links davon
+        ein Personen-Platzhalter oder ein Vor-/Nachname der Wissensbasis, dazwischen nur Komma, Klammer, Stern,
+        Bindestrich oder Tabulator ("Kind 2: [PERSON A], 30.06.2018", "Kinder: Ben (02.05.2019)") – nicht an einem
+        Behandler und nicht vor einem Behandlungstext (personenkontext.behandlungsdatum)?"""
+        text, zeile = self.text, self.zeilen_text(z)
+        davor = zeile[:ms]
+        trenner = _FAMILIE_TRENNER_RE.search(davor)
+        if trenner is None:
+            return False
+        vorn = davor[:trenner.start()]
+        name_start = None
+        m = _PERSON_PLATZHALTER_ENDE_RE.search(vorn)
+        if m:
+            name_start = m.start()
+        else:
+            w = re.search(r"([^\W\d_][\w'’\-]*)$", vorn)
+            if w and w.group(1)[:1].isupper():
+                vn, nn, vnm, nnm, aw, tit, allow, part = self.w.art(w.group(1))
+                if (vn or nn) and not (aw or tit or allow):
+                    name_start = w.start(1)
+        if name_start is None:
+            # auf der Seite: das graue Rechteck eines Personen-Platzhalters links neben dem Datum, dazwischen nur
+            # Satzzeichen (die Schwärzung schreibt den Platzhalter nicht an die Stelle des Namens im Text)
+            b = self.box(z.start + ms, z.start + me)
+            for ps, pe, rand in (self.platzhalter_boxen() if b is not None else ()):
+                if not _PERSONEN_PLATZHALTER_RE.match(text[ps:pe]) or rand[2] > b.x0 + 1:
+                    continue
+                if self._benachbart(b, rand, 3.0) and not any(re.search(r"[^\W_]", t) for t in
+                                                              self._woerter_zwischen(z, rand[2], b.x0)):
+                    name_start = len(davor[:trenner.start()].rstrip(" \t,(*-–"))
+                    break
+        if name_start is None:
+            return False
+        if personenkontext.behandlungsdatum(davor[:name_start], zeile, me):
+            return False
+        a = z.start
+        if not personenkontext.familien_kontext(text, a, a + name_start):
+            return False
+        if not personenkontext.familien_rolle_in_zeile(text, a, a + name_start) \
+                and personenkontext.BETRAG_IN_ZEILE_RE.search(zeile):
+            return False                    # Leistungs- oder Rechnungsliste unter "Kinder:"
+        return True
+
+    def _woerter_zwischen(self, z, x0: float, x1: float) -> list:
+        """Wörter der Zeile z, deren Box zum guten Teil zwischen x0 und x1 liegt."""
+        aus = []
+        for m in re.finditer(r"\S+", self.zeilen_text(z)):
+            wb = self.box(z.start + m.start(), z.start + m.end())
+            if wb is not None and min(wb.x1, x1) - max(wb.x0, x0) >= 1.0:
+                aus.append(m.group(0))
+        return aus
 
     def _datum_daneben(self, z, datum) -> bool:
         """Steht rechts neben der Zeile z in derselben Reihe (eigene Zeile des Seitenmodells: Tabellenspalte) allein ein
@@ -2490,10 +2731,51 @@ class _Seitenpruefung:
             if erstes.lower().rstrip(".") in _STRASSEN_ANFANG:
                 self._strassenwert(z, zeile, s, v.text)  # "Anschrift: Straße des 17. Juni 72", "Am Markt 3"
                 continue
+            if len(text.split()) > 1 and re.search(r"(?i)ort$", v.text.strip()) \
+                    and self.w.frage("ist_ortsgattung", erstes):
+                # "Unfallort: Skigebiet Sudelfeld": der Ort ist der Eigenname hinter den Gattungswörtern – dieselbe
+                # Regel wie die Erkennung hinter Ort-Etiketten (wissen.ortsname_hinter_gattung)
+                woerter = list(re.finditer(r"[^\s,;()/]+", text))
+                try:
+                    n = self.w.modul.ortsname_hinter_gattung([w.group(0) for w in woerter])
+                except Exception:
+                    n = 0
+                if n is None:
+                    continue                            # nur Gattungswörter, Einrichtung oder Straße
+                s, text = s + woerter[n].start(), text[woerter[n].start():]
+                erstes = text.split()[0]
+                if self.ist_platzhalter_bei(o + s, o + s + len(text)):
+                    continue
             vn, nn, vnm, nnm, aw, tit, allow, _ = self.w.art(erstes)
             if aw or tit or allow or erstes.lower() in _STOPPWOERTER or self.w.ist_etikett(erstes):
                 continue
             self.neu(o + s, o + s + len(text), f"Angabe hinter Etikett »{v.text}«", "anschrift")
+
+    def _umbrochene_strasse(self, z, zeile: str):
+        """Straßenname am Ende einer Zelle in einer Spalte mit Anschrift-Etikett im Kopf, die Hausnummer am Anfang
+        derselben Zelle in der Zeile darunter ("Am Gänsbichl" ⏎ "4, 84453 Mühldorf a. Inn": Zellumbruch einer
+        Bestandsliste, Befund 84) – die Erkennung liest die Zelle als Ganzes (struktur_tabelle)."""
+        o = z.start
+        for m in re.finditer(r"[^\t]+", zeile):
+            zelle = m.group(0).strip(" ,")
+            if not zelle or len(zelle.split()) > 4 or not _STRASSENNAME_ZELLE_RE.fullmatch(zelle):
+                continue
+            s = o + m.start() + m.group(0).index(zelle)
+            e = s + len(zelle)
+            if self.ist_gesperrt(s, e) or self.org_kontext(s) or self.w.ist_etikett(zelle.split()[-1]):
+                continue
+            b = self.box(s, e)
+            unten = self.zeile_darunter(z, b.x0, b.x1) if b is not None else None
+            if unten is None:
+                continue
+            darunter, ds, _ = self.zelle_ueber(unten, b.x0, b.x1)
+            nummer = _HAUSNUMMER_VORN_RE.match(darunter)
+            if nummer is None or self.spaltenkopf(s, e, ("adresse",)) is None:
+                continue
+            self.neu(s, e, "Anschrift (Straße + Hausnummer)", "anschrift")
+            ns, ne = ds + nummer.start(1), ds + nummer.end(1)
+            if not self.ist_gesperrt(ns, ne):
+                self.neu(ns, ne, "Anschrift (Straße + Hausnummer)", "anschrift")
 
     def _platzhalter_darunter(self, z) -> bool:
         """Beginnt die Zeile unter z (auf der Seite, nicht in der Textfolge – Platzhalter stehen im Modell als eigene
@@ -2623,14 +2905,15 @@ class _Seitenpruefung:
         def etikett_kontext(i) -> bool:
             """Steht das Wort im Wert hinter einem Personen-Etikett/einer Rolle ("Name: …", "Vorstand: …",
             "Name\\t\\tMax …") – nicht in Klammern, nicht hinter kleingeschriebenen Wörtern ("Facharzt für Innere
-            Medizin") und nicht in einer Kopfzeile aus lauter Etiketten?"""
+            Medizin") und nicht in einer Kopfzeile aus lauter Etiketten? Je Feld zählt das nächste Etikett links
+            des Worts ("Name des Hundehalters: Felsberger    Vorname: Rainer": beide Werte haben ihr Etikett)."""
             s = woerter[i][0]
             z = self.zeile(s)
             if z is None:
                 return False
-            ende = etikett_zeilen.get(z.id)
-            if ende is None:
-                ende = -1
+            enden = etikett_zeilen.get(z.id)
+            if enden is None:
+                enden = []
                 zeile = self.zeilen_text(z)
                 for art in ("person", "rollen"):
                     index = self.w.index(art)
@@ -2645,13 +2928,17 @@ class _Seitenpruefung:
                         am_anfang = not vor or vor.endswith(("\t", ":", "·", "|", ","))
                         if (am_anfang and v.text[:1].isupper()) or zeile[v.ende:v.ende + 2].startswith(":") \
                                 or v.text in ("gez.", "i. A.", "i.A.", "i. V.", "i.V.", "ppa."):
-                            ende = max(ende, z.start + v.ende)
-                etikett_zeilen[z.id] = ende
+                            enden.append(z.start + v.ende)
+                enden.sort()
+                etikett_zeilen[z.id] = enden
+            ende = max((x for x in enden if x <= s), default=-1)
             if not (0 <= ende <= s):
                 return False
             zwischen = text[ende:s]
             if "(" in zwischen and ")" not in zwischen[zwischen.rfind("("):]:
                 return False                            # in Klammern: "(Vorsitzender)"
+            if _RECHTSFORM_RE.search(zwischen):
+                return False                            # "Vermieter: Sixt GmbH & Co KG, Filiale Rosenheim": eine Firma
             if any(w[:1].islower() and not self.w.art(w)[7] for w in re.findall(r"[^\W\d_][\w\-]*", zwischen)):
                 return False                            # "Facharzt für Innere Medizin"
             if "\t" in zwischen:
@@ -2714,8 +3001,17 @@ class _Seitenpruefung:
             teile = woerter[i][2].split("-")
             if len(teile) < 2 or not all(t[:1].isupper() for t in teile if t):
                 return False
-            for t in teile:
-                vn, nn, vnm, nnm, aw, tit, allow, part = self.w.art(t)
+            arten_teile = [self.w.art(t) for t in teile if t]
+            nicht_leer = [t for t in teile if t]
+            # Komposita mit einem Sachwort oder einer Abkürzung sind keine Doppelnamen ("TAN-Verfahren", "SMS-TAN",
+            # "WLAN-MAC-Adresse"; Befunde 66/83): jeder Teil muss ein Name sein können – ein Sachwort-Teil nur dann
+            # nicht, wenn daneben ein eindeutiger Name in gewöhnlicher Schreibweise steht ("Schmidt-Wald")
+            stark = any(((a[0] and not a[2]) or (a[1] and not a[3])) and not a[4] and not t.isupper() and len(t) >= 3
+                        for t, a in zip(nicht_leer, arten_teile))
+            if any((not stark and (a[4] or self.w.ist_etikett(t)))
+                   or (t.isupper() and len(t) <= 4 and not (a[0] or a[1])) for t, a in zip(nicht_leer, arten_teile)):
+                return False
+            for t, (vn, nn, vnm, nnm, aw, tit, allow, part) in zip([t for t in teile if t], arten_teile):
                 if ((vn and not vnm) or (nn and not nnm)) and not aw and not allow and len(t) >= 3:
                     return True
             return False
@@ -2727,6 +3023,64 @@ class _Seitenpruefung:
                 or "&" in text[max(0, woerter[i][0] - 3):woerter[i][0]]
 
         gruss_zeilen = self._unterschriftszeilen()
+        # Namen in Wohn- und Nachbarschaftsangaben ("unseres Nachbarn Felsberger", "Bei Felsberger im 1. OG", "EG links
+        # (Hackenschmied)") – dieselbe Regel wie die Erkennung (personenkontext)
+        wohn_starts = {a for a, _ in personenkontext.wohn_kontext_namen(text)} if re.search(
+            r"(?i)nachbar|mieter|eigentümer|bewohner|hausmeister|verwalter|\b(?:og|eg|dg|ug)\b|geschoss|stock|etage",
+            text) else set()
+
+        sach_zeilen: dict = {}
+
+        def sachname(i) -> bool:
+            """Steht das Wort in einer Marke, einem Modell oder einer Tierrasse der Wissensbasis ("Weber Genesis",
+            "Junghans Max Bill", "Jack Russell Terrier"), vor einem Modellcode ("Böckmann TPV", "Rossini 540") oder in
+            der Abstammung eines Tiers – dieselben Regeln wie die Erkennung (namen.py, personenkontext)?"""
+            s, e = woerter[i][0], woerter[i][1]
+            z = self.zeile(s)
+            if z is None:
+                return False
+            if z.id not in sach_zeilen:
+                sach_zeilen[z.id] = [(z.start + a, z.start + b) for a, b in
+                                     personenkontext.sachnamen_stellen(self.zeilen_text(z), self.w.modul)]
+            if any(a <= s and e <= b for a, b in sach_zeilen[z.id]):
+                return True
+            if personenkontext.modellcode_danach(text, e, self.w.wortgestalt, (woerter[i][2],)):
+                return True                             # nicht vor Datum, Jahr, Betrag, Telefonnummer
+            return personenkontext.tierangabe(text, s)
+
+        def artikel_davor(i) -> bool:
+            """Steht direkt davor ein Artikel oder Begleiter ("Die Scheibe", "eine Weber-Grillstation")? Dann ist das
+            großgeschriebene Wort ein Substantiv (Befund 66)."""
+            return i > 0 and direkt(i, i - 1) and woerter[i - 1][2].lower() in _ARTIKEL
+
+        def ortszusatz(i) -> bool:
+            """Zusatz eines Ortsnamens hinter "/" ("Fürstenberg/Havel", "[PLZ ORT]/Havel", "Frankfurt/Oder")?"""
+            s = woerter[i][0]
+            if s < 1 or text[s - 1] != "/":
+                return False
+            if self.ist_platzhalter_bei(max(0, s - 3), s - 1) or \
+                    self.neben_platzhalter(s - 1, s, _ANSCHRIFT_PLATZHALTER_RE) is not None:
+                return True
+            davor = re.search(r"([^\W\d_][\w\-]*)/$", text[max(0, s - 40):s])
+            return bool(davor) and (self.w.frage("ist_ort", davor.group(1))
+                                    or bool(re.search(r"\d{5}[ \t]+" + re.escape(davor.group(1)) + "/$",
+                                                      text[max(0, s - 50):s])))
+
+        def partei(i) -> bool:
+            """Steht das Wort im Kurzrubrum direkt an "./." ("Kranzbühler ./. Felsberger")?"""
+            s, e = woerter[i][0], woerter[i][1]
+            return bool(re.search(r"\./\.[ \t]*$", text[max(0, s - 6):s])
+                        or re.match(r"[ \t]*(?:,[ \t]*[^\W\d_][\w\-]*[ \t]*)?\./\.", text[e:e + 40]))
+
+        def organisation(i) -> bool:
+            """Steht das Wort in einer Tabellenspalte mit Organisations-Kopf ("Versicherer" über "Adam Riese",
+            "Roland"; Befund 92) – dieselbe Regel wie die Erkennung (personenkontext.organisations_spalte)?"""
+            return personenkontext.organisations_spalte(text, woerter[i][0])
+
+        def name_amt(i) -> bool:
+            """Steht hinter dem Wort ", <Amtsbezeichnung>" ("Eibl, JAng", "Kollmannsberger, JOSin")?"""
+            m = re.match(r"[ \t]*,[ \t]*([A-Za-zÄÖÜäöü'’]{2,8})(?![\wäöüß])", text[woerter[i][1]:woerter[i][1] + 14])
+            return bool(m) and sum(c.isupper() for c in m.group(1)) >= 2 and self.w.art(m.group(1))[5]
 
         def firmenname(i) -> bool:
             """Steht das Wort hinter einer Geschäftsbezeichnung – direkt oder über Namenszusätze ("Werkstatt Weiß",
@@ -2753,7 +3107,31 @@ class _Seitenpruefung:
             if vn or nn or doppelname(i):
                 return True
             return not (self._wort_harmlos(w) or _ORG_WORT_RE.search(w) or _RECHTSFORM_RE.fullmatch(w)
-                        or self._strassenwort(i, woerter) or re.search(r"(?i)" + _STRASSEN_ENDUNG + r"$", w))
+                        or self._strassenwort(i, woerter) or re.search(r"(?i)" + _STRASSEN_ENDUNG + r"$", w)
+                        or self.w.frage("ist_ort", w) or _JURISTISCH_DANACH_RE.match(text, woerter[i][1]))
+
+        etikett_spannen: dict = {}
+
+        def im_etikett(i) -> bool:
+            """Steht das Wort in einem mehrteiligen Feld-Etikett der Wissensbasis ("Given names", "Lieu de naissance",
+            "Place of birth" auf einer Ausweiskopie, Befund 90)? Dann ist es ein Etikettwort, kein Eigenname."""
+            s, e = woerter[i][0], woerter[i][1]
+            z = self.zeile(s)
+            if z is None:
+                return False
+            spannen = etikett_spannen.get(z.id)
+            if spannen is None:
+                spannen = []
+                zeile = self.zeilen_text(z)
+                for art in ("person", "datum_geburt", "adresse", "kontakt", "kennung", "vertragsdaten"):
+                    index = self.w.index(art)
+                    try:
+                        treffer = index.finde(zeile) if index is not None else []
+                    except Exception:
+                        treffer = []
+                    spannen += [(z.start + v.start, z.start + v.ende) for v in treffer if " " in v.text.strip()]
+                etikett_spannen[z.id] = spannen
+            return any(a <= s and e <= b for a, b in spannen)
 
         for i, (s, e, w, k) in enumerate(woerter):
             if firmenname(i) and namenswort(i) and not (self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e)):
@@ -2788,10 +3166,20 @@ class _Seitenpruefung:
             gruss = (z_wort is not None and z_wort.id in gruss_zeilen and not w.isupper()
                      and not self._org_zeile(z_wort) and not self._wort_harmlos(w))
             geboren = geburtsname(i)
+            rolle = s in wohn_starts or partei(i) or name_amt(i)
             kontext = (titel or platzhalter or etikett or links_vorname or rechts_nachname or komma_paar or gruss
-                       or geboren)
+                       or geboren or rolle)
+            if personenkontext.tierangabe(text, s) or (personenkontext.medizinisch(w, text, s, self.w.modul)
+                                                       and not titel):
+                continue                                # "Abstammung: v. Gribaldi", "Baker-Zyste", "Morbus Scheuermann"
+            if sachname(i) and not (titel or etikett):
+                continue                                # "Gasgrill Weber Genesis", "Böckmann TPV", "Jack Russell"
+            if not (titel or platzhalter or etikett or rolle) and (vn or nn) and organisation(i):
+                continue                                # "Adam Riese", "Versicherer" ⏎ "Roland": ein Versicherer
             if vorname_stark(i) or nachname_stark(i) or doppelname(i):
                 stark_kontext = titel or platzhalter or links_vorname
+                if not (stark_kontext or etikett or rolle) and (artikel_davor(i) or ortszusatz(i)):
+                    continue                            # "Die Scheibe ist gesprungen", "Fürstenberg/Havel"
                 marke_davor = i > 0 and direkt(i, i - 1) and woerter[i - 1][2].lower() in _MARKEN
                 marke_davor = marke_davor or (k > 0 and stuecke[k - 1][2] in ("St.", "Sankt", "Hl.")
                                               and not titel_davor(i))  # "Krankenhaus St. Ansgar"
@@ -2816,6 +3204,8 @@ class _Seitenpruefung:
                 kontext = etikett = True                # Tabellenspalte "Vorname", "Name", "Kunde"
             if len(w) < 2 or (w.isupper() and len(w) <= 3 and not kontext) or w.lower() in _ANREDE_ZUSATZ:
                 continue
+            if im_etikett(i):
+                continue                                # "Vornamen / Given names / Prénoms": Etikett, kein Name
             if (vn or nn) and kontext and not allow and not self.w.ist_etikett(w) \
                     and not text[e:e + 2].lstrip(")").startswith(":"):
                 self.neu(s, e, "mehrdeutiger Name im Personenkontext", "name")    # nicht "Größe:", "Alt:" (Etikett)
@@ -2834,7 +3224,7 @@ class _Seitenpruefung:
             ocr_wort = self._quelle(s) != "text"
             if ocr_wort and not (5 <= len(w) <= 14):
                 continue                                # OCR-Bruchstücke ("Fran", "Versicherurigsnehmer")
-            if titel or (platzhalter and len(w) <= 14) or (etikett and not ocr_wort):
+            if titel or (platzhalter and len(w) <= 14) or (etikett and not ocr_wort) or (rolle and not ocr_wort):
                 self.neu(s, e, "unbekannter Eigenname im Personenkontext", "name")
             elif geboren:
                 self.neu(s, e, "möglicher Geburtsname (hinter »geb.«)", "name")
@@ -2885,6 +3275,8 @@ class _Seitenpruefung:
         text = self.text
         if not self.platzhalter and not self.schwaerzungen:
             return
+        # Feldcodes einer Zulassungsbescheinigung Teil I ("C.1.3  [ADRESSE]") sind Etiketten, kein Rest (Befund 32)
+        zb1 = personenkontext.zb1_seite(text)
         for ps, pe in self.platzhalter:                # "[PLZ ORT]OPf." – ohne Leerzeichen angehängt
             if not (_ANSCHRIFT_PLATZHALTER_RE.match(text[ps:pe]) or _PERSONEN_PLATZHALTER_RE.match(text[ps:pe])):
                 continue
@@ -2898,7 +3290,8 @@ class _Seitenpruefung:
             s, e = m.start(), m.end()
             roh = m.group(0)
             kern = roh.strip("()[]{},;:\"'„“”‚‘’«»|")
-            if not kern or self.ist_gesperrt(s, e) or _platzhalter_bruchstueck(roh):
+            if not kern or self.ist_gesperrt(s, e) or _platzhalter_bruchstueck(roh) \
+                    or (zb1 and personenkontext.ZB1_FELDCODE_RE.fullmatch(kern)):
                 continue
             s += roh.find(kern)
             e = s + len(kern)
