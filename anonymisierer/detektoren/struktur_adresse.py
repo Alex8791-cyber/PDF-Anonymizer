@@ -429,8 +429,20 @@ def _zeilen_text(seite, z) -> str:
     return seite.text[z.start:z.ende]
 
 
+# Adresszusatz zwischen Straße und PLZ + Ort derselben Zeile ("Kaiserstraße 17, 3. OG links, 83022 Rosenheim",
+# "…, Hinterhaus, …"): ein kurzes Segment ohne Kontaktangabe gehört zur Anschrift (Gegenprüfung LK-05/LK-12)
+_ADRESSZUSATZ_RE = re.compile(r"[^\W_][\w.\-/ ]{0,29}")
+_KEIN_ZUSATZ_RE = re.compile(r"(?i)tel|fax|mobil|handy|e-?mail|@|www\.|https?:|iban|ust|steuer")
+
+
+def _adresszusatz(text: str) -> bool:
+    t = text.strip()
+    return bool(_ADRESSZUSATZ_RE.fullmatch(t)) and len(t.split()) <= 4 and not _KEIN_ZUSATZ_RE.search(t)
+
+
 def _segment_werte(seite, start: int, ende: int, fk: _Firmenkontext, zid: int) -> list:
-    """Zeile mit Trennern ("Name · Straße 1 · 12345 Ort"): Werte der Segmente vor PLZ + Ort."""
+    """Zeile mit Trennern ("Name · Straße 1 · 12345 Ort"): Werte der Segmente vor PLZ + Ort; ein kurzer Adresszusatz
+    zwischen Straße und PLZ ("Kaiserstraße 17, 3. OG links, 83022 Rosenheim") gehört zur Anschrift."""
     text = seite.text
     segmente = []
     pos = start
@@ -449,12 +461,20 @@ def _segment_werte(seite, start: int, ende: int, fk: _Firmenkontext, zid: int) -
             continue
         aus.append((plz[0][0], plz[0][1], "plzort", None))
         if k >= 1:
-            s2, e2 = segmente[k - 1]
+            j = k - 1
+            s2, e2 = segmente[j]
             st = strasse_spanne(text, s2, e2)
+            if not (st and st[1] >= e2 - 1) and j >= 1 and _adresszusatz(text[s2:e2]):
+                sv, ev = segmente[j - 1]
+                st_vor = strasse_spanne(text, sv, ev)
+                if st_vor and st_vor[1] >= ev - 1:
+                    zs = s2 + len(text[s2:e2]) - len(text[s2:e2].lstrip())
+                    aus.append((zs, zs + len(text[s2:e2].strip()), "strasse", None))
+                    j, st, s2, e2 = j - 1, st_vor, sv, ev
             if st and st[1] >= e2 - 1:
                 aus.append((st[0], st[1], "strasse", None))
-                if k >= 2:
-                    s3, e3 = segmente[k - 2]
+                if j >= 1:
+                    s3, e3 = segmente[j - 1]
                     sp = namen_spanne(text, s3, e3)
                     if sp and sp.ende >= e3 - 1 and sp.start - s3 <= 25:
                         aus.append((sp.start, sp.ende, "namen", text[sp.start:sp.ende] if sp.woerter > 1 else None))

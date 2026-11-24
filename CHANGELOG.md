@@ -275,7 +275,8 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     („tiktok.com/@…“), Schweizer Anschriften mit Kantonskürzel („3600 Thun BE“), ein mehrdeutiger Vorname in einer
     Kinderliste („Max, 05.09.2016“), Berufe der Wissensbasis unter dem Spaltenkopf „Tätigkeit“ (der Nachbarkopf
     „Arbeitgeber“ wird nicht mehr als Beruf geschwärzt), die IP-Adresse in „Received:“-Kopfzeilen und die Anschrift in
-    der Formularzeile des Kunden unter einer Spartenüberschrift („Kfz-Versicherung“ ⏎ „Versicherungsnehmer: …, …“).
+    der Formularzeile des Kunden unter einer Spartenüberschrift („Kfz-Versicherung“ ⏎ „Versicherungsnehmer: …, …“);
+    ein Adresszusatz zwischen Straße und PLZ derselben Zeile („Kaiserstraße 17, 3. OG links, 83022 Rosenheim“).
   - Weniger Über-Schwärzung: Spartenkürzel mit SF-Klasse bzw. Selbstbeteiligung („HP SF 12“, „RS SB 150“) sind keine
     Kennzeichen; Einzelwerte hinter „Breite“/„Länge“ mit Maßeinheit, Viererpunktzahlen hinter Artikel- und
     Bestellnummern, „@“-Tarife ohne Plattform und Kalenderwörter im Familienkontext bleiben stehen; Konfession nur in

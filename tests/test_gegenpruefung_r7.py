@@ -680,3 +680,21 @@ def test_l3_pathologische_zeilen_wachsen_linear(muster):
 ])
 def test_l3_gegenproben_regeln_greifen_weiter(text, wert):
     assert _geschwaerzt(text, wert), _stellen(_funde(text))
+
+
+# ----------------------------------------------------------------------
+# LK-05/LK-12: Adresszusatz zwischen Straße und PLZ + Ort derselben Zeile („3. OG links“) – sonst schlägt der Status
+# der Datei um, sobald die Nachbarwerte erkannt sind (vorher nur über ein anderes _PRUEFEN sichtbar)
+# ----------------------------------------------------------------------
+def test_lk05_adresszusatz_zwischen_strasse_und_plz():
+    text = "Mieterin: Sabine Ortner, Kaiserstraße 17, 3. OG links, 83022 Rosenheim"
+    stellen = _stellen(_funde(text))
+    assert {"Kaiserstraße 17", "3. OG links", "83022 Rosenheim"} <= stellen, stellen
+
+
+@pytest.mark.parametrize("text, bleibt", [
+    ("Allianz Versicherungs-AG · Königinstraße 28 · Haus B · 80802 München", "Haus B"),   # Firmenanschrift
+    ("Kaiserstraße 17, Tel. 0171 2345678, 83022 Rosenheim", "Tel."),                    # Kontakt, kein Zusatz
+])
+def test_lk05_adresszusatz_gegenproben(text, bleibt):
+    assert not any(bleibt in s for s in _stellen(_funde(text), "strasse")), _stellen(_funde(text))
