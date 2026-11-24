@@ -340,6 +340,14 @@ def _kartenpruefnummer(kategorie: str, text: str, davor: str | None = None) -> b
     return davor is None or not _KARTENNUMMER_DAVOR_RE.search(davor)
 
 
+def _nur_am_etikett(kategorie: str, text: str) -> bool:
+    """Kurzer Wert, der nur hinter seinem Etikett gilt und weder im Dokument noch in andere Dokumente weitergegeben
+    wird (wie die Kartenprüfnummer): eine PIN oder ein kurzer Code der Zugangsdaten (bis sechs Zeichen: "4711" ist
+    anderswo ein Betrag oder eine Seitenzahl) und ein Kirchensteuermerkmal ("rk", "ev": anderswo ein Kürzel)."""
+    n = sum(c.isalnum() for c in text or "")
+    return (kategorie == "zugangsdaten" and n <= 6) or (kategorie == "religion" and n <= 4)
+
+
 def _kontext_davor(fund: dict) -> str | None:
     """Text vor dem Fund in seinem Kontext ("… Karten-Nr.: »1234« …" -> "… Karten-Nr.:")."""
     kontext = fund.get("kontext") or ""
@@ -353,6 +361,7 @@ def _nicht_weitergeben(fund: dict) -> bool:
     anderen Dokument nicht zur Person)."""
     return (fund.get("anzeige") == ANZEIGE_TITEL or QUELLE_FIRMENANSCHRIFT in (fund.get("quellen") or ())
             or _kartenpruefnummer(fund.get("kategorie", ""), fund.get("text", ""), _kontext_davor(fund))
+            or _nur_am_etikett(fund.get("kategorie", ""), fund.get("text", ""))
             or (fund.get("kategorie") == "namen" and _mehrdeutiger_geburtsname(fund.get("text", ""),
                                                                                 fund.get("quellen") or ())))
 
@@ -828,6 +837,7 @@ GRUND_SATZANFANG = "mehrdeutiges Wort am Satzanfang"
 GRUND_KOMPOSITUM = "Teil eines fremden Bindestrich-Worts"
 GRUND_TITEL = "derselbe Titel bei einer anderen Person"
 GRUND_KARTENPRUEFNUMMER = "dieselben Ziffern wie eine Kartenprüfnummer, aber ohne ihr Etikett (Betrag, Seitenzahl …)"
+GRUND_NUR_ETIKETT = "derselbe kurze Wert wie eine PIN bzw. ein Kirchensteuermerkmal, aber ohne dessen Etikett"
 GRUND_GEBURTSNAME_MEHRDEUTIG = "Geburtsname, der zugleich Ort oder Wort ist – hier ohne Personenbezug"
 
 
@@ -1295,14 +1305,16 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
         kurz = _kartenpruefnummer(kategorie, roh) and any(
             _kartenpruefnummer(kategorie, roh, text[max(0, t.start - 40):t.start]) for t in behalten
             if t.kategorie == kategorie and text[t.start:t.ende] == roh)
+        nur_etikett = _nur_am_etikett(kategorie, roh)
         for s, e in vorkommen[modus].get(roh, ()):
             if kategorie != "begriff" and nie.umhuellt(s, e):
                 ausgelassen.append((s, e, schl, GRUND_NIE))
                 continue
-            if kurz:
-                # Kartenprüfnummer: nur hinter ihrem Etikett (Detektor-Treffer); gleiche Ziffern anderswo bleiben als
-                # abgewählte Stelle bekannt – die Selbstkontrolle meldet sie dann nicht als Rest
-                ausgelassen.append((s, e, schl, GRUND_KARTENPRUEFNUMMER))
+            if kurz or nur_etikett:
+                # Kartenprüfnummer, PIN, Kirchensteuermerkmal: nur hinter ihrem Etikett (Detektor-Treffer); gleiche
+                # Zeichen anderswo bleiben als abgewählte Stelle bekannt – die Selbstkontrolle meldet sie dann nicht
+                # als Rest
+                ausgelassen.append((s, e, schl, GRUND_KARTENPRUEFNUMMER if kurz else GRUND_NUR_ETIKETT))
                 continue
             grund = ausschluss(s, e, roh) if einzelwort else None
             if grund:
@@ -1311,7 +1323,8 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
             kandidaten.append(_Kandidat(s, e, kategorie, schl, "weitergabe", sicherheit, 1))
     # Auf OCR-Seiten auch leicht verlesene Vorkommen ('Birkanallea 40' für 'Birkenallee 40')
     aehnlich = _aehnliche_stellen(dok, [((kategorie, roh), roh) for kategorie, roh in gesucht
-                                        if not _kartenpruefnummer(kategorie, roh)])
+                                        if not _kartenpruefnummer(kategorie, roh)
+                                        and not _nur_am_etikett(kategorie, roh)])
     for (kategorie, roh), spannen in aehnlich.items():
         for s, e in spannen:
             if kategorie == "begriff" or not nie.umhuellt(s, e):

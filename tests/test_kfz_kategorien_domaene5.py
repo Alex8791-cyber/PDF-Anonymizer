@@ -682,6 +682,20 @@ def test_b69_b100_zugangsdaten(text, werte):
         assert _gemeldet(text, w), (w, [(v.text, v.grund) for v in pruefe_text(text)])
 
 
+def test_b69_b88_kurze_werte_nur_hinter_etikett():
+    """Wie die Kartenprüfnummer gelten eine PIN und ein Kirchensteuermerkmal nur hinter ihrem Etikett: dieselben
+    Zeichen anderswo im Dokument („4711 Cent“, „Seite 4711“, „Kennung rk 12“) werden nicht mitgeschwärzt."""
+    text = "Ihre Zugangsdaten\nPIN: 4711\nBitte überweisen Sie 4711 Cent bis Seite 4711."
+    spannen = _angehakt(_funde(text))
+    pin = text.index("4711")
+    assert any(a <= pin < e for a, e in spannen), spannen
+    for anderswo in [m.start() for m in re.finditer("4711", text)][1:]:
+        assert not any(a <= anderswo < e for a, e in spannen), (anderswo, spannen)
+    text = "Konf.: rk\nKennung rk 12 laut Liste"
+    spannen = _angehakt(_funde(text, aktive=muster.PROFILE["maximal"]["aktive"], profil="maximal"))
+    assert any(a <= 7 < e for a, e in spannen) and not any(a <= text.index("rk 12") < e for a, e in spannen)
+
+
 @pytest.mark.parametrize("text", [
     "Passwort vergessen? Klicken Sie auf „Neues Passwort anfordern“.",
     "Kennwort: wird separat per Post zugesandt",

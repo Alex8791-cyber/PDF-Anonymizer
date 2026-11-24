@@ -205,7 +205,9 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Profil-Links, Kunden-, Vertrags- und Namensangaben in Links), Standort-Koordinaten `[STANDORT]` – alle vier in jeder
   Schutzstufe angehakt – und Religion/Konfession `[RELIGION]` (Kirchensteuermerkmal „rk“/„ev“, auch unter dem
   Spaltenkopf „Konf.“) wie Gesundheitsdaten: in „Ausgewogen“ und „Hoch“ nur angeboten (Meldung RELIGION), in
-  „Maximal“ angehakt. Gespeicherte Einstellungen bleiben gültig; die neuen Kategorien gelten dort als an. Außerdem:
+  „Maximal“ angehakt. Eine kurze PIN und ein Kirchensteuermerkmal gelten wie die Kartenprüfnummer nur hinter ihrem
+  Etikett („4711“ anderswo im Dokument bleibt stehen). Gespeicherte Einstellungen bleiben gültig; die neuen
+  Kategorien gelten dort als an. Außerdem:
   verschleierte E-Mail-Adressen („name (at) web (punkt) de“) und Flurstück, Grundbuchblatt und Gemarkungsnummer.
 - **Kfz-Kennzeichen (Runde 5):** Versicherungskennzeichen („435 GHT“, „435GHT“, zweizeilig) hinter Kfz-Etiketten, im
   Satz und in Spalten mit Kfz-Kopf; Komposita mit Fahrzeugbezug als Kfz-Etikett (Versicherungs-, Kurzzeit-,
