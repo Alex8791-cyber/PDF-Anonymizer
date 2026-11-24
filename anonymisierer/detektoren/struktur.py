@@ -734,7 +734,9 @@ _DATUM_RE = re.compile(
     r"|((?:19|20)\d{2})-(\d{2})-(\d{2})"
     r"|(\d{1,2})/(\d{1,2})/((?:19|20)\d{2})"
     r"|(\d{1,2})[ ]+(?-i:(" + _MONAT_PASS_ALT + r"))(?:[ ]?/[ ]?(?-i:" + _MONAT_PASS_ALT + r"))?\.?[ ]+"
-    r"((?:19|20)\d{2}|\d{2}))(?![\d])", re.IGNORECASE)
+    r"((?:19|20)\d{2}|\d{2})"
+    # ein Trenner als Komma verlesen oder vertippt ("17,03.1968", "17.03,1968") – nur mit vierstelligem Jahr
+    r"|(\d{1,2})(?:,[ ]?(\d{1,2})\.|\.[ ]?(\d{1,2}),)[ ]?((?:19|20)\d{2}))(?![\d])", re.IGNORECASE)
 
 
 def _heute() -> datetime.date:
@@ -752,6 +754,8 @@ def datum_zerlegen(m) -> tuple | None:
             j, mo, t = int(g[6]), int(g[7]), int(g[8])
         elif g[9]:
             t, mo, j = int(g[9]), int(g[10]), int(g[11])
+        elif g[15]:
+            t, mo, j = int(g[15]), int(g[16] or g[17]), int(g[18])
         else:
             t, mo, j = int(g[12]), _MONATE_PASS[g[13].casefold()], int(g[14])
     except (KeyError, ValueError, TypeError):
@@ -1615,11 +1619,21 @@ def ort_hinter_person(text: str, ende: int, grenze: int):
     return a, b
 
 
+# Familienname-Felder: ein Wochentag oder Monat allein ist dort der Name ("Nachname: Freitag", "Familienname: Mai") –
+# namen_spanne liest ihn sonst nur mit Namenskontext ("Freitag, Jonas")
+_FAMILIENNAME_FELD_RE = re.compile(r"^(?:name|nachname|familienname|zuname|geburtsname|ehename)$")
+_KALENDERNAME_RE = re.compile(r"[ \t]*([A-ZÄÖÜ][a-zäöüß]+)[ \t.,;]*$")
+
+
 def _namens_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> list:
     """Namen hinter einem Personen-Etikett; Gremien-Etiketten (Vorstand …) lesen eine Liste. In der Abstammung eines
     Tiers ("Abstammung: Vater: Sandro Hit") steht kein Mensch."""
     if personenkontext.tierangabe(text, i):
         return []
+    if mit_trenner and _FAMILIENNAME_FELD_RE.match(_vergleichsform(et.eintrag)):
+        m = _KALENDERNAME_RE.match(text, i, e)
+        if m and m.group(1).casefold() in personenkontext.KALENDERWOERTER:
+            return [Wert(m.start(1), m.end(1), "namen")]
     liste = bool(_GREMIUM_RE.search(et.eintrag)) or et.eintrag.casefold() in ("kinder", "erben", "zeugen",
                                                                             "mitversicherte personen")
     org = bool(_ORG_ROLLEN_RE.match(et.eintrag))
@@ -1819,7 +1833,10 @@ def werte_rechts_daneben(seite, lg: Lage, et: Etikett, alle_starts: set) -> list
         return []                                   # rechts daneben steht das nächste Etikett
     if re.search(r"(?:/-?in|\(in\)|:)\s*$", text[z.start:z.ende]):
         return []                                   # Feldbezeichner ("Raucher/in", "Beruf:")
-    return werte_lesen(text, z.start, z.ende, et, True)
+    # Die Zelle daneben ist eine Wertzelle: geht ihr Text hinter dem Wert klein geschrieben weiter, ist sie Fließtext
+    # einer anderen Spalte ("Do parkte", "El fuhr auf": Ankreuzzeilen eines Unfallberichts neben "Name")
+    return [w for w in werte_lesen(text, z.start, z.ende, et, True)
+            if not re.match(r"[ \t]*[a-zäöüß]", text[w.ende:z.ende])]
 
 
 _FUELLWERT_RE = re.compile(r"(?i)^(?:wie\b.*|siehe\b.*|s\.\s*o\.?|entf[aä]llt|keine?|nein|ja|[-–—/_.x]+|n/?a|"

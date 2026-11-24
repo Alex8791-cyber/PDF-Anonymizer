@@ -75,6 +75,7 @@ from . import detektoren
 from . import muster as _muster
 from . import nebenkanaele as _nebenkanaele
 from . import ocr as _ocr
+from . import personenkontext
 from .detektoren import Kontext
 from .muster import KATEGORIE_PRIORITAET, KATEGORIEN
 from .namen import (ANREDEN, GEBURTSNAME_QUELLE, NAMEN_STOPPLISTE, PARTIKEL, TITEL, finde_personen,  # noqa: F401
@@ -839,6 +840,7 @@ GRUND_TITEL = "derselbe Titel bei einer anderen Person"
 GRUND_KARTENPRUEFNUMMER = "dieselben Ziffern wie eine Kartenprüfnummer, aber ohne ihr Etikett (Betrag, Seitenzahl …)"
 GRUND_NUR_ETIKETT = "derselbe kurze Wert wie eine PIN bzw. ein Kirchensteuermerkmal, aber ohne dessen Etikett"
 GRUND_GEBURTSNAME_MEHRDEUTIG = "Geburtsname, der zugleich Ort oder Wort ist – hier ohne Personenbezug"
+GRUND_KALENDERWORT = "Wochentag oder Monat als Datumsangabe (am Freitag, im Mai 2025)"
 
 
 # ----------------------------------------------------------------------
@@ -1294,6 +1296,14 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
             if (fund_schluessel(kompositum, "name") not in personen.zuordnung
                     and not any(_schluessel(p) in personen.namensteile for p in andere)):
                 return GRUND_KOMPOSITUM
+        if personenkontext.kalenderwort_als_datum(text, s, e):
+            # Familienname "Freitag": "Rückruf am Freitag, 12.03." ist ein Tag – außer mit Personenkontext in derselben
+            # Zeile ("Herrn Freitag am Montag"); die Zeile davor ("Frau Freitag," ⏎ "Freitag, den 14.03.") zählt nicht
+            za = text.rfind("\n", 0, s) + 1
+            ze = text.find("\n", e)
+            zeile = text[za:ze if ze >= 0 else len(text)]
+            if not _personenkontext(zeile, s - za, e - za, personen.namensteile):
+                return GRUND_KALENDERWORT
         if not mehrdeutig(wort):
             return None
         if not _satzanfang(text, s) or _personenkontext(text, s, e, personen.namensteile):

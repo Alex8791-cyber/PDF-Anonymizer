@@ -266,7 +266,16 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     („Adam Riese“ aus „Adam Riese Versicherung“). Die Selbstkontrolle bestimmt Spalte, Grußblock und Personen-Etikett
     nach der Lage auf der Ausgabeseite.
   - Formulare in Spaltenblöcken (Texterkennung liest Feldcodes, Feldnamen und Werte je als eigenen Block): der Wert
-    rechts auf derselben Höhe gehört zum Feldnamen; „Name oder Firmenname“ ist ein Personen-Etikett.
+    rechts auf derselben Höhe gehört zum Feldnamen; „Name oder Firmenname“ ist ein Personen-Etikett. Nur eine ganze
+    Wertzelle zählt: Ankreuzzeilen der Nachbarspalte eines Unfallberichts („Do parkte“, „El fuhr auf“) werden nicht
+    mehr als Name neben „Name“/„Vorname“ geschwärzt.
+  - Wochentag oder Monat als Familienname („Nachname: Freitag“, „Familienname: Mai“) wird hinter einem Namensfeld
+    geschwärzt, auch auf Scans; als Datumsangabe („Rückruf am Freitag, 12.03.2025“, „Montag bis Freitag“, „im Mai 2025“,
+    „Freitag, den 14.03.“) gibt die Weitergabe den Namen nicht mehr weiter – die Stelle bleibt als abgewählte Stelle
+    sichtbar, außer mit Personenkontext in derselben Zeile („Termin mit Herrn Freitag“).
+  - Ein Datum mit einem als Komma verlesenen oder vertippten Trenner und vierstelligem Jahr („17,03.1968“ in der
+    Spalte „GEB-DATUM“ eines Scans, „Geburtsdatum: 17.03,1968“) wird wie „17.03.1968“ erkannt und von der
+    Selbstkontrolle auch auf der Textebene gemeldet; Beträge („17,03 EUR“) bleiben stehen.
   - Zugangsdaten mit Zwischenwörtern („Kennwort für telefonische Auskünfte: …“), als Kompositum („WPA2-Kennwort“,
     „Router-Kennwort“, „App-Login“, „Administrator-Konto“), ohne Doppelpunkt mit Ziffer oder Sonderzeichen („Router-
     Kennwort Zirbe-Stube-77“), Geheimzahl, Zahlen- und Entsperrcode, „Code der Alarmanlage“ und „PIN“ als Spaltenkopf.

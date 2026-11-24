@@ -10,7 +10,7 @@ import pytest
 from conftest import braucht_ocr
 from anonymisierer import muster
 from anonymisierer.analyse import analysiere_pdf, analysiere_text
-from anonymisierer.restrisiko import pruefe_text, restrisiko_pruefen
+from anonymisierer.restrisiko import pruefe_text
 from anonymisierer.schwaerzung import schwaerze_pdf
 
 ALLE = {k for k, _, _, _, an in muster.KATEGORIEN if an}
@@ -712,3 +712,143 @@ def test_lk02_titelzeile_nur_ueber_einem_kopf_ohne_ziffern(tmp_path):
     elemente += _zeilen(["MEKONNEN\t\tABENA\t\t2012-01-07\t\tmitversichertes Kind"], y=80 + 6 * 16, xs=xs)
     pdf = _pdf(tmp_path / "zerrissen.pdf", [elemente])
     assert "2012-01-07" in _pdf_stellen(_pdf_funde(pdf), "geburt"), _pdf_stellen(_pdf_funde(pdf))
+
+
+# ----------------------------------------------------------------------
+# Endmessung s9x 007: der Wert rechts neben einem Feldnamen ist eine eigene Wertzelle – Ankreuzzeilen der anderen
+# Spalte eines Unfallberichts („Do parkte“, „El fuhr auf“: Kästchen als Buchstaben gelesen) sind Fließtext, kein Name
+# ----------------------------------------------------------------------
+def _scan_aus(tmp_path, elemente, name="scan.pdf"):
+    vorlage = fitz.open()
+    s = vorlage.new_page()
+    for x, y, t in elemente:
+        s.insert_text((x, y), t, fontsize=11, fontname="helv")
+    pix = s.get_pixmap(dpi=200, colorspace=fitz.csGRAY)
+    doc = fitz.open()
+    p = doc.new_page(width=s.rect.width, height=s.rect.height)
+    p.insert_image(p.rect, stream=pix.tobytes("png"))
+    pdf = tmp_path / name
+    doc.save(pdf)
+    doc.close()
+    vorlage.close()
+    return pdf
+
+
+@braucht_ocr
+def test_wert_rechts_daneben_nur_ganze_wertzelle(tmp_path):
+    from anonymisierer.ocr import OcrDienst
+    # Feldname „Name“ am Zeilenende, darunter ein unlesbarer Wert („SorzeW“), rechts auf derselben Höhe die
+    # Ankreuzzeilen der Spalte „Umstände“
+    links = [(40, 100, "6. Versicherungsnehmer:"), (200, 100, "Name"), (40, 118, "SorzeW"), (40, 140, "Vorname"),
+             (40, 158, "Divine"), (40, 180, "Anschrift"), (40, 198, "Marktplatz 8")]
+    rechts = [(330, 100, "Do parkte"), (330, 118, "Oo fuhr rückwärts"), (330, 140, "El fuhr auf"),
+              (330, 158, "bog rechts ab"), (330, 176, "bog links ab")]
+    pdf = _scan_aus(tmp_path, links + rechts, "unfallbericht.pdf")
+    with OcrDienst(prozesse=1) as dienst:
+        e = analysiere_pdf(pdf, ALLE, [], [], ocr=dienst)
+    stellen = _pdf_stellen(e)
+    assert not any(t in ("Do", "El", "Oo") for t in stellen), stellen
+
+
+@braucht_ocr
+def test_wert_rechts_daneben_ganze_wertzelle_bleibt_wert(tmp_path):
+    # Gegenprobe: steht rechts eine ganze Wertzelle („Do“ als Familienname, „Freitag“), bleibt sie der Wert
+    from anonymisierer.ocr import OcrDienst
+    elemente = [(40, 100, "6. Versicherungsnehmer:"), (200, 100, "Name"), (40, 118, "SorzeW"),
+                (330, 100, "Do"), (330, 118, "Oo fuhr rückwärts"), (330, 140, "bog rechts ab")]
+    pdf = _scan_aus(tmp_path, elemente, "unfallbericht_name.pdf")
+    with OcrDienst(prozesse=1) as dienst:
+        e = analysiere_pdf(pdf, ALLE, [], [], ocr=dienst)
+    assert "Do" in _pdf_stellen(e), _pdf_stellen(e)
+
+
+# ----------------------------------------------------------------------
+# Endmessung s7 036: Wochentag oder Monat als Familienname („Nachname: Freitag“) – hinter einem Namensfeld ist das Wort
+# der Name; als Datumsangabe („am Freitag, 12.03.2025“, „Montag bis Freitag“, „im Mai 2025“) wird es nicht weitergegeben
+# ----------------------------------------------------------------------
+def _an_stellen(text):
+    """(start, ende) aller angehakten Stellen im Text."""
+    aus = set()
+    for f in _funde(text):
+        for st in f["stellen"]:
+            if st.get("an", True):
+                aus.add((st["start"], st["ende"]))
+    return aus
+
+
+def _stelle_an(text, wert, n=0) -> bool:
+    """Liegt das n-te Vorkommen von `wert` in einer angehakten Stelle?"""
+    pos = -1
+    for _ in range(n + 1):
+        pos = text.index(wert, pos + 1)
+    return any(s <= pos and pos + len(wert) <= e for s, e in _an_stellen(text))
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Familienname:\t\tMontag", "Montag"),
+    ("Nachname:\t\tFreitag\nGeburtsdatum:\t\t31.10.1976", "Freitag"),
+    ("Name:\t\tSonntag", "Sonntag"),
+    ("Geburtsname:\t\tMai", "Mai"),
+])
+def test_kalenderwort_als_familienname_hinter_namensfeld(text, wert):
+    assert _stelle_an(text, wert), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text, name_n, datum_n, wert", [
+    ("Vorname:\t\tKlaus\nNachname:\t\tFreitag\nRückruf bitte am Freitag, 12.03.2025 um 10 Uhr.", 0, 1, "Freitag"),
+    ("Herr Jonas Freitag\nSprechzeiten Montag bis Freitag von 8 bis 12 Uhr.", 0, 1, "Freitag"),
+    ("Familienname:\t\tMai\nDer Vertrag beginnt im Mai 2025.", 0, 1, "Mai"),
+    ("Sehr geehrter Herr Freitag,\nIhre Unterlagen erhalten Sie bis Freitag, den 14.03.2025.", 0, 1, "Freitag"),
+])
+def test_kalenderwort_als_datum_wird_nicht_weitergegeben(text, name_n, datum_n, wert):
+    assert _stelle_an(text, wert, name_n), _stellen(_funde(text))
+    assert not _stelle_an(text, wert, datum_n), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Bürozeiten:\t\tMontag", "Montag"),                                   # kein Namensfeld
+    ("Erreichbar: Montag bis Freitag", "Freitag"),
+    ("Zahlungsweise:\t\tjährlich zum 1. Mai", "Mai"),
+])
+def test_kalenderwort_gegenproben_bleiben(text, wert):
+    assert not _beruehrt(text, wert), _stellen(_funde(text))
+
+
+def test_kalenderwort_name_neben_datum_bleibt_name():
+    # Personenkontext geht vor: „Termin mit Herrn Freitag am Montag“ – der Name bleibt geschwärzt, der Tag nicht
+    text = "Sehr geehrter Herr Freitag,\nTermin mit Herrn Freitag am Montag, 17.03.2025."
+    assert _stelle_an(text, "Freitag", 0) and _stelle_an(text, "Freitag", 1), _stellen(_funde(text))
+    assert not _beruehrt(text, "Montag"), _stellen(_funde(text))
+
+
+# ----------------------------------------------------------------------
+# D (s7 018): ein Datumstrenner als Komma verlesen oder vertippt („17,03.1968“ unter „GEB-DATUM“) – Erkennung und
+# Selbstkontrolle lesen das Datum mit vierstelligem Jahr wie „17.03.1968“
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, wert", [
+    ("NAME\t\tVORNAME\t\tGEB-DATUM\t\tROLLE\nKARACA\t\tBÜSRA\t\t15.10.1975\t\tVN / versicherte Person\n"
+     "KARACA\t\tMEHMET\t\t17,03.1968\t\tversicherte Person\nKARACA\t\tDERYA\t\t12.03.2021\t\tmitversichertes Kind",
+     "17,03.1968"),
+    ("Geburtsdatum:\t\t17,03.1968", "17,03.1968"),
+    ("Geburtsdatum: 17.03,1968", "17.03,1968"),
+    ("Versicherte Person: Mehmet Karaca, geb. 17,03.1968", "17,03.1968"),
+])
+def test_datum_mit_komma_als_trenner(text, wert):
+    assert _geschwaerzt(text, wert, "geburt"), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Geburtsdatum:\t\t17,03.1968", "17,03.1968"),
+    ("Geb.-Datum: 17.03,1968", "17.03,1968"),
+])
+def test_datum_mit_komma_selbstkontrolle(text, wert):
+    assert _gemeldet(text, wert), _verdacht(text)
+
+
+@pytest.mark.parametrize("text, bleibt", [
+    ("Rechnungsbetrag: 17,03 EUR", "17,03"),
+    ("Leistungszeitraum 01,03.2025 bis 31.03.2025", "01,03.2025"),       # Datum, aber kein Geburtsdatum
+    ("Beitrag 1.234,05 EUR fällig", "1.234,05"),
+])
+def test_datum_mit_komma_gegenproben(text, bleibt):
+    assert not _beruehrt(text, bleibt), _stellen(_funde(text))

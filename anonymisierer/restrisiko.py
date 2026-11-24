@@ -402,6 +402,10 @@ _DATUM_RES = (
     (re.compile(r"(?<![\d.,/])(\d{1,2})\.[ ]?(\d{1,2})\.[ ]?(\d{4}|\d{2})(?![\d]|\.\d)"), "tmj"),
     (re.compile(r"(?<![\d.,/-])(\d{4})-(\d{1,2})-(\d{1,2})(?![\d])"), "jmt"),
     (re.compile(r"(?<![\d.,/])(\d{1,2})/(\d{1,2})/(\d{4}|\d{2})(?![\d/])"), "tmj"),
+    # ein Trenner als Komma vertippt oder verlesen ("17,03.1968", "17.03,1968") – wie die Erkennung nur mit vierstelligem
+    # Jahr (struktur._DATUM_RE)
+    (re.compile(r"(?<![\d.,/])(\d{1,2}),[ ]?(\d{1,2})\.[ ]?((?:19|20)\d{2})(?![\d]|[.,]\d)"), "tmj"),
+    (re.compile(r"(?<![\d.,/])(\d{1,2})\.[ ]?(\d{1,2}),[ ]?((?:19|20)\d{2})(?![\d]|[.,]\d)"), "tmj"),
     (re.compile(r"(?<![\d.])(\d{1,2})\.?[ ]?(Jan(?:uar)?|Jänner|Feb(?:ruar)?|März|Mär|Maerz|Apr(?:il)?|Mai|"
                 r"Juni?|Juli?|Aug(?:ust)?|Sept?(?:ember)?|Okt(?:ober)?|Nov(?:ember)?|Dez(?:ember)?)\.?[ ]?"
                 r"(\d{4})(?![\d])", re.IGNORECASE), "tMj"),

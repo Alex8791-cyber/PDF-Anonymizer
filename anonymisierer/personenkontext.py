@@ -32,6 +32,7 @@ bzw. kennungsformen.einzelkaufmann_block – eine Regel für Erkennung und Selbs
     zb1_anschriftfelder(text) -> [(start, ende)], ZB1_FELDCODE_RE
     gemeinschaft_namen(text, sachwort) -> [(start, ende)], personengruppe(wort) -> bool
     ORG_SPALTEN, organisations_spalte(text, pos) -> bool
+    KALENDERWOERTER, kalenderwort_als_datum(text, start, ende) -> bool
 """
 
 from __future__ import annotations
@@ -169,8 +170,29 @@ def namensgestalt(wort: str, wissen=None) -> bool:
 _BERUF_IM_SATZ_RE = re.compile(rf"(?<![\wäöüß]){BEGLEITER}[ \t]+(?P<beruf>[A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß]+)?)"
                                rf"[ \t]+(?P<name>[A-ZÄÖÜ][a-zäöüß'’]+(?:-[A-ZÄÖÜ][a-zäöüß'’]+)?)"
                                r"(?=[ \t]+[a-zäöüß]|[ \t]*[,.;:!?)]|[ \t]*$)", re.MULTILINE)
-_KALENDER = frozenset("""montag dienstag mittwoch donnerstag freitag samstag sonntag januar februar märz april mai juni
-juli august september oktober november dezember""".split())
+_KALENDER = frozenset("""montag dienstag mittwoch donnerstag freitag samstag sonnabend sonntag januar februar märz april
+mai juni juli august september oktober november dezember""".split())
+KALENDERWOERTER = _KALENDER
+# Wochentag oder Monat als Datumsangabe: hinter einer Zeitangabe ("am", "ab", "bis", "im", "jeden", "nächsten" …) oder
+# einer Tageszahl ("12. Mai"), vor einem Datum ("Freitag, 12.03.2025", "Freitag, den 14.03.") oder einer Jahreszahl
+# ("Mai 2025") oder in einer Spanne ("Montag bis Freitag")
+_KALENDER_DAVOR_RE = re.compile(
+    r"(?:(?<![\wäöüß])(?i:am|ab|bis|seit|jeden|jede[mn]|nächste[mnrs]?|naechste[mnrs]?|übernächste[mnrs]?|"
+    r"kommende[mnrs]?|letzte[mnrs]?|vergangene[mnrs]?|diese[mnrs]|vorige[mnrs]?|im|anfang|ende|mitte|zum|vom)"
+    r"|(?<![\d.])\d{1,2}\.)[ \t]+$")
+_KALENDER_DANACH_RE = re.compile(
+    r"[ \t]*,?[ \t]*(?:den[ \t]+)?\d{1,2}\.[ \t]*(?:\d{1,2}\.|[A-ZÄÖÜ][a-zäöü]+)|[ \t]+\d{4}(?!\d)"
+    r"|[ \t]*(?:bis|-|–|und|oder)[ \t]*(?i:" + "|".join(sorted(_KALENDER)) + r")(?![\wäöüß])")
+
+
+def kalenderwort_als_datum(text: str, start: int, ende: int) -> bool:
+    """Steht das Wort text[start:ende] – ein Wochentag oder Monat – als Datumsangabe da ("am Freitag, 12.03.2025",
+    "Montag bis Freitag", "im Mai 2025", "12. Mai")? Dann ist es kein Familienname ("Freitag", "Mai"): die Weitergabe
+    eines solchen Namens überspringt diese Stelle."""
+    if text[start:ende].casefold() not in _KALENDER:
+        return False
+    davor = text[max(0, start - 30):start].rsplit("\n", 1)[-1]
+    return bool(_KALENDER_DAVOR_RE.search(davor) or _KALENDER_DANACH_RE.match(text, ende))
 
 
 def _beruf_gebeugt(wissen, wort: str) -> bool:
