@@ -36,6 +36,7 @@ bzw. kennungsformen.einzelkaufmann_block – eine Regel für Erkennung und Selbs
 
 from __future__ import annotations
 
+import functools
 import re
 
 from .kennungsformen import FUNKTIONSWOERTER
@@ -162,6 +163,76 @@ def namensgestalt(wort: str, wissen=None) -> bool:
     return len(w) >= 7 and bool(_NACHNAMEN_ENDUNG_RE.search(w.casefold())) and not _SUBSTANTIV_ENDUNG_RE.search(w)
 
 
+# Berufsbezeichnung im Satz mit Begleiter und dahinter ein Name ("Der Glaser Eibl hat …", "unser Monteur Zwickl kam",
+# "die Gutachterin Hechenberger, …"): der Name ist das Wort direkt hinter dem Beruf, gefolgt von einem kleingeschriebenen
+# Wort, einem Satzzeichen oder dem Zeilenende
+_BERUF_IM_SATZ_RE = re.compile(rf"(?<![\wäöüß]){BEGLEITER}[ \t]+(?P<beruf>[A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß]+)?)"
+                               rf"[ \t]+(?P<name>[A-ZÄÖÜ][a-zäöüß'’]+(?:-[A-ZÄÖÜ][a-zäöüß'’]+)?)"
+                               r"(?=[ \t]+[a-zäöüß]|[ \t]*[,.;:!?)]|[ \t]*$)", re.MULTILINE)
+_KALENDER = frozenset("""montag dienstag mittwoch donnerstag freitag samstag sonntag januar februar märz april mai juni
+juli august september oktober november dezember""".split())
+
+
+def _beruf_gebeugt(wissen, wort: str) -> bool:
+    """Berufsbezeichnung der Wissensbasis, auch gebeugt ("des Glasers", "dem Monteur", "den Gutachtern")?"""
+    for endung in ("", "s", "es", "n", "en"):
+        if endung and not wort.endswith(endung):
+            continue
+        kern = wort[:len(wort) - len(endung)] if endung else wort
+        if len(kern) >= 4 and wissen.ist_beruf(kern):
+            return True
+    return False
+
+
+def _name_hinter_beruf(wissen, wort: str) -> bool:
+    """Ist ein großgeschriebenes Wort hinter einer Berufsbezeichnung ein Name: ein Nachname der Wissensbasis oder ein
+    unbekanntes Wort – kein Allerwelts-, Orts-, Berufs-, Vor-, Anrede-, Etikett-, Kalender- oder Sachwort (Marke,
+    Modell), keine Substantiv-Endung, kein zusammengesetztes Hauptwort ("Notdienst")?"""
+    if len(wort) < 3 or wort.isupper() or wort.casefold() in _KALENDER:
+        return False
+    try:
+        if wissen.ist_nachname(wort) and not wissen.ist_mehrdeutig(wort):
+            return True
+        if (wissen.ist_allerweltswort(wort) or wissen.ist_allowlist(wort) or wissen.ist_ort(wort)
+                or wissen.ist_beruf(wort) or wissen.ist_vorname(wort) or wissen.ist_anrede_titel(wort)
+                or wissen.index("sachnamen").finde(wort)):
+            return False
+        if any(wissen.index(f"etiketten_{art}").eintrag_fuer(wort) is not None for art in wissen.ETIKETTEN_ARTEN):
+            return False
+        for i in range(3, len(wort) - 3):              # "Notdienst", "Kundendienst": Kompositum
+            rest = wort[i].upper() + wort[i + 1:]
+            if not wort[i].isupper() and len(rest) >= 4 and wissen.ist_allerweltswort(rest):
+                return False
+    except Exception:  # pragma: no cover - Wissensbasis beschädigt
+        return False
+    return not _SUBSTANTIV_ENDUNG_RE.search(wort)
+
+
+def beruf_kontext_namen(text: str, wissen=None) -> list:
+    """(start, ende) eines Namens direkt hinter einer Berufsbezeichnung im Satz ("Der Glaser Eibl hat bereits ein
+    Angebot erstellt", "unser Monteur Zwickl kam um 8 Uhr"): Begleiter (Artikel, Possessiv) + Beruf der Wissensbasis +
+    ein Wort, das ein Name sein kann (_name_hinter_beruf) – auch ein kurzer unbekannter Familienname. Erkennung und
+    Selbstkontrolle nutzen dieselbe Regel."""
+    if not text:
+        return []
+    if wissen is None:
+        try:
+            from . import wissen as wissen_modul
+            wissen = wissen_modul
+        except Exception:  # pragma: no cover - Wissensbasis fehlt
+            return []
+    aus = []
+    for m in _BERUF_IM_SATZ_RE.finditer(text):
+        try:
+            if not _beruf_gebeugt(wissen, m.group("beruf")):
+                continue
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            return []
+        if _name_hinter_beruf(wissen, m.group("name")):
+            aus.append((m.start("name"), m.end("name")))
+    return aus
+
+
 def wohn_kontext_namen(text: str) -> list:
     """(start, ende) einzelner Namen in Wohn- und Nachbarschaftsangaben: hinter einer Rolle im Satz ("unseres Nachbarn
     Felsberger", "Die Mieterin Riedlinger", "Beim Nachbarn Unterholzner"), hinter "bei/von … im 1. OG" ("Bei
@@ -194,13 +265,22 @@ TIERNAME_DAVOR_RE = re.compile(r"(?:Name|Rufname|Zuchtname)[ \t]+(?:des|der)[ \t
 _ABSTAMMUNG_RE = re.compile(r"(?<![\wäöüß])(?:Abstammung|Pedigree|Ahnentafel)(?![\wäöüß])")
 
 
+@functools.lru_cache(maxsize=128)
+def _tierzeile(zeile: str) -> tuple:
+    """(Ende des ersten "Abstammung"/"Pedigree" in der Zeile oder -1, Zeile der Abstammung bzw. mit "Muttervater") –
+    je Zeile einmal (Laufzeit L2: lange Einzelzeilen mit vielen Kandidaten)."""
+    m = _ABSTAMMUNG_RE.search(zeile)
+    return (m.end() if m else -1), bool(TIERZEILE_RE.match(zeile))
+
+
 def tierangabe(text: str, start: int) -> bool:
     """Steht die Stelle in der Abstammung eines Tiers (hinter "Abstammung" in derselben Zeile, in einer Zeile mit
     "Muttervater") oder direkt hinter dem Namens-Etikett eines Tiers ("Name des Pferdes:")?"""
     zeilenanfang = text.rfind("\n", 0, start) + 1
     zeilenende = text.find("\n", start)
     zeile = text[zeilenanfang:len(text) if zeilenende < 0 else zeilenende]
-    if _ABSTAMMUNG_RE.search(text, zeilenanfang, start) or TIERZEILE_RE.match(zeile):
+    abstammung_ende, tierzeile = _tierzeile(zeile)
+    if tierzeile or 0 <= abstammung_ende <= start - zeilenanfang:
         return True
     return bool(TIERNAME_DAVOR_RE.search(text, max(zeilenanfang, start - 40), start))
 
@@ -303,6 +383,126 @@ def modellcode_danach(text: str, ende: int, wortgestalt=None, woerter=()) -> boo
     return not (_NUR_ZAHL_RE.match(text, pos) and any(namensgestalt(w) for w in woerter))
 
 
+# Sachbeleg für eine Marke, ein Modell oder eine Rasse in derselben Zelle (Gegenprüfung LK-02): Fahrzeug-, Geräte-,
+# Werkzeug-, Uhren-, Elektronik- und Tierwörter sowie Sach-Etiketten ("Hersteller", "Marke", "Rasse")
+SACHWORT_RE = re.compile(
+    r"(?i)(?<![\wäöüß])(?:pkw|lkw|kfz|krad|kraftrad|motorrad|mofa|moped|roller|motorroller|leichtkraftrad|"
+    r"kleinkraftrad|quad|wohnmobil|wohnwagen|caravan|anh(?:ä|ae)nger|transporter|fahrzeug(?:e|s|typ)?|auto|"
+    r"fahrrad|e-bike|ebike|pedelec|marke|hersteller|modell|typ|fabrikat|gerät(?:e|s)?|haushaltsgerät|"
+    r"waschmaschine|waschtrockner|trockner|wäschetrockner|geschirrspüler|spülmaschine|kühlschrank|gefrierschrank|"
+    r"herd|backofen|kochfeld|dunstabzugshaube|mikrowelle|kaffeevollautomat|kaffeemaschine|staubsauger|heizung|"
+    r"therme|gastherme|heizkessel|kessel|wärmepumpe|boiler|durchlauferhitzer|klimaanlage|säge|kettensäge|"
+    r"motorsäge|rasenmäher|mähroboter|bohrmaschine|bohrhammer|akkuschrauber|werkzeug|uhr|armbanduhr|"
+    r"chronograph|fernseher|laptop|notebook|smartphone|handy|tablet|kamera|drucker|grill|gasgrill|hund|hündin|"
+    r"rüde|welpe|katze|pferd|pony|stute|fohlen|rasse|tierart|mischling)(?![\wäöüß])")
+# Grußformel über einem Unterschriftsblock ("Mit freundlichen Grüßen", "Beste Grüße aus Prien", "Hochachtungsvoll")
+GRUSS_RE = re.compile(r"(?i)(?<![\wäöüß])(?:mit[ \t]+(?:freundlichen|besten|herzlichen|lieben|vielen|kollegialen|"
+                      r"verbindlichen)[ \t]+gr[üu](?:ß|ss)en|mit[ \t]+freundlichem[ \t]+gru(?:ß|ss)|"
+                      r"(?:freundliche|beste|viele|herzliche|liebe|schöne|sonnige)[ \t]+gr[üu](?:ß|ss)e|"
+                      r"hochachtungsvoll|mfg)(?![\wäöüß])")
+
+
+def _zelle_um(text: str, start: int, ende: int) -> tuple:
+    """(Anfang, Ende) der Tabellenzelle bzw. Zeile um [start, ende) – Zellen trennt ein Tabulator."""
+    a = max(text.rfind("\n", 0, start), text.rfind("\t", 0, start)) + 1
+    b = len(text)
+    for zeichen in ("\n", "\t"):
+        k = text.find(zeichen, ende)
+        if 0 <= k < b:
+            b = k
+    return a, b
+
+
+def sachbeleg(text: str, start: int, ende: int, wissen=None) -> bool:
+    """Belegt die Zelle um [start, ende) eine Sache: ein Sachwort ("Waschmaschine Miele", "Mofa Simson", "Rasse:
+    Holsteiner") außerhalb der Stelle oder eine Marke, ein Modell bzw. eine Rasse der Wissensbasis, die über die Stelle
+    hinausreicht ("Jack Russell Terrier")?"""
+    a, b = _zelle_um(text, start, ende)
+    for m in SACHWORT_RE.finditer(text, a, b):
+        if m.end() <= start or m.start() >= ende:
+            return True
+    for x, y in sachnamen_stellen(text[a:b], wissen):
+        if a + x <= start and ende <= a + y and (y - x) > (ende - start):
+            return True
+    return False
+
+
+def im_grussblock(text: str, pos: int) -> bool:
+    """Steht die Stelle in einer kurzen Zeile höchstens drei Zeilen unter einer Grußformel (Unterschriftsblock: "Mit
+    freundlichen Grüßen" ⏎ "Neff") oder in derselben Zeile hinter ihr?"""
+    za = text.rfind("\n", 0, pos) + 1
+    ze = text.find("\n", pos)
+    ze = len(text) if ze < 0 else ze
+    if len(text[za:ze].split()) > 6:
+        return False
+    if GRUSS_RE.search(text, za, pos):
+        return True
+    a = za
+    for _ in range(3):
+        if a == 0:
+            return False
+        b = a - 1
+        a = text.rfind("\n", 0, b) + 1
+        zeile = text[a:b]
+        if GRUSS_RE.search(zeile):
+            return True
+        if len(zeile.split()) > 8:
+            return False                                 # Fließtext dazwischen: kein Unterschriftsblock
+    return False
+
+
+def _etikett_art(wissen, zelle: str):
+    """Art des Etiketts, das die ganze Zelle ist ("Kunde", "Name:", "Fahrzeug"), oder None."""
+    z = zelle.strip().rstrip(":").strip()
+    if not z or len(z) > 40 or any(c.isdigit() for c in z):
+        return None
+    for art in getattr(wissen, "ETIKETTEN_ARTEN", ()):
+        try:
+            if wissen.index(f"etiketten_{art}").eintrag_fuer(z) is not None:
+                return art
+        except Exception:
+            return None
+    return None
+
+
+def personen_spalte(text: str, pos: int, wissen=None, zeilen: int = 40) -> bool:
+    """Steht die Stelle in einer Tabellenspalte, deren Kopf (die nächste Zeile darüber mit Etiketten an derselben
+    Spaltennummer, Zellen getrennt durch Tabulatoren) ein Personen-Etikett ist ("Kunde", "Fahrer", "Name")?"""
+    if wissen is None:
+        return False
+    za = text.rfind("\n", 0, pos) + 1
+    ze = text.find("\n", pos)
+    zeile = text[za:len(text) if ze < 0 else ze]
+    zellen = [z for z in re.split(r"\t+", zeile)]
+    if len(zellen) < 2:
+        return False
+    k = len([z for z in re.split(r"\t+", text[za:pos])]) - 1
+    a = za
+    for _ in range(zeilen):
+        if a == 0:
+            return False
+        b = a - 1
+        a = text.rfind("\n", 0, b) + 1
+        kopf = re.split(r"\t+", text[a:b])
+        if len(kopf) < 2 or k >= len(kopf):
+            continue
+        arten = [_etikett_art(wissen, z) for z in kopf]
+        if sum(1 for x in arten if x) < 2:
+            continue                                     # keine Kopfzeile (Datenzeile, Überschrift)
+        return arten[k] == "person"
+    return False
+
+
+def personenbeleg(text: str, start: int, wissen=None) -> bool:
+    """Spricht der Ort der Stelle für eine Person: ein Unterschriftsblock unter einer Grußformel, eine Personenspalte
+    einer Tabelle oder das Feld C.1.1/C.1.2 der Zulassungsbescheinigung? Dann ist ein Familienname, der zugleich
+    Marke, Modell oder Rasse ist ("Neff", "Miele", "Pommer", "Kreidler"), ohne Sachbeleg ein Name (Gegenprüfung
+    LK-02)."""
+    if im_grussblock(text, start) or personen_spalte(text, start, wissen):
+        return True
+    return any(a <= start < b for a, b in zb1_personenfelder(text))
+
+
 def sachnamen_stellen(zeile: str, wissen) -> list:
     """(start, ende) der Marken, Modelle und Tierrassen der Wissensbasis (Liste sachnamen) in einer Zeile – nur
     innerhalb einer Zelle: ein Treffer über einen Tabulator hinweg ("Seat ⇥⇥ Leon Wawrzyniak": Fahrzeug und Fahrer in
@@ -398,9 +598,71 @@ def _zellen(zeile: str) -> list:
     return [(m.start(), m.end()) for m in re.finditer(r"[^\t]+", zeile) if zeile[m.start():m.end()].strip()]
 
 
+# Organisationswort oder Rechtsform in einem Zellteil einer Organisations-Spalte ("HUK-COBURG Versicherung", "BKK",
+# "Sparkasse Rosenheim", "Muster AG"): eine Organisation
+_ORG_WORT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:\w*versicherung(?:en|s-?ag)?|versicherer|assekuranz|\w*bank|"
+                          r"\w*kasse|sparkasse|bkk|aok|ikk|dak|lkk|knappschaft|barmer|gesellschaft|konzern|gruppe|"
+                          r"ag|gmbh|mbh|se|vvag|a\.[ \t]?g\.|eg|kg|ohg|ltd|inc|s\.[ \t]?a\.)(?![\wäöüß])")
+# Hinweis auf eine Person in der Zelle ("Gebhard Lindinger (privat)", "Kurt Wendlinger (Vermittler)", "Herr Maier")
+_PERSON_HINWEIS_RE = re.compile(r"(?i)(?<![\wäöüß])(?:privat|privatperson|vermittler(?:in)?|makler(?:in)?|herrn?|frau|"
+                                r"inhaber(?:in)?|familienversichert|mitversichert|über)(?![\wäöüß])")
+_ZELLTEIL_RE = re.compile(r"[^,;/()]+")
+
+
+@functools.lru_cache(maxsize=4)
+def _org_kerne(wissen) -> frozenset:
+    """Markenkerne der Organisationen der Wissensbasis: ein Eintrag aus Marke und Organisationswort oder Rechtsform
+    ("Gothaer Versicherung", "Adam Riese Versicherung") ohne dieses Schlusswort ("gothaer", "adam riese"). Nur in einer
+    Organisations-Spalte eine Organisation: die Erlaubnisliste selbst enthält keine Vor-/Nachnamen-Paare (sonst bliebe
+    eine Person dieses Namens überall lesbar, test_wissen)."""
+    kerne = set()
+    try:
+        eintraege = wissen.liste("versicherer_und_organisationen")
+    except Exception:
+        return frozenset()
+    for eintrag in eintraege:
+        woerter = eintrag.split()
+        while len(woerter) > 1 and _ORG_WORT_RE.fullmatch(woerter[-1]):
+            woerter.pop()
+            kerne.add(" ".join(woerter).casefold())
+    return frozenset(kerne)
+
+
+def _org_zellteil(teil: str, zelle: str, wissen) -> bool:
+    """Ist der Zellteil einer Organisations-Spalte eine Organisation: eine Organisation der Wissensbasis ("HUK-COBURG")
+    oder ihr Markenkern ("Adam Riese", _org_kerne), ein Organisationswort oder eine Rechtsform darin – oder ein
+    einzelnes Wort ohne Hinweis auf eine Person ("Roland")? Vor- und Nachname ("Gebhard Lindinger") und ein Personen-Hinweis in der Zelle ("(privat)",
+    "Vermittler", "familienversichert über …") sind eine Person (Gegenprüfung LK-03/LK-04)."""
+    t = " ".join(teil.split())
+    if not t:
+        return True
+    try:
+        if wissen is not None and (wissen.ist_allowlist(t) or any(True for _ in wissen.finde(t,
+                                                                    "versicherer_und_organisationen"))):
+            return True
+    except Exception:
+        return True
+    if _ORG_WORT_RE.search(t):
+        return True
+    if _PERSON_HINWEIS_RE.search(zelle):
+        return False
+    if wissen is not None and t.casefold() in _org_kerne(wissen):
+        return True                          # Markenkern eines Versicherers ("Adam Riese" aus "Adam Riese Versicherung")
+    woerter = re.findall(r"[^\W\d_][\w'’\-]*", t)
+    grosse = [w for w in woerter if w[:1].isupper()]
+    if len(grosse) >= 2 and wissen is not None:
+        try:
+            if any(wissen.ist_vorname(a) and not wissen.ist_allerweltswort(b) for a, b in zip(grosse, grosse[1:])):
+                return False                 # Vor- und Nachname: eine Person
+        except Exception:
+            return True
+    return True
+
+
 def organisations_spalte(text: str, pos: int) -> bool:
     """Steht die Stelle pos in einer Tabellenspalte, deren Kopfzelle eine Organisation ankündigt ("Versicherer" ⏎
-    "Adam Riese")? Dieselbe Regel für die Erkennung (namen.py, wissen_namen) und die Selbstkontrolle."""
+    "Adam Riese"), und ist ihr Zellteil eine Organisation (_org_zellteil)? Dieselbe Regel für die Erkennung (namen.py,
+    wissen_namen) und die Selbstkontrolle."""
     za = text.rfind("\n", 0, pos) + 1
     ze = text.find("\n", pos)
     zeile = text[za:len(text) if ze < 0 else ze]
@@ -422,7 +684,15 @@ def organisations_spalte(text: str, pos: int) -> bool:
         if len(kopf) == len(zellen):
             a, b = kopf[nr]
             if _ORG_SPALTE_RE.fullmatch(oben[a:b].strip()):
-                return True
+                za0, zb0 = zellen[nr]
+                zelle = zeile[za0:zb0]
+                teil = next((m.group(0) for m in _ZELLTEIL_RE.finditer(zelle)
+                             if m.start() <= pos - za - za0 < m.end()), zelle)
+                try:
+                    from . import wissen as wissen_modul
+                except Exception:  # pragma: no cover - Wissensbasis fehlt
+                    wissen_modul = None
+                return _org_zellteil(teil, zelle, wissen_modul)
         ende = anfang - 1
     return False
 

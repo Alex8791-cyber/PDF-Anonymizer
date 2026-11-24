@@ -1555,6 +1555,64 @@ _FELD_DAHINTER_RE = re.compile(r"[ \t]*:")
 _JURISTISCH_DAHINTER_RE = re.compile(
     r"[ \t]*(?:gGmbH|GmbH|mbH|AG|SE|KGaA|KG|OHG|UG|e\.[ \t]?V\.|eG|VVaG|Ltd\.?|Inc\.?|PLC|S\.[ \t]?A\.|B\.[ \t]?V\.|"
     r"N\.[ \t]?V\.|&[ \t]*Co\.?)(?![\wäöüß])")
+# Ort hinter der Person, die ein Personen-Etikett nennt ("Einweisender Arzt: Dr. Petra Ullrich-Habermann, Gaimersheim",
+# "Zeuge: Hans Maier, Kolbermoor"): Komma, ein Ortsname und danach nichts mehr im Wert (Zellende, Tabulator, ";")
+_KOMMA_VOR_ORT_RE = re.compile(r"[ \t]*,[ \t]*(?=[A-ZÄÖÜ])")
+_NICHTS_DAHINTER_RE = re.compile(r"[ \t.]*(?:[;\t]|$)")
+# typische Endungen deutscher Ortsnamen ("Pfaffenhofen", "Denkendorf", "Neukirchen"): kein zusammengesetztes Hauptwort
+_ORTSNAMEN_ENDUNG_RE = re.compile(r"(?i)(?:stadt|statt|dorf|feld|felden|hausen|heim|berg|burg|bach|hofen|hof|kirchen|"
+                                  r"brücken|brück|furt|au|see|moos|ried|wald|tal|thal|brunn|born|hagen|rode|weiler|"
+                                  r"zell|münster|hafen|kreuz|markt|mühle|mühlen|wies|wiesen|ofen|stetten|ing|ingen|"
+                                  r"garten|stein|haus|bruck|kofen|reuth|grün|lohe|loh|ach|beuren|beuern|leben|"
+                                  r"städt|wang|wangen|weil|wil|wyl|dingen|lingen|kamp|horst|holz|siel|winkel|rath)$")
+
+
+def _kompositum_allerwelt(wort: str) -> bool:
+    """Endet ein langes Wort auf ein Allerwelts- oder Berufswort ("Kleintierpraxis", "Schadenabteilung") – nicht auf
+    eine typische Endung von Ortsnamen ("Pfaffenhofen", "Denkendorf")?"""
+    if _wissen is None or _ORTSNAMEN_ENDUNG_RE.search(wort):
+        return False
+    for i in range(3, len(wort) - 3):
+        rest = wort[i].upper() + wort[i + 1:]
+        if wort[i].isupper() or len(rest) < 4:
+            continue
+        try:
+            if _wissen.ist_allerweltswort(rest) or _wissen.ist_beruf(rest):
+                return True
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            return False
+    return False
+
+
+def ort_hinter_person(text: str, ende: int, grenze: int):
+    """(start, ende) eines Ortsnamens direkt hinter einem Personennamen und einem Komma, wenn danach im Wert nichts mehr
+    steht ("…, Gaimersheim"); kein Allerwelts-, Berufs-, Etikett-, Organisations- oder Vorname, kein Fachwort der
+    Medizin und kein zusammengesetztes Hauptwort ("…, Kleintierpraxis"). Sonst None."""
+    m = _KOMMA_VOR_ORT_RE.match(text, ende, grenze)
+    if not m:
+        return None
+    sp = ort_spanne(text, m.end(), grenze)
+    if sp is None:
+        return None
+    a, b = sp[0], ort_verlaengern(text, sp[1], grenze)
+    if not _NICHTS_DAHINTER_RE.match(text[b:grenze]):
+        return None
+    ort = text[a:b]
+    erstes = ort.split()[0]
+    if erstes.isupper() or len(erstes) < 3 or not any(c.islower() for c in erstes):
+        return None                                      # "DEKRA", "TÜV": Organisation bzw. Kürzel
+    if _wissen is not None:
+        try:
+            ist_ort = _wissen.ist_ort(ort) or _wissen.ist_ort(erstes)
+            if not ist_ort and (_wissen.ist_vorname(erstes) or _wissen.ist_beruf(ort) or _wissen.ist_allowlist(ort)
+                                or _wissen.ist_anrede_titel(erstes)
+                                or _wissen.index("sachnamen").finde(ort)):
+                return None
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            return None
+        if not ist_ort and (_kompositum_allerwelt(erstes) or personenkontext.medizinisch(erstes, text, a, _wissen)):
+            return None
+    return a, b
 
 
 def _namens_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> list:
@@ -1600,6 +1658,9 @@ def _namens_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
             gruppe = text[a:b] if len(text[a:b].split()) >= 2 and (len(teile) > 1 or sp.woerter >= 2) else None
             aus.append(Wert(a, b, "namen", gruppe))
         if not liste:
+            ort = None if org else ort_hinter_person(text, sp.ende, e)
+            if ort is not None:
+                aus.append(Wert(ort[0], ort[1], "ort"))   # "Einweisender Arzt: Dr. …, Gaimersheim"
             break
         pos = sp.ende
     return aus
@@ -1721,6 +1782,44 @@ def werte_darunter(seite, lg: Lage, et: Etikett, alle_starts: set) -> list:
             return werte
         return []
     return []
+
+
+def werte_rechts_daneben(seite, lg: Lage, et: Etikett, alle_starts: set) -> list:
+    """Wert in einer eigenen Zeile rechts auf derselben Höhe: ein Formular, dessen Spalten das Seitenmodell als
+    getrennte Blöcke führt (Texterkennung: Feldcodes, Feldnamen und Werte je ein Block – "Name oder Firmenname" und
+    "Kreidler" stehen in verschiedenen Zeilen). Das Etikett ist die letzte Zelle seiner Zeile; der Wert ist die erste
+    Zelle der nächsten Zeile rechts, deren Höhe sich mit dem Etikett deckt – nicht zu weit entfernt, kein weiteres
+    Etikett und kein Feldbezeichner."""
+    zelle = lg.zelle_bei(et.start)
+    if zelle is None:
+        return []
+    eigene = lg.zellen_je_zeile.get(zelle.zeile, ())
+    if not eigene or max(c.x1 for c in eigene) > zelle.x1 + 0.5:
+        return []                                   # rechts in derselben Zeile steht noch etwas
+    h = max(zelle.hoehe, 4.0)
+    weite = max(260.0, 25 * lg.hoehe)
+    bester = None
+    for zid, zellen in lg.zellen_je_zeile.items():
+        if zid == zelle.zeile or not zellen:
+            continue
+        erste = min(zellen, key=lambda c: c.x0)
+        abstand = erste.x0 - zelle.x1
+        if abstand < -0.5 or abstand > weite:
+            continue
+        deckung = min(erste.y1, zelle.y1) - max(erste.y0, zelle.y0)
+        if deckung < 0.6 * min(erste.y1 - erste.y0, zelle.y1 - zelle.y0, h):
+            continue
+        if bester is None or abstand < bester[0]:
+            bester = (abstand, erste)
+    if bester is None:
+        return []
+    z = bester[1]
+    text = seite.text
+    if any(z.start <= s < z.ende and s <= z.start + 2 for s in alle_starts):
+        return []                                   # rechts daneben steht das nächste Etikett
+    if re.search(r"(?:/-?in|\(in\)|:)\s*$", text[z.start:z.ende]):
+        return []                                   # Feldbezeichner ("Raucher/in", "Beruf:")
+    return werte_lesen(text, z.start, z.ende, et, True)
 
 
 _FUELLWERT_RE = re.compile(r"(?i)^(?:wie\b.*|siehe\b.*|s\.\s*o\.?|entf[aä]llt|keine?|nein|ja|[-–—/_.x]+|n/?a|"
@@ -2230,6 +2329,8 @@ def etikett_wert(dok, kontext):
             if not werte and _etikett_am_ende(seite, lg, et) and _etikett_am_zellanfang(seite, lg, et) \
                     and not _mit_doppelpunkt(seite, et):
                 werte = werte_darunter(seite, lg, et, starts)
+                if not werte and not kopfzeile(seite, lg, et.start, alle, koepfe):
+                    werte = werte_rechts_daneben(seite, lg, et, starts)
                 quelle_sicherheit = SICHERHEIT_UNTER
             else:
                 quelle_sicherheit = SICHERHEIT_ETIKETT

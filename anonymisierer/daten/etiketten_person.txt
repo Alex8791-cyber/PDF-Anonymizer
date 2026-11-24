@@ -581,6 +581,8 @@ Name des Versicherten
 Name des Versicherungsnehmers
 Name des Zahlungspflichtigen
 Name des Zeugen
+Name oder Firma
+Name oder Firmenname
 Name of passenger
 Name und Anschrift
 Name und Vorname

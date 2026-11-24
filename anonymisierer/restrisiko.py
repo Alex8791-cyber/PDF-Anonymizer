@@ -190,6 +190,11 @@ _MONATE = {"januar": 1, "jan": 1, "jänner": 1, "februar": 2, "feb": 2, "märz":
            "april": 4, "apr": 4, "mai": 5, "juni": 6, "jun": 6, "juli": 7, "jul": 7, "august": 8, "aug": 8,
            "september": 9, "sep": 9, "sept": 9, "oktober": 10, "okt": 10, "november": 11, "nov": 11,
            "dezember": 12, "dez": 12}
+# Vertragsvokabular zwischen einem Geburts-Etikett und dem Datum: ein Leistungs- oder Vertragsdatum, kein
+# Geburtsdatum ("Leistungen bei Entbindung im Krankenhaus ab 01.01.2025") – dieselben Wörter wie die Erkennung
+# (muster._GEB_STOPP_ZEILE_RE)
+_GEB_STOPP_RE = re.compile(r"(?<![\wäöüß])(?:vom|ab|zum|seit|bis|am Ende)(?![\wäöüß])"
+                           r"|(?i:beginn|ablauf|fällig|gültig|kündig|stand(?![\wäöüß])|rechnung|angebot|zahlung)")
 _KALENDERWOERTER = frozenset({
     "januar", "februar", "märz", "april", "mai", "juni", "juli", "august", "september", "oktober", "november",
     "dezember", "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonnabend", "sonntag",
@@ -844,6 +849,16 @@ def _ocr_unsinn(wort: str) -> bool:
             or bool(re.search(r"[a-zäöüß][A-ZÄÖÜ][a-zäöüß]*[A-ZÄÖÜ]", wort)))
 
 
+def _religion_geschwaerzt(profil) -> bool:
+    """Schwärzt die Schutzstufe Religion/Konfession (muster.PROFILE: nur „Maximal“)? Unbekannte Stufe: ja."""
+    try:
+        from . import muster
+        stufe = muster.PROFILE.get(profil)
+    except Exception:  # pragma: no cover - muster fehlt
+        return True
+    return stufe is None or "religion" in stufe.get("aktive", ())
+
+
 def _platzhalter_bruchstueck(wort: str) -> bool:
     """OCR-Bruchstück eines Platzhalters ("PERS", "ORTI]", "[PLZ")?"""
     if "[" in wort or "]" in wort:
@@ -992,6 +1007,8 @@ class _Seitenpruefung:
             ms, me = z.start + m.start(), z.start + m.end()
             if ms <= s < me or (ms < e and me > s):
                 continue
+            if m.group(0) in (",", ";"):
+                continue                             # "[PERSON B], Gaimersheim": ein Komma trennt nicht
             wb = self.box(ms, me)
             if wb is None:
                 continue
@@ -1880,9 +1897,13 @@ class _Seitenpruefung:
         Spaltenkopf und ausländische Kennzeichen hinter einem Fahrzeugwort ("Zugmaschine WGM 4471K") – dieselben
         Formen wie in der Erkennung (kennungsformen.religion, kennzeichen_im_satz)."""
         text = self.text
-        for s, e in kennungsformen.religion(text):
-            if not self.ist_platzhalter_bei(s, e):
-                self.neu(s, e, "Religion/Konfession (Art. 9 DSGVO)", "kennung")
+        # Religion wie Gesundheitsdaten (Gegenprüfung V1): in „Ausgewogen“ und „Hoch“ nur angeboten, nicht angehakt –
+        # dort bewusst stehen gelassen und im Abschlussdialog gemeldet, also kein Verdacht der Ausgabe; nur in einer
+        # Stufe, die sie schwärzt („Maximal“), ist ein lesbarer Wert ein Rest
+        if _religion_geschwaerzt(self.profil):
+            for s, e in kennungsformen.religion(text):
+                if not self.ist_platzhalter_bei(s, e):
+                    self.neu(s, e, "Religion/Konfession (Art. 9 DSGVO)", "kennung")
         for s, e, _ in kennungsformen.kennzeichen_im_satz(text):
             if not self.ist_platzhalter_bei(s, e):
                 self.neu(s, e, "ausländisches Kfz-Kennzeichen?", "form")
@@ -2540,6 +2561,9 @@ class _Seitenpruefung:
             if etikett is None:
                 etikett = self.spaltenkopf(s, e, ("datum_geburt", "vertragsdaten"), streng=False)
             if etikett is not None and etikett[0] == "datum_geburt":
+                pos = zeile.rfind(etikett[1], 0, ms)
+                if pos >= 0 and _GEB_STOPP_RE.search(zeile[pos + len(etikett[1]):ms]):
+                    continue                # "Entbindung im Krankenhaus ab 01.01.2025": ein Leistungsbeginn (U6)
                 if alter <= 120:
                     self.neu(s, e, f"Datum hinter Etikett »{etikett[1]}«", "datum")
                 continue
@@ -2580,8 +2604,12 @@ class _Seitenpruefung:
             w = re.search(r"([^\W\d_][\w'’\-]*)$", vorn)
             if w and w.group(1)[:1].isupper():
                 vn, nn, vnm, nnm, aw, tit, allow, part = self.w.art(w.group(1))
-                if (vn or nn) and not (aw or tit or allow):
-                    name_start = w.start(1)
+                if (vn or nn) and not (aw or tit or allow) and w.group(1).casefold() not in _KALENDERWOERTER:
+                    # ein mehrdeutiger Nachname allein ("Behandlungstag: Montag, 03.06.2024") nur mit Vornamen davor
+                    # (Gegenprüfung U5)
+                    v = re.search(r"([^\W\d_][\w'’\-]*)[ \t]+$", vorn[:w.start(1)])
+                    if vn or not nnm or (v is not None and self.w.art(v.group(1))[0]):
+                        name_start = w.start(1)
         if name_start is None:
             # auf der Seite: das graue Rechteck eines Personen-Platzhalters links neben dem Datum, dazwischen nur
             # Satzzeichen (die Schwärzung schreibt den Platzhalter nicht an die Stelle des Namens im Text)
@@ -2684,6 +2712,15 @@ class _Seitenpruefung:
                 if klasse is not None and klasse.end() == m.end():
                     continue                                 # "Auf der BAB 9": eine Fahrbahn (Straßenklasse)
                 self.neu(s, o + m.end(), "Anschrift (Straße + Hausnummer)", "anschrift")
+        # Mannheimer Quadrate ("L 14, 16, [PLZ ORT]", "Anschrift: E 3, 1") – dieselbe Form wie die Erkennung; Mannheim
+        # bzw. die PLZ darf in den zwei Zeilen danach stehen
+        bis = z.ende
+        for _ in range(2):
+            n = self.text.find("\n", bis + 1)
+            bis = len(self.text) if n < 0 else n
+        for a, b in kennungsformen.quadrat_stellen(self.text[o:bis]):
+            if a < len(zeile) and not self.ist_platzhalter_bei(o + a, o + b):
+                self.neu(o + a, o + b, "Anschrift (Straße + Hausnummer)", "anschrift")
         for m in _POSTFACH_RE.finditer(zeile):
             if not self.org_kontext(o + m.start()):
                 self.neu(o + m.start(), o + m.end(), "Postfach", "anschrift")
@@ -2758,8 +2795,8 @@ class _Seitenpruefung:
         o = z.start
         for m in re.finditer(r"[^\t]+", zeile):
             zelle = m.group(0).strip(" ,")
-            if not zelle or len(zelle.split()) > 4 or not _STRASSENNAME_ZELLE_RE.fullmatch(zelle):
-                continue
+            if not zelle or len(zelle) > 80 or len(zelle.split()) > 4 or not _STRASSENNAME_ZELLE_RE.fullmatch(zelle):
+                continue                                  # (über 80 Zeichen kein Straßenname; Laufzeit L2)
             s = o + m.start() + m.group(0).index(zelle)
             e = s + len(zelle)
             if self.ist_gesperrt(s, e) or self.org_kontext(s) or self.w.ist_etikett(zelle.split()[-1]):
@@ -3028,6 +3065,9 @@ class _Seitenpruefung:
         wohn_starts = {a for a, _ in personenkontext.wohn_kontext_namen(text)} if re.search(
             r"(?i)nachbar|mieter|eigentümer|bewohner|hausmeister|verwalter|\b(?:og|eg|dg|ug)\b|geschoss|stock|etage",
             text) else set()
+        # Name hinter einer Berufsbezeichnung im Satz ("Der Glaser Eibl hat …") – dieselbe Regel wie die Erkennung
+        wohn_starts |= {a for a, _ in personenkontext.beruf_kontext_namen(text, self.w.modul)} \
+            if self.w.modul is not None else set()
 
         sach_zeilen: dict = {}
 
@@ -3043,7 +3083,17 @@ class _Seitenpruefung:
                 sach_zeilen[z.id] = [(z.start + a, z.start + b) for a, b in
                                      personenkontext.sachnamen_stellen(self.zeilen_text(z), self.w.modul)]
             if any(a <= s and e <= b for a, b in sach_zeilen[z.id]):
-                return True
+                # genau eine Marke, ein Modell oder eine Rasse an einem Ort für Personen (Unterschriftsblock,
+                # Personenspalte, Feld C.1.1): nur mit Sachbeleg in der Zelle eine Sache ("Neff", "Miele" als Fahrer).
+                # Auf der Ausgabeseite verschieben Platzhalter die Zellen: die Spalte, den Unterschriftsblock und
+                # ein Personen-Etikett links daneben (Formular in Spaltenblöcken) bestimmt die Lage auf der Seite
+                # (spalte_person, Grußzeilen, etikett_davor), der Text nur ersatzweise
+                genau = all(a == s and e == b for a, b in sach_zeilen[z.id] if a <= s and e <= b)
+                person_ort = genau and (z.id in gruss_zeilen or spalte_person(i)
+                                        or personenkontext.personenbeleg(text, s, self.w.modul)
+                                        or self.etikett_davor(s, e, ("person",)) is not None)
+                if not (person_ort and not personenkontext.sachbeleg(text, s, e, self.w.modul)):
+                    return True
             if personenkontext.modellcode_danach(text, e, self.w.wortgestalt, (woerter[i][2],)):
                 return True                             # nicht vor Datum, Jahr, Betrag, Telefonnummer
             return personenkontext.tierangabe(text, s)
@@ -3174,6 +3224,8 @@ class _Seitenpruefung:
                 continue                                # "Abstammung: v. Gribaldi", "Baker-Zyste", "Morbus Scheuermann"
             if sachname(i) and not (titel or etikett):
                 continue                                # "Gasgrill Weber Genesis", "Böckmann TPV", "Jack Russell"
+            if artikel_davor(i) and not titel and self.w.frage("ist_beruf", w):
+                continue                                # "Der Glaser [PERSON C] hat …": Beruf, kein Name
             if not (titel or platzhalter or etikett or rolle) and (vn or nn) and organisation(i):
                 continue                                # "Adam Riese", "Versicherer" ⏎ "Roland": ein Versicherer
             if vorname_stark(i) or nachname_stark(i) or doppelname(i):
@@ -3471,15 +3523,18 @@ class _Seitenpruefung:
         return False
 
     def _kompositum(self, w: str) -> bool:
-        """Zusammengesetztes Hauptwort ("Bestandsliste", "Maklerbüro", "Unfallhergang")?"""
-        for i in range(3, len(w) - 3):
+        """Zusammengesetztes Hauptwort ("Bestandsliste", "Maklerbüro", "Unfallhergang")? Geprüft werden Grund- und
+        Bestimmungswörter bis 30 Zeichen – auf einem sehr langen Wort ("Ab-Ab-…", 2 000 Zeichen) sonst je Trennstelle
+        ein Nachschlagen über das ganze Wort (quadratisch, Laufzeit L3)."""
+        teil = 30
+        for i in range(max(3, len(w) - teil), len(w) - 3):
             rest = w[i:]
             if rest[0].isupper():
                 continue
             kandidat = rest[0].upper() + rest[1:]
             if self.w.art(kandidat)[4] or self.w.ist_etikett(kandidat):
                 return True
-        for i in range(4, len(w) - 2):
+        for i in range(4, min(len(w) - 2, teil + 1)):
             if (self.w.art(w[:i])[4] and i >= 5) or self.w.ist_etikett(w[:i]):
                 return True
         return False

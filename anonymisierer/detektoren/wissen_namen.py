@@ -125,8 +125,14 @@ def _in_sachnamen(text: str, start: int, ende: int) -> bool:
     a = text.rfind("\n", 0, start) + 1
     b = text.find("\n", ende)
     zeile = text[a:len(text) if b < 0 else b]
-    # je Zelle (personenkontext.sachnamen_stellen, wie die Selbstkontrolle): "Seat ⇥⇥ Leon …" ist keine Marke
-    return any(x <= start - a and ende - a <= y for x, y in personenkontext.sachnamen_stellen(zeile, wissen))
+    # je Zelle (personenkontext.sachnamen_stellen, wie die Selbstkontrolle): "Seat ⇥⇥ Leon …" ist keine Marke; je
+    # Zeile einmal berechnet (Laufzeit L2: lange Einzelzeilen mit vielen Kandidaten)
+    return any(x <= start - a and ende - a <= y for x, y in _sachnamen_der_zeile(zeile))
+
+
+@functools.lru_cache(maxsize=128)
+def _sachnamen_der_zeile(zeile: str) -> tuple:
+    return tuple(personenkontext.sachnamen_stellen(zeile, wissen))
 
 
 def _sach_etikett_davor(text: str, start: int) -> bool:
@@ -759,6 +765,15 @@ def _wohn_namen(text: str) -> list:
 
 
 # ----------------------------------------------------------------------
+# R6d Name hinter einer Berufsbezeichnung im Satz ("Der Glaser Eibl hat bereits ein Angebot erstellt", "unser Monteur
+#     Zwickl kam"): auch ein kurzer unbekannter Familienname (personenkontext.beruf_kontext_namen, dieselbe Regel wie
+#     die Selbstkontrolle)
+# ----------------------------------------------------------------------
+def _beruf_namen(text: str) -> list:
+    return [_treffer(s, e, text, 0.6) for s, e in personenkontext.beruf_kontext_namen(text)]
+
+
+# ----------------------------------------------------------------------
 # R6c Felder C.1.1/C.1.2 der Zulassungsbescheinigung Teil I (Name oder Firma, Vornamen)
 # ----------------------------------------------------------------------
 def _zb1_namen(text: str) -> list:
@@ -803,6 +818,7 @@ def namen_stellen(text: str) -> list:
     treffer += _personenlisten(text)
     treffer += _rollen_namen(text)
     treffer += _wohn_namen(text)
+    treffer += _beruf_namen(text)
     treffer += _zb1_namen(text)
     treffer += _url_namen(text)
     aus, gesehen = [], set()

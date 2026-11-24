@@ -1911,9 +1911,11 @@ def einzelkaufmann_register(text: str) -> list:
 
 # -- Etiketten ----------------------------------------------------------------------------------------------------
 # Zusammengesetzte Nummern-Etiketten, die in keiner Liste stehen ("Bestandsnummer", "Mitglieds-ID", "BG-Nummer",
-# "Vorg.-Nr.", "Ser.-Nr.", "Rahmen-Nummer") – auch mit Trenner vor "Nummer" und Punkt vor "-Nr."
+# "Vorg.-Nr.", "Ser.-Nr.", "Rahmen-Nummer") – auch mit Trenner vor "Nummer" und Punkt vor "-Nr.". Die Wortteile
+# enthalten keinen Unterstrich ([^\W_]): sonst zerlegt der Ausdruck eine Unterschriftslinie ("Ort, Datum ________")
+# auf exponentiell viele Arten (Gegenprüfung L1); ein Unterstrich steht nur als Trenner zwischen zwei Teilen
 NUMMERN_WORT_RE = re.compile(
-    r"(?<![\w.\-])([A-ZÄÖÜa-zäöü][\wäöüß]*?(?:[-._][\wäöüßÄÖÜ]+)*?"
+    r"(?<![\w.\-])([A-ZÄÖÜa-zäöü][^\W_]*?(?:[-._][^\W_]+)*?"
     r"(?:[-._]?(?:[Nn]ummer|NUMMER)|\.?[-_]?(?:[Nn]r\.?|NR\.?)|[-_](?:ID|Id)|[Kk]ennung|KENNUNG|[Kk]ennziffer))"
     r"(?![\w])")
 # … deren Wert nicht zur Person gehört: Rufnummern, Anschrift, Kataloge (Artikel, Gebührenordnungen GOZ/GOÄ/EBM/BEL,
@@ -2572,10 +2574,42 @@ _STRASSENTYP_VORN_RE = re.compile(
     r"Splaiul|Intrarea|bul\.|Bul\.|ul\.|Ul\.|ulica|Ulica|ulitsa|ul\.|trg|Trg)[ \t]+"
     rf"(?:(?:{_ORT_CAP}|\d{{1,2}}[.]?|de|din|lui|la|cel|na|pod|kod)[ \t]+){{0,3}}{_ORT_CAP},?[ \t]+"
     r"(?:(?i:nr\.?|no\.?|br\.?|broj)[ \t]*)?\d{1,4}[a-zA-Z]?(?:[ \t]?/[ \t]?\d{1,4}[a-zA-Z]?)?(?![\w])")
+# Hausnummer eines Mannheimer Quadrats hinter Buchstabe und Nummer: Komma und eine kleine Zahl ("L 14, 16", "Q 7, 22",
+# "E 3, 1"), keine Dezimalzahl ("BAB 9, km 381,2" ist keine)
+_QUADRAT_HAUSNR = r"[ \t]*,[ \t]*\d{1,3}[a-zA-Z]?(?!\d|[,.]\d)"
 # Straßenklasse mit Nummer – Autobahn, Bundes-, Landes-, Kreis-, Staatsstraße, Europastraße ("Auf der A 8", "B 15",
-# "L 2080", "BAB 9", "St 2089", "E 45"): eine Fahrbahn, keine Anschrift (Domänen-Befund 46; muster.py und restrisiko.py)
-STRASSENKLASSE = r"(?:A|B|L|K|S|E|St|ST|Kr|KR|BAB|Bab|AB)[ \t]?\d{1,4}"
+# "L 2080", "BAB 9", "St 2089", "E 45"): eine Fahrbahn, keine Anschrift (Domänen-Befund 46; muster.py und restrisiko.py).
+# Nicht mit einer Hausnummer dahinter: "L 14, 16" ist ein Mannheimer Quadrat, eine Anschrift (Gegenprüfung LK-01)
+STRASSENKLASSE = r"(?:A|B|L|K|S|E|St|ST|Kr|KR|BAB|Bab|AB)[ \t]?\d{1,4}(?!\d|" + _QUADRAT_HAUSNR + r")"
 STRASSENKLASSE_RE = re.compile(r"(?<![\wäöüß])" + STRASSENKLASSE + r"(?![\wäöüß])")
+# Mannheimer Quadrat mit Hausnummer ("L 14, 16", "Q 7, 22", "B 2, 9"): Buchstabe A–U, Nummer des Quadrats 1–19, Komma,
+# Hausnummer – eine Anschrift, wenn Mannheim bzw. eine PLZ 681xx–683xx in der Zeile oder den zwei Zeilen danach steht
+# oder ein Anschrift-Etikett davor (quadrat_stellen)
+QUADRAT_RE = re.compile(r"(?<![\wäöüß.\-/])[A-U][ \t]?(?:1\d|[1-9])" + _QUADRAT_HAUSNR + r"(?![\wäöüß])")
+_MANNHEIM_RE = re.compile(r"(?<!\d)68[1-3]\d\d(?!\d)|(?<![\wäöüß])(?i:mannheim)(?![\wäöüß])"
+                          r"|^[ \t,\n]*\[(?:PLZ|ORT|ADRESSE)\b")    # in der Ausgabe: PLZ und Ort schon ersetzt
+_ANSCHRIFT_DAVOR_RE = re.compile(r"(?i)(?:anschrift|adresse|wohnort|wohnsitz|risikoort|risikoanschrift|"
+                                 r"versicherungsort|halter|halterin|c\.1\.3|straße|strasse|str\.|wohnhaft)"
+                                 r"[^\n]{0,80}$")
+
+
+def quadrat_stellen(text: str) -> list:
+    """(start, ende) von Mannheimer Quadraten mit Hausnummer ("Anschrift: L 14, 16, 68161 Mannheim", "B 2, 9" ⏎ "68159
+    Mannheim", "Bisheriger Halter: Brettschneider, Annemarie, Q 3, 7, 68161 Mannheim") – Erkennung und
+    Selbstkontrolle."""
+    aus = []
+    for m in QUADRAT_RE.finditer(text or ""):
+        a = text.rfind("\n", 0, m.start()) + 1
+        b = m.end()
+        for _ in range(3):                                   # die Zeile und die zwei Zeilen danach
+            n = text.find("\n", b)
+            if n < 0:
+                b = len(text)
+                break
+            b = n + 1
+        if _MANNHEIM_RE.search(text[m.end():b]) or _ANSCHRIFT_DAVOR_RE.search(text[a:m.start()]):
+            aus.append((m.start(), m.end()))
+    return aus
 # sechsstellige PLZ mit Ort (Rumänien, Russland, Weißrussland, Kasachstan …) – nur mit Länderhinweis
 _PLZ6_RE = re.compile(rf"(?<![\w\-/.,])\d{{6}}[ \t]+({_ORT_STADT})(?![\w])")
 # vierstellige PLZ mit Ort (Österreich, Schweiz, Liechtenstein, Dänemark, Ungarn, Belgien …)
@@ -2714,9 +2748,13 @@ _IPV4_RE = re.compile(r"(?<![\w.:\-/])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})
 _IPV6_RE = re.compile(r"(?<![\w:.\-])(?=[0-9A-Fa-f:]*:[0-9A-Fa-f]*:)[0-9A-Fa-f:]{2,39}(?![\w:])")
 _IP_ETIKETT_RE = re.compile(r"(?i)(?<![a-zäöüß])(?:ip(?:v[46])?(?:-?adresse)?|adresse|host|server|router|client|"
                             r"zugriff|absender|von|aus|via|quelle|source|address)[ \t]*[:=]?[ \t]*\(?[ \t]*$")
-_IP_IN_ZEILE_RE = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:IP|IPv4|IP-Adresse|IP-Adr\.|ip-adresse)(?![a-zäöüß])")
+# "IP" als eigenes Wort bzw. "IP-Adresse"/"IPv4" – nicht die Schutzart "IP44" und keine Komposita ("IP-Kamera",
+# "IP-basiert"): dort ist eine Viererpunktzahl der Zeile eine Modell- oder Artikelnummer (Gegenprüfung U2)
+_IP_IN_ZEILE_RE = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:IPv4|IPv6|IP-Adresse|IP-Adr\.|ip-adresse|IP(?![\w\-]))")
 _VERSION_DAVOR_RE = re.compile(r"(?i)(?:version|vers\.|release|build|firmware|software|update|treiber|patch|"
-                               r"stand|revision|rev\.|ver\.|v)[ \t\-]*[:.]?[ \t]*$")
+                               r"stand|revision|rev\.|ver\.|v|modell|typ|artikel|art\.[ \t\-]*nr\.?|"
+                               r"artikelnummer|bestellnummer|best\.-?nr\.?|teilenummer|teile-?nr\.?)"
+                               r"[ \t\-]*[:.]?[ \t]*$")
 
 
 def _ipv4_gueltig(m) -> bool:
@@ -2764,8 +2802,12 @@ _GRAD_PAAR_RE = re.compile(
     r"(?<![\w.,\-])([-+]?\d{1,2}\.\d{3,8})(?:[ \t]*°)?(?:[ \t]*([NSns])(?![\w]))?[ \t]*[,;/][ \t]*"
     r"([-+]?\d{1,3}\.\d{3,8})(?:[ \t]*°)?(?:[ \t]*([EOWeow])(?![\w]))?(?![\w]|[.,]\d)")
 _GRAD_EINZELN_RE = re.compile(
-    r"(?i)(?<![\wäöüß])(?:breite(?:ngrad)?|l(?:ä|ae)nge(?:ngrad)?|lat(?:itude)?|lon(?:gitude)?|lng)[ \t]*[:=]?[ \t]*"
-    r"([-+]?\d{1,3}\.\d{3,8})(?:[ \t]*°)?(?:[ \t]*[NSEOW](?![\w]))?(?![\w]|[.,]\d)")
+    r"(?i)(?<![\wäöüß])(?P<etikett>breite(?:ngrad)?|l(?:ä|ae)nge(?:ngrad)?|lat(?:itude)?|lon(?:gitude)?|lng)[ \t]*[:=]?"
+    r"[ \t]*(?P<wert>[-+]?\d{1,3}\.(?P<nk>\d{3,8}))(?P<grad>[ \t]*°)?(?P<richtung>[ \t]*[NSEOW](?![\w]))?"
+    r"(?![\w]|[.,]\d)")
+# Maßeinheit hinter einem Einzelwert: "Länge 4.689 mm", "Breite 1.829 m" sind Maße mit Tausenderpunkt (Gegenprüfung U1)
+_EINHEIT_DAHINTER_RE = re.compile(r"[ \t]*(?:mm|cm|dm|m|km|kg|g|t|l|m²|m2|qm|m³|m3|ccm|ps|kw|zoll|ft|%|€|eur)"
+                                  r"(?![\wäöüß])", re.IGNORECASE)
 _DMS_RE = re.compile(
     r"(?<![\d.,])(\d{1,3})[ \t]?°[ \t]?(\d{1,2})[ \t]?['′’][ \t]?(\d{1,2}(?:[.,]\d+)?)[ \t]?(?:[\"″”]|'')?[ \t]?"
     r"([NSEOW])(?![\wäöüß])")
@@ -2790,8 +2832,15 @@ def koordinaten(text: str) -> list:
             if stellen >= 4 or (stellen >= 3 and (mit_richtung or _STANDORT_ETIKETT_RE.search(davor))):
                 aus.append((m.start(1), m.end()))
         for m in _GRAD_EINZELN_RE.finditer(text):
-            if abs(float(m.group(1))) <= 180 and not any(a <= m.start(1) < b for a, b in aus):
-                aus.append((m.start(1), m.end()))
+            # ein Einzelwert nur mit Grad-Zeichen, Himmelsrichtung oder Etikett eines Grads ("Breitengrad", "lat") –
+            # hinter "Breite"/"Länge" sonst nur mit mindestens vier Nachkommastellen und ohne Maßeinheit dahinter
+            # ("Länge 4.689 mm", "Breite 1.829 mm" sind Fahrzeugmaße mit Tausenderpunkt, Gegenprüfung U1)
+            etikett = m.group("etikett").casefold()
+            grad_etikett = etikett.endswith("grad") or etikett.startswith(("lat", "lon", "lng"))
+            belegt = bool(m.group("grad") or m.group("richtung")) or grad_etikett or (
+                len(m.group("nk")) >= 4 and not _EINHEIT_DAHINTER_RE.match(text, m.end()))
+            if belegt and abs(float(m.group("wert"))) <= 180 and not any(a <= m.start("wert") < b for a, b in aus):
+                aus.append((m.start("wert"), m.end()))
     if "°" in text:
         for m in _DMS_RE.finditer(text):
             grad = int(m.group(1))
@@ -2850,11 +2899,15 @@ def _zugang_wert(text: str, i: int, grenze: int):
     if m is None:
         return None
     s, e = m.start(), m.end()
+    if text[e - 1] == ":" or text[e:e + 1] == ":" or _ZUGANG_ETIKETT_RE.fullmatch(text, s, e):
+        return None                                     # das Etikett des nächsten Felds ("Kennwort: E-Mail:", U4)
     while e > s and text[e - 1] in ".,:;)»“”'\"":
         e -= 1
     wert = text[s:e]
     if len(wert) < 3 or not any(c.isalnum() for c in wert) or wert.startswith(("[", "(", "http", "www.")):
         return None
+    if _feld_etikett(wert):
+        return None                                     # "Kennzeichen", "Konto", "IMEI": ein Feld-Etikett, kein Wert
     if wert.casefold() in _ZUGANG_FUELLWORT or wert.casefold().rstrip(".:") in _ZUGANG_FUELLWORT:
         return None
     if "@" in wert and "." in wert.split("@")[-1]:
@@ -2873,6 +2926,18 @@ def _zugang_wert(text: str, i: int, grenze: int):
         except Exception:  # pragma: no cover - Wissensbasis fehlt
             pass
     return s, e
+
+
+def _feld_etikett(wert: str) -> bool:
+    """Ist der Wert selbst ein Feld-Etikett der Wissensbasis ("E-Mail", "Kennzeichen", "Konto", "IMEI", "PIN") – in
+    einem leeren Formular das nächste Feld, kein Zugangswert?"""
+    if not wert[:1].isalpha():
+        return False
+    try:
+        from . import wissen
+        return any(wissen.index(f"etiketten_{art}").eintrag_fuer(wert) is not None for art in wissen.ETIKETTEN_ARTEN)
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return False
 
 
 def zugangsdaten(text: str) -> list:
@@ -2956,6 +3021,11 @@ gelöscht geloescht gesperrt offen folgt
 """.split())
 
 
+_PLATTFORM_IN_ZEILE_RE = re.compile(r"(?<![\wäöüß])(?:" + _PLATTFORM + r"|X|Profil|Account|Konto|Kanal|Handle|"
+                                    r"Nutzername|Benutzername|Nickname|Follower|gepostet|Post|Story|Direktnachricht|DM)"
+                                    r"(?![\wäöüß])")
+
+
 def _personenartig(teil: str) -> bool:
     """Sieht der Pfadteil eines Profil-Links nach einer Person aus – Trenner zwischen Wortteilen ("quirin.zwackelhuber",
     "korbi_zeitl84"), Ziffern oder ein Vor-/Nachname der Wissensbasis – und nicht nach einer Organisation der
@@ -2982,7 +3052,17 @@ def profilnamen(text: str) -> list:
     ("?kdnr=4711081&name=Zwackelhuber"). Kein Füllwort ("Telegram: nein", "Signal: nicht vorhanden")."""
     aus = []
     if "@" in text:
-        aus += [(m.start(), m.end()) for m in _HANDLE_RE.finditer(text)]
+        # "@"-Name: personenartig ("@lena.wiesengrund", "@korbi_zeitl84", ein Name der Wissensbasis) – oder eine
+        # Plattform bzw. ein Profilwort in derselben Zeile ("als @schattenwolf auf Instagram"); ein Tarif "@home"
+        # allein ist kein Profil (Gegenprüfung U3)
+        for m in _HANDLE_RE.finditer(text):
+            if not _personenartig(m.group(1)):
+                a = text.rfind("\n", 0, m.start()) + 1
+                b = text.find("\n", m.end())
+                zeile = text[a:len(text) if b < 0 else b]
+                if not _PLATTFORM_IN_ZEILE_RE.search(zeile):
+                    continue
+            aus.append((m.start(), m.end()))
     for m in _PROFIL_ETIKETT_RE.finditer(text):
         t = re.match(r"[ \t]*(?:[:=]|\t\t)[ \t]*", text[m.end():m.end() + 6])
         if t is None:

@@ -246,6 +246,9 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
         grenzen_umfang = ("  • Diagnosen, Krankheiten, Medikamente: nur bekannte Begriffe, angehakt erst in der "
                           "Schutzstufe „Maximal“ (sonst gemeldet und nicht angehakt in der Fundliste angeboten, "
                           "Zeichen ⚕)\n"
+                          "  • Konfession (Kirchensteuermerkmal „rk“/„ev“): nur hinter ihrem Etikett oder unter dem "
+                          "Spaltenkopf „Konf.“, angehakt erst in „Maximal“ (sonst gemeldet und nicht angehakt "
+                          "angeboten, Zeichen ⚑)\n"
                           "  • Beruf, Arbeitgeber: nur mit Etikett oder Personenbezug (ab Schutzstufe „Hoch“); "
                           "Einkommen und Familienstand nicht\n")
         # „Maximal“ (fotos.seite_pruefen): Rasterbilder auf Textseiten („digitale PDF-Seiten“), Fotobereiche auf Scans

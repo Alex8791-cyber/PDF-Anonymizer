@@ -294,6 +294,13 @@ class _Tabelle:
         self.letzte_y1 = kopf.y1
         self.anker = frozenset()                      # belegte Spalten der ersten Zeile des letzten Datensatzes
         self.umbrochen: set = set()                   # (Spalte, Reihe) mit Folgezeilen (Zellumbruch)
+        self.bis_ende = False                         # reicht bis an den unteren Seitenrand (Fortsetzung sicher)
+
+
+# Hinweis auf eine Fortsetzung am Kopf der Folgeseite ("Fortsetzung", "Bestandsliste … – Seite 2", "Blatt 3 von 4",
+# "Übertrag"): dann setzt sich eine Tabelle auch fort, die auf der Seite davor nicht bis an den Rand reichte
+_FORTSETZUNG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:fortsetzung|forts\.|fortgesetzt|übertrag|continued|"
+                             r"(?:seite|blatt|page)[ \t]+\d{1,3}(?:[ \t]*(?:von|/|of)[ \t]*\d{1,3})?)(?![\wäöüß])")
 
 
 def _datenreihen(text: str, reihen: list, i_kopf: int, tab: _Tabelle, h: float, nr: int, ist_kopf,
@@ -943,21 +950,35 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
 
     i = 0
     if offen is not None:
-        # Seitenumbruch: ohne wiederholten Kopf die Reihen am Seitenanfang in den alten Spalten lesen
+        # Seitenumbruch: ohne wiederholten Kopf die Reihen am Seitenanfang in den alten Spalten lesen – wenn die
+        # Tabelle davor bis an den Seitenrand reichte oder die neue Seite eine Fortsetzung ankündigt ("Fortsetzung",
+        # "– Seite 2") und keine andere Tabelle dazwischen begann
         vorn = reihen[:6]
         tab = None
         if not any(ist_kopf(r) for r in vorn):
             for i0 in range(len(vorn)):
+                if not offen.bis_ende and not any(_FORTSETZUNG_RE.search(text, z.start, z.ende)
+                                                  for r in reihen[:i0 + 1] for z in r.zellen):
+                    continue
                 kandidat = _Tabelle(offen.spalten, reihen[i0])
                 j = _datenreihen(text, reihen, i0 - 1, kandidat, h, nr, ist_kopf, hat_etikett)
                 if kandidat.reihen >= 2 and _passt_zur_tabelle(dok, kandidat):
                     treffer += _werte_der_tabelle(dok, kandidat, im_etikett)
                     tab, i = kandidat, j
                     break
-        offen = tab if tab is not None and _bis_seitenende(lg, tab) else None
+        if tab is not None:
+            tab.bis_ende = _bis_seitenende(lg, tab)
+        offen = tab
     while i < len(reihen):
         spalten = _kopf_spalten(text, reihen[i], ets, starts, breite)
         kopf_ende = i
+        if spalten is None and i + 1 < len(reihen) and len(reihen[i].zellen) == 1 \
+                and len(reihen[i + 1].zellen) >= 2 \
+                and _kopf_spalten(text, reihen[i + 1], ets, starts, breite) is not None:
+            # Überschrift aus einer Zelle über einem vollständigen Kopf ("Mitversicherte Personen" ⏎ "Name ⇥⇥ Vorname ⇥⇥
+            # geb. am"): kein zweizeiliger Kopf – die Spalte "Name" bliebe sonst ohne ihr Etikett
+            i += 1
+            continue
         if i + 1 < len(reihen) and (spalten is None or any(not sp.arten and sp.eintrag.rstrip().endswith("-")
                                                            for sp in spalten)):
             # Kopf über zwei Zeilen – auch, wenn die erste Zeile schon ein Kopf ist, aber eine ihrer Zellen umbricht
@@ -981,7 +1002,8 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
         j = _datenreihen(text, reihen, kopf_ende, tab, h, nr, ist_kopf, hat_etikett)
         if tab.reihen:
             treffer += _werte_der_tabelle(dok, tab, im_etikett)
-            offen = tab if _bis_seitenende(lg, tab) else None
+            tab.bis_ende = _bis_seitenende(lg, tab)
+            offen = tab                               # die letzte Tabelle der Seite kann sich fortsetzen
         i = max(j, i + 1)
     return treffer, offen
 

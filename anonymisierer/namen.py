@@ -13,6 +13,7 @@ Toleranz für OCR-Lesefehler gehört nicht hierher (detektoren/ocr_lesart.py pr�
 
 import functools
 import re
+import threading
 
 from . import kennungsformen, personenkontext
 
@@ -358,10 +359,12 @@ def _wissen_modul():
         return None
 
 
-def _sachname_stellen(zeile: str) -> list:
+@functools.lru_cache(maxsize=128)
+def _sachname_stellen(zeile: str) -> tuple:
     """(start, ende) der Eigennamen von Sachen und Tieren (Wissensbasis "sachnamen") in einer Zeile – je Zelle
-    (personenkontext.sachnamen_stellen, wie die Selbstkontrolle)."""
-    return personenkontext.sachnamen_stellen(zeile, _wissen_modul())
+    (personenkontext.sachnamen_stellen, wie die Selbstkontrolle). Je Zeile einmal berechnet: eine lange Zeile mit
+    vielen Kandidaten würde sonst je Kandidat ganz durchsucht (Laufzeit L2)."""
+    return tuple(personenkontext.sachnamen_stellen(zeile, _wissen_modul()))
 
 
 def _personen_paar(teile: list) -> bool:
@@ -381,6 +384,17 @@ def _code_wort(wort: str) -> bool:
 
 _TITEL_DAVOR_RE = re.compile(r"(?<![^\W\d_])(?:Dr|Prof|Dipl\.-\w+)[.,][ \t]*"
                              r"(?:(?:med|rer|nat|jur|phil|dent|vet|oec|habil)[.,][ \t]*){0,3}$")
+
+
+# Der Text mit Spalten, wenn finde_personen nur die Zellen als Zeilen bekommt (klassisch._zellen_kandidaten: gleiche
+# Länge, gleiche Offsets) – für den Ort der Stelle (Personenspalte, Unterschriftsblock); je Thread
+_ORT = threading.local()
+
+
+def _ortstext(text: str) -> str:
+    """Der Text, an dem der Ort einer Stelle geprüft wird: der Originaltext der Zellen, sonst der Text selbst."""
+    quelle = getattr(_ORT, "text", None)
+    return quelle if quelle is not None and len(quelle) == len(text) else text
 
 
 def _ner_sachtreffer(text: str, start: int, ende: int, teile: list) -> bool:
@@ -405,6 +419,10 @@ def _ner_sachtreffer(text: str, start: int, ende: int, teile: list) -> bool:
     s, e = start - zeilenanfang, ende - zeilenanfang
     for a, b in _sachname_stellen(zeile):
         if a <= s and e <= b and (not paar or b - a > e - s):
+            ort = _ortstext(text)
+            if b - a == e - s and personenkontext.personenbeleg(ort, start, _wissen_modul()) \
+                    and not personenkontext.sachbeleg(ort, start, ende, _wissen_modul()):
+                continue                                  # "Mit freundlichen Grüßen" ⏎ "Neff", Spalte "Fahrer": "Miele"
             return True                                   # ganz in einer Marke, einem Modell, einer Rasse
         if a < e and s < b and not paar:
             rest = [t for t in teile if not (a <= zeile.find(t, s) < b)]
@@ -925,8 +943,10 @@ def _fahrzeug_statt_name(text: str, start: int, ende: int, teile: list) -> bool:
         return False
     if any(t.isupper() and _MODELLCODE_RE.fullmatch(t) for t in teile) or _MODELL_DANACH_RE.match(text, ende):
         return True
+    # davor nur in derselben Zelle: der Spaltenkopf "Fahrzeug" über "Weidemann" ist kein Fahrzeugwort am Namen
+    zellanfang = max(text.rfind("\n", 0, start), text.rfind("\t", 0, start)) + 1
     return any(_FAHRZEUGWORT_RE.fullmatch(t) for t in teile) \
-        or _FAHRZEUGWORT_RE.search(text, max(0, start - 25), start) is not None
+        or _FAHRZEUGWORT_RE.search(text, max(zellanfang, start - 25), start) is not None
 
 
 def _kontakt_etikett(wort: str) -> bool:
@@ -1492,6 +1512,25 @@ def geburtsnamen(text: str, kandidaten=()) -> list:
 # ----------------------------------------------------------------------
 # Öffentliche Schnittstelle
 # ----------------------------------------------------------------------
+class ortstext:
+    """Kontext: `finde_personen` bekommt nur die Zellen als Zeilen (klassisch._zellen_kandidaten) – der Ort einer
+    Stelle (Personenspalte: "Miele" unter "Fahrer" ist ein Name, keine Marke) wird am Text mit Spalten geprüft
+    (gleiche Länge, gleiche Offsets)."""
+
+    def __init__(self, text: str):
+        self.text = text
+        self.alt = None
+
+    def __enter__(self):
+        self.alt = getattr(_ORT, "text", None)
+        _ORT.text = self.text
+        return self
+
+    def __exit__(self, *_):
+        _ORT.text = self.alt
+        return False
+
+
 def finde_personen(text: str) -> list:
     """Personennamen per KI-Modell und Regeln.
     Liefert Kandidaten {text, start, ende, gruppe}; gruppe ist ein zusammengesetzter Vollname,

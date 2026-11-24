@@ -196,7 +196,9 @@ def _zellen_kandidaten(text: str, kandidaten: list) -> list:
         max_ende.append(m)
     bekannt = {" ".join(str(k.get("text", "")).split()).casefold() for k in kandidaten}
     aus = []
-    for k in namen.finde_personen(zellen):
+    with namen.ortstext(text):
+        personen = namen.finde_personen(zellen)
+    for k in personen:
         s, e = int(k.get("start", -1)), int(k.get("ende", -1))
         if not (0 <= s < e <= len(text)) or text[s:e] != k.get("text"):
             continue

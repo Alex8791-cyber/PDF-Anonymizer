@@ -721,6 +721,10 @@ def _strasse_spannen(text: str) -> list:
         if _FAHRBAHN_RE.match(m.group(0)) and _FAHRBAHN_DAVOR_RE.search(text[max(0, m.start() - 6):m.start()]):
             continue
         aus.append(Stelle(_feldname_abschneiden(text, m.start(), m.end()), m.end()))
+    # Mannheimer Quadrate ("L 14, 16, 68161 Mannheim"): Quadrat und Hausnummer sind die Straße
+    for s, e in kennungsformen.quadrat_stellen(text):
+        if not any(st.start <= s < st.ende for st in aus):
+            aus.append(Stelle(s, e))
     return aus
 
 
