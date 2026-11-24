@@ -450,6 +450,15 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   synthetische Versicherungsdokumente samt Scans und versteckten Teilen und bewertet die Ausgabe über alle
   Kanäle; `tests/test_benchmark.py` nutzt ihn als Qualitätstor (12 Dokumente). Dazu
   `werkzeuge/wissen_pflegen.py` (Wortlisten) und `werkzeuge/programmsymbol.py` (`icon.ico`).
+- Domänen-Probe als Werkzeug im Repository (`werkzeuge/domaenenprobe/`): die 41 Falldateien der
+  Domänen-Durchsicht (691 Fälle mit 2261 frei erfundenen geheimen Werten aus Kfz, Personenversicherungen, Sach,
+  Finanzen/Digitales und Briefverkehr/Listen/Scans), der Harness `e2e.py` und die Messung `messen.py` (je Wert weg,
+  sichtbar mit `_PRUEFEN` oder STILL; Vergleich mit `referenz.json`, gemessen auf ef90382). Die Messlogik ist
+  unverändert übernommen, nur Pfade und Plattform angepasst (relative Pfade, UTF-8, Windows ohne `nice`,
+  Tesseract- und Schriftsuche); eine fehlschlagende Tesseract-Kommandozeile bricht ab, statt Werte still als „weg“ zu
+  zählen. Eine Regressionsprobe für die Entwicklung, keine Blindprüfung – die Regeln wurden an diesen Fällen
+  verbessert. `tests/test_domaenenprobe.py` prüft Falldateien und Referenz und lässt einen kleinen Text-Fall Ende zu
+  Ende laufen (OCR dort mit PyMuPDF, weil die CI keine Tesseract-Kommandozeile hat).
 - Kommentare im Code verweisen auf Entwicklungsunterlagen (`CONTRACT_V2.md`, `BENCHMARK_SCHEMA.md`, „Vertrag
   Abschnitt …“), die nicht im Repository liegen.
 - Zusammenführung der Runde 5 (Pakete Kennungen/Kfz und Personen/Tabellen): Regeln, die beide Pakete getrennt
@@ -500,6 +509,9 @@ Auslieferung und Dokumentation nach dem Review „Auslieferung/Doku“ (AD-01 �
   nach Skalierung); ab 1366×768 und im 1366×768-Szenario prüft der Test unverändert.
 - Actions auf die Node-24-Ausgaben angehoben (`actions/checkout@v5`, `actions/setup-python@v6`,
   `actions/upload-artifact@v6`); die Node-20-Warnung im Protokoll entfällt.
+- Neuer Job **`domaenenprobe`** (ubuntu-latest), nur von Hand („Run workflow“ mit Haken „domaenenprobe“): misst die
+  volle Domänen-Probe mit der Tesseract-Kommandozeile und lädt `bericht.md` und `ergebnis.json` als Artefakt
+  `domaenenprobe-bericht` hoch. Die Jobs `pytest` und `exe` laufen unverändert.
 
 ### Dokumentation
 - README: „Was NICHT erkannt wird“ behauptete fälschlich, Versicherten-, Fahrzeug-Ident- und
