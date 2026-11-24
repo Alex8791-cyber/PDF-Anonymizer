@@ -89,14 +89,16 @@ ERLAEUTERUNG = {
            "klein geschrieben; hinter einem Kfz-Etikett („Versicherungskennzeichen:“, „Kurzzeitkennzeichen“, "
            "„Versicherungsplakette Nr.“) auch Versicherungs-, Kurzzeit-, rote und Ausfuhrkennzeichen („435 GHT“, "
            "„RO-04 1287“) und ausländische Kennzeichen",
-    "ip": "IPv4 mit gültigen Oktetten (ohne Etikett nur mit IP-Bezug in der Zeile, nie eine Versionsnummer wie "
-          "„10.0.19045.1234“) und IPv6",
-    "zugangsdaten": "Benutzername/-kennung, Kennwort, PIN, Aktivierungs- und Freischaltcode hinter ihrem Etikett – "
-                    "nicht „Passwort vergessen?“ oder „PIN: siehe separates Schreiben“",
+    "ip": "IPv4 mit gültigen Oktetten (ohne Etikett nur mit IP-Bezug in der Zeile oder in der Kopfzeile einer "
+          "E-Mail „Received: from …“; direkt hinter einem Versionswort wie „Version 10.0.19045.1234“ nie) und IPv6",
+    "zugangsdaten": "Benutzername/-kennung, Kennwort, PIN, Geheimzahl, Aktivierungs-, Freischalt-, Zahlen- und "
+                    "Entsperrcode hinter ihrem Etikett (auch „WPA2-Kennwort“, „Kennwort für das Portal: …“, als "
+                    "Spaltenkopf „PIN“) – nicht „Passwort vergessen?“ oder „PIN: siehe separates Schreiben“",
     "profilname": "@-Namen, Nutzer- und Profilnamen hinter Plattform-Etiketten („eBay-Name:“, „Telegram:“), der "
                   "Pfad eines Profil-Links („facebook.com/vorname.nachname“) und Kunden-, Vertrags- und Namensangaben "
                   "in Links („?kdnr=4711081&name=…“) – nicht die Seite einer Firma",
-    "standort": "Koordinaten als Dezimalgrad-Paar oder in Grad/Minuten/Sekunden",
+    "standort": "Koordinaten als Dezimalgrad-Paar, in Grad/Minuten/Sekunden und als Einzelwert hinter „Breite“/"
+                "„Länge“ (ohne Maßeinheit dahinter)",
     "international": "auch Straßen mit vorangestelltem Straßentyp („Str. Memorandumului nr. 27“, „Calea …“), "
                      "vierstellige PLZ mit Ort hinter einer Straße oder mit Länderhinweis („8002 Zürich“), "
                      "sechsstellige PLZ mit Länderhinweis und ausländische Kennzeichen im Satz mit Länderhinweis",

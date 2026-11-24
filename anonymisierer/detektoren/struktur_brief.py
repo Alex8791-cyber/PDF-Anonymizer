@@ -262,8 +262,10 @@ def _betreff_kennung(wert: str) -> bool:
 # ----------------------------------------------------------------------
 # Ort, Datum
 # ----------------------------------------------------------------------
+# Anfang: Zeilenanfang oder der erste Tabulator einer Lücke – nicht jeder Tabulator einer Lücke aus Tausenden (die
+# Suche bliebe sonst quadratisch, Gegenprüfung L3); "[ \t]*" liest den Rest der Lücke
 _ORT_DATUM_RE = re.compile(
-    r"(?:^|(?<=\t))[ \t]*(?P<ort>[A-ZÄÖÜ][^\t\n,]{1,40}?)[ \t]*,[ \t]*(?:den[ \t]+|am[ \t]+)?"
+    r"(?:^|(?<=[^\t]\t)|(?<=^\t))[ \t]*(?P<ort>[A-ZÄÖÜ][^\t\n,]{1,40}?)[ \t]*,[ \t]*(?:den[ \t]+|am[ \t]+)?"
     r"(?:\d{1,2}\.[ ]?(?:\d{1,2}\.|[A-ZÄÖÜa-zäöü]{3,9}\.?)[ ]?(?:19|20)?\d{2}(?!\d)|\d{4}-\d{2}-\d{2})",
     re.MULTILINE)
 QUELLE_ORT = "struktur.ort_datum"

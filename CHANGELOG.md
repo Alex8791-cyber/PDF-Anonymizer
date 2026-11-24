@@ -200,14 +200,14 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Flug-, Sitzplatz- und Zimmernummern, die Nummer einer Vorschrift hinter einem Etikett („Registrierungsnummer: § 34d
   Abs. 1 GewO“, auf Scans „8 34d …“); eine IMEI ist eine Kennung, keine Kreditkarte.
 - **Fünf neue Kategorien (Domänen-Durchsicht, Runde 5):** IP-Adressen `[IP-ADRESSE]` (IPv4 mit gültigen Oktetten und
-  IP-Bezug, IPv6 – keine Versionsnummern, keine Vertragsnummern mit Punkten), Zugangsdaten `[ZUGANGSDATEN]`
+  IP-Bezug, IPv6 – nicht direkt hinter einem Versionswort, keine Vertragsnummern mit Punkten), Zugangsdaten `[ZUGANGSDATEN]`
   (Benutzername/-kennung, Kennwort, PIN, Aktivierungs- und Freischaltcode hinter ihrem Etikett), Profil- und Kontonamen
   `[PROFIL]` (@-Namen, „eBay-Name:“, „Telegram:“, Profil-Links, Kunden-, Vertrags- und Namensangaben in Links),
   Standort-Koordinaten `[STANDORT]` – alle vier in jeder Schutzstufe angehakt – und Religion/Konfession `[RELIGION]`
   (Kirchensteuermerkmal „rk“/„ev“, auch unter dem Spaltenkopf „Konf.“) wie Gesundheitsdaten: in „Ausgewogen“ und „Hoch“
   nur angeboten (Meldung RELIGION), in „Maximal“ angehakt. Eine kurze PIN und ein Kirchensteuermerkmal gelten wie die
   Kartenprüfnummer nur hinter ihrem Etikett („4711“ anderswo im Dokument bleibt stehen). Gespeicherte Einstellungen
-  bleiben gültig; die neuen Kategorien gelten dort als an. Außerdem: verschleierte E-Mail-Adressen („name (at) web
+  bleiben gültig; die neuen Kategorien gelten dort als an, Religion wie oben nur in „Maximal“. Außerdem: verschleierte E-Mail-Adressen („name (at) web
   (punkt) de“) und Flurstück, Grundbuchblatt und Gemarkungsnummer.
 - **Kfz-Kennzeichen (Runde 5):** Versicherungskennzeichen („435 GHT“, „435GHT“, zweizeilig) hinter Kfz-Etiketten, im
   Satz und in Spalten mit Kfz-Kopf; Komposita mit Fahrzeugbezug als Kfz-Etikett (Versicherungs-, Kurzzeit-, Oldtimer-,
@@ -253,6 +253,36 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   entpacken“ statt `Installieren.bat`.
 
 ### Behoben
+- **Gegenprüfung der Zusammenführung (Runde 5):** Was die zwei Prüfer am zusammengeführten Stand fanden, ist allgemein
+  behoben – je Befund mit Abwandlungen und Gegenproben in `tests/test_gegenpruefung_r7.py`:
+  - Verluste der Zusammenführung: der Ort hinter der Person eines Personen-Etiketts („Einweisender Arzt: Dr. …,
+    Gaimersheim“), der Name hinter einer Berufsbezeichnung im Satz („Der Glaser Eibl hat …“, auch in der
+    Selbstkontrolle) und Folgeseiten einer Tabelle ohne Kopf (nur mit Hinweis „Fortsetzung“ oder bis zum Seitenende).
+  - Wieder geschwärzt bzw. gemeldet wie vor der Runde: Mannheimer Quadrate („L 14, 16“ hinter „Anschrift:“, in der
+    Anschriftenzeile und im Feld C.1.3); Familiennamen, die zugleich Marke oder Rasse sind („Neff“, „Miele“,
+    „Kreidler“) im Grußblock, in Personenspalten, im Feld C.1.1 und hinter Personen-Etiketten – eine Sache nur mit
+    Sachbeleg in der Zelle („Mofa Simson“); eine Person in der Spalte „Versicherer“/„Anbieter“/„Krankenkasse“ (Vor- und
+    Nachname, „(privat)“, „(Vermittler)“); dort bleibt nur der Versicherer selbst lesbar, auch als Markenkern
+    („Adam Riese“ aus „Adam Riese Versicherung“). Die Selbstkontrolle bestimmt Spalte, Grußblock und Personen-Etikett
+    nach der Lage auf der Ausgabeseite.
+  - Formulare in Spaltenblöcken (Texterkennung liest Feldcodes, Feldnamen und Werte je als eigenen Block): der Wert
+    rechts auf derselben Höhe gehört zum Feldnamen; „Name oder Firmenname“ ist ein Personen-Etikett.
+  - Zugangsdaten mit Zwischenwörtern („Kennwort für telefonische Auskünfte: …“), als Kompositum („WPA2-Kennwort“,
+    „Router-Kennwort“, „App-Login“, „Administrator-Konto“), ohne Doppelpunkt mit Ziffer oder Sonderzeichen („Router-
+    Kennwort Zirbe-Stube-77“), Geheimzahl, Zahlen- und Entsperrcode, „Code der Alarmanlage“ und „PIN“ als Spaltenkopf.
+  - Kennung hinter einem Fundort („Mitgliedsnummer im Formular: …“, „… laut Anlage: …“), USt-IdNr. eines
+    Versicherungsmaklers ohne „e.K.“, Profilnamen hinter Zwischenwörtern, Discord-Namen und Profil-Links ohne Protokoll
+    („tiktok.com/@…“), Schweizer Anschriften mit Kantonskürzel („3600 Thun BE“), ein mehrdeutiger Vorname in einer
+    Kinderliste („Max, 05.09.2016“), Berufe der Wissensbasis unter dem Spaltenkopf „Tätigkeit“ (der Nachbarkopf
+    „Arbeitgeber“ wird nicht mehr als Beruf geschwärzt), die IP-Adresse in „Received:“-Kopfzeilen und die Anschrift in
+    der Formularzeile des Kunden unter einer Spartenüberschrift („Kfz-Versicherung“ ⏎ „Versicherungsnehmer: …, …“).
+  - Weniger Über-Schwärzung: Spartenkürzel mit SF-Klasse bzw. Selbstbeteiligung („HP SF 12“, „RS SB 150“) sind keine
+    Kennzeichen; Einzelwerte hinter „Breite“/„Länge“ mit Maßeinheit, Viererpunktzahlen hinter Artikel- und
+    Bestellnummern, „@“-Tarife ohne Plattform und Kalenderwörter im Familienkontext bleiben stehen; Konfession nur in
+    „Maximal“ als Verdacht.
+  - Laufzeit: Unterschriftslinien aus Unterstrichen und lange Zeilen ohne Leerzeichen oder mit riesigen Lücken
+    wachsen wieder linear (16 000 Zeichen „Ab-…“ 15,5 s → 0,6 s, „:“ 27,9 s → 0,3 s, Leerzeichen 5,9 s → 0,7 s,
+    Tabulatoren 4,3 s → 0,7 s).
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene

@@ -41,13 +41,14 @@ from .struktur import (_GREMIUM_RE, _ORG_ROLLEN_RE, etiketten, lage, namen_spann
 
 MM = 72 / 25.4
 
-# Rechtsformen und Organisationswörter (ganze Wörter bzw. Wortenden)
+# Rechtsformen und Organisationswörter (ganze Wörter bzw. Wortenden; der Wortanfang davor höchstens 40 Zeichen – auf
+# einer Zeile aus Tausenden "Ab-Ab-…" sonst quadratisch, Gegenprüfung L3)
 _RECHTSFORM_RE = re.compile(
     r"(?<![\wäöüß])(?:GmbH|gGmbH|mbH|AG|KG|KGaA|OHG|oHG|GbR|SE|eG|e\.[ ]?G\.|e\.[ ]?V\.|a\.[ ]?G\.|VVaG|"
     r"V\.a\.G\.|AöR|KdöR|Ltd\.?|Inc\.?|Corp\.?|S\.A\.|S\.p\.A\.|B\.V\.|N\.V\.|PartG(?:mbB)?|UG)(?![\wäöüß])"
     r"|&[ ]?Co\.")
 _ORGANISATION_RE = re.compile(
-    r"(?i)(?<![\wäöüß])[\wäöüß\-]*(?:versicherung|versicherungen|versicherungs-ag|assekuranz|kasse|bank|"
+    r"(?i)(?<![\wäöüß])[\wäöüß\-]{0,40}(?:versicherung|versicherungen|versicherungs-ag|assekuranz|kasse|bank|"
     r"genossenschaft|gericht|finanzamt|landratsamt|bürgeramt|standesamt|stadtverwaltung|gemeindeverwaltung|"
     r"kreisverwaltung|ministerium|bundesamt|landesamt|jobcenter|polizeipräsidium|polizeidirektion|"
     r"polizeiinspektion|polizeirevier|klinikum|krankenhaus|universität|hochschule|stiftung|verband|kammer|"
@@ -76,6 +77,8 @@ def _allowlist_in(zeile: str) -> bool:
     nicht als Teil eines Titels ("Dipl.-Ing.")."""
     if _wissen is None or not zeile.strip():
         return False
+    if "  " in zeile:
+        zeile = re.sub(r"[ ]{2,}", " ", zeile)       # lange Leerzeichenfolgen: Trennen bleibt linear (L3)
     try:
         for teil in _SEGMENT_RE.split(zeile):
             teil = teil.strip(" .()")
@@ -125,17 +128,19 @@ _REGISTER_RE = re.compile(r"(?i)(?<![\wäöüß])(?:HRB|HRA)(?![\wäöüß])|amt
                           r"(?<![\wäöüß])www\.|https?://|service-?telefon|bankverbindung")
 
 
-# Feldnamen von Mitarbeitern, Gremien und Organisationen: kein Beleg für einen Kundendatenblock
+# Feldnamen von Mitarbeitern, Gremien und Organisationen (auch der Aussteller einer Rechnung): kein Beleg für einen
+# Kundendatenblock
 _KEIN_KUNDENFELD_RE = re.compile(r"(?i)ansprechpart|sachbearbeit|bearbeiter|berater|betreuer|vermittler|makler|"
                                  r"agentur|zeichen|vorstand|aufsichtsrat|geschäftsführ|geschaftsfuhr|inhaber|"
-                                 r"prokur|vertreten|vorsitz")
+                                 r"prokur|vertreten|vorsitz|rechnungssteller|aussteller|leistungserbringer")
 
 
-def personen_formzeile(seite, z) -> bool:
+def personen_formzeile(seite, z, mit_anschrift: bool = False) -> bool:
     """Formularzeile eines Kundendatenblocks: Personen-Feldname am Zeilenanfang mit einem Namen dahinter
-    ("VERSICHERUNGSNEHMER   HAAS, FIETE", "Name: Erika Muster") oder Geburtsdatum-Feldname mit Datum.
-    Briefkopf und Fußzeile tragen solche Zeilen nie – Mitarbeiter- und Gremienfelder ("Ansprechpartner:",
-    "Vorstand:") zählen nicht."""
+    ("VERSICHERUNGSNEHMER   HAAS, FIETE", "Name: Erika Muster") oder Geburtsdatum-Feldname mit Datum; mit_anschrift:
+    auch mit der Anschrift hinter dem Namen ("Versicherungsnehmer: Annelie Stöberl, Kastanienallee 9, …" – nur der Teil
+    bis zum ersten Komma muss ein Name sein). Briefkopf und Fußzeile tragen solche Zeilen nie – Mitarbeiter- und
+    Gremienfelder ("Ansprechpartner:", "Vorstand:") zählen nicht."""
     text = seite.text
     roh = text[z.start:z.ende]
     anfang = z.start + len(roh) - len(roh.lstrip())
@@ -151,6 +156,8 @@ def personen_formzeile(seite, z) -> bool:
         return False
     if "datum_geburt" in et.arten:
         return bool(re.match(r"\d{1,2}\.\d{1,2}\.\d{2,4}", wert))
+    if mit_anschrift and "," in wert:
+        wert = wert.split(",", 1)[0]
     return "person" in et.arten and _ist_personenzeile(wert)
 
 
@@ -212,6 +219,10 @@ class _Firmenkontext:
         eigen = self.zeilen_text[zid] if bis is None else self.seite.text[z.start:max(z.start, min(bis, z.ende))]
         if firmen_beleg(eigen):
             return True
+        if self.kundenzeile.get(zid) or personen_formzeile(self.seite, z, mit_anschrift=True):
+            return False                              # "Versicherungsnehmer: Annelie Stöberl, Kastanienallee 9, …"
+                                                      # unter "Kfz-Versicherung": die Anschrift des Kunden in seiner
+                                                      # Formularzeile, kein Firmenblock darüber (Gegenprüfung K1)
         lg = self.lg
         box = lg.zeilen_box.get(zid)
         if box is None:

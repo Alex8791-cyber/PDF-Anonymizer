@@ -611,7 +611,10 @@ _FS_WORT_RE = re.compile(r"(?i)" + _FS_WORT)
 _FS_KOPF_RE = re.compile(r"(?i)^(?![ \t]*\d{1,2}[.)][ \t])[\W\d_]{0,3}(?:EU[\s\-]?)?(?:" + _FS_WORT +
                          r")(?:[\s/·|,.\-–]+(?:" + _FS_WORT + r"))*(?:[\s/·|,.\-–]+[A-Z]{1,3})?[^\w]{0,3}$")
 # Feldnummer am Zeilen- oder Zellenanfang bzw. hinter breiter Lücke: "1.", "4a.", OCR auch "4a," / "1 ."
-_FS_FELD_RE = re.compile(r"(?:^|(?<=\t)|(?<=  ))[ \t]*(1|2|3|4a|4b|4c|4d|5|8|9)[ ]?[.,](?=[ \t]|$)", re.MULTILINE)
+# ohne "[ \t]*" vor der Nummer: in einer Lücke aus Tausenden Leerzeichen wäre die Suche sonst quadratisch (L3); die
+# festen Rückblicke decken dieselben Stellungen ab (Zeilenanfang, Tabulator, zwei Leerzeichen, je mit einem Leerzeichen)
+_FS_FELD_RE = re.compile(r"(?:^|(?<=\t)|(?<=  )|(?<=\t )|(?<=^ ))(1|2|3|4a|4b|4c|4d|5|8|9)[ ]?[.,](?=[ \t]|$)",
+                         re.MULTILINE)
 _DATUM_RE = re.compile(r"\d{1,2}[./]\d{1,2}[./](?:\d{4}|\d{2})")
 # Führerscheinklassen (Feld 9, Rückseite): "AM/B/L", "B/BE/C1/C1E/L" – mit den Lesarten der OCR für die Ziffer 1
 # und 2 ("AL"/"AI" für A1, "CIE" für C1E, "AZ" für A2)

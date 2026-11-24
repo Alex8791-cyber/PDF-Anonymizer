@@ -596,16 +596,34 @@ def _stuecke(text: str):
         anfang = ende
 
 
+# Überlange Zeichenfolgen ohne Leerraum (eine Zeile aus 16 000 Doppelpunkten oder "Ab-Ab-…", ein langer Link) und
+# riesige Lücken aus Leerraum: dort steht kein Name, der Tokenizer von spaCy braucht dafür aber quadratisch viel Zeit
+# (Gegenprüfung L3) – die NER liest nur die Teile dazwischen, mit ihrem Versatz im Stück
+_NER_LUECKE_RE = re.compile(r"[^\s]{100,}|\s{50,}")
+
+
+def _ner_teile(stueck: str):
+    """(versatz, teil) eines Stücks ohne überlange Zeichenfolgen und Lücken (_NER_LUECKE_RE)."""
+    pos = 0
+    for m in _NER_LUECKE_RE.finditer(stueck):
+        if m.start() > pos:
+            yield pos, stueck[pos:m.start()]
+        pos = m.end()
+    if pos < len(stueck):
+        yield pos, stueck[pos:]
+
+
 def _ner_spannen(nlp, text: str) -> set:
     """PER-Entitäten (start, end) über den ganzen Text, stückweise an Zeilenumbrüchen."""
     spannen = set()
     for offset, stueck in _stuecke(text):
-        if not stueck.strip():
-            continue
-        doc = nlp(stueck)
-        for ent in doc.ents:
-            if ent.label_ == "PER":
-                spannen.add((offset + ent.start_char, offset + ent.end_char))
+        for versatz, teil in _ner_teile(stueck):
+            if not teil.strip():
+                continue
+            doc = nlp(teil)
+            for ent in doc.ents:
+                if ent.label_ == "PER":
+                    spannen.add((offset + versatz + ent.start_char, offset + versatz + ent.end_char))
     return spannen
 
 

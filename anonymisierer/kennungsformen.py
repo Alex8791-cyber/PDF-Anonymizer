@@ -469,6 +469,22 @@ def _letztes_wort(text: str, pos: int, k: int) -> str:
     return teile[-1].strip(".,;:()") if teile else ""
 
 
+# Schriftstücke, in denen ein Wert nur steht ("… im Formular", "… laut Anlage", "… im beiliegenden Vordruck"): hinter
+# einer Präposition des Orts oder der Quelle ein Fundort, nicht der Gegenstand mit eigener Nummer – der Wert gehört dem
+# Kennungs-Etikett davor (Gegenprüfung LK-08; "Nummer der Seite: 12" bleibt die Nummer der Seite)
+_FUNDORT_WOERTER = frozenset("formular formulars vordruck vordrucks anlage anlagen seite schreiben brief".split())
+_FUNDORT_PRAEPOSITIONEN = frozenset("im in auf laut lt lt. gemäß gemaess gem gem. aus unter siehe nach".split())
+
+
+def _fundort_davor(text: str, pos: int, k: int) -> bool:
+    """Steht vor der Ankündigung ein Schriftstück als Fundort ("im Formular", "laut Anlage", "im beiliegenden
+    Vordruck") – nicht als Gegenstand mit eigener Nummer ("Nummer der Seite", "Formular Nr.")?"""
+    teile = [t.strip(".,;:()").casefold() for t in text[pos:k].split()]
+    if len(teile) < 2 or teile[-1] not in _FUNDORT_WOERTER:
+        return False
+    return any(t in _FUNDORT_PRAEPOSITIONEN for t in teile[-3:-1])
+
+
 def _wert_ueberspringen(text: str, i: int, grenze: int) -> int:
     """Ende des Werts eines fremden Felds ab i: bis zum nächsten Komma, Semikolon oder Zeilenende."""
     m = re.compile(r"[^,;\n]*").match(text, i, grenze)
@@ -522,7 +538,8 @@ def wert_hinter_etikett(text: str, pos: int, wert_re: re.Pattern, *, grenze: int
             k += 1
             continue
         if c in ":=":
-            if kennung and woerter and fremd_pruefen(_letztes_wort(text, pos, k)):
+            if kennung and woerter and fremd_pruefen(_letztes_wort(text, pos, k)) \
+                    and not _fundort_davor(text, pos, k):
                 k, fremd = _wert_ueberspringen(text, k + 1, ende_suche), True   # "Transferticket für Tarif: …"
                 continue
             fund = _nach_ankuendigung(text, k + 1, ende_suche, wert_re, pos, k, c)
@@ -1836,8 +1853,10 @@ _EINZELKAUFMANN_RE = re.compile(r"(?<![\w])(?:e\.[ ]?K(?:fm|fr)?\.|Inhaber(?:in)
 _KAPITALGESELLSCHAFT_RE = re.compile(r"(?<![\w])(?:GmbH|gGmbH|mbH|AG(?![ \t]+[A-ZÄÖÜ][a-zäöü])|SE|UG|KG|KGaA|OHG|eG|"
                                      r"e\.[ ]?V\.|VVaG|a\.[ ]?G\.|gAG|Ltd\.?|Inc\.|HR[ ]?B)(?![\w])")
 #                                                                        "AG Traunstein": Amtsgericht, keine Rechtsform
-# Register- und Organisationswörter einer USt-IdNr. ohne Einzelkaufmann (Fußzeile des Versicherers, Gutachten EQ-16)
-_ORGANISATION_UST_RE = re.compile(r"(?<![\wäöüß])(?:Versicherung\w*|Versicherer|Bank|Sparkasse|HRB|HRA|Registergericht|"
+# Register- und Organisationswörter einer USt-IdNr. ohne Einzelkaufmann (Fußzeile des Versicherers, Gutachten EQ-16) –
+# nicht der Beruf einer natürlichen Person ("Versicherungsmakler Benno Viessmann · USt-IdNr. …", Gegenprüfung LK-10)
+_ORGANISATION_UST_RE = re.compile(r"(?<![\wäöüß])(?:Versicherung(?!s(?:makler|vermittler|berater|vertreter|fach|kauf|"
+                                  r"agent|bote|mathematiker))\w*|Versicherer|Bank|Sparkasse|HRB|HRA|Registergericht|"
                                   r"Amtsgericht|Handelsregister|Vorstand|Aufsichtsrat\w*|Geschäftsführ\w*|"
                                   r"Sitz(?:[ \t]+der[ \t]+Gesellschaft)?)(?![\wäöüß])")
 _HRA_RE = re.compile(r"(?<![\w])HR[ ]?A[ ]?\d{1,6}(?:[ ]?[A-Z])?(?![\w])")
@@ -2477,6 +2496,9 @@ def kennzeichen_stellen(text: str, sperre=frozenset()) -> list:
             continue
         if trenner != "-" and len(ziffern) == 4 and ziffern[:2] in ("19", "20"):
             continue                                    # "SGB VI 2023", "VVG AB 2008", "S - BU 2024"
+        if trenner != "-" and m.group(3) in ("SF", "SB"):
+            continue                                    # Sparte mit SF-Klasse bzw. Selbstbeteiligung: "HP SF 12",
+                                                        # "RS SB 150" (Gegenprüfung U7); "HP-SF 12" bleibt Kennzeichen
         aus.append((m.start(), m.end()))
     for m in _KFZ_SONDER_FREI_RE.finditer(text):
         if m.group(1) not in sperre and unterscheidungszeichen(m.group(1)) \
@@ -2675,6 +2697,12 @@ def _ort_ab(text: str, pos: int):
     return None if danach and (danach.isalnum() or danach in "-‐–") else treffer[0]
 
 
+# Kantonskürzel hinter dem Ort einer Schweizer Anschrift ("3600 Thun BE", "8706 Meilen ZH"; Gegenprüfung LK-12): das
+# Ende der Angabe und ein Länderhinweis – kein weiteres Wort des Satzes
+_KANTON_DANACH_RE = re.compile(r"[ \t]+(?:AG|AI|AR|BE|BL|BS|FR|GE|GL|GR|JU|LU|NE|NW|OW|SG|SH|SO|SZ|TG|TI|UR|VD|VS|"
+                               r"ZG|ZH|FL)(?![\wäöüß\-])")
+
+
 def _ort_allein_anschrift(text: str, pos: int, ort) -> bool:
     """Zeigt der Ort ab pos (ort: _ort_ab) ohne Straße, Länderhinweis oder Länderkürzel eine ausländische Anschrift?
     Nur ein Ort der Nachbarländer; einer, der zugleich ein deutsches Wort ist (daten/orte_at_ch_mehrdeutig.txt: "Zug",
@@ -2687,7 +2715,8 @@ def _ort_allein_anschrift(text: str, pos: int, ort) -> bool:
         mehrdeutig = wissen.menge("orte_at_ch_mehrdeutig")
     except Exception:  # pragma: no cover - Wissensbasis fehlt
         return False
-    return wissen.normalisieren(ort.eintrag) not in mehrdeutig or not _WORT_DANACH_RE.match(text, pos + ort.ende)
+    return wissen.normalisieren(ort.eintrag) not in mehrdeutig or not _WORT_DANACH_RE.match(text, pos + ort.ende) \
+        or bool(_KANTON_DANACH_RE.match(text, pos + ort.ende))
 
 
 def strassen_vorn(text: str) -> list:
@@ -2727,7 +2756,8 @@ def plz4_ausland(text: str, strassen) -> list:
         nach_strasse = any(0 <= m.start() - e <= 6 and "\n" not in text[e:m.start()] for e in enden
                            if m.start() - 8 <= e <= m.start())
         vor_strasse = any(0 <= s - m.end() <= 3 for s in anfaenge if m.end() <= s <= m.end() + 3)
-        kuerzel = m.group(0)[:1].isalpha()
+        kuerzel = m.group(0)[:1].isalpha() or (bekannt is not None
+                                               and bool(_KANTON_DANACH_RE.match(text, m.start(2) + bekannt.ende)))
         land = bool(LAND_RE.search(text, max(0, m.start() - 120), min(len(text), m.end() + 60)))
         etikett = bool(_ANSCHRIFT_DAVOR_RE.search(text[max(0, m.start() - 40):m.start()]))
         jahr = plz[:2] in ("19", "20")
@@ -2747,10 +2777,13 @@ def plz4_ausland(text: str, strassen) -> list:
 _IPV4_RE = re.compile(r"(?<![\w.:\-/])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\w]|[.:]\d)")
 _IPV6_RE = re.compile(r"(?<![\w:.\-])(?=[0-9A-Fa-f:]*:[0-9A-Fa-f]*:)[0-9A-Fa-f:]{2,39}(?![\w:])")
 _IP_ETIKETT_RE = re.compile(r"(?i)(?<![a-zäöüß])(?:ip(?:v[46])?(?:-?adresse)?|adresse|host|server|router|client|"
-                            r"zugriff|absender|von|aus|via|quelle|source|address)[ \t]*[:=]?[ \t]*\(?[ \t]*$")
+                            r"zugriff|absender|von|aus|via|quelle|source|address|from|received)"
+                            r"[ \t]*[:=]?[ \t]*[(\[]?[ \t]*$")
 # "IP" als eigenes Wort bzw. "IP-Adresse"/"IPv4" – nicht die Schutzart "IP44" und keine Komposita ("IP-Kamera",
-# "IP-basiert"): dort ist eine Viererpunktzahl der Zeile eine Modell- oder Artikelnummer (Gegenprüfung U2)
-_IP_IN_ZEILE_RE = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:IPv4|IPv6|IP-Adresse|IP-Adr\.|ip-adresse|IP(?![\w\-]))")
+# "IP-basiert"): dort ist eine Viererpunktzahl der Zeile eine Modell- oder Artikelnummer (Gegenprüfung U2); dazu die
+# Kopfzeilen eines E-Mail-Ausdrucks mit dem einliefernden Rechner ("Received: from … [91.12.34.59]", LK-16)
+_IP_IN_ZEILE_RE = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:IPv4|IPv6|IP-Adresse|IP-Adr\.|ip-adresse|IP(?![\w\-])|"
+                             r"(?i:received|x-originating-ip|x-sender-ip|x-forwarded-for)[ \t]*:)")
 _VERSION_DAVOR_RE = re.compile(r"(?i)(?:version|vers\.|release|build|firmware|software|update|treiber|patch|"
                                r"stand|revision|rev\.|ver\.|v|modell|typ|artikel|art\.[ \t\-]*nr\.?|"
                                r"artikelnummer|bestellnummer|best\.-?nr\.?|teilenummer|teile-?nr\.?)"
@@ -2870,16 +2903,31 @@ def email_verschleiert(text: str) -> list:
 # -- Zugangsdaten -----------------------------------------------------------------------------------------------------
 # Etiketten eines Zugangs (Kundenportal, App): Benutzer/-name/-kennung, Login, Kennwort/Passwort, PIN, Aktivierungs-,
 # Freischalt-, Zugangs- und Registrierungscode – nicht als Bestimmungswort ("Benutzerhandbuch", "Kennwortregeln") und
-# nicht hinter einer Plattform ("Signal-Benutzername": ein Profilname)
+# nicht hinter einer Plattform ("Signal-Benutzername": ein Profilname). Geheimnisse auch als Kompositum mit oder ohne
+# Bindestrich ("WPA2-Kennwort", "Router-Kennwort", "Initialkennwort", "Karten-PIN", "Zahlencode", "Entsperrcode",
+# "Code der Alarmanlage"), Benutzerkonten auch mit Vorsatz ("App-Login", "Administrator-Konto"; Gegenprüfung LK-06/07)
+_GEHEIMNIS = (r"(?i:(?:[a-zäöüß0-9]{1,20}-)?[a-zäöüß0-9]{0,20}?(?:kennwort|passwort|password|passwd|geheimzahl|"
+              r"geheimnummer|geheimcode))"
+              r"|(?:[A-Za-zÄÖÜäöüß0-9]{1,20}-)?(?:PIN|Pin|PUK)(?:-?(?:Nr\.?|Nummer|Code))?"
+              r"|(?i:(?:[a-zäöüß0-9]{1,20}-)?(?:zahlen|entsperr|tresor|alarm|alarmanlagen|tür|tuer|haustür|haustuer|"
+              r"tor|garagen|garagentor|schließ|schliess|schloss|schlüsseltresor|schluesseltresor|safe|plaketten|"
+              r"sperr|geräte|geraete|handy|sim|router|wlan|wifi|wpa2?|netzwerk)-?code)")
 _ZUGANG_ETIKETT_RE = re.compile(
     r"(?<![\wäöüß\-./])(?:"
-    r"(?i:benutzer(?:name|kennung|konto|-?id)?|nutzerkennung|anmelde(?:name|kennung)|login(?:-?(?:name|id|kennung))?|"
-    r"username|user(?:-?id)?|zugangs(?:kennung|name|code|nummer|daten)|kunden-?login)"
-    r"|(?i:(?:initial|einmal|start|erst|transport|online)?-?(?:kennwort|passwort|password|passwd))"
-    r"|(?:PIN|Pin)(?:-?(?:Nr\.?|Nummer|Code))?"
+    r"(?i:benutzer(?:name|kennung|konto|-?id)?|nutzerkennung|anmelde(?:name|kennung)|"
+    r"(?:[a-zäöüß0-9]{1,15}-)?login(?:-?(?:name|id|kennung))?|admin(?:istrator)?-?(?:konto|kennung|name|login|"
+    r"account|zugang)|username|user(?:-?id)?|zugangs(?:kennung|name|code|nummer|daten)|kunden-?login)"
+    r"|" + _GEHEIMNIS +
     r"|(?i:aktivierungs(?:code|schl(?:ü|ue)ssel|nummer|kennung)|freischalt(?:code|nummer|schl(?:ü|ue)ssel)|"
     r"registrierungs(?:code|schl(?:ü|ue)ssel|nummer)|zugangsschl(?:ü|ue)ssel|einmalcode|tan)"
     r")(?:[ \t]*\([^()\n]{1,20}\))?(?![\wäöüß\-])")
+_GEHEIMNIS_RE = re.compile(r"(?:" + _GEHEIMNIS + r")(?:[ \t]*\([^()\n]{1,20}\))?")
+# "Code" allein ist erst mit einem Gegenstand eines Schlosses oder Geräts in den Zwischenwörtern ein Geheimnis
+# ("Code der Alarmanlage: 1357", "Code für den Schlüsseltresor: 2580") – nicht "Code der Bestellung"
+_CODE_ETIKETT_RE = re.compile(r"(?<![\wäöüß\-./])(?:Code|Zahlenkombination|Kombination)(?![\wäöüß\-])")
+_CODE_GEGENSTAND_RE = re.compile(r"(?i)alarm|tresor|safe|schloss|schließ|schliess|tür|tuer|garage|tor\b|haus|"
+                                 r"wohnung|briefkasten|fahrradschloss|handy|smartphone|tablet|laptop|computer|"
+                                 r"router|wlan|sim|app|portal|konto|zugang|plakette|stempel")
 _ZUGANG_WERT_RE = re.compile(r"[^\s,;\"„“”«»<>|]{3,64}")
 _ZUGANG_FUELLWORT = frozenset("""
 wird werden wurde ist sind siehe s. vgl. folgt folgen separat gesondert per bitte nicht kein keine keinen unbekannt
@@ -2940,19 +2988,81 @@ def _feld_etikett(wert: str) -> bool:
         return False
 
 
+def _geheimnis_form(wert: str) -> bool:
+    """Hat ein Wert ohne Trennzeichen davor die Form eines Geheimnisses: mit Ziffer oder Sonderzeichen ("Kx7#mQ2v",
+    "Zirbe-Stube-77", "2580") – nicht ein Wort des Satzes ("Kennwort ändern", "PIN eingeben")?"""
+    kern = wert.rstrip(".,;:!?)")
+    return len(kern) >= 4 and (any(c.isdigit() for c in kern) or any(not c.isalnum() for c in kern))
+
+
+def zugang_kopf(inhalt: str) -> bool:
+    """Ist die Zelle ein Zugangs-Etikett als Spaltenkopf ("PIN", "Kennwort", "Benutzername")? Für Erkennung
+    (_zugang_spalten) und Selbstkontrolle (restrisiko._spalten_kennungen) gleich."""
+    return bool(_ZUGANG_ETIKETT_RE.fullmatch((inhalt or "").strip()))
+
+
+def zugang_etikett_im_text(text: str) -> bool:
+    return bool(_ZUGANG_ETIKETT_RE.search(text))
+
+
+def zugang_wert(text: str, i: int, grenze: int):
+    """(start, ende) eines Zugangswerts ab i (dieselbe Wertform wie hinter dem Etikett) oder None."""
+    return _zugang_wert(text, i, grenze)
+
+
+def _zugang_spalten(text: str) -> list:
+    """(start, ende) der Werte unter einem Zugangs-Etikett als Spaltenkopf ("Karte ⇥⇥ PIN ⇥⇥ gültig bis" ⏎ "girocard ⇥⇥
+    4713 ⇥⇥ 12/2028"): die ganze Zelle derselben Spalte in den folgenden Zeilen mit gleich vielen Zellen, bis zu einer
+    Leerzeile (höchstens 40 Zeilen)."""
+    aus = []
+    zeilen, pos = [], 0
+    for inhalt in text.split("\n"):
+        zeilen.append((pos, inhalt))
+        pos += len(inhalt) + 1
+    for nr, (_, kopfzeile) in enumerate(zeilen):
+        if "\t" not in kopfzeile:
+            continue
+        kopf = [m for m in re.finditer(r"[^\t]+", kopfzeile) if m.group(0).strip()]
+        if len(kopf) < 2:
+            continue
+        spalten = [k for k, m in enumerate(kopf) if zugang_kopf(m.group(0))]
+        if not spalten:
+            continue
+        for start, inhalt in zeilen[nr + 1:nr + 41]:
+            if not inhalt.strip():
+                break                                   # Leerzeile: die Tabelle ist zu Ende
+            zellen = [m for m in re.finditer(r"[^\t]+", inhalt) if m.group(0).strip()]
+            if len(zellen) != len(kopf):
+                continue
+            for k in spalten:
+                roh = zellen[k].group(0)
+                a = start + zellen[k].start() + (len(roh) - len(roh.lstrip()))
+                b = start + zellen[k].end() - (len(roh) - len(roh.rstrip()))
+                sp = _zugang_wert(text, a, b)
+                if sp is not None and not text[sp[1]:b].strip(" .,;"):
+                    aus.append(sp)
+    return aus
+
+
 def zugangsdaten(text: str) -> list:
     """(start, ende) der Zugangsdaten hinter ihrem Etikett (Benutzer, Benutzerkennung, Login, Kennwort, Passwort, PIN,
-    Aktivierungs-, Freischalt-, Zugangs-, Registrierungscode, Initialpasswort): mit Trennzeichen (":", "=", Zellgrenze,
-    eine Klammer "(alt)" davor) oder hinter "lautet"/"ist" desselben Satzes (höchstens sechs Wörter Abstand:
-    "Ihr Kennwort für das Kundenportal lautet: Sommer2024!"); ein Etikett am Zeilenende mit Doppelpunkt nimmt den
-    Wert am Anfang der nächsten Zeile. Kein Füllwort ("Kennwort: wird separat zugesandt", "PIN: siehe Brief"), kein
-    Name, keine E-Mail-Adresse."""
+    Geheimzahl, Aktivierungs-, Freischalt-, Zugangs-, Registrierungs-, Zahlen- und Entsperrcode, Initialpasswort):
+    mit Trennzeichen (":", "=", Zellgrenze, eine Klammer "(alt)" davor), hinter Zwischenwörtern desselben Satzes bis
+    zu einem Doppelpunkt ("Kennwort für telefonische Auskünfte: Gartenzwerg", "Code der Alarmanlage: 1357") oder hinter
+    "lautet"/"ist" desselben Satzes (höchstens sechs Wörter Abstand: "Ihr Kennwort für das Kundenportal lautet:
+    Sommer2024!"); ein Geheimnis direkt dahinter auch ohne Trennzeichen, wenn der Wert Ziffer oder Sonderzeichen hat
+    ("Router-Kennwort Zirbe-Stube-77", "Zahlencode 2580"); ein Etikett am Zeilenende mit Doppelpunkt nimmt den Wert am
+    Anfang der nächsten Zeile. Kein Füllwort ("Kennwort: wird separat zugesandt", "PIN: siehe Brief"), kein Name, keine
+    E-Mail-Adresse."""
     aus = []
-    for m in _ZUGANG_ETIKETT_RE.finditer(text):
+    treffer = [(m, False) for m in _ZUGANG_ETIKETT_RE.finditer(text)]
+    if "ode" in text or "ombination" in text:
+        treffer += [(m, True) for m in _CODE_ETIKETT_RE.finditer(text)]
+    for m, nur_code in treffer:
         e = m.end()
         zeilenende = text.find("\n", e)
         zeilenende = len(text) if zeilenende < 0 else zeilenende
-        t = re.match(r"[ \t]*(?:[:=]|\t\t)[ \t]*", text[e:zeilenende + 1])
+        t = None if nur_code else re.match(r"[ \t]*(?:[:=]|\t\t)[ \t]*", text[e:zeilenende + 1])
         if t is not None:
             i = e + t.end()
             if i >= zeilenende and text[e:zeilenende].strip().startswith(":"):
@@ -2965,17 +3075,35 @@ def zugangsdaten(text: str) -> list:
             if sp is not None:
                 aus.append(sp)
             continue
-        # "Ihr Kennwort für das Kundenportal lautet: …": Ankündigung im selben Satz
+        geheim = not nur_code and _GEHEIMNIS_RE.fullmatch(m.group(0)) is not None
+        if geheim:
+            # "Router-Kennwort Zirbe-Stube-77", "Ihr Initialkennwort Kx7#mQ2v.", "Zahlencode 2580."
+            w = re.match(r"[ \t]+([^\s,;\"„“”«»<>|]{3,64})", text[e:zeilenende])
+            if w is not None and _geheimnis_form(w.group(1)):
+                sp = _zugang_wert(text, e + w.start(1), zeilenende)
+                if sp is not None:
+                    aus.append(sp)
+                    continue
+        # Zwischenwörter desselben Satzes bis "lautet"/"ist" oder bis zu einem Doppelpunkt ("Kennwort der App laut
+        # Begrüßungsschreiben: Blasmusik!77"); "Code" allein nur mit dem Gegenstand eines Schlosses oder Geräts
         satz = text[e:min(zeilenende, e + 120)]
         for k, wort in enumerate(re.finditer(r"\S+", satz)):
             if k > 6 or wort.group(0)[-1:] in ".!?;" and not wort.group(0).endswith(":"):
                 break
+            if _ZUGANG_ETIKETT_RE.fullmatch(wort.group(0).rstrip(":")):
+                break                                   # das nächste Etikett ("Benutzername ⇥ Kennwort: …")
             a = _ZUGANG_ANKUENDIGUNG_RE.match(satz, wort.start())
-            if a is not None and a.end() > wort.start():
-                sp = _zugang_wert(text, e + a.end(), zeilenende)
+            doppelpunkt = wort.group(0).endswith(":") and k > 0 or (wort.group(0) == ":" and k > 0)
+            if (a is not None and a.end() > wort.start()) or doppelpunkt:
+                if nur_code and not _CODE_GEGENSTAND_RE.search(satz[:wort.end()]):
+                    break
+                start = e + (a.end() if a is not None and a.end() > wort.start() else wort.end())
+                sp = _zugang_wert(text, start, zeilenende)
                 if sp is not None:
                     aus.append(sp)
                 break
+    if "\t" in text:
+        aus += _zugang_spalten(text)
     return sorted(set(aus))
 
 
@@ -2995,17 +3123,17 @@ _PROFIL_ETIKETT_RE = re.compile(
     r"(?:[ \t]+(?:auf|bei|in|im)[ \t]+(?:" + _PLATTFORM + r"))?"                       # "Profilname auf Vinted"
     r"|(?:Snapchat|Signal|Telegram|Threema|Discord|TikTok|Tiktok|Instagram|Skype|Twitter|Mastodon|Bluesky|Xing|XING)"
     r")(?![\wäöüß\-])")
-_PROFIL_WERT_RE = re.compile(r"@?[A-Za-z0-9ÄÖÜäöüß][A-Za-z0-9ÄÖÜäöüß._\-]{1,40}(?<![._\-])")
+_PROFIL_WERT_RE = re.compile(r"@?[A-Za-z0-9ÄÖÜäöüß][A-Za-z0-9ÄÖÜäöüß._\-]{1,40}(?<![._\-])(?:#\d{4}(?!\d))?")
 # "@"-Name mit mindestens einem Buchstaben ("@lena.wiesengrund", "@korbi_zeitl84") – nie ein Datum oder eine Zahl hinter
 # einem verlesenen "@" ("@1.12.2034" auf einem Schreibmaschinen-Scan)
 _HANDLE_RE = re.compile(r"(?<![\w@.\-+%/])@(?=[\w.]*[A-Za-z])"
                         r"([A-Za-z0-9_](?:[A-Za-z0-9_.]{1,38}[A-Za-z0-9_]))(?![\w@]|\.[A-Za-z])")
 _PROFIL_URL_RE = re.compile(
     r"(?i)(?<![\w.\-/])(?:https?://)?(?:www\.|m\.|de\.|mobile\.)?"
-    r"(?:facebook\.com|fb\.com|instagram\.com|t\.me|telegram\.me|tiktok\.com/@?|twitter\.com|x\.com|threads\.net/@?|"
-    r"linkedin\.com/in|xing\.com/profile|youtube\.com/@?|youtube\.com/(?:c|user|channel)|twitch\.tv|"
+    r"(?:facebook\.com|fb\.com|instagram\.com|t\.me|telegram\.me|tiktok\.com|twitter\.com|x\.com|threads\.net|"
+    r"linkedin\.com/in|xing\.com/profile|youtube\.com/(?:c|user|channel)|youtube\.com|twitch\.tv|"
     r"reddit\.com/u(?:ser)?|pinterest\.(?:com|de)|snapchat\.com/add|vinted\.de/member|vinted\.de/members|"
-    r"kleinanzeigen\.de/s-bestandsliste\.html\?userId=|github\.com|onlyfans\.com|mastodon\.social/@?)/"
+    r"kleinanzeigen\.de/s-bestandsliste\.html\?userId=|github\.com|onlyfans\.com|mastodon\.social)/"
     r"(@?[A-Za-z0-9ÄÖÜäöüß][A-Za-z0-9ÄÖÜäöüß._\-]{1,60})")
 _URL_RE = re.compile(r"(?i)(?<![\w@])(?:https?://|www\.)[^\s<>\"'„“”]+|"
                      r"(?<![\w@./])[\w\-]+(?:\.[\w\-]+)*\.(?:de|com|net|org|eu|info|at|ch|io|me|app)/[^\s<>\"'„“”]*")
@@ -3065,9 +3193,15 @@ def profilnamen(text: str) -> list:
             aus.append((m.start(), m.end()))
     for m in _PROFIL_ETIKETT_RE.finditer(text):
         t = re.match(r"[ \t]*(?:[:=]|\t\t)[ \t]*", text[m.end():m.end() + 6])
-        if t is None:
-            continue
-        i = m.end() + t.end()
+        if t is not None:
+            i = m.end() + t.end()
+        else:
+            # Zwischenwörter desselben Satzes bis zu einem Doppelpunkt ("Instagram-Konto der Betroffenen: …",
+            # "Discord-Name des Mitschülers: …"; Gegenprüfung LK-11) – höchstens vier Wörter, kein Satzende
+            z = re.match(r"((?:[ \t]+[^\s:.!?;]+){1,4}?)[ \t]*:[ \t]*", text[m.end():m.end() + 80])
+            if z is None or "\n" in z.group(0):
+                continue
+            i = m.end() + z.end()
         u = _PROFIL_URL_RE.match(text, i)
         if u is not None:
             continue                                    # der Link: unten

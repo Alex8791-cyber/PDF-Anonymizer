@@ -7,6 +7,7 @@ der Wert stehen, muss sie ihn melden. Alle Personen, Nummern und Anschriften sin
 import pymupdf as fitz
 import pytest
 
+from conftest import braucht_ocr
 from anonymisierer import muster
 from anonymisierer.analyse import analysiere_pdf, analysiere_text
 from anonymisierer.restrisiko import pruefe_text, restrisiko_pruefen
@@ -406,3 +407,276 @@ def test_u5_u6_kein_fehlverdacht(text, wert):
 ])
 def test_u5_u6_gegenproben_bleiben_verdacht(text, wert):
     assert _gemeldet(text, wert), _verdacht(text)
+
+
+# ----------------------------------------------------------------------
+# LK-02/LK-17: ZB I als Scan in Spaltenblöcken (Feldcodes, Feldnamen und Werte je ein Block der Texterkennung) – der
+# Wert rechts auf derselben Höhe gehört zum Feldnamen („Name oder Firmenname“ … „Kreidler“)
+# ----------------------------------------------------------------------
+@braucht_ocr
+def test_lk02_zb1_scan_spaltenbloecke(tmp_path):
+    from anonymisierer.ocr import OcrDienst
+    zeilen = [("Zulassungsbescheinigung Teil I – Abschrift für den Versicherer", None, None),
+              ("A", "Amtliches Kennzeichen", "MA-KL 4412"), ("B", "Datum der Erstzulassung", "17.06.2021"),
+              ("C.1.1", "Name oder Firmenname", "Kreidler"), ("C.1.2", "Vorname(n)", "Ludwig Anselm"),
+              ("C.1.3", "Anschrift", "L 14, 16, 68161 Mannheim"), ("P.3", "Kraftstoff", "Benzin")]
+    vorlage = fitz.open()
+    s = vorlage.new_page()
+    for i, (a, b, c) in enumerate(zeilen):
+        y = 90 + 22 * i
+        s.insert_text((50, y), a, fontsize=11, fontname="helv")
+        if b:
+            s.insert_text((110, y), b, fontsize=11, fontname="helv")
+            s.insert_text((330, y), c, fontsize=11, fontname="helv")
+    pix = s.get_pixmap(dpi=200, colorspace=fitz.csGRAY)
+    doc = fitz.open()
+    p = doc.new_page(width=s.rect.width, height=s.rect.height)
+    p.insert_image(p.rect, stream=pix.tobytes("png"))
+    pdf = tmp_path / "zb1_scan.pdf"
+    doc.save(pdf)
+    doc.close()
+    vorlage.close()
+    with OcrDienst(prozesse=1) as dienst:
+        e = analysiere_pdf(pdf, ALLE, [], [], ocr=dienst)
+    stellen = _pdf_stellen(e)
+    assert any("Kreidler" in t for t in stellen), stellen
+    assert not any(t in ("Benzin", "Kraftstoff", "Anschrift") for t in stellen), stellen
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Name oder Firmenname: Kreidler", "Kreidler"),                       # Feldname der ZB I als Personen-Etikett
+    ("Fahrer: Miele", "Miele"),
+])
+def test_lk02_personen_etikett_vor_markenname(text, wert):
+    assert _geschwaerzt(text, wert) or _gemeldet(text, wert), (_stellen(_funde(text)), _verdacht(text))
+
+
+def test_lk03_markenkern_eines_versicherers_nur_in_der_versicherer_spalte():
+    # "Adam Riese" steht nicht als Person in der Erlaubnisliste, nur der Versicherer "Adam Riese Versicherung": als
+    # Markenkern gilt der Name allein in einer Organisations-Spalte – hinter einem Personen-Etikett bleibt er Person
+    assert not _beruehrt("Versicherer\t\tTarif\nAdam Riese\t\tXXL", "Riese")
+    assert _geschwaerzt("Versicherungsnehmer: Adam Riese", "Adam Riese")
+    assert _geschwaerzt("Sparte\t\tVersicherer\nPHV\t\tGebhard Lindinger", "Lindinger")
+
+
+# ----------------------------------------------------------------------
+# LK-06/LK-07/LK-05: Zugangsdaten mit Zwischenwörtern, Kompositum, ohne Doppelpunkt, im Satz; Geheimzahlen und Codes
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, wert", [
+    ("Kennwort für telefonische Auskünfte: Gartenzwerg", "Gartenzwerg"),
+    ("Passwort für das Kundenportal: Hufeisen#27", "Hufeisen#27"),
+    ("WPA2-Kennwort: Kuckucksuhr!1983", "Kuckucksuhr!1983"),
+    ("Router-Kennwort Zirbe-Stube-77", "Zirbe-Stube-77"),
+    ("Ihr Benutzername lautet EBUERSTNER61, Ihr Initialkennwort Kx7#mQ2v.", "Kx7#mQ2v"),
+    ("Benutzername für das Bürgerkonto: valentina.grieshaber", "valentina.grieshaber"),
+    ("App-Login (Benutzer): ikastenmueller", "ikastenmueller"),
+    ("Kennwort der App laut Begrüßungsschreiben: Blasmusik!77", "Blasmusik!77"),
+    ("Administrator-Konto: adm-tabbert", "adm-tabbert"),
+    ("Kennwort des Administrators vor dem Vorfall: Werkbank&Hobel1990", "Werkbank&Hobel1990"),
+    ("Ihre persönliche Geheimzahl lautet 8034.", "8034"),
+    ("Code der Alarmanlage: 1357", "1357"),
+    ("Schlüssel im Schlüsseltresor neben der Haustür, Zahlencode 2580.", "2580"),
+    ("Plakettencode der Stempelplakette hinten: B4R7ZT", "B4R7ZT"),
+    ("Entsperrcode des Handys: 482916", "482916"),
+    ("Karten-PIN 7713", "7713"),
+])
+def test_lk06_lk07_zugangsdaten(text, wert):
+    assert _geschwaerzt(text, wert, "zugangsdaten"), _stellen(_funde(text))
+    assert _gemeldet(text, wert), _verdacht(text)            # dieselbe Regel in der Selbstkontrolle
+
+
+def test_lk07_pin_als_spaltenkopf(tmp_path):
+    zeilen = ["Kartenübersicht", "Karte\t\tPIN\t\tgültig bis", "girocard\t\t4713\t\t12/2028"]
+    assert _geschwaerzt("\n".join(zeilen), "4713", "zugangsdaten")
+    pdf = _pdf(tmp_path / "pin.pdf", [_zeilen(zeilen)])
+    assert "4713" in _pdf_stellen(_pdf_funde(pdf), "zugangsdaten")
+    verdacht = _ausgabe_ohne(tmp_path, pdf, "4713")          # verfehlte Erkennung: die Selbstkontrolle meldet
+    assert any("4713" in t for t, _ in verdacht), verdacht
+    assert not any("girocard" in t or "2028" in t for t, _ in verdacht), verdacht
+
+
+@pytest.mark.parametrize("text, bleibt", [
+    ("Kennwort ändern", "ändern"),
+    ("PIN eingeben und bestätigen", "eingeben"),
+    ("Code der Bestellung: 4711-22", "4711-22"),
+    ("Die Kennwortregeln: mindestens 8 Zeichen", "mindestens"),
+    ("Kennwort bitte nicht weitergeben: Ihre Bank", "Bank"),
+    ("Fehlercode: E-401", "E-401"),
+    ("Karte\t\tPIN\ngirocard\t\twird separat zugesandt", "separat"),
+])
+def test_lk06_lk07_gegenproben(text, bleibt):
+    assert not _beruehrt(text, bleibt), _stellen(_funde(text))
+
+
+def test_lk06_gegenprobe_kompositum_ist_kein_kennwort():
+    # "Passwort-Manager" ist kein Kennwort-Etikett: kein Zugangsdatum dahinter (den Produktnamen schwärzt dort
+    # unabhängig davon die Namenserkennung, wie schon vorher)
+    assert not _stellen(_funde("Passwort-Manager: Bitwarden"), "zugangsdaten")
+
+
+# ----------------------------------------------------------------------
+# LK-08: Kennung hinter "im Formular"/"im Vordruck"/"laut Anlage" – ein Fundort, kein Gegenstand mit eigener Nummer
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, wert", [
+    ("Mitgliedsnummer im Formular: 88 1290 4473", "88 1290 4473"),
+    ("Versicherungsnummer im Vordruck: 55 1290 4475", "55 1290 4475"),
+    ("Versicherungsscheinnummer laut Anlage: 44 712 908", "44 712 908"),
+    ("Kundennummer im beiliegenden Formular: 4471 2290", "4471 2290"),
+])
+def test_lk08_kennung_hinter_fundort(text, wert):
+    assert _geschwaerzt(text, wert), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text, bleibt", [
+    ("Nummer der Seite: 12", "12"),                                      # die Nummer der Seite selbst
+    ("Versicherungsnummer im Tarif: KOMFORT 2024", "KOMFORT"),            # Tarif bleibt Gegenstand mit eigenem Wert
+])
+def test_lk08_gegenproben(text, bleibt):
+    assert not _beruehrt(text, bleibt), _stellen(_funde(text))
+
+
+# ----------------------------------------------------------------------
+# LK-10: USt-IdNr. eines Versicherungsmaklers (natürliche Person) ohne "e.K."
+# ----------------------------------------------------------------------
+def test_lk10_ust_id_des_maklers():
+    text = "Versicherungsmakler Benno Viessmann · USt-IdNr. DE298765431"
+    assert _geschwaerzt(text, "DE298765431"), _stellen(_funde(text))
+    for firma in ("Allianz Versicherungs-AG · USt-IdNr. DE298765431",
+                  "Versicherungsmakler GmbH · USt-IdNr. DE298765431"):
+        assert not _beruehrt(firma, "DE298765431"), firma
+
+
+# ----------------------------------------------------------------------
+# LK-11: Profilnamen hinter Zwischenwörtern, Discord-Namen, Profil-Link ohne Protokoll
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, wert", [
+    ("Instagram-Konto der Betroffenen: romana_pointner_08", "romana_pointner_08"),
+    ("Täterprofil: tiktok.com/@romana.pntr (gefälschtes Profil)", "romana.pntr"),
+    ("Discord-Name des Mitschülers: Schattenwolf#4471", "Schattenwolf#4471"),
+])
+def test_lk11_profilnamen(text, wert):
+    assert _geschwaerzt(text, wert), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text, bleibt", [
+    ("Instagram: privat", "privat"),
+    ("Instagram-Konto der Firma ist gesperrt: nein", "nein"),
+    ("Besuchen Sie uns auf facebook.com/HUKCOBURG", "HUKCOBURG"),
+])
+def test_lk11_gegenproben(text, bleibt):
+    assert not _beruehrt(text, bleibt), _stellen(_funde(text))
+
+
+# ----------------------------------------------------------------------
+# LK-12: Schweizer Anschrift mit Kantonskürzel hinter dem Ort
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, wert", [
+    ("Neue Anschrift: Bälliz 3, 3600 Thun BE, Tel. +41 33 2211447", "3600 Thun"),
+    ("Arbeitgeber in 8706 Meilen ZH seit 2019", "8706 Meilen"),
+])
+def test_lk12_kantonskuerzel(text, wert):
+    assert _geschwaerzt(text, wert), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text", ["Es wurden 5000 Meilen gutgeschrieben.", "Wir fahren 1500 Zug um Zug."])
+def test_lk12_gegenproben(text):
+    assert not _stellen(_funde(text), "international"), _stellen(_funde(text))
+
+
+# ----------------------------------------------------------------------
+# LK-13: Kinderliste unter "Kinder:" – auch ein mehrdeutiger Vorname am Anfang des Listeneintrags
+# ----------------------------------------------------------------------
+def test_lk13_kinderliste_mehrdeutiger_vorname():
+    text = "Kinder:\nLena, 12.03.2014\nMax, 05.09.2016"
+    for datum in ("12.03.2014", "05.09.2016"):
+        assert _geschwaerzt(text, datum, "geburt"), _stellen(_funde(text))
+    assert not _stellen(_funde("Termine:\nMax, 05.09.2016"), "geburt")    # ohne Kinderliste kein Geburtsdatum
+
+
+# ----------------------------------------------------------------------
+# LK-15: Beruf der Wissensbasis unter dem Spaltenkopf "Tätigkeit" – der Nachbarkopf ist kein Beruf
+# ----------------------------------------------------------------------
+def test_lk15_beruf_in_taetigkeitsspalte():
+    text = "Angaben zur Tätigkeit\t\tTätigkeit\t\tArbeitgeber\nseit 2014\t\tSpieleentwickler\t\tPixelhaus Studios"
+    assert _geschwaerzt(text, "Spieleentwickler", "beruf"), _stellen(_funde(text))
+    assert not ({"Tätigkeit", "Arbeitgeber"} & _stellen(_funde(text))), _stellen(_funde(text))
+    assert _geschwaerzt("Beruf\t\tSchreiner", "Schreiner", "beruf")       # Etikett und Wert in einer Zeile
+
+
+# ----------------------------------------------------------------------
+# LK-16: IP-Adresse in den Kopfzeilen eines E-Mail-Ausdrucks
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text", [
+    "Received: from [91.12.34.59] by mout.gmx.net with ESMTPSA",
+    "Received: from mail.example.de (mail.example.de [91.12.34.59]) by mx.example.net",
+    "X-Originating-IP: [91.12.34.59]",
+])
+def test_lk16_received_ip(text):
+    assert _geschwaerzt(text, "91.12.34.59"), _stellen(_funde(text))
+
+
+def test_lk16_gegenprobe_vertragsnummer_mit_punkten():
+    assert not _stellen(_funde("Vertrag 95.137.189.6 vom 01.02.2024"), "ip")
+
+
+# ----------------------------------------------------------------------
+# U7: Spartenkürzel mit SF-Klasse bzw. Selbstbeteiligung sind keine Kennzeichen
+# ----------------------------------------------------------------------
+def test_u7_sparten_mit_sf_und_sb_bleiben():
+    text = "HP SF 12 (35 %), RS SB 150, GL SB 0, HR SB 500"
+    assert not _stellen(_funde(text), "kfz"), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Kennzeichen: HP SF 12", "HP SF 12"),                               # hinter dem Kfz-Etikett
+    ("Unfallgegner GL-SB 150 fuhr auf", "GL-SB 150"),                    # mit Bindestrich ein Kennzeichen
+    ("Das Fahrzeug GL AB 150 parkte vor dem Haus", "GL AB 150"),
+])
+def test_u7_gegenproben_kennzeichen(text, wert):
+    assert _geschwaerzt(text, wert, "kfz"), _stellen(_funde(text))
+
+
+# ----------------------------------------------------------------------
+# K1: Anschrift in der Formularzeile des Kunden unter einer Spartenüberschrift ist keine Firmenanschrift
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text", [
+    "Kfz-Versicherung\nVersicherungsnehmer: Annelie Stöberl, Kastanienallee 9, 85354 Freising",
+    "Hausratversicherung\nLeasingnehmerin: Annelie Stöberl, Kastanienallee 9, 85354 Freising",
+])
+def test_k1_anschrift_des_kunden_unter_sparte(text):
+    stellen = _stellen(_funde(text))
+    assert "Kastanienallee 9" in stellen and "85354 Freising" in stellen, stellen
+
+
+def test_k1_gegenprobe_firmenanschrift_bleibt():
+    text = "Allianz Versicherungs-AG\nAnsprechpartner: Herr Kurt Maier, Königinstraße 28, 80802 München"
+    assert not ({"Königinstraße 28", "80802 München"} & _stellen(_funde(text))), _stellen(_funde(text))
+
+
+# ----------------------------------------------------------------------
+# L3: Zeilen ohne Leerzeichen und riesige Lücken (vorher 16 000 Zeichen: "Ab-…" 15,5 s, ":" 27,9 s, Leerzeichen 5,9 s,
+# Tabulatoren 4,3 s) – NER ohne überlange Zeichenfolgen, Organisations-, Führerschein-, Ort-Datum- und Alter-Regeln ohne
+# Neustart an jeder Stelle einer Folge
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("muster", ["Ab-", ":", " ", "\t"])
+def test_l3_pathologische_zeilen_wachsen_linear(muster):
+    import zeitmessung
+
+    def zeile(n):
+        return ("A" + muster * n + "B") if muster.isspace() else muster * (n // len(muster))
+    gross, klein = zeile(8000), zeile(1000)
+    analysiere_text("Vertragsnummer: 12345 Max Mustermann", ALLE, [], [], profil="hoch")    # Modell laden
+    wachstum, _, zeit = zeitmessung.wachstum_messen(lambda: analysiere_text(klein, ALLE, [], [], profil="hoch"),
+                                                    lambda: analysiere_text(gross, ALLE, [], [], profil="hoch"), 8,
+                                                    wiederholungen=1, schranke=2.0)
+    print(f"{muster!r}: {zeit:.2f} s CPU, wachstum {wachstum:.2f}")
+    assert wachstum < 2.0, f"Laufzeit wächst um {wachstum:.2f} x linear"
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Anna Berg (54)", "54"),                                             # Alter hinter dem Namen weiter erkannt
+    ("München, den 01.02.2024", "München"),                               # Ort-Datum-Zeile
+    ("Name\t\tMünchen, 01.02.2024", "München"),
+])
+def test_l3_gegenproben_regeln_greifen_weiter(text, wert):
+    assert _geschwaerzt(text, wert), _stellen(_funde(text))

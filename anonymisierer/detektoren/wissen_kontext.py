@@ -398,10 +398,23 @@ def _kein_beruf(wert: str) -> bool:
     return _feldbezeichner(wert)
 
 
+_KOPF_NACHBAR_RE = re.compile(r"(?i)^(?:arbeitgeber(?:in)?|tätigkeit|beruf|branche|stellung|firma|betrieb)\b")
+
+
+def _bekannter_beruf(wert: str) -> bool:
+    """Ist die ganze Zelle ein Beruf der Wissensbasis ("Spieleentwickler", "Zahnärztin")?"""
+    try:
+        return any(v.start == 0 and v.ende == len(wert) for v in wissen.index("berufe").finde(wert))
+    except Exception:
+        return False
+
+
 def _beruf_spalte(text: str, m):
-    """Steht das Beruf-Etikett als ganze Zelle in der Kopfzeile einer Personentabelle ("Name, Vorname ⇥⇥ Geb.-Datum
-    ⇥⇥ Beruf ⇥⇥ Eintritt")? Dann die Zellen dieser Spalte in den Zeilen darunter (Befund 87 der Domänen-Durchsicht);
-    sonst None. Die Nachbarzelle der Kopfzeile ist kein Beruf."""
+    """Steht das Beruf-Etikett als ganze Zelle in der Kopfzeile einer Tabelle? In einer Personentabelle ("Name, Vorname
+    ⇥⇥ Geb.-Datum ⇥⇥ Beruf ⇥⇥ Eintritt") jede Zelle dieser Spalte in den Zeilen darunter (Befund 87 der Domänen-
+    Durchsicht); in einer anderen Kopfzeile – die Nachbarzelle ist selbst ein Feldbezeichner ("Angaben zur Tätigkeit ⇥⇥
+    Tätigkeit ⇥⇥ Arbeitgeber") – die Berufe der Wissensbasis darunter (Gegenprüfung LK-15); sonst None. Die
+    Nachbarzelle der Kopfzeile ist kein Beruf."""
     if ":" in text[m.start():m.end()] or "\t" not in text[m.start():m.end()]:
         return None
     za = text.rfind("\n", 0, m.start()) + 1
@@ -409,9 +422,13 @@ def _beruf_spalte(text: str, m):
     ze = len(text) if ze < 0 else ze
     kopf = _zellen(text[za:ze], za)
     nr = next((i for i, (a, b, _) in enumerate(kopf) if a <= m.start() < b), None)
-    if nr is None or len(kopf) < 3 or any(c.isdigit() for c in text[za:ze]) \
-            or not any(_PERSONEN_KOPF_RE.search(t) for _, _, t in kopf):
+    if nr is None or len(kopf) < 2 or any(c.isdigit() for c in text[za:ze]):
         return None
+    personen = len(kopf) >= 3 and any(_PERSONEN_KOPF_RE.search(t) for _, _, t in kopf)
+    if not personen:
+        nachbar = kopf[nr + 1][2] if nr + 1 < len(kopf) else ""
+        if not nachbar or not (_feldbezeichner(nachbar) or _KOPF_NACHBAR_RE.match(nachbar)):
+            return None                            # "Beruf ⇥⇥ Schreiner": Etikett und Wert in einer Zeile
     aus = []
     pos = ze + 1
     while pos < len(text):
@@ -421,7 +438,7 @@ def _beruf_spalte(text: str, m):
         if len(zellen) != len(kopf):
             break
         a, b, wert = zellen[nr]
-        if not _kein_beruf(wert):
+        if not _kein_beruf(wert) and (personen or _bekannter_beruf(wert)):
             s0 = a + (len(text[a:b]) - len(text[a:b].lstrip()))
             aus.append((s0, s0 + len(wert)))
         pos = ende + 1
@@ -824,7 +841,9 @@ _DATUM_RE = re.compile(r"(?<![\d.])\d{1,2}\.[ \t]?\d{1,2}\.[ \t]?(?:19|20)?\d{2}
                        r"[ \t]?(?:19|20)\d{2}(?!\d)")
 _NAME_VOR_RE = re.compile(rf"((?:{_WORT_GROSS})(?:[ \t]+(?:von|van|de|der|den|zu|vom)?[ \t]*{_WORT_GROSS}){{1,3}})"
                           r"[ \t]*(?:,|\*|\()[ \t]*$")
-_ALTER_RE = re.compile(rf"((?:{_WORT_GROSS})(?:[ \t]+{_WORT_GROSS}){{1,3}})[ \t]*(?:\([ \t]*(\d{{1,3}})"
+# nur am Wortanfang (sonst auf einer Zeile aus Tausenden "Ab-Ab-…" an jeder Stelle neu, quadratisch – L3)
+_ALTER_RE = re.compile(rf"(?<![{_KLEIN}{_GROSS}'’\-])((?:{_WORT_GROSS})(?:[ \t]+{_WORT_GROSS}){{1,3}})[ \t]*"
+                       rf"(?:\([ \t]*(\d{{1,3}})"
                        r"(?:[ \t]*(?:J\.|Jahre|Jahren|jährig))?[ \t]*\)|,[ \t]*(\d{1,3})[ \t]+(?:Jahre|J\.)(?:[ \t]+alt)?"
                        r"(?=[,.;\n]))")
 _VERTRAGSDATUM_RE = re.compile(
@@ -841,9 +860,10 @@ _FAMILIE_NAME_RE = re.compile(
     r"{0,2})(?:[ \t]*(?:,|\(|\*)[ \t]*|[ \t]*\t[ \t]*|[ \t]+[-–][ \t]+)$")
 
 
-def _familien_name(name: str) -> bool:
+def _familien_name(name: str, listeneintrag: bool = False) -> bool:
     """Kann `name` ("Liv Ostermeier", "Brenner, Lina", "Ben") eine Person sein: keine Allerwelts-, Etikett- oder
-    Rollenwörter, mindestens ein Vor- oder Nachname der Wissensbasis (ein einzelnes Wort: ein Vorname)?"""
+    Rollenwörter, mindestens ein Vor- oder Nachname der Wissensbasis (ein einzelnes Wort: ein eindeutiger Vorname –
+    am Anfang eines Listeneintrags unter "Kinder:" auch ein mehrdeutiger: "Max, 05.09.2016", Gegenprüfung LK-13)?"""
     woerter = [w for w in re.split(r"[ \t,]+", name) if w and w[0].isupper()]
     if not woerter or len(woerter) > 3:
         return False
@@ -852,7 +872,7 @@ def _familien_name(name: str) -> bool:
                 or wissen.ist_allowlist(w) or wissen.index("etiketten_person").eintrag_fuer(w) is not None:
             return False
     if len(woerter) == 1:
-        return wissen.ist_vorname(woerter[0]) and not wissen.ist_vorname_mehrdeutig(woerter[0])
+        return wissen.ist_vorname(woerter[0]) and (listeneintrag or not wissen.ist_vorname_mehrdeutig(woerter[0]))
     return any(wissen.ist_vorname(w) or wissen.ist_nachname(w) for w in woerter)
 
 
@@ -910,7 +930,9 @@ def geburt_ohne_stichwort(text: str, alle: bool = False) -> list:
         # Familien-/Versichertenkontext: das Datum direkt an einem Namen ist ein Geburtsdatum in jedem Alter ("Kind 2:
         # Bastian Leutgeb, 30.06.2018", "Kinder: Ben (02.05.2019)", "Brenner, Lina, 05.05.2019", Kinderliste mit
         # Tabstopps unter "Kinder:") – in einer Liste unter einer Überschrift nur ohne Betrag in der Zeile
-        if f and _familien_name(f.group("name")) and personenkontext.familien_kontext(text, a, a + f.start("name")):
+        listeneintrag = f is not None and not davor[:f.start("name")].strip(" \t-–•*·")
+        if f and _familien_name(f.group("name"), listeneintrag) \
+                and personenkontext.familien_kontext(text, a, a + f.start("name")):
             gleiche_zeile = personenkontext.familien_rolle_in_zeile(text, a, a + f.start("name"))
             zeile_ende = text.find("\n", m.end())
             zeile = text[a:len(text) if zeile_ende < 0 else zeile_ende]

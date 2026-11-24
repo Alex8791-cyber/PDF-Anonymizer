@@ -569,6 +569,16 @@ def test_pflegewerkzeug_ordnet_datei(tmp_path):
     assert pfad.read_text(encoding="utf-8") == "# Kopf\nAnna\nanna\n"
 
 
+def test_quellen_md_zaehlt_die_eintraege_jeder_liste():
+    """Die Spalte "Einträge" der Tabelle in QUELLEN.md stimmt mit den Listen überein (Gegenprüfung D1)."""
+    import re
+    text = (DATEN / "QUELLEN.md").read_text(encoding="utf-8")
+    for name, datei in w.LISTEN.items():
+        m = re.search(r"\|\s*`%s`\s*\|\s*([\d\u00a0\u202f .]+?)\s*\|" % re.escape(datei), text)
+        assert m, f"{datei}: keine Zeile in der Tabelle"
+        assert int(re.sub(r"\D", "", m.group(1))) == len(w.liste(name)), datei
+
+
 def test_quellen_md_beschreibt_herkunft_und_alle_listen():
     text = (DATEN / "QUELLEN.md").read_text(encoding="utf-8")
     for pflicht in ("MIT", "CC0", "wissen_pflegen.py --schreiben", "--add-data"):

@@ -2422,7 +2422,7 @@ class _Seitenpruefung:
         text = self.text
         koepfe = self._kennungs_koepfe()
         if not koepfe and not kennungsformen.ETIKETT_RE.search(text) and "-\t" not in text \
-                and not re.search(r"-[ \t]*\n", text):
+                and not re.search(r"-[ \t]*\n", text) and not kennungsformen.zugang_etikett_im_text(text):
             return []
         zeilen = self._zeilen_nach_lage()
         aus = []
@@ -2451,6 +2451,8 @@ class _Seitenpruefung:
                             break
                 if art is None and (cs, ce) in koepfe:
                     art = "allgemein"                   # "Vertragsnr.", "Seriennummer": jedes Kennungs-Etikett
+                if art is None and kennungsformen.zugang_kopf(inhalt):
+                    art = "zugang"                      # "PIN", "Kennwort" als Spaltenkopf (Gegenprüfung LK-07)
                 if art is None:
                     continue
                 if art == "pruef" and not kennungsformen.KARTENANGABE_RE.search(zt) and not any(
@@ -2471,6 +2473,11 @@ class _Seitenpruefung:
                     if kennungsformen.etikett_art(zelle.strip()) is not None:
                         break                           # nächster Kopf
                     vorn = len(zelle) - len(zelle.lstrip())
+                    if form == "zugang":
+                        sp = kennungsformen.zugang_wert(text, zs + vorn, ze)
+                        if sp is not None and not text[sp[1]:ze].strip(" .,;)"):
+                            aus.append((sp[0], sp[1], f"Zugangsdaten in der Spalte »{' '.join(kopf.split())}«", True))
+                        continue
                     if form == "allgemein":
                         if self.w.ist_etikett(zelle.strip()) or self.w.ist_etikett(zelle.strip().rstrip(".:")):
                             break                       # nächster Kopf bzw. Feld
