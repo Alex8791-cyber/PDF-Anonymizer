@@ -328,6 +328,9 @@ def _datenreihen(text: str, reihen: list, i_kopf: int, tab: _Tabelle, h: float, 
         zellen = [z for z in r.zellen if z.x1 > links and z.x0 < rechts]
         if not zellen:
             break
+        if tab.reihen and len(zellen) == 1 and len(text[zellen[0].start:zellen[0].ende].strip(" .,;:|-_")) <= 2:
+            i += 1                                   # Rest der Texterkennung ("i", "|") zwischen zwei Datenreihen
+            continue                                 # eines Scans: beendet die Tabelle nicht (s7 066)
         if any(_ist_fliesstext(text, z, spalten) for z in zellen):
             break
         if zellen[0].x0 < links + 1.0 and len(zellen) == 1 and len(text[zellen[0].start:zellen[0].ende].split()) > 4:
@@ -974,9 +977,12 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
         kopf_ende = i
         if spalten is None and i + 1 < len(reihen) and len(reihen[i].zellen) == 1 \
                 and len(reihen[i + 1].zellen) >= 2 \
+                and not any(c.isdigit() for z in reihen[i + 1].zellen for c in text[z.start:z.ende]) \
                 and _kopf_spalten(text, reihen[i + 1], ets, starts, breite) is not None:
             # Überschrift aus einer Zelle über einem vollständigen Kopf ("Mitversicherte Personen" ⏎ "Name ⇥⇥ Vorname ⇥⇥
-            # geb. am"): kein zweizeiliger Kopf – die Spalte "Name" bliebe sonst ohne ihr Etikett
+            # geb. am"): kein zweizeiliger Kopf – die Spalte "Name" bliebe sonst ohne ihr Etikett. Eine Reihe mit
+            # Ziffern ist kein Kopf, sondern eine Datenreihe hinter einem zerrissenen Rest ("MEKONNEN" ⏎ "i" ⏎ "YAW ⇥⇥
+            # 2019-04-18 ⇥⇥ mitversichertes Kind" auf einem Scan)
             i += 1
             continue
         if i + 1 < len(reihen) and (spalten is None or any(not sp.arten and sp.eintrag.rstrip().endswith("-")

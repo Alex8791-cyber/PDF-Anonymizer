@@ -276,7 +276,8 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Kinderliste („Max, 05.09.2016“), Berufe der Wissensbasis unter dem Spaltenkopf „Tätigkeit“ (der Nachbarkopf
     „Arbeitgeber“ wird nicht mehr als Beruf geschwärzt), die IP-Adresse in „Received:“-Kopfzeilen und die Anschrift in
     der Formularzeile des Kunden unter einer Spartenüberschrift („Kfz-Versicherung“ ⏎ „Versicherungsnehmer: …, …“);
-    ein Adresszusatz zwischen Straße und PLZ derselben Zeile („Kaiserstraße 17, 3. OG links, 83022 Rosenheim“).
+    ein Adresszusatz zwischen Straße und PLZ derselben Zeile („Kaiserstraße 17, 3. OG links, 83022 Rosenheim“); ein
+    Rest der Texterkennung („i“) zwischen zwei Reihen einer Scan-Tabelle beendet die Tabelle nicht mehr.
   - Weniger Über-Schwärzung: Spartenkürzel mit SF-Klasse bzw. Selbstbeteiligung („HP SF 12“, „RS SB 150“) sind keine
     Kennzeichen; Einzelwerte hinter „Breite“/„Länge“ mit Maßeinheit, Viererpunktzahlen hinter Artikel- und
     Bestellnummern, „@“-Tarife ohne Plattform und Kalenderwörter im Familienkontext bleiben stehen; Konfession nur in

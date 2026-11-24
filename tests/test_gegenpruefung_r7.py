@@ -698,3 +698,17 @@ def test_lk05_adresszusatz_zwischen_strasse_und_plz():
 ])
 def test_lk05_adresszusatz_gegenproben(text, bleibt):
     assert not any(bleibt in s for s in _stellen(_funde(text), "strasse")), _stellen(_funde(text))
+
+
+def test_lk02_titelzeile_nur_ueber_einem_kopf_ohne_ziffern(tmp_path):
+    # Scan einer Personentabelle mit zerrissener Reihe: "YAW ⇥⇥ 2019-04-18 ⇥⇥ mitversichertes Kind" ist kein Kopf
+    # (Ziffern), die Reihe darunter bleibt eine Datenreihe der Tabelle (s7 066 der Endmessung)
+    xs = (60, 180, 300, 420)
+    elemente = _zeilen(["Name\t\tVorname\t\tGeb.-Datum\t\tRolle",
+                        "MEKONNEN\t\tFATOUMATA\t\t1991-05-30\t\tVN / versicherte Person",
+                        "MEKONNEN\t\tABEBE\t\t19.12.1993\t\tversicherte Person"], xs=xs)
+    elemente += [(60, 80 + 3 * 16, "MEKONNEN"), (180, 80 + 4 * 16, "i")]
+    elemente += _zeilen(["YAW\t\t2019-04-18\t\tmitversichertes Kind"], y=80 + 5 * 16, xs=(180, 300, 420))
+    elemente += _zeilen(["MEKONNEN\t\tABENA\t\t2012-01-07\t\tmitversichertes Kind"], y=80 + 6 * 16, xs=xs)
+    pdf = _pdf(tmp_path / "zerrissen.pdf", [elemente])
+    assert "2012-01-07" in _pdf_stellen(_pdf_funde(pdf), "geburt"), _pdf_stellen(_pdf_funde(pdf))
