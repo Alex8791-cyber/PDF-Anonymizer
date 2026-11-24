@@ -896,6 +896,7 @@ def _plz_ort_spannen(text: str) -> list:
     return ergebnisse
 
 
+_HAUSNUMMER_REST_RE = re.compile(r"(?:[ \t]*[-–/][ \t]*\d{1,4}[ \t]?[a-hA-H]?)?")   # "33-35" hinter "Am Stadtpark 33"
 _PLZ_KOPF_RE = re.compile(r"(?i)(?<![a-zäöü])(?:plz|postleitzahl|zip)(?![a-zäöü])")
 _KOPF_ZEILEN = 40                 # so weit wird über einer PLZ-Zelle nach dem Spaltenkopf gesucht (Zeilen)
 
@@ -918,21 +919,22 @@ def _zellen_der_zeile(text: str, pos: int) -> tuple:
 
 
 def _spaltenkopf_ueber(text: str, zeilenanfang: int, nr: int) -> str | None:
-    """Spaltenkopf über der Zelle Nummer nr: in den Tabellenzeilen darüber (mit Spaltentrenner, ohne Leerzeile
-    dazwischen) die nächste Zelle derselben Nummer ohne Ziffer ("PLZ", "Kd.-Nr.", "VN_PLZ") – None ohne Tabelle."""
+    """Spaltenkopf über der Zelle Nummer nr: die nächste Kopfzeile darüber – eine Tabellenzeile mit mindestens drei
+    Zellen und ohne Ziffer und "@" ("Kd.-Nr. ⇥⇥ Name ⇥⇥ … ⇥⇥ PLZ ⇥⇥ Ort") – bis zu einer Leerzeile; Datenzeilen und
+    umbrochene Zeilen dazwischen zählen nicht (ihre Zellen verrutschen auf Scans). Die Zelle mit derselben Nummer, None
+    ohne Kopfzeile."""
     ende = zeilenanfang - 1
     for _ in range(_KOPF_ZEILEN):
         if ende <= 0:
             return None
         anfang = text.rfind("\n", 0, ende) + 1
         zeile = text[anfang:ende]
-        if "\t\t" not in zeile:
-            return None
-        zellen = zeile.split("\t\t")
-        if nr < len(zellen):
-            kopf = zellen[nr].strip()
-            if kopf and not any(c.isdigit() for c in kopf) and len(kopf) <= 30:
-                return kopf
+        if not zeile.strip():
+            return None                                 # Leerzeile: die Tabelle beginnt hier
+        if "\t\t" in zeile and "@" not in zeile and not any(c.isdigit() for c in zeile):
+            zellen = [z.strip() for z in zeile.split("\t\t")]
+            if len(zellen) >= 3:
+                return zellen[nr] if nr < len(zellen) and len(zellen[nr]) <= 30 else None
         ende = anfang - 1
     return None
 
@@ -962,8 +964,8 @@ def _plz_zelle_anschrift(text: str, s: int, ort: str) -> bool:
         davor = text[text.rfind("\n", 0, zeilenanfang - 1) + 1:zeilenanfang - 1].rsplit("\t\t", 1)[-1]
     davor = davor.rstrip(" ,;")
     if davor and (_ANSCHRIFT_ETIKETT_DAVOR_RE.search(davor)
-                  or any(st.ende == len(davor) for st in _strasse_spannen(davor))):
-        return True
+                  or any(_HAUSNUMMER_REST_RE.fullmatch(davor, st.ende) for st in _strasse_spannen(davor))):
+        return True                                     # "Am Stadtpark 33-35 ⇥⇥ 76829 ⇥⇥ Landau in der Pfalz"
     kopf = _spaltenkopf_ueber(text, zeilenanfang, nr)
     if kopf is not None:
         return bool(_PLZ_KOPF_RE.search(kopf))

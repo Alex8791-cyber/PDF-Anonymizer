@@ -199,8 +199,8 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Pharmazentralnummer (PZN, keine Telefonnummer mehr), Fahrzeugschlüssel (HSN/TSN, „Schlüssel-Nr. 2.1/2.2“),
   Flug-, Sitzplatz- und Zimmernummern, die Nummer einer Vorschrift hinter einem Etikett („Registrierungsnummer: § 34d
   Abs. 1 GewO“, auf Scans „8 34d …“); eine IMEI ist eine Kennung, keine Kreditkarte.
-- **Fünf neue Kategorien (Domänen-Durchsicht, Runde 5):** IP-Adressen `[IP-ADRESSE]` (IPv4 mit gültigen Oktetten,
-  IPv6 – keine Versionsnummern), Zugangsdaten `[ZUGANGSDATEN]` (Benutzername/-kennung, Kennwort, PIN, Aktivierungs-
+- **Fünf neue Kategorien (Domänen-Durchsicht, Runde 5):** IP-Adressen `[IP-ADRESSE]` (IPv4 mit gültigen Oktetten
+  und IP-Bezug, IPv6 – keine Versionsnummern, keine Vertragsnummern mit Punkten), Zugangsdaten `[ZUGANGSDATEN]` (Benutzername/-kennung, Kennwort, PIN, Aktivierungs-
   und Freischaltcode hinter ihrem Etikett), Profil- und Kontonamen `[PROFIL]` (@-Namen, „eBay-Name:“, „Telegram:“,
   Profil-Links, Kunden-, Vertrags- und Namensangaben in Links), Standort-Koordinaten `[STANDORT]` – alle vier in jeder
   Schutzstufe angehakt – und Religion/Konfession `[RELIGION]` (Kirchensteuermerkmal „rk“/„ev“, auch unter dem
@@ -219,8 +219,9 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   oder einem Ort der Nachbarländer („8002 Zürich“), Straßen mit vorangestelltem Straßentyp („Str. Memorandumului nr.
   27“, „Calea Victoriei nr. 12“, „bul. Vitosha 15“), sechsstellige PLZ mit Länderhinweis. Nicht mehr als Anschrift:
   Straßenklassen mit Nummer („Auf der A 8“, „B 15“, „L 2080“, „BAB 9“); PLZ ⇥⇥ Ort über einen Spaltentrenner nur mit
-  Straße davor, unter dem Spaltenkopf „PLZ“ oder mit bekanntem Ort – in „Kd.-Nr. ⇥⇥ Name“ ist „10471 ⇥⇥ Ruhstorfer“
-  keine Anschrift.
+  Straße davor (auch mit Hausnummernbereich „33-35“), unter dem Spaltenkopf „PLZ“ oder mit bekanntem Ort – in
+  „Kd.-Nr. ⇥⇥ Name“ ist „10471 ⇥⇥ Ruhstorfer“ keine Anschrift. Hinter „Unfallort:“ ist „BAB 9, km 381,2“ weder
+  Straße noch Ort.
 
 ### Geändert
 - **Prüfziffern sind nur noch ein Indiz:** Eine IBAN mit falscher Prüfziffer wird trotzdem geschwärzt, wenn

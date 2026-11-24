@@ -396,6 +396,17 @@ def test_b26_gegenproben(zeile, frei):
     assert _nicht_geschwaerzt(zeile, frei, funde), _paare(funde)
 
 
+def test_b26_ocr_geteilte_ziffern_hinter_etikett():
+    """Korpus-Messung s1 (Dokument 038, Scan): die Texterkennung liest „F-YY 5311“ als „F-YY 531 1“ – hinter einem
+    Kfz-Etikett gehört die abgetrennte Ziffergruppe dazu (höchstens vier Ziffern, keine Einheit dahinter)."""
+    text = "Mein Kennzeichen ist F-YY 531 1, die Fahrzeug-Identnummer folgt."
+    funde = _funde(text)
+    assert _abgedeckt(text, "F-YY 531 1", funde), _paare(funde)
+    text = "Kennzeichen: M-AB 12 3 km vor der Ausfahrt"
+    funde = _funde(text)
+    assert _abgedeckt(text, "M-AB 12", funde) and _nicht_geschwaerzt(text, "3 km", funde), _paare(funde)
+
+
 # ======================================================================
 # Befund 41: Kompaktform ohne Trenner mit amtlichem Unterscheidungszeichen und Kfz-Wort davor
 # ======================================================================
@@ -486,6 +497,8 @@ def test_b44_echte_kennzeichen_bleiben_erkannt(zeile, wert):
     ("Auf der K 12 kam mir ein Traktor entgegen.", "K 12"),
     ("Auf der BAB 9 bei Kilometer 112 platzte ein Reifen.", "BAB 9"),
     ("Auf der E 45 Richtung Süden war Stau.", "E 45"),
+    # Korpus-Messung s3x (Unfallbericht): hinter „Unfallort:“ weder Straße noch Ort („BAB“ wurde [PLZ ORT])
+    ("Unfallort: BAB 9, km 381,2", "BAB 9"),
 ])
 def test_b46_strassenklasse_ist_keine_anschrift(zeile, frei):
     text = f"Unfallschilderung (ohne Personenangaben)\n{zeile}"
@@ -592,6 +605,17 @@ def test_b94_kundenliste_im_pdf(tmp_path):
                    for f in funde), _paare(funde)
     for w in ("10471", "Ruhstorfer", "83512"):
         assert any(w in t for t in texte), (w, _paare(funde))
+
+
+def test_b94_hausnummernbereich_und_verrutschte_spalten():
+    """Korpus-Messung s9x (Dokument 072, Excel-Bestandsliste als Scan): die Texterkennung zieht laufende Nummer und
+    Namen in eine Zelle, die Zellen verrutschen gegen den Kopf. Vor der PLZ-Zelle steht eine Straße mit
+    Hausnummernbereich („Am Stadtpark 33-35“) – das genügt; der verrutschte Kopf („Straße“ über der PLZ) zählt nicht
+    dagegen."""
+    text = ("Nr.\t\tName\t\tVorname\t\tGeb.\t\tStraße\t\tPLZ Ort\t\tTelefon\n"
+            "37 Strauß\t\tTill\t\t02.11.80\t\tAm Stadtpark 33-35\t\t76829\t\tLandau in der Pfalz\t\t06341/9925 91")
+    plz = [text[s:e] for s, e in muster.finde_plz_ort_stellen(text)]
+    assert "76829\t\tLandau in der Pfalz" in plz, plz
 
 
 # ======================================================================
@@ -718,6 +742,8 @@ def test_b70_snapchat_gegenprobe_kundenbogen_kein_name():
     ("Kontakt über Signal möglich, Instagram nutzt der Kunde nicht.", ["Signal", "Instagram"]),
     ("E-Mail: lena.wiesengrund@web.de", []),
     ("Preis @ 5 EUR je Stück; Treffen @ Büro", ["5 EUR", "Büro"]),
+    # Korpus-Messung s3x (Schreibmaschinen-Scan): ein verlesenes „@“ vor einem Datum ist kein @-Name
+    ("Der Vertrag ist gültig ab @1.12.2034 laut Nachtrag.", ["1.12.2034"]),
 ])
 def test_b70_b99_gegenproben(text, frei):
     funde = _funde(text)
@@ -800,6 +826,15 @@ def test_b71_b102_ip_adresse(text, werte):
 def test_b71_b102_gegenproben(text, frei):
     funde = _funde(text)
     assert not [f for f in funde if f["kategorie"] == "ip"], _paare(funde)
+
+
+def test_b71_punktierte_vertragsnummer_ist_keine_ip():
+    """Korpus-Messung s1/s7 (Bestandsliste): eine Vertragsnummer mit Punkten ("95.137.189.6") hat vier gültige
+    Oktette – ohne IP-Bezug in der Zeile ist sie keine IP-Adresse (Platzhalter [VERTRAGS-NR], nicht [IP-ADRESSE])."""
+    text = "Vertragsnummer\t\tSparte\t\tBeitrag\n95.137.189.6\t\tLeben\t\t45,90 EUR"
+    funde = _funde(text)
+    assert not any(f["kategorie"] == "ip" for f in funde), _paare(funde)
+    assert _abgedeckt(text, "95.137.189.6", funde), _paare(funde)
 
 
 def test_b71_mac_adresse_bleibt_kennung():

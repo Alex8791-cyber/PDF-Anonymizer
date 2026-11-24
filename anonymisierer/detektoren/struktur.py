@@ -1428,9 +1428,17 @@ _NICHT_ADRESSE_RE = re.compile(r"land|staat|bundesland|kreis|bezirk|kanton|natio
                                r"beschaftigungsort|tatort|unfallstelle|standort|garagenstandort")
 
 
+# Straßenklasse mit Nummer am Anfang eines Anschrift-Werts ("Unfallort: BAB 9, km 381,2", "Unfallort: Auf der A 99"):
+# eine Fahrbahn – weder Straße noch Ort
+_STRASSENKLASSE_WERT_RE = re.compile(r"[ \t]*(?:(?i:auf|an|über|ueber)[ \t]+(?i:der|die|dem|den)[ \t]+)?"
+                                     + kennungsformen.STRASSENKLASSE + r"(?![\wäöüß])")
+
+
 def _adress_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> list:
     v = _vergleichsform(et.eintrag)
     if _NICHT_ADRESSE_RE.search(v) and not _ANSCHRIFT_ETIKETT_RE.search(v):
+        return []
+    if _STRASSENKLASSE_WERT_RE.match(text, i, e):
         return []
     aus = []
     # PLZ + Ort im Bereich

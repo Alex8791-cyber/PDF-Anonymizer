@@ -2345,7 +2345,15 @@ def kfz_wert(text: str, pos: int, grenze: int | None = None):
             continue
         if EINHEIT_DANACH_RE.match(text, m.end()):
             continue
-        return m.start(), m.end()
+        ende = m.end()
+        if regel is _KFZ_DE_RE and not m.group(4):
+            # von der Texterkennung geteilte Ziffern ("F-YY 531 1" für "F-YY 5311"): eine Ziffergruppe direkt
+            # dahinter gehört dazu, solange es höchstens vier Ziffern sind und keine Einheit folgt
+            rest = re.match(r"[ ](\d{1,3})(?![\w/\-]|[.,]\d)", text[ende:grenze])
+            if rest is not None and len(m.group(3)) + len(rest.group(1)) <= 4 \
+                    and not EINHEIT_DANACH_RE.match(text, ende + rest.end()):
+                ende += rest.end()
+        return m.start(), ende
     m = _KFZ_DE_KLEIN_RE.match(text, i, grenze)
     if m is not None and m.group(1) not in _KFZ_KLEIN_SPERRE \
             and (m.group(2) not in _KFZ_KLEIN_SPERRE or re.search(r"[-–‐]", text[m.end(1):m.start(2)])) \
@@ -2631,6 +2639,7 @@ _IPV4_RE = re.compile(r"(?<![\w.:\-/])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})
 _IPV6_RE = re.compile(r"(?<![\w:.\-])(?=[0-9A-Fa-f:]*:[0-9A-Fa-f]*:)[0-9A-Fa-f:]{2,39}(?![\w:])")
 _IP_ETIKETT_RE = re.compile(r"(?i)(?<![a-zäöüß])(?:ip(?:v[46])?(?:-?adresse)?|adresse|host|server|router|client|"
                             r"zugriff|absender|von|aus|via|quelle|source|address)[ \t]*[:=]?[ \t]*\(?[ \t]*$")
+_IP_IN_ZEILE_RE = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:IP|IPv4|IP-Adresse|IP-Adr\.|ip-adresse)(?![a-zäöüß])")
 _VERSION_DAVOR_RE = re.compile(r"(?i)(?:version|vers\.|release|build|firmware|software|update|treiber|patch|"
                                r"stand|revision|rev\.|ver\.|v)[ \t\-]*[:.]?[ \t]*$")
 
@@ -2641,10 +2650,10 @@ def _ipv4_gueltig(m) -> bool:
 
 
 def ip_adressen(text: str) -> list:
-    """(start, ende) der IP-Adressen: IPv4 mit vier gültigen Oktetten (bis 255, ohne führende Null) – hinter einem
-    Etikett oder Kontextwort ("IP-Adresse:", "IPv4", "Zugriff von", "Absender-IP") jede, sonst nur in deutlicher Form
-    (mindestens zwei zweistellige Oktette: "84.123.45.67"), nie hinter einem Versionswort ("Version 10.0.19045.1234",
-    "Firmware-Release 4.18.0.147") und keine Gliederung aus einstelligen Teilen ("Abschnitt 1.2.3.4"); IPv6 mit
+    """(start, ende) der IP-Adressen: IPv4 mit vier gültigen Oktetten (bis 255, ohne führende Null) nur mit IP-Bezug –
+    direkt hinter einem Etikett oder Kontextwort ("IP-Adresse:", "IPv4", "Zugriff von", "Absender-IP") oder mit "IP"
+    in derselben Zeile ("Zeitstempel …, IP 84.123.45.67"); ohne ihn ist "95.137.189.6" eher eine Vertragsnummer mit
+    Punkten. Nie hinter einem Versionswort ("Version 10.0.19045.1234", "Firmware-Release 4.18.0.147"); IPv6 mit
     mindestens drei Gruppen, gültig nach der Norm und mit Hex-Buchstabe oder "::" (nie eine Uhrzeit "14:08:30", nie eine
     MAC-Adresse aus sechs Zweiergruppen)."""
     aus = []
@@ -2655,8 +2664,10 @@ def ip_adressen(text: str) -> list:
             davor = text[max(0, m.start() - 30):m.start()].rsplit("\n", 1)[-1]
             if _VERSION_DAVOR_RE.search(davor):
                 continue
-            deutlich = sum(len(t) >= 2 for t in m.groups()) >= 2
-            if deutlich or _IP_ETIKETT_RE.search(davor):
+            a = text.rfind("\n", 0, m.start()) + 1
+            e = text.find("\n", m.end())
+            zeile = text[a:len(text) if e < 0 else e]
+            if _IP_ETIKETT_RE.search(davor) or _IP_IN_ZEILE_RE.search(zeile):
                 aus.append((m.start(), m.end()))
     if text.count(":") >= 2:
         import ipaddress
@@ -2845,7 +2856,10 @@ _PROFIL_ETIKETT_RE = re.compile(
     r"|(?:Snapchat|Signal|Telegram|Threema|Discord|TikTok|Tiktok|Instagram|Skype|Twitter|Mastodon|Bluesky|Xing|XING)"
     r")(?![\wäöüß\-])")
 _PROFIL_WERT_RE = re.compile(r"@?[A-Za-z0-9ÄÖÜäöüß][A-Za-z0-9ÄÖÜäöüß._\-]{1,40}(?<![._\-])")
-_HANDLE_RE = re.compile(r"(?<![\w@.\-+%/])@([A-Za-z0-9_](?:[A-Za-z0-9_.]{1,38}[A-Za-z0-9_]))(?![\w@]|\.[A-Za-z])")
+# "@"-Name mit mindestens einem Buchstaben ("@lena.wiesengrund", "@korbi_zeitl84") – nie ein Datum oder eine Zahl hinter
+# einem verlesenen "@" ("@1.12.2034" auf einem Schreibmaschinen-Scan)
+_HANDLE_RE = re.compile(r"(?<![\w@.\-+%/])@(?=[\w.]*[A-Za-z])"
+                        r"([A-Za-z0-9_](?:[A-Za-z0-9_.]{1,38}[A-Za-z0-9_]))(?![\w@]|\.[A-Za-z])")
 _PROFIL_URL_RE = re.compile(
     r"(?i)(?<![\w.\-/])(?:https?://)?(?:www\.|m\.|de\.|mobile\.)?"
     r"(?:facebook\.com|fb\.com|instagram\.com|t\.me|telegram\.me|tiktok\.com/@?|twitter\.com|x\.com|threads\.net/@?|"
