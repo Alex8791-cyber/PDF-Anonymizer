@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      domaenenprobe:
+        description: "Zusätzlich die volle Domänen-Probe messen (Linux, ca. 15–30 min, Bericht als Artefakt)"
+        type: boolean
+        default: false
 
 # Der Workflow liest nur das Repository; er schreibt nichts zurück.
 permissions:
@@ -215,4 +220,52 @@ jobs:
           path: dist/${{ steps.pruefung.outputs.zipname }}.zip
           if-no-files-found: error
           compression-level: 0
+          retention-days: 30
+
+  # Volle Domänen-Probe (werkzeuge/domaenenprobe) nur von Hand: Actions -> Tests -> "Run workflow" mit Haken bei
+  # "domaenenprobe". Misst alle Falldateien mit der Tesseract-Kommandozeile, vergleicht mit referenz.json und legt
+  # bericht.md und ergebnis.json als Artefakt ab. Unabhängig von den anderen Jobs (kein needs), die unverändert laufen.
+  domaenenprobe:
+    name: Domänen-Probe (ubuntu-latest)
+    if: github.event_name == 'workflow_dispatch' && inputs.domaenenprobe
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      # Die deutsche Sprachdatei kommt aus tessdata/ des Repositorys (das Programm setzt TESSDATA_PREFIX).
+      - name: Tesseract-Kommandozeile und DejaVu-Schriften
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr fonts-dejavu-core
+
+      - name: Pakete installieren (nur fertige Wheels, kein Quellbau)
+        timeout-minutes: 15
+        run: |
+          python -m pip install --only-binary=:all: -r requirements.txt
+
+      - name: Domänen-Probe messen und mit der Referenz vergleichen
+        timeout-minutes: 75
+        run: python -W ignore werkzeuge/domaenenprobe/messen.py "${{ runner.temp }}/domaene" --jobs 2
+
+      - name: Bericht sichern
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: domaenenprobe-bericht
+          path: |
+            ${{ runner.temp }}/domaene/bericht.md
+            ${{ runner.temp }}/domaene/ergebnis.json
+          if-no-files-found: ignore
           retention-days: 30

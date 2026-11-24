@@ -739,6 +739,16 @@ Werkzeuge in `werkzeuge/`:
 - `benchmark.py` mit dem Paket `benchmark/` – Entwicklungs-Benchmark: erzeugt Testdokumente
   mit bekannter Wahrheit und bewertet die Ausgaben; `tests/test_benchmark.py` nutzt ihn als
   Qualitätstor.
+- `domaenenprobe/` – Domänen-Probe: 41 Falldateien mit synthetischen Fällen aus allen
+  Maklersparten (2261 frei erfundene geheime Werte auf Textebene und Scans) laufen Ende zu Ende
+  wie in der Oberfläche; gezählt wird je Wert, ob er danach noch lesbar ist (weg, sichtbar mit
+  `_PRUEFEN`, STILL), verglichen mit `referenz.json`. Eine Regressionsprobe für die Entwicklung,
+  keine Blindprüfung: Die Regeln wurden an genau diesen Fällen verbessert, die Zahlen sagen nichts
+  über unbekannte Dokumente. Aufruf: `python werkzeuge/domaenenprobe/messen.py <ordner>` (braucht
+  die Tesseract-Kommandozeile); Einzelheiten in `werkzeuge/domaenenprobe/README.md`. Die
+  GitHub-Action misst sie nur von Hand („Run workflow“ mit Haken „domaenenprobe“, Bericht als
+  Artefakt); `tests/test_domaenenprobe.py` prüft Falldateien und Referenz und lässt einen kleinen
+  Fall Ende zu Ende laufen.
 - `wissen_pflegen.py` – Wortlisten der Wissensbasis prüfen und einsortieren;
   `programmsymbol.py` – erzeugt `icon.ico`; `verknuepfung.py` – legt die Desktop-Verknüpfung an
   (wird von `Installieren.bat` aufgerufen).
