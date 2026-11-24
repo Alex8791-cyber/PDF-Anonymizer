@@ -266,9 +266,9 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     („Adam Riese“ aus „Adam Riese Versicherung“). Die Selbstkontrolle bestimmt Spalte, Grußblock und Personen-Etikett
     nach der Lage auf der Ausgabeseite.
   - Formulare in Spaltenblöcken (Texterkennung liest Feldcodes, Feldnamen und Werte je als eigenen Block): der Wert
-    rechts auf derselben Höhe gehört zum Feldnamen; „Name oder Firmenname“ ist ein Personen-Etikett. Nur eine ganze
-    Wertzelle zählt: Ankreuzzeilen der Nachbarspalte eines Unfallberichts („Do parkte“, „El fuhr auf“) werden nicht
-    mehr als Name neben „Name“/„Vorname“ geschwärzt.
+    rechts auf derselben Höhe gehört zum Feldnamen; „Name oder Firmenname“ ist ein Personen-Etikett. Nur eine Wertzelle
+    zählt: Ankreuzzeilen der Nachbarspalte eines Unfallberichts („Do parkte“, „El fuhr auf“) werden nicht mehr als Name
+    neben „Name“/„Vorname“ geschwärzt; ein Wert mit Rechtsform („Elektro Schuster e.K.“) bleibt ein Wert.
   - Wochentag oder Monat als Familienname („Nachname: Freitag“, „Familienname: Mai“) wird hinter einem Namensfeld
     geschwärzt, auch auf Scans; als Datumsangabe („Rückruf am Freitag, 12.03.2025“, „Montag bis Freitag“, „im Mai 2025“,
     „Freitag, den 14.03.“) gibt die Weitergabe den Namen nicht mehr weiter – die Stelle bleibt als abgewählte Stelle

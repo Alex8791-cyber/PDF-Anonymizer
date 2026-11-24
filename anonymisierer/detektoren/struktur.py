@@ -1833,10 +1833,14 @@ def werte_rechts_daneben(seite, lg: Lage, et: Etikett, alle_starts: set) -> list
         return []                                   # rechts daneben steht das nächste Etikett
     if re.search(r"(?:/-?in|\(in\)|:)\s*$", text[z.start:z.ende]):
         return []                                   # Feldbezeichner ("Raucher/in", "Beruf:")
-    # Die Zelle daneben ist eine Wertzelle: geht ihr Text hinter dem Wert klein geschrieben weiter, ist sie Fließtext
-    # einer anderen Spalte ("Do parkte", "El fuhr auf": Ankreuzzeilen eines Unfallberichts neben "Name")
+    # Die Zelle daneben ist eine Wertzelle: folgt hinter dem Wert ein klein geschriebenes Wort, ist sie Fließtext einer
+    # anderen Spalte ("Do parkte", "El fuhr auf": Ankreuzzeilen eines Unfallberichts neben "Name") – Rechtsformen und
+    # Abkürzungen ("Elektro Schuster e.K.", "geb. Brandl") und Verbinder ("und") gehören zur Wertzelle
     return [w for w in werte_lesen(text, z.start, z.ende, et, True)
-            if not re.match(r"[ \t]*[a-zäöüß]", text[w.ende:z.ende])]
+            if not _FLIESSTEXT_DAHINTER_RE.match(text, w.ende, z.ende)]
+
+
+_FLIESSTEXT_DAHINTER_RE = re.compile(r"[ \t]+(?!(?:und|oder|sowie|bzw)(?![\wäöüß]))[a-zäöüß]{3,}(?![\wäöüßÄÖÜ.])")
 
 
 _FUELLWERT_RE = re.compile(r"(?i)^(?:wie\b.*|siehe\b.*|s\.\s*o\.?|entf[aä]llt|keine?|nein|ja|[-–—/_.x]+|n/?a|"

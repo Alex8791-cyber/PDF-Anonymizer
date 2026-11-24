@@ -762,6 +762,23 @@ def test_wert_rechts_daneben_ganze_wertzelle_bleibt_wert(tmp_path):
     assert "Do" in _pdf_stellen(e), _pdf_stellen(e)
 
 
+@braucht_ocr
+def test_wert_rechts_daneben_mit_rechtsform_bleibt_wert(tmp_path):
+    # Gegenprobe (Endmessung s7 037): eine kleingeschriebene Rechtsform hinter dem Wert („Elektro Schuster e.K.“) oder
+    # ein Geburtsname („geb. Brandl“) gehört zur Wertzelle – nur ein klein geschriebenes Wort wie „parkte“ ist Fließtext
+    from anonymisierer.ocr import OcrDienst
+    links = [(50, 100, "Antrag auf Riester-Rente"), (50, 130, "Vorname:"), (50, 150, "Nachname:"),
+             (50, 170, "Ausgeübter Beruf:"), (50, 190, "Arbeitgeber:"), (50, 210, "Kontoinhaber:")]
+    rechts = [(330, 130, "Quang"), (330, 150, "Tran"), (330, 170, "Busfahrer"), (330, 190, "Elektro Schuster e.K."),
+              (330, 210, "Mai Tran geb. Brandl")]
+    pdf = _scan_aus(tmp_path, links + rechts, "antrag_arbeitgeber.pdf")
+    with OcrDienst(prozesse=1) as dienst:
+        e = analysiere_pdf(pdf, ALLE, [], [], ocr=dienst)
+    stellen = _pdf_stellen(e)
+    assert any("Elektro" in t for t in stellen), stellen
+    assert any("Mai Tran" in t for t in stellen), stellen
+
+
 # ----------------------------------------------------------------------
 # Endmessung s7 036: Wochentag oder Monat als Familienname („Nachname: Freitag“) – hinter einem Namensfeld ist das Wort
 # der Name; als Datumsangabe („am Freitag, 12.03.2025“, „Montag bis Freitag“, „im Mai 2025“) wird es nicht weitergegeben
