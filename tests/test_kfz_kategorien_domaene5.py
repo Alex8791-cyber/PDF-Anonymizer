@@ -597,6 +597,9 @@ def test_b29_ortsname_als_wort_ist_keine_anschrift(zeile, frei):
     ("Kurhausstraße 3, 4820 Bad Ischl", "4820 Bad Ischl"),
     ("aus 6060 Hall in Tirol", "6060 Hall in Tirol"),           # ein mehrteiliger Ort ganz
     ("Hauptplatz 3, 8600 Bruck an der Mur", "8600 Bruck an der Mur"),
+    # ein Anschrift-Etikett direkt davor trägt auch den mehrdeutigen Ort mitten im Satz
+    ("Die Halterin ist wohnhaft in 8706 Meilen am Zürichsee.", "8706 Meilen"),
+    ("Zustellanschrift: 6300 Zug, bitte nur werktags", "6300 Zug"),
 ])
 def test_b29_orte_der_nachbarlaender(zeile, wert):
     text = f"Angaben zur Unfallgegnerin\n{zeile}"

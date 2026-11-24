@@ -2588,6 +2588,10 @@ def ort_at_ch(phrase: str) -> bool:
 
 
 _WORT_DANACH_RE = re.compile(r"[ \t]*[^\W\d_]")
+# Anschrift-Etikett direkt vor der PLZ ("wohnhaft in", "Wohnort:", "Zustellanschrift:"): die Zahl dahinter ist eine PLZ
+_ANSCHRIFT_DAVOR_RE = re.compile(
+    r"(?i)(?<![\wäöüß])(?:[\wäöüß\-]*anschrift|(?:wohn|post|melde|privat|halter|zustell)?adresse|wohnort|wohnsitz|"
+    r"wohnhaft(?:[ \t]+in)?|wohnt[ \t]+in)[ \t]*:?[ \t]*$")
 
 
 def _ort_ab(text: str, pos: int):
@@ -2661,8 +2665,9 @@ def plz4_ausland(text: str, strassen) -> list:
         vor_strasse = any(0 <= s - m.end() <= 3 for s in anfaenge if m.end() <= s <= m.end() + 3)
         kuerzel = m.group(0)[:1].isalpha()
         land = bool(LAND_RE.search(text, max(0, m.start() - 120), min(len(text), m.end() + 60)))
+        etikett = bool(_ANSCHRIFT_DAVOR_RE.search(text[max(0, m.start() - 40):m.start()]))
         jahr = plz[:2] in ("19", "20")
-        if not (nach_strasse or vor_strasse or kuerzel or land) \
+        if not (nach_strasse or vor_strasse or kuerzel or land or etikett) \
                 and (jahr or not _ort_allein_anschrift(text, m.start(2), bekannt)):
             continue
         # ein mehrteiliger Ort gehört ganz dazu ("6060 Hall in Tirol", "8600 Bruck an der Mur")
