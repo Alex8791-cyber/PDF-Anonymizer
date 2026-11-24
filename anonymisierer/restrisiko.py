@@ -1777,6 +1777,12 @@ class _Seitenpruefung:
             return None                        # Schlüssel-Wert-Zeile ("Tarif:  ZahnPlus 80"), keine Tabelle
         if self._etikettzeile(z):
             return None                        # selbst eine Etikettzeile (Kastenformular), kein Wert der Spalte
+        # eigene Zelle (zwischen Tabulatoren): ein kurzer Wert darf über Datenzeilen hinweg zu seinem Kopf, Fließtext
+        # unter der Tabelle nicht ("Die Erstattung … überweisen wir auf Ihr Konto" unter "Leistungserbringer")
+        rel_s, rel_e = max(0, s - z.start), max(0, e - z.start)
+        ende_zelle = eigene.find("\t", rel_e)
+        eigene_zelle = eigene[eigene.rfind("\t", 0, rel_s) + 1:ende_zelle if ende_zelle >= 0 else len(eigene)]
+        kurzer_wert = len(eigene_zelle.split()) <= 5
         leer = 0
         oben = z.rect.y0
         hoehe = max(z.rect.height, 8.0)
@@ -1797,7 +1803,7 @@ class _Seitenpruefung:
             if not kurz and (zelle.endswith(":") or not self._kopfzeile(y)):
                 if any(c.isdigit() for c in zelle) or self.ist_platzhalter_bei(zs, ze):
                     continue
-                if not zelle.endswith(":") and self._datenzeile(y):
+                if kurzer_wert and not zelle.endswith(":") and self._datenzeile(y):
                     continue                   # Wert einer Datenzeile derselben Spalte ("Eheleute" ⏎ "Gstettner")
                 return None
             for art in arten:

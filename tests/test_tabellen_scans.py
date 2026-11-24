@@ -318,6 +318,59 @@ def test_befund_90_gegenproben_namen_in_firmenbezeichnungen_bleiben_verdacht(zei
     assert any(wert in v.text for v in pruefe_text(zeile)), [v.text for v in pruefe_text(zeile)]
 
 
+# Nachtrag aus der Korpusmessung: Fließtext unter einer Tabelle ist kein Wert ihrer Spalte (die Selbstkontrolle geht
+# nur von kurzen Werten über Datenzeilen hinweg zum Kopf), ein Wort eines Feld-Etiketts ist kein Name
+_XL = [56, 120, 236, 330, 400]
+_LEISTUNG = ([(56, 60, "Ihre Leistungsabrechnung", 11),
+              (56, 80, "wir haben die eingereichten Rechnungen geprüft und erstatten wie folgt:", 9)]
+             + _tabelle(100, _XL, [["Person", "Datum", "Leistungserbringer", "Betrag", "Erstattung Tarif"],
+                                   ["[PERSON B]", "14.01.2025", "Linden-Apotheke", "397,51", "278,26 Beihilfe"],
+                                   ["[PERSON B]", "25.12.2024", "Dr. med. [PERSON C]", "1625,40", "1300,32 Ambulant"]],
+                        8, 11)
+             + [(56, 140, "Die Erstattung von € 838,42 überweisen wir auf Ihr Konto [IBAN]. Ihre Selbstbeteiligung "
+                          "ist ausgeschöpft.", 9)])
+
+
+def test_befund_90_fliesstext_unter_der_tabelle_ohne_fehlverdacht(tmp_path):
+    verdacht = _verdacht_pdf(_pdf(tmp_path / "leistung.pdf", _LEISTUNG))
+    assert not _gemeldet(verdacht, "Konto") and not _gemeldet(verdacht, "Selbstbeteiligung"), verdacht
+
+
+# Ausweis, wie die OCR ihn liest: Feld-Etiketten und Werte gleich groß, das Etikett zweigeteilt und verlesen
+_PASS_OCR = [(50, 50, "PASSPORT - PASSEPORT", 10), (50, 70, "Surname", 9), (125, 70, "/ Nom", 9),
+             (50, 82, "JABLONSKI", 9), (50, 94, "Given names", 9), (125, 94, "/ Pr&noms", 9),
+             (50, 106, "KRZYSZTOF", 9), (50, 118, "Nationality", 9), (125, 118, "/ Nationalite", 9),
+             (50, 130, "POLSKIE", 9)]
+_PASS = [(50, 50, "REISEPASS / PASSPORT / PASSEPORT", 12),
+         (50, 80, "Name / Surname / Nom", 7), (50, 92, "JABLONSKI", 10),
+         (50, 110, "Vornamen / Given names / Prénoms", 7), (50, 122, "KRZYSZTOF", 10),
+         (50, 140, "Staatsangehörigkeit / Nationality / Nationalité", 7), (50, 152, "POLSKIE", 10),
+         (300, 80, "Geburtsdatum / Date of birth", 7), (300, 92, "11.01.1994", 10)]
+
+
+def test_befund_90_etikettwort_zwischen_ausweisfeldern_ist_kein_name(tmp_path):
+    funde = _funde(_pdf(tmp_path / "pass.pdf", _PASS_OCR))
+    for wort in ("Given", "names", "Nationality"):
+        assert not _beruehrt(funde, wort), (wort, _stellen(funde))
+    assert _gedeckt(funde, "JABLONSKI") and _gedeckt(funde, "KRZYSZTOF"), _stellen(funde)
+
+
+def test_befund_90_gegenprobe_ausweis_mit_kleinen_etiketten(tmp_path):
+    funde = _funde(_pdf(tmp_path / "pass.pdf", _PASS))
+    for wort in ("Given", "names", "Vornamen", "Surname", "Nationality"):
+        assert not _beruehrt(funde, wort), (wort, _stellen(funde))
+    assert _gedeckt(funde, "JABLONSKI") and _gedeckt(funde, "KRZYSZTOF"), _stellen(funde)
+
+
+def test_befund_84_gegenprobe_etikett_unter_dem_wert_ist_keine_folgezeile(tmp_path):
+    kasten = [(50, 60, "Antrag – Angaben zur versicherten Person", 12)] + _kasten(
+        95, [50, 300], [(("Name, Vorname", "Geburtsdatum"), ("Pichlmeier, Notburga", "02.08.1958"))]) + [
+        (50, 122, "Geburtsname", 7), (50, 134, "Huber", 10)]
+    funde = _funde(_pdf(tmp_path / "kasten.pdf", kasten))
+    assert not _beruehrt(funde, "Geburtsname"), _stellen(funde)
+    assert _gedeckt(funde, "Pichlmeier") and _gedeckt(funde, "Huber"), _stellen(funde)
+
+
 # ----------------------------------------------------------------------
 # Befund 93: Raster aus mehreren Kopf- und Wertzeilen (Kastenformular, Entgeltabrechnung)
 # ----------------------------------------------------------------------
@@ -487,3 +540,11 @@ def test_befund_85_gerader_scan_unveraendert(tmp_path, ocr_dienst):
         assert not _beruehrt(erg["funde"], etikett), _stellen(erg["funde"])
     seite = erg["modell"].seiten[0]
     assert seite.ocr_schraeg == 0.0, "gerader Scan: keine Neigung"
+
+
+@braucht_ocr
+def test_befund_85_gegenprobe_ausweis_schief_gescannt(tmp_path, ocr_dienst):
+    """Ausweis mit Feld-Etiketten in zwei Sprachen, leicht schief gescannt: die Etiketten bleiben stehen."""
+    funde = _funde(_scan(_pdf(tmp_path / "pass.pdf", _PASS), tmp_path / "scan.pdf", 0.6), ocr=ocr_dienst)
+    for wort in ("Given", "names", "Vornamen", "Surname", "Nationality"):
+        assert not _beruehrt(funde, wort), (wort, _stellen(funde))

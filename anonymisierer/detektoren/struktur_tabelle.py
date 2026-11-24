@@ -333,7 +333,7 @@ def _datenreihen(text: str, reihen: list, i_kopf: int, tab: _Tabelle, h: float, 
             break
         belegte = {idx for idx, _, _ in teile}
         luecke = r.y0 - vorige_y1 if vorige_y1 is not None else None
-        if tab.reihen and _folgezeile(text, teile, belegte, tab, h, luecke, abstand):
+        if tab.reihen and _folgezeile(text, teile, belegte, tab, h, luecke, abstand, hat_etikett):
             # Zellumbruch: die Zeile setzt die Zellen des letzten Datensatzes fort (Befund 84)
             for idx, s, e in teile:
                 tab.werte[idx].append((nr, s, e, tab.reihen - 1))
@@ -399,24 +399,40 @@ def _etikettzeile(text: str, zellen: list, groesse: float, hat_etikett) -> bool:
 
 def _namensteil(inhalt: str) -> bool:
     """Kann der Zellinhalt einen Namen fortsetzen: ohne Ziffern und Doppelpunkt, nach einem Verbinder ("und", "&",
-    "/") großgeschrieben ("Gstettner", "und Walburga", "Severin und Afra", "Schwarzenböck/Lechleitner")?"""
+    "/") großgeschrieben ("Gstettner", "und Walburga", "Severin und Afra", "Schwarzenböck/Lechleitner") – jedes Wort
+    großgeschrieben, ein Verbinder, eine Namenspartikel ("von") oder ein abgekürzter Titelteil ("med.")? Ein verlesenes
+    Feld-Etikett ("Give natıes ’ Pronmms" zwischen den Feldern eines Ausweises) setzt keinen Namen fort."""
     if not inhalt or ":" in inhalt or any(c.isdigit() for c in inhalt):
         return False
     rest = inhalt[_VERBINDER_VORN_RE.match(inhalt).end():] if _VERBINDER_VORN_RE.match(inhalt) else inhalt
-    return bool(rest) and rest[0].isupper() and len(rest.split()) <= 5
+    woerter = rest.split()
+    if not rest or not rest[0].isupper() or len(woerter) > 5:
+        return False
+    for wort in woerter:
+        kern = wort.rstrip(",;")
+        if not kern or kern[0].isupper() or kern.casefold() in PARTIKEL or _VERBINDER_RE.fullmatch(" " + kern):
+            continue
+        if kern.endswith(".") and kern[:-1].isalpha() and len(kern) <= 5:
+            continue                                 # "Dr. med. dent."
+        return False
+    return True
 
 
-def _folgezeile(text: str, teile: list, belegte: set, tab: _Tabelle, h: float, luecke, abstand) -> bool:
+def _folgezeile(text: str, teile: list, belegte: set, tab: _Tabelle, h: float, luecke, abstand,
+                hat_etikett=None) -> bool:
     """Ist die Reihe die nächste Zeile der Zellen darüber (Zellumbruch in schmalen Spalten: "Eheleute" ⏎ "Gstettner",
     "Am Gänsbichl" ⏎ "4, 84453 Mühldorf a. Inn")? Nur, wenn sie keine neue Zeile der Tabelle beginnt: weniger belegte
     Spalten als die erste Zeile des Datensatzes und jede davon dort schon belegt (die Spaltenlage passt), nur
     Personen- und Anschriftspalten (keine Kennung, kein Datum, kein Betrag, keine Sparte – Spalten ohne
-    Personenetikett beginnen den nächsten Vertrag), Namensteile ohne Ziffern, kein größerer Abstand als zwischen den
+    Personenetikett beginnen den nächsten Vertrag), Namensteile ohne Ziffern, kein Feld-Etikett der Wissensbasis
+    (das nächste Feld eines Ausweises: "JABLONSKI" ⏎ "Given names / Prénoms"), kein größerer Abstand als zwischen den
     Reihen."""
     anker = tab.anker
     if not anker or not belegte < anker:
         return False
     if luecke is not None and luecke > max(1.3 * abstand if abstand else 0.9 * h, 0.5 * h):
+        return False
+    if hat_etikett is not None and any(hat_etikett(s, e) for _, s, e in teile):
         return False
     for idx, s, e in teile:
         arten = tab.spalten[idx].arten
@@ -740,8 +756,9 @@ def _kontakt(text: str, s: int, e: int, kategorie: str | None) -> list:
     return aus
 
 
-def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
-    """Treffer aller Spalten einer Tabelle."""
+def _werte_der_tabelle(dok, tab: _Tabelle, im_etikett=None) -> list:
+    """Treffer aller Spalten einer Tabelle. im_etikett(seite, start, ende): steht dort ein Feld-Etikett ("Given" in
+    "Given names / Prénoms", "Nationality" zwischen den Feldern eines Ausweises)? Dann ist es kein Name."""
     treffer = []
     hat_person = any("person" in sp.arten for sp in tab.spalten)
     vorname_idx = [i for i, sp in enumerate(tab.spalten) if "person" in sp.arten
@@ -790,14 +807,19 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
     # "Berlin, Hamburg" in der Kundenspalte ist kein Name.
     paar_idx = set(namensspalte)
     belegt = set()
-    belegt_paar = set()
+    belegt_paar: dict = {}                           # Reihe -> Namensspalten mit belegtem Namen
     belegt_je_spalte: dict = {}
     for k, t in enumerate(treffer):
         if t[3] == "namen" and _namensbeleg(dok.seiten[t[0]].text[t[1]:t[2]]):
             belegt.add(k)
             belegt_je_spalte[t[6]] = belegt_je_spalte.get(t[6], 0) + 1
             if t[6] in paar_idx:
-                belegt_paar.add(t[5])
+                belegt_paar.setdefault(t[5], set()).add(t[6])
+
+    def partner_belegt(t) -> bool:
+        # die Partnerzelle ist eine ANDERE Namensspalte derselben Reihe – nicht die Folgezeile derselben Zelle
+        # (ein verlesenes Feld-Etikett "Give natıes" über "JAROSLAW" ist kein Name)
+        return t[6] in paar_idx and any(j != t[6] for j in belegt_paar.get(t[5], ()))
     # Eine Namensspalte, deren Zellen überwiegend bekannte Namen tragen, ist als solche belegt: dann zählen auch
     # unbekannte Namen ("FERESHTEH", "Tschernyschow") und Namen, die zugleich Wörter sind ("FREITAG", "NUR")
     sichere_spalten = set()
@@ -806,8 +828,7 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
         if belegt_je_spalte.get(idx, 0) >= 3 and belegt_je_spalte[idx] >= 0.5 * max(1, nicht_leer):
             sichere_spalten.add(idx)
     treffer = [t for k, t in enumerate(treffer)
-               if t[3] != "namen" or k in belegt or t[7] or (t[6] in paar_idx and t[5] in belegt_paar)
-               or t[6] in sichere_spalten]
+               if t[3] != "namen" or k in belegt or t[7] or partner_belegt(t) or t[6] in sichere_spalten]
     treffer += [t for t in ganze_zellen if t[6] in sichere_spalten]
     # Personen über Spalten "Name" + "Vorname" derselben Reihe gruppieren
     if vorname_idx:
@@ -830,6 +851,8 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
     aus = []
     gesehen = {}
     for nr, a, b, kat, gruppe, *_ in treffer:
+        if kat == "namen" and im_etikett is not None and im_etikett(nr, a, b):
+            continue
         # dieselbe Stelle aus der Zeile und aus der ganzen umbrochenen Zelle: einmal, mit der Gruppe des ganzen Werts
         schl = (nr, a, b, kat)
         if schl in gesehen:
@@ -894,6 +917,18 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
     def hat_etikett(s, e):
         return bool(_etiketten_in(ets, starts, s, e))
 
+    def im_etikett(n, a, b):
+        # Feld-Etikett dieser Seite statt eines Werts – wie die Namensprüfung von restrisiko (im_etikett und
+        # Etikettwörter): ein Wort eines mehrteiligen Etiketts ("Given" in "Given names") oder ein sicher erkanntes
+        # Etikettwort, das kein Name der Wissensbasis ist ("Nationality"; "Richter" kann ein Familienname sein)
+        if n != nr:
+            return False
+        for et in _etiketten_in(ets, starts, max(0, a - 80), b):
+            if et.start <= a and b <= et.ende and (" " in et.eintrag.strip() or (
+                    not et.unscharf and not _namensbeleg(text[a:b]))):
+                return True
+        return False
+
     i = 0
     if offen is not None:
         # Seitenumbruch: ohne wiederholten Kopf die Reihen am Seitenanfang in den alten Spalten lesen
@@ -904,7 +939,7 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
                 kandidat = _Tabelle(offen.spalten, reihen[i0])
                 j = _datenreihen(text, reihen, i0 - 1, kandidat, h, nr, ist_kopf, hat_etikett)
                 if kandidat.reihen >= 2 and _passt_zur_tabelle(dok, kandidat):
-                    treffer += _werte_der_tabelle(dok, kandidat)
+                    treffer += _werte_der_tabelle(dok, kandidat, im_etikett)
                     tab, i = kandidat, j
                     break
         offen = tab if tab is not None and _bis_seitenende(lg, tab) else None
@@ -933,7 +968,7 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
         tab = _Tabelle(spalten, reihen[kopf_ende])
         j = _datenreihen(text, reihen, kopf_ende, tab, h, nr, ist_kopf, hat_etikett)
         if tab.reihen:
-            treffer += _werte_der_tabelle(dok, tab)
+            treffer += _werte_der_tabelle(dok, tab, im_etikett)
             offen = tab if _bis_seitenende(lg, tab) else None
         i = max(j, i + 1)
     return treffer, offen

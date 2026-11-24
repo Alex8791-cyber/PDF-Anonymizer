@@ -101,7 +101,7 @@ ersten Aufbau nach festen Regeln erzeugt und stehen ausgeschrieben in den Dateie
 | `etiketten_person.txt` | 974 | Feldbezeichner und Rollenwörter vor Personen (Versicherungsnehmer, Name, Zeuge; seit Runde 5 auch Rollen aus Kfz, Miete, Recht, Tier, Familie und Reise wie Leasingnehmerin, Sozius, Gegner, Beklagte, Tierhalter, Rechnungsempfänger) – „Name des/der <Rolle>“ leitet `wissen.py` daraus ab | 92,3 % |
 | `etiketten_kennung.txt` | 582 | Feldbezeichner vor Kennungen (Vertrags-, Kunden-, Schadennummer, Aktenzeichen, Steuer-ID, Kennzeichen) | 66,5 % |
 | `etiketten_datum_geburt.txt` | 78 | Feldbezeichner für Geburts-, Sterbe- und Heiratsdaten (auch „Geburt des Kindes“, „Entbindung am“, „Geburtsjahrgang“) | 95,3 % |
-| `etiketten_adresse.txt` | 128 | Feldbezeichner vor Anschriften und Orten einer Person | 85,2 % |
+| `etiketten_adresse.txt` | 132 | Feldbezeichner vor Anschriften und Orten einer Person (auch englisch und französisch auf Ausweisen: „Nationality“, „Lieu de naissance“) | 83,3 % |
 | `etiketten_kontakt.txt` | 82 | Feldbezeichner für Telefon, Fax, E-Mail, Messenger, Profile | 96,3 % |
 | `etiketten_vertragsdaten.txt` | 222 | Feldbezeichner für Vertrags- und Vorgangsdaten (Beginn, Ablauf, Stand, Eintritt): ein Datum dahinter ist kein Geburtsdatum | 83,8 % |
 | `allerweltswoerter_gross.txt` | 9 340 | Großgeschriebene Wörter aus Versicherungs-, Rechts-, Medizin- und Verwaltungsschreiben, die eine Namenserkennung leicht für Personen hält; enthält **keine** Vor- und Nachnamen, Berufe, Diagnosen und Medikamente (maschinell geprüft) | 91,6 % |

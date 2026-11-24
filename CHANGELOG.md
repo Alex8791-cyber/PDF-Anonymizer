@@ -318,10 +318,12 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   mehr Teil der Telefonnummer, die Beitragsgruppe „1111“ keine SV-Nummer; Berufe unter „Beruf des Ehepartners“
   werden geschwärzt. Namen enden am Spaltentrenner („Mooslechner, Anton ⇥ PHV“: die Sparte ist kein Vorname und
   trägt nicht mehr den Platzhalter des Kunden), eine Vertragsnummer mit Tausenderpunkten („7.712.345“) unter einem
-  Kennungs-Spaltenkopf wird geschwärzt. Die Restrisiko-Prüfung meldet keinen Fehlverdacht mehr für Spaltenköpfe und
-  Etikettwörter („Sparte“, „Ausgeübter Beruf“, „Given names“, „Lieu de naissance“) und Ortsnamen in Firmennamen
-  („Hausverwaltung Inntal GmbH“) – ein solcher Verdacht machte die Datei `_PRUEFEN`, lag aber nicht auf dem Leck;
-  umbrochene Straßen und Nummern mit Tausenderpunkten unter einem Kennungskopf meldet sie dagegen.
+  Kennungs-Spaltenkopf wird geschwärzt. Feld-Etiketten eines Ausweises („Given names“, „Nationality“) werden auch
+  dann nicht als Namen geschwärzt, wenn die Texterkennung den Ausweis als Tabelle liest. Die Restrisiko-Prüfung meldet
+  keinen Fehlverdacht mehr für Spaltenköpfe und Etikettwörter („Sparte“, „Ausgeübter Beruf“, „Given names“, „Lieu de
+  naissance“), Ortsnamen in Firmennamen („Hausverwaltung Inntal GmbH“) und Fließtext unter einer Tabelle – ein solcher
+  Verdacht machte die Datei `_PRUEFEN`, lag aber nicht auf dem Leck; umbrochene Straßen und Nummern mit
+  Tausenderpunkten unter einem Kennungskopf meldet sie dagegen.
 
 ### Sicherheit
 - Manche PDFs (z. B. aus LibreOffice) enthielten nach dem Schwärzen das ungeschwärzte Originalbild unsichtbar
