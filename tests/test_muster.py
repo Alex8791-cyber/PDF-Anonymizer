@@ -635,9 +635,9 @@ def test_profile_vertrag_abschnitt_9():
     assert hoch == standard, "Standard-Häkchen = Schutzstufe „hoch“ (Oberfläche erkennt sonst „benutzerdefiniert“)"
     assert {"beruf", "arbeitgeber", "international"} <= hoch and not hoch & {"diagnose", "medikament", "datum"}
     assert ausgewogen < hoch and not ausgewogen & {"beruf", "arbeitgeber", "international"}
-    assert maximal == hoch | {"diagnose", "medikament"}
-    assert mu.hinweis_kategorien("hoch", hoch) == {"diagnose", "medikament"}
-    assert mu.hinweis_kategorien("hoch", hoch | {"diagnose"}) == {"medikament"}
+    assert maximal == hoch | {"diagnose", "medikament", "religion"}        # Art. 9 DSGVO (Religion seit Runde 5)
+    assert mu.hinweis_kategorien("hoch", hoch) == {"diagnose", "medikament", "religion"}
+    assert mu.hinweis_kategorien("hoch", hoch | {"diagnose"}) == {"medikament", "religion"}
     assert mu.hinweis_kategorien("maximal", maximal) == set()
     assert mu.option("maximal", "alle_geburtsdaten") and not mu.option("hoch", "alle_geburtsdaten")
     assert all(isinstance(p["beschreibung"], str) for p in mu.PROFILE.values())

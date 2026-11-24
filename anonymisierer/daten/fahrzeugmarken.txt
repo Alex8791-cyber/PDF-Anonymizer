@@ -1,0 +1,215 @@
+# Fahrzeugmarken (Pkw, Lkw, Busse, Anhänger, Wohnwagen, Motorräder, Roller, E-Scooter, Landmaschinen, Fahrräder):
+# Ein Code direkt hinter einer Marke ist ein Modell („DAF XF 480“, „KTM RC 390“, „Volvo FH 500“), kein Kennzeichen.
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+Abarth
+Adria
+Aiways
+Alfa Romeo
+Alpina
+Alpine
+Aprilia
+Aston Martin
+Audi
+Benelli
+Bentley
+Beta
+Bimota
+BMW
+Bobcat
+Böckmann
+Borgward
+Brenderup
+Buell
+Bugatti
+Bulls
+Bürstner
+BYD
+Cadillac
+Cagiva
+Can-Am
+Canyon
+Carado
+Case
+Centurion
+CFMoto
+Chery
+Chevrolet
+Chrysler
+Citroën
+Claas
+Cube
+Cupra
+Dacia
+Daewoo
+DAF
+Daihatsu
+Derbi
+Dethleffs
+Deutz-Fahr
+Diamant
+Dodge
+DS
+Ducati
+Eduard
+Eriba
+Fendt
+Ferrari
+Fiat
+Fisker
+Ford
+Gas Gas
+Gazelle
+Geely
+Genesis
+Ghost
+Giant
+Gilera
+GMC
+Goupil
+Haibike
+Hako
+Harley
+Harley-Davidson
+Hercules
+Hercules E-Bikes
+Hobby
+Honda
+Humbaur
+Hummer
+Husqvarna
+Hymer
+Hyundai
+Indian
+Infiniti
+Irisbus
+Isuzu
+Iveco
+Jaguar
+JCB
+Jeep
+John Deere
+Kalkhoff
+Kawasaki
+Kia
+Knaus
+Kögel
+Kramer
+Kreidler
+Krone
+KTM
+KTM Bikes
+Kubota
+Kymco
+Lada
+Lamborghini
+Lamborghini Trattori
+Lancia
+Land Rover
+Leapmotor
+Lexus
+Liebherr
+Lindner
+Linhai
+LMC
+Lotus
+Lucid
+Lynk
+Malaguti
+MAN
+Manitou
+Maserati
+Massey Ferguson
+Maybach
+Mazda
+McLaren
+Mercedes
+Mercedes-Benz
+Mercedes-Benz Trucks
+Merlo
+MG
+Mini
+Mitsubishi
+Moto Guzzi
+Multicar
+MV Agusta
+MZ
+Neoplan
+New Holland
+Niesmann
+Ninebot
+Nio
+Nissan
+Niu
+Opel
+Ora
+Pegasus
+Peugeot
+Peugeot Motocycles
+Piaggio
+Polaris
+Polestar
+Porsche
+Pössl
+Puch
+Renault
+Renault Trucks
+Rieju
+Riese & Müller
+Rivian
+Rolls-Royce
+Rover
+Royal Enfield
+Saab
+Same
+Saris
+Scania
+Schmitz
+Schmitz Cargobull
+Schwarzmüller
+Scott
+Seat
+Segway
+Setra
+Sherco
+Simson
+Skoda
+Smart
+Solaris
+Specialized
+SsangYong
+Stema
+Stevens
+Steyr
+Subaru
+Sunlight
+Suzuki
+SYM
+Tabbert
+Temsa
+Tesla
+TGB
+Toyota
+Trek
+Triumph
+Unimog
+Unsinn
+Valtra
+Van Hool
+Vespa
+Volkswagen
+Volvo
+Volvo Trucks
+VW
+Weidemann
+Weinsberg
+Westfalia
+Wielton
+Winora
+Xiaomi
+Xpeng
+Yamaha
+Zeekr
+Zero
+Zündapp

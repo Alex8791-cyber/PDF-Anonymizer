@@ -429,7 +429,9 @@ _KVNR_RE = re.compile(r"(?<![A-Za-z0-9])([A-Z][ ]?\d{3}[ ]?\d{3}[ ]?\d{3})(?![A-
 _FIN_RE = re.compile(r"(?<![A-Za-z0-9])((?=[A-HJ-NPR-Z0-9]{17}(?![A-Za-z0-9]))(?=[A-HJ-NPR-Z0-9]*\d)"
                      r"(?=[A-HJ-NPR-Z0-9]*[A-HJ-NPR-Z])[A-HJ-NPR-Z0-9]{17})")
 _KARTE_RE = re.compile(r"(?<![\d])((?:\d{4}[ \-]?){3}\d{1,4}|\d{4}[ \-]?\d{6}[ \-]?\d{5})(?![\d])")
-_KFZ_RE = re.compile(r"(?<![\wÄÖÜäöü\-/.])([A-ZÄÖÜ]{1,3})([- ])([A-Z]{1,2})[ ]?(\d{1,4})([EH])?(?![\w\-/.])")
+# Kfz-Kennzeichen ohne Etikett: die Form der Erkennung (kennungsformen.kennzeichen_stellen – nur mit amtlichem
+# Unterscheidungszeichen, Modellcodes wie "KTM RC 390" nicht); dazu Kürzel, die in Versicherungstexten keine
+# Unterscheidungszeichen sind
 _KFZ_SPERRE = frozenset({
     "AVB", "AKB", "AHB", "AGB", "ARB", "AUB", "ABB", "ALB", "BGB", "DIN", "ISO", "SGB", "VVG", "VAG", "HGB",
     "EWG", "VO", "KFZ", "PKW", "LKW", "SF", "PKV", "GKV", "DRV", "BMW", "VW", "ABS", "PDF", "PIN", "TAN", "IBAN",
@@ -448,9 +450,17 @@ _AUSWEIS_ETIKETT_RE = re.compile(
 # 4c: getrennt gebaut hatten beide dieselben Lücken); hier kommen die Kartenangabe des Platzhalters [KREDITKARTE] und
 # die eVB mit Einfügungen der Texterkennung dazu ("K7/H3MY9P", auf jeder Zeile: die Ausgabe kann OCR-Text tragen)
 _FORM_GRUND = {"evb": "eVB-Nummer", "ticket": "Transferticket", "cvc": "Kartenprüfnummer"}
+_PLZ_DAVOR_RE = re.compile(r"(?<![\d.,/])\d{4,5}[ \t]+$")
 _OHNE_ETIKETT_GRUND = {"mac": "MAC-Adresse (Gerätekennung)", "eid": "EID einer eSIM (Gerätekennung)",
                        "mastr": "Nummer im Marktstammdatenregister (Anlage bzw. Betreiber)",
-                       "aktenzeichen": "Aktenzeichen eines Gerichts oder einer Staatsanwaltschaft"}
+                       "aktenzeichen": "Aktenzeichen eines Gerichts oder einer Staatsanwaltschaft",
+                       "grundbuch": "Grundbuch- bzw. Flurstücksangabe (bestimmt das Grundstück)"}
+# Formen der neuen Kategorien (Runde 5, Paket K2): dieselben wie in der Erkennung (kennungsformen); Grund und Art
+_NEUE_FORMEN = ((kennungsformen.ip_adressen, "IP-Adresse", "form"),
+                (kennungsformen.koordinaten, "Standort-Koordinaten", "form"),
+                (kennungsformen.email_verschleiert, "E-Mail-Adresse (verschleiert)", "kontakt"),
+                (kennungsformen.zugangsdaten, "Zugangsdaten (Benutzer, Kennwort, PIN, Code)", "kennung"),
+                (kennungsformen.profilnamen, "Profil- bzw. Kontoname", "kontakt"))
 _KREDITKARTE_PLATZHALTER_RE = re.compile(r"\[KREDITKARTE\]")
 # Geburtsname direkt hinter "geb." / "geb:" / "geborene" ("[PERSON A] geb. Quarnstedt", "GEB. QUARNSTEDT") – nicht
 # "Gebr." (Gebrüder), nicht "Geb." am Satz-/Zeilenanfang (Gebäude, Gebühr), nicht über eine Spaltenlücke
@@ -1197,9 +1207,12 @@ class _Seitenpruefung:
         return self._allowlist_in(t)
 
     def _allowlist_in(self, t: str) -> bool:
+        """Eintrag der Allowlist in t – nicht als Ort hinter einer Postleitzahl ("8002 Zürich" ist eine Anschrift,
+        keine Zurich Versicherung)."""
         index = self.w.index("allowlist")
         try:
-            return index is not None and any(len(v.text) >= 4 and v.text[:1].isupper() for v in index.finde(t))
+            return index is not None and any(len(v.text) >= 4 and v.text[:1].isupper()
+                                             and not _PLZ_DAVOR_RE.search(t, 0, v.start) for v in index.finde(t))
         except Exception:
             return False
 
@@ -1738,7 +1751,20 @@ class _Seitenpruefung:
         self._geburtsname_etiketten()
         self._reste_neben_platzhaltern()
         self._ort_datum()
+        self._seitenformen()
         return self.kandidaten
+
+    def _seitenformen(self):
+        """Formen über Zeilen- und Zellgrenzen der Seite: Religion/Konfession hinter ihrem Etikett oder unter ihrem
+        Spaltenkopf und ausländische Kennzeichen hinter einem Fahrzeugwort ("Zugmaschine WGM 4471K") – dieselben
+        Formen wie in der Erkennung (kennungsformen.religion, kennzeichen_im_satz)."""
+        text = self.text
+        for s, e in kennungsformen.religion(text):
+            if not self.ist_platzhalter_bei(s, e):
+                self.neu(s, e, "Religion/Konfession (Art. 9 DSGVO)", "kennung")
+        for s, e, _ in kennungsformen.kennzeichen_im_satz(text):
+            if not self.ist_platzhalter_bei(s, e):
+                self.neu(s, e, "ausländisches Kfz-Kennzeichen?", "form")
 
     def _ort_datum(self):
         """Ort-Datum-Zeile ("Tübingen, 14. Januar 2025", "St. Ingbert, 11.08.2025"): der Ort ist meist der
@@ -1987,15 +2013,12 @@ class _Seitenpruefung:
         for m in _KARTE_RE.finditer(zeile):
             if luhn_gueltig(m.group(1)):
                 self.neu(o + m.start(1), o + m.end(1), "Kreditkartennummer (Prüfziffer gültig)", "form")
-        for m in _KFZ_RE.finditer(zeile):
-            kuerzel, trenner, ziffern = m.group(1), m.group(2), m.group(4)
-            if kuerzel in _KFZ_SPERRE or any(maske[m.start():m.end()]):
+        for s, e in kennungsformen.kennzeichen_stellen(zeile, _KFZ_SPERRE):
+            if any(maske[s:e]) or self.ist_platzhalter_bei(o + s, o + e):
                 continue
-            if trenner != "-" and len(ziffern) == 4 and ziffern[:2] in ("19", "20"):
-                continue                             # "SGB VI 2023"
-            if _ORG_NUMMER_RE.search(zeile[max(0, m.start() - 30):m.start()]):
+            if _ORG_NUMMER_RE.search(zeile[max(0, s - 30):s]):
                 continue                             # Register-, Formularnummern – ein Kennzeichen hat keine
-            self.neu(o + m.start(), o + m.end(), "Kfz-Kennzeichen-Form", "form")
+            self.neu(o + s, o + e, "Kfz-Kennzeichen-Form", "form")
         for m in _BIC_RE.finditer(zeile):
             davor = zeile[max(0, m.start() - 40):m.start()]
             zelle_davor = re.split(r"\t", zeile[:m.start()])[-1][-60:]
@@ -2035,8 +2058,18 @@ class _Seitenpruefung:
         # Gerichts mit Gerichtswort in der Zeile): dieselben Formen wie in der Erkennung
         # (kennungsformen.kennungen_ohne_etikett)
         for s, e, art in kennungsformen.kennungen_ohne_etikett(zeile):
-            if not self.ist_platzhalter_bei(o + s, o + e) and not self.org_wert(o + s, o + e):
+            # ein Flurstück steht nie im Briefkopf einer Organisation: keine Ausnahme für ihre Angaben
+            if not self.ist_platzhalter_bei(o + s, o + e) and (art == "grundbuch"
+                                                               or not self.org_wert(o + s, o + e)):
                 self.neu(o + s, o + e, _OHNE_ETIKETT_GRUND[art], "form")
+        # IP-Adresse, Standort-Koordinaten, verschleierte E-Mail-Adresse, Zugangsdaten, Profil-/Kontoname
+        for funktion, grund, art in _NEUE_FORMEN:
+            for s, e in funktion(zeile):
+                if self.ist_platzhalter_bei(o + s, o + e):
+                    continue
+                if art == "kontakt" and self.org_kontext(o + s):
+                    continue                         # Auftritt der Organisation (Briefkopf, Fußzeile)
+                self.neu(o + s, o + e, grund, art)
         # Handelsregisternummer (HRA) und USt-IdNr. im Angabenblock eines Einzelkaufmanns: Angaben einer Person (die
         # Ausnahmen der Organisation gelten dort nicht, kennungsformen.einzelkaufmann_block)
         for g_s, g_e in self._einzelkaufmann():
@@ -2253,7 +2286,10 @@ class _Seitenpruefung:
                     if form == "allgemein":
                         if self.w.ist_etikett(zelle.strip()) or self.w.ist_etikett(zelle.strip().rstrip(".:")):
                             break                       # nächster Kopf bzw. Feld
-                        sp = kennungsformen.kennungswert(text, zs + vorn, ze, kopf, nr=True)
+                        if kennungsformen.kfz_etikett(kopf):
+                            sp = kennungsformen.kfz_wert(text, zs + vorn, ze)   # "519 TWA" unter "Kennzeichen"
+                        else:
+                            sp = kennungsformen.kennungswert(text, zs + vorn, ze, kopf, nr=True)
                         if sp is not None and not text[sp[1]:ze].strip(" .,;)"):
                             aus.append((sp[0], sp[1], f"Wert in der Spalte »{' '.join(kopf.split())}«", True))
                         continue
@@ -2403,10 +2439,26 @@ class _Seitenpruefung:
                     continue
                 if _VERWEIS_STRASSE_RE.search(wort):
                     continue                                 # "Führerscheinnummer laut Feld 5": Verweis auf ein Feld
+                klasse = kennungsformen.STRASSENKLASSE_RE.search(zeile, m.start(), m.end())
+                if klasse is not None and klasse.end() == m.end():
+                    continue                                 # "Auf der BAB 9": eine Fahrbahn (Straßenklasse)
                 self.neu(s, o + m.end(), "Anschrift (Straße + Hausnummer)", "anschrift")
         for m in _POSTFACH_RE.finditer(zeile):
             if not self.org_kontext(o + m.start()):
                 self.neu(o + m.start(), o + m.end(), "Postfach", "anschrift")
+        # ausländische Anschriften: Straße mit vorangestelltem Typ ("Str. Memorandumului nr. 27"), sechsstellige PLZ
+        # mit Länderhinweis, vierstellige PLZ mit Ort hinter einer Straße (auch hinter ihrem Platzhalter), mit
+        # Länderhinweis oder einem Ort der Nachbarländer – dieselben Formen wie in der Erkennung (kennungsformen)
+        vorn = kennungsformen.strassen_vorn(zeile)
+        strassen = vorn + [(m.start(), m.end()) for regex in (_STRASSE_RE, _STRASSE_PRAEP_RE)
+                           for m in regex.finditer(zeile)]
+        strassen += [(m.start(), m.end()) for m in re.finditer(r"\[[A-ZÄÖÜ\- ]+\]", zeile)]
+        for gruppe, grund in ((vorn, "Anschrift (Straße, ausländische Form)"),
+                              (kennungsformen.plz6_mit_land(zeile), "PLZ + Ort (Ausland)"),
+                              (kennungsformen.plz4_ausland(zeile, strassen), "PLZ + Ort (Ausland)")):
+            for s, e in gruppe:
+                if not self.ist_platzhalter_bei(o + s, o + e) and not self.org_kontext(o + s):
+                    self.neu(o + s, o + e, grund, "anschrift")
         # Werte hinter Anschrift-Etiketten ("Ort: Jena", "Wohnort Frankfurt am Main")
         index = self.w.index("adresse")
         if index is None:
@@ -2433,6 +2485,8 @@ class _Seitenpruefung:
                 continue                                # OCR-Salat ("EIS EFESEHE")
             if self.org_kontext(o + s) or ("\t" in zeile[v.ende:s] and self._kopfzeile(z)):
                 continue                                # Kopfzeile einer Tabelle: "PLZ / Ort ⇥ Sparte ⇥ Versicherer"
+            if kennungsformen.STRASSENKLASSE_RE.search(zeile, s, min(len(zeile), s + len(text) + 6)):
+                continue                                # "Unfallort: Auf der A 99": eine Fahrbahn
             if erstes.lower().rstrip(".") in _STRASSEN_ANFANG:
                 self._strassenwert(z, zeile, s, v.text)  # "Anschrift: Straße des 17. Juni 72", "Am Markt 3"
                 continue

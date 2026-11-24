@@ -1189,6 +1189,28 @@ def test_alte_einstellungen_ohne_schutzstufe(root, umgebung, dialoge):
         root2.destroy()
 
 
+def test_alte_einstellungen_ohne_neue_kategorien(root, umgebung, dialoge):
+    """Domänen-Durchsicht Runde 5: gespeicherte Einstellungen von vor den neuen Kategorien (IP-Adresse, Zugangsdaten,
+    Profilname, Standort, Religion) bleiben gültig – die neuen gelten dort als an (Religion wie Gesundheitsdaten nur
+    in „Maximal“), eine unveränderte Standard-Auswahl bleibt Stufe „Hoch“, eine eigene Auswahl bleibt erhalten."""
+    neu = {"ip", "zugangsdaten", "profilname", "standort", "religion"}
+    alt_standard = {e[0]: bool(e[4]) for e in gui.KATEGORIEN if e[0] not in neu}
+    app = gui.AnonymisiererApp(root, einstellungen={"kategorien": alt_standard})
+    assert app.profil_var.get() == "hoch"
+    assert all(app.kategorie_vars[k].get() for k in neu - {"religion"}) and not app.kategorie_vars["religion"].get()
+    app.root.destroy()
+    for einstellungen in ({"profil": "benutzerdefiniert", "basis_profil": "hoch",
+                           "kategorien": dict(alt_standard, iban=False)},
+                          {"kategorien": dict(alt_standard, iban=False)}):
+        root2 = tk.Tk()
+        try:
+            app2 = gui.AnonymisiererApp(root2, einstellungen=einstellungen)
+            assert app2.profil_var.get() == "benutzerdefiniert" and app2.kategorie_vars["iban"].get() is False
+            assert all(app2.kategorie_vars[k].get() for k in neu - {"religion"}), einstellungen
+        finally:
+            root2.destroy()
+
+
 def test_schutzstufe_steuert_kategorien_und_wird_uebergeben(root, umgebung, dialoge, monkeypatch):
     profile = {"ausgewogen": {"aktive": {"namen", "iban"}},
                "hoch": {"aktive": {"namen", "iban", "email"}, "beschreibung": "Empfohlen (Test)."},
@@ -1784,6 +1806,23 @@ ARZTBERICHT = ("Arztbericht\nDiagnose: Lumboischialgie links (M54.4)\nMedikation
                "IBAN DE89 3704 0044 0532 0130 00\n")
 
 
+def test_religion_mit_echter_engine_abgewaehlt_angeboten(app, umgebung, dialoge):
+    """Domänen-Befund 88: Konfession/Kirchensteuermerkmal in „Hoch“ wie Gesundheitsdaten – nicht angehakt in der
+    Fundliste, Meldung RELIGION im Protokoll und ein Absatz im Abschlussdialog."""
+    tmp = umgebung["tmp"]
+    pdf = pdf_schreiben(tmp / "Lohnabrechnung.pdf", "Entgeltabrechnung November 2026\nKonfession: römisch-katholisch\n"
+                                                    "IBAN DE89 3704 0044 0532 0130 00\n")
+    app.kategorie_vars["namen"].set(False)
+    assert app.basis_profil == "hoch"
+    analysiere(app, [pdf])
+    ergebnis = app.analyse_ergebnisse[pdf]
+    assert "RELIGION" in gui.meldungs_codes(ergebnis)
+    zeilen = {app.baum.item(k, "values")[1]: k for k in app.baum.get_children(str(pdf))}
+    assert app._zustand(zeilen["römisch-katholisch"]) == "aus"
+    art, titel, text = dialoge.liste[-1]
+    assert art == "warning" and "Religion bzw. Konfession (Art. 9 DSGVO" in text and "• Lohnabrechnung.pdf" in text
+
+
 def test_gesundheitsdaten_mit_echter_engine_abgewaehlt_angeboten(app, umgebung, dialoge):
     """„hoch“: Diagnose und Medikament stehen NICHT angehakt (⚕ – eigenes Zeichen der angebotenen Gesundheitsdaten,
     Hinweis) in der Fundliste, die Meldung GESUNDHEITSDATEN steht in einfachem Deutsch im Protokoll und im
@@ -2040,10 +2079,12 @@ def test_maximal_ohne_gesundheitsdaten_bleibt_maximal(app, umgebung, monkeypatch
     _kategorie_knopf(app, "diagnose").invoke()
     assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "maximal"
     _kategorie_knopf(app, "medikament").invoke()
+    _kategorie_knopf(app, "religion").invoke()       # seit Runde 5 gehört auch die Konfession (Art. 9) zu „Maximal“
     assert app._aktive_kategorien() == app.profil_kategorien("hoch")        # dieselbe Menge wie „Hoch“
     assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "maximal"
     text = app.profil_beschreibung.cget("text")
     assert "„Maximal“" in text and "Gesundheitsdaten werden gemeldet und abgewählt angeboten" in text, text
+    assert "Konfession werden gemeldet und abgewählt angeboten" in text, text
 
     aufrufe, schwaerz = [], []
     monkeypatch.setattr(gui, "analysiere_pdf", fake_analyse_neu({"a.pdf": [FUND_TEL]}, aufrufe=aufrufe))
@@ -2051,7 +2092,7 @@ def test_maximal_ohne_gesundheitsdaten_bleibt_maximal(app, umgebung, monkeypatch
     analysiere(app, [pdf_schreiben(umgebung["tmp"] / "a.pdf")])
     starte_lauf(app, app.schwaerzen)
     assert aufrufe[-1]["profil"] == "maximal" and schwaerz[-1]["profil"] == "maximal"
-    assert aufrufe[-1]["aktive"] == set(muster.PROFILE["maximal"]["aktive"]) - muster.GESUNDHEIT
+    assert aufrufe[-1]["aktive"] == set(muster.PROFILE["maximal"]["aktive"]) - muster.ART9
     assert "Schutzstufe Maximal" in app.protokoll_text()
 
     # gespeichert und nach einem Neustart wieder so (hier: Einstellungen erneut anwenden)
@@ -2063,12 +2104,13 @@ def test_maximal_ohne_gesundheitsdaten_bleibt_maximal(app, umgebung, monkeypatch
     assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "maximal"
     assert not app.kategorie_vars["diagnose"].get() and not app.kategorie_vars["medikament"].get()
 
-    # beide wieder angehakt -> wieder „Maximal“
+    # alle wieder angehakt -> wieder „Maximal“
     _kategorie_knopf(app, "diagnose").invoke()
     _kategorie_knopf(app, "medikament").invoke()
+    _kategorie_knopf(app, "religion").invoke()
     assert app.profil_var.get() == "maximal" and app.basis_profil == "maximal"
     # „Maximal“ bis auf die Menge von „Ausgewogen“ abgewählt: bleibt „Maximal“ (Benutzerdefiniert)
-    for schluessel in ("beruf", "arbeitgeber", "international", "ort", "diagnose", "medikament"):
+    for schluessel in ("beruf", "arbeitgeber", "international", "ort", "diagnose", "medikament", "religion"):
         _kategorie_knopf(app, schluessel).invoke()
     assert app._aktive_kategorien() == app.profil_kategorien("ausgewogen")
     assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "maximal"
@@ -2077,10 +2119,11 @@ def test_maximal_ohne_gesundheitsdaten_bleibt_maximal(app, umgebung, monkeypatch
     for schluessel in ("beruf", "arbeitgeber", "international", "ort"):
         _kategorie_knopf(app, schluessel).invoke()
     assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "hoch"
-    # … nach oben aber weiter: „Hoch“ + Diagnosen + Medikamente = „Maximal“
+    # … nach oben aber weiter: „Hoch“ + Diagnosen + Medikamente + Konfession = „Maximal“
     app.profil_knoepfe["hoch"].invoke()
     _kategorie_knopf(app, "diagnose").invoke()
     _kategorie_knopf(app, "medikament").invoke()
+    _kategorie_knopf(app, "religion").invoke()
     assert app.profil_var.get() == "maximal" and app.basis_profil == "maximal"
 
 

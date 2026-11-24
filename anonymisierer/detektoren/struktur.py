@@ -374,7 +374,7 @@ _KENNUNG_KATEGORIE = [
     (re.compile(r"\b(?:bic|swift)\b"), "bic"),
     (re.compile(r"egk\b|krankenversicherten|krankenversicherungs ?n|\bkv ?n|\bkvnr\b|versicherten ?n|versicherten ?id"),
      "kvnr"),
-    (re.compile(r"kennzeichen|\bkennz\b|\bkz\b|kfz zeichen"), "kfz"),
+    (re.compile(r"kennzeichen|\bkennz\b|\bkz\b|kfz zeichen|plakette|nummernschild|kfz schild"), "kfz"),
     (re.compile(r"\b(?:fin|vin)\b|fahrgestell|fahrzeug ?ident"), "fin"),
     (re.compile(r"ausweis|reisepass|\bpass\b|\bpass ?n|fuhrerschein"), "ausweis"),
     (re.compile(r"\bust\b|umsatzsteuer|wirtschafts ?ident|\bw idnr\b"), "steuernr"),
@@ -481,6 +481,10 @@ def _etiketten_roh(text: str) -> list:
     for m in kennungsformen.NUMMER_DER_RE.finditer(text):
         if kennungsformen.stamm_der_nummer(m.group(1)):
             aus.append((m.start(), m.end(), "kennung", f"{m.group(1)}-Nummer"))
+    # Kfz-Etiketten mit Fahrzeugbezug ("Kurzzeitkennzeichen", "rotes Oldtimerkennzeichen", "Versicherungsplakette",
+    # "Vers.-Kennzeichen"): Kennzeichen-Wert (kennungsformen.kfz_wert); nicht "Gefahrgutkennzeichen", "Prüfkennzeichen"
+    for m in kennungsformen.KFZ_ETIKETT_RE.finditer(text):
+        aus.append((m.start(), m.end(), "kennung", m.group(0)))
     return aus
 
 
@@ -1077,6 +1081,9 @@ def strasse_spanne(text: str, pos: int, grenze: int):
     if not worte or all(w.casefold() in PARTIKEL | {"am", "an", "auf", "im", "in", "zum", "zur", "unter", "hinter",
                                                   "vor", "bei"} for w in worte):
         return None
+    klasse = kennungsformen.STRASSENKLASSE_RE.search(text, s, e)
+    if klasse is not None and klasse.end() == e:
+        return None                                     # "Unfallort: Auf der A 99": eine Fahrbahn
     return s, e
 
 
@@ -1234,7 +1241,6 @@ class Wert(NamedTuple):
     gruppe: str | None = None
 
 
-_KFZ_RE = re.compile(r"[A-ZÄÖÜ]{1,3}[- ][A-Z]{1,2}[ -]?\d{1,4}[EH]?(?![\w])")
 _BIC_RE = re.compile(r"[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?(?![\w])")
 _AUSWEIS_RE = re.compile(r"(?=[A-Z0-9]*\d)[A-Z0-9]{6,12}(?![\w])")
 
@@ -1300,8 +1306,14 @@ def _kennungs_wert(text: str, s: int, e: int, kategorie: str, streng: bool, eint
             return eigen
         if art == "cvc":
             kategorie = "vertrag"
-    # Kennungsarten mit eigener Form (wenige oder keine Ziffern): Kennzeichen, BIC, Ausweis
-    for kat, regel in (("kfz", _KFZ_RE), ("bic", _BIC_RE), ("ausweis", _AUSWEIS_RE)):
+    # Kennungsarten mit eigener Form (wenige oder keine Ziffern): Kennzeichen (jede Kennzeichenform hinter dem
+    # Kfz-Etikett: deutsch, Sonderformen, Versicherungskennzeichen, Kompaktform, ausländisch – kennungsformen.kfz_wert),
+    # BIC, Ausweis
+    if kategorie == "kfz":
+        sp = kennungsformen.kfz_wert(text, s, e)
+        if sp is not None:
+            return [Wert(sp[0], sp[1], "kfz")]
+    for kat, regel in (("bic", _BIC_RE), ("ausweis", _AUSWEIS_RE)):
         if kategorie == kat:
             m = regel.match(text, s, e)
             if m:
@@ -1931,6 +1943,10 @@ def kennung_folgezeile(seite, lg: Lage, et: Etikett) -> list:
             kategorie = "vertrag"
     m = re.match(r"[ \t]*(?:\S{1,2}[ \t]+)?", text[folge.start:folge.ende])
     for anfang in (folge.start, folge.start + (m.end() if m else 0)):
+        if kategorie == "kfz":
+            sp = kennungsformen.kfz_wert(text, anfang, folge.ende)
+            if sp is not None and sp[0] - anfang <= 1:
+                return [Wert(sp[0], sp[1], "kfz")]
         sp = kennung_spanne(text, anfang, folge.ende, 3)
         if sp and sp[0] - anfang <= 1 and (art is None or allgemeiner_wert_passt(et.eintrag, text[sp[0]:sp[1]])):
             return [Wert(sp[0], sp[1], kategorie or "vertrag")]

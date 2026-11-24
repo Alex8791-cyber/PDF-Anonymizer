@@ -475,6 +475,12 @@ def _kennung(text: str, s: int, e: int, kategorie: str | None, eintrag: str = ""
             return eigen
         if art == "cvc":
             kategorie = "vertrag"
+    if kategorie == "kfz" and art is None:
+        # Kennzeichen-Spalte ("Kennzeichen", "Vers.-Kennzeichen"): jede Kennzeichenform – auch Versicherungs-
+        # kennzeichen ("519 TWA") und Kompaktform ("ROKL2207"), Domänen-Befund 21
+        sp = kennungsformen.kfz_wert(text, i, e)
+        if sp is not None and not text[sp[1]:e].strip(" .,;)"):
+            return [(sp[0], sp[1], "kfz", None)]
     # dieselbe Wertform wie hinter einem Etikett (kennungsformen.kennungswert): auch Tausenderpunkt-Gruppen unter einem
     # Nummer-Kopf ("12.345.678" unter "Vertragsnr.", Domänen-Befunde 1, 67) und Codes mit Trennern – keine Beträge,
     # Versionsnummern und Zahlen mit Einheit

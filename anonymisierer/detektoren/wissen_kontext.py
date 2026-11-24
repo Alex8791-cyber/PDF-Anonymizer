@@ -28,11 +28,11 @@ from __future__ import annotations
 import datetime
 import re
 
-from .. import muster, wissen
+from .. import kennungsformen, muster, wissen
 from . import ALLE_PROFILE, Treffer, detektor, entfernen
 
 _GROSS = "A-ZÄÖÜÀ-ÖØ-ÞĀĂĄĆČĎĐĒĖĘĚĞĢĪĮİĶĹĻĽŁŃŅŇŌŐŒŔŘŚŞŠŢŤŪŮŰŲŹŻŽ"
-_KLEIN = "a-zäöüßà-öø-ÿāăąćčďđēėęěğģīįıķĺļľłńņňōőœŕřśşšţťūůűųźżž"
+_KLEIN = "a-zäöüßà-öø-ÿāăąćčďđēėęěğģīįıķĺļľłńņňōőœŕřśşšţťūůűųźżžșț"
 _WORT_GROSS = f"[{_GROSS}][{_KLEIN}{_GROSS}'’\\-]*"
 _ZEILENENDE_RE = re.compile(r"[\n]")
 
@@ -621,12 +621,8 @@ _AUSLAND_RE = re.compile(
     # UK/IE "10 Downing Street"
     rf"|\d{{1,4}}[ \t]+{_CAP}(?:[ \t]+{_CAP})?[ \t]+(?:Street|Road|Avenue|Lane|Drive|Close|Square|Crescent|Terrace)"
     r")(?![\w])")
-_AUSLAND_PLZ4_RE = re.compile(rf"(?<![\w\-/.,])(?:\d{{4}})[ \t]+({_STADT})(?![\w])")
-_LAND_RE = re.compile(r"(?i:österreich|schweiz|niederlande|holland|belgien|luxemburg|frankreich|italien|spanien|"
-                      r"portugal|polen|tschechien|slowakei|ungarn|dänemark|schweden|norwegen|türkei|kroatien|"
-                      r"slowenien|rumänien|bulgarien|griechenland|austria|switzerland|netherlands|belgium|france|"
-                      r"italy|spain|poland|czech|hungary|denmark|sweden|norway|turkey|united[ \t]+kingdom|"
-                      r"großbritannien|england|irland|ireland)")
+# Länderhinweis im Umkreis einer Anschrift (dieselbe Liste wie die Selbstkontrolle)
+_LAND_RE = kennungsformen.LAND_RE
 _KENNZEICHEN_ETIKETT_RE = re.compile(
     r"(?<![\wäöüß])(?i:amtl(?:iches|\.)?[ \t]+)?(?i:Kfz-?)?(?i:Kennzeichen|Kennz\.|Nummernschild|Plate)"
     r"(?:[ \t]*\((?P<land>[A-Z]{1,3})\))?(?:[ \t]+des[ \t]+\w+)?[ \t]*(?::[ \t]*|\t+[ \t]*)"
@@ -636,7 +632,11 @@ _DEUTSCHES_KENNZEICHEN_RE = re.compile(r"[A-ZÄÖÜ]{1,3}[-\s][A-Z]{1,2}[ \t]?\d
 
 def ausland_stellen(text: str) -> list:
     """Ausländische Anschriften (Straße und PLZ+Ort typischer Nachbarländer) und ausländische Kennzeichen hinter
-    einem Etikett ("Kennzeichen: 67-BDK-1", "LU 946067")."""
+    einem Etikett ("Kennzeichen: 67-BDK-1", "LU 946067") bzw. mit Länderhinweis im Fließtext ("ein polnischer
+    Sattelzug (Zugmaschine WGM 4471K)"). Runde 5: Straßen mit vorangestelltem Straßentyp ("Str. Memorandumului nr.
+    27", "bul. Vitosha 15"), sechsstellige PLZ mit Länderhinweis ("400114 Cluj-Napoca, Rumänien") und vierstellige PLZ
+    hinter einer Straße beliebiger Form bzw. mit einem Ort der Nachbarländer ("Seestrasse 12, 8002 Zürich", "aus 4040
+    Linz") – dieselben Formen wie in der Selbstkontrolle (kennungsformen)."""
     if not text:
         return []
     aus = []
@@ -646,23 +646,28 @@ def ausland_stellen(text: str) -> list:
                 text[max(0, m.start() - 120):m.end() + 60]):
             continue                                       # "120 00 Praha" nur mit Länderhinweis
         aus.append((m.start(), m.end()))
-    # vierstellige PLZ (A, CH, BE, DK, HU, LU, NO …) nur mit Länderhinweis oder ausländischer Straße davor
-    belegt = list(aus)
-    for m in _AUSLAND_PLZ4_RE.finditer(text):
-        land = _LAND_RE.search(text[max(0, m.start() - 120):m.end() + 60])
-        nach_strasse = any(a < m.start() and 0 <= m.start() - b < 6 for a, b in belegt)
-        if land or nach_strasse:
-            stadt = m.group(1)
-            if stadt.split()[0].casefold() in _KEIN_ORT or wissen.ist_allerweltswort(stadt.split()[0]):
-                continue
-            aus.append((m.start(), m.end()))
+    aus += kennungsformen.strassen_vorn(text)
+    aus += kennungsformen.plz6_mit_land(text)
+    # vierstellige PLZ (A, CH, LI, BE, DK, HU, LU, NO …) hinter einer ausländischen oder deutsch geformten Straße, vor
+    # einer Straße in Klammern, mit Länderhinweis oder mit einem Ort der Nachbarländer (kennungsformen.plz4_ausland)
+    strassen = list(aus) + muster.finde_strasse_stellen(text)
+    for s, e in kennungsformen.plz4_ausland(text, strassen):
+        stadt = re.sub(r"^\S*\d{4}[ \t]+", "", text[s:e])
+        if stadt.split()[0].casefold() in _KEIN_ORT:
+            continue
+        aus.append((s, e))
     for m in _KENNZEICHEN_ETIKETT_RE.finditer(text):
         wert = m.group("wert")
         if not any(c.isdigit() for c in wert) or sum(c.isalnum() for c in wert) < 4:
             continue
         if _DEUTSCHES_KENNZEICHEN_RE.fullmatch(wert) and not (m.group("land") or m.group("land2")):
             continue                                       # deutsches Kennzeichen: Kategorie kfz
-        aus.append((m.start("wert"), m.end("wert")))
+        sp = kennungsformen.kfz_wert(text, m.start("wert"), m.end("wert"))
+        if sp is None:
+            continue                                       # "Kennzeichen: 100 EUR": keine Kennzeichenform
+        aus.append(sp)
+    # ausländisches Kennzeichen im Fließtext direkt hinter einem Fahrzeugwort, mit Länderhinweis im Satz
+    aus += [(s, e) for s, e, mit_land in kennungsformen.kennzeichen_im_satz(text) if mit_land]
     return _vereinigen(aus)
 
 

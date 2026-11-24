@@ -222,6 +222,8 @@ _SACHWORT_ENDUNGEN = (
     # "Postleitzahl", "Adresszusatz", "Doktorgrad", "Haarfarbe", "Schuhgröße", "Vorerkrankungen", "Hauptversicherter")
     "name", "namen", "zahl", "zusatz", "grad", "titel", "farbe", "größe", "groesse", "gewicht", "erkrankung",
     "erkrankungen", "krankheit", "krankheiten", "beschwerden", "versicherte", "versicherter", "versicherten",
+    # Formular- und Kfz-Wörter der Domänen-Durchsicht ("Kundenbogen", "Verkehrsjahr", "Versicherungsplakette")
+    "bogen", "jahr", "plakette",
 )
 # Adjektiv-/Partizipstämme, die großgeschrieben vor Rollenwörtern stehen ("Betreuender Vermittler",
 # "Mitversichertes Kind", "Fälliger Beitrag", "Erstattungsfähig")
@@ -718,6 +720,40 @@ _KENNUNGS_ETIKETT_NAME_RE = re.compile(
     r"|e-?v[b8](?:-?nr|-?nummer)?|cv[cv]2?|csc|transfer-?tickets?(?:-?nr|-?nummer)?)\.?$")
 
 
+# Marke + Modell statt eines Namens ("Suzuki GSX-R 750", "Mofa Simson S51", "Pkw Opel Corsa"): ein Modellcode mit
+# Großbuchstaben (und Ziffern) neben der Marke oder ein Fahrzeugwort davor bzw. im Treffer
+_MODELLCODE_RE = re.compile(r"[A-Z]{1,4}-?[A-Z0-9]*\d[A-Z0-9]*|[A-Z]{2,4}(?:-[A-Z0-9]{1,4})?")
+_MODELL_DANACH_RE = re.compile(r"[ \t]+(?:" + _MODELLCODE_RE.pattern + r")(?![\wäöüß.,/])")
+_FAHRZEUGWORT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:pkw|lkw|kfz|krad|kraftrad|motorrad|mofa|moped|roller|"
+                              r"motorroller|leichtkraftrad|kleinkraftrad|quad|wohnmobil|wohnwagen|anh(?:ä|ae)nger|"
+                              r"transporter|fahrzeug|fahrzeugs|wagen|auto|marke|hersteller|modell|typ)(?![\wäöüß])")
+
+
+def _fahrzeug_statt_name(text: str, start: int, ende: int, teile: list) -> bool:
+    """Ist der KI-Treffer Marke und Modell eines Fahrzeugs: ein Teil eine Fahrzeugmarke der Wissensbasis
+    (daten/fahrzeugmarken.txt) und daneben ein Modellcode ("GSX-R", "S51", "XF 480") oder ein Fahrzeugwort ("Mofa",
+    "Pkw") – im Treffer oder direkt davor?"""
+    if not any(kennungsformen.fahrzeugmarke(t) for t in teile):
+        return False
+    if any(t.isupper() and _MODELLCODE_RE.fullmatch(t) for t in teile) or _MODELL_DANACH_RE.match(text, ende):
+        return True
+    return any(_FAHRZEUGWORT_RE.fullmatch(t) for t in teile) \
+        or _FAHRZEUGWORT_RE.search(text, max(0, start - 25), start) is not None
+
+
+def _kontakt_etikett(wort: str) -> bool:
+    """Ist das Wort ein Kontakt-Etikett der Wissensbasis ("Instagram", "WhatsApp", "Telefon") – ein Kanal, kein
+    Name ("Kontakt: Instagram @lena.wiesengrund")?"""
+    w = wort.strip(".,;:()[]\"'")
+    if len(w) < 3:
+        return False
+    try:
+        from . import wissen
+        return wissen.index("etiketten_kontakt").eintrag_fuer(w) is not None
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return False
+
+
 def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
     """Plausibilitätsfilter: keine Ziffern/Kürzel, keine Feldbezeichner, keine Versicherer,
     keine Organisationen, mindestens ein großgeschriebenes Wort mit >= 3 Buchstaben (>= 2 hinter
@@ -745,6 +781,9 @@ def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
     teile = _namensteile(name)
     if not teile:
         return False
+    if len(teile) == 1 and not mit_anrede and _kontakt_etikett(teile[0]) \
+            and not _wissen_wort("ist_nachname", teile[0]):
+        return False                          # "Kontakt: Instagram": ein Kanal, auch hinter einem Rollen-Etikett
     mindestlaenge = 2 if mit_anrede else 3
     if not any(len(re.sub(r"[^\wäöüß]", "", t)) >= mindestlaenge and t[0].isupper() for t in teile):
         return False
@@ -755,6 +794,8 @@ def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
             return False                      # OCR-Reste ("IE EEESTEUER", "ee BEER", "i= SEE")
         if all(_ist_sachwort(t) for t in teile):
             return False                      # "Schadenanzeige Kraftfahrt-Haftpflicht", "Familientarif"
+        if _fahrzeug_statt_name(text, start, ende, teile):
+            return False                      # "Suzuki GSX-R 750", "Mofa Simson S51": Marke und Modell
         if len(teile) == 1 and teile[0].isupper() and len(teile[0]) <= 4:
             return False                      # Kürzel wie RLV, BU, KFZ (Versalien-Namen kommen über die Regeln)
         zeilenanfang = text.rfind("\n", 0, start) + 1

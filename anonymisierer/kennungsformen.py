@@ -57,6 +57,16 @@ Regel „Etikett + Wert“ (wert_hinter_etikett):
     einzelkaufmann_block(text, pos), einzelkaufmann_register(text)   HRA/USt-IdNr. eines Einzelkaufmanns (Person)
     einzelkaufmann_erwaehnt(text)      Vorprüfung: "e.K.", "Inhaber:" im Text
     vorschrift(text, s, e)             Nummer einer Vorschrift ("§ 34d", "8 34d Abs. 1 GewO") – kein Wert
+  Kfz, Anschriften und neue Kategorien (Runde 5, Paket K2):
+    KFZ_ETIKETT_RE, kfz_etikett(etikett), kfz_wert(text, pos, grenze), KFZ_WERTFORM   Kfz-Etiketten mit Fahrzeugbezug
+                                        ("Versicherungskennzeichen", "Kurzzeitkennzeichen") und der Kennzeichen-Wert
+    kennzeichen_stellen(text, sperre)  deutsche Kennzeichen ohne Etikett, nur mit amtlichem Unterscheidungszeichen
+    kennzeichen_im_satz(text)          ausländische Kennzeichen hinter einem Fahrzeugwort (mit Länderhinweis?)
+    unterscheidungszeichen(kuerzel), fahrzeugmarke(wort)
+    LAND_RE, STRASSENKLASSE_RE, strassen_vorn, plz6_mit_land, plz4_ausland, ort_at_ch   ausländische Anschriften,
+                                        Straßenklassen ("Auf der A 8": keine Anschrift)
+    ip_adressen, koordinaten, email_verschleiert, zugangsdaten, profilnamen, grundbuch, religion   (start, ende) der
+                                        neuen Kategorien bzw. Formen
 """
 
 from __future__ import annotations
@@ -1794,8 +1804,9 @@ _GERICHT_WORT_RE = re.compile(
 
 def kennungen_ohne_etikett(text: str) -> list:
     """(start, ende, art) der Kennungen mit eigener, eindeutiger Form ohne Etikett: MAC-Adresse ("mac"), EID einer eSIM
-    ("eid"), Nummer im Marktstammdatenregister ("mastr") und Aktenzeichen eines Gerichts oder einer Staatsanwaltschaft
-    mit Gerichtswort in der Zeile ("aktenzeichen")."""
+    ("eid"), Nummer im Marktstammdatenregister ("mastr"), Aktenzeichen eines Gerichts oder einer Staatsanwaltschaft
+    mit Gerichtswort in der Zeile ("aktenzeichen") und Angaben aus Grundbuch und Kataster ("grundbuch": Flurstück,
+    Grundbuchblatt, Gemarkungsnummer)."""
     aus = []
     for m in MAC_RE.finditer(text):
         if m.group("t") == ":" or re.search(r"[A-Fa-f]", m.group("mac")):
@@ -1810,6 +1821,7 @@ def kennungen_ohne_etikett(text: str) -> list:
         zeile = text[zeilenanfang:zeilenende if zeilenende >= 0 else len(text)]
         if _GERICHT_WORT_RE.search(zeile):
             aus.append((m.start(), m.end(), "aktenzeichen"))
+    aus += [(s, e, "grundbuch") for s, e in grundbuch(text)]
     return aus
 
 
@@ -1963,6 +1975,8 @@ def kennungs_etiketten(text: str, start: int = 0, ende: int | None = None) -> li
     for m in _VOR_NR_RE.finditer(text, start, ende):
         if stamm_vor_nr(m.group(1)):
             roh.append((m.start(), m.end()))
+    if "ennz" in text or "ENNZ" in text or "lakette" in text or "child" in text or "Kfz" in text:
+        roh += [(m.start(), m.end()) for m in KFZ_ETIKETT_RE.finditer(text, start, ende)]  # "Kurzzeitkennzeichen"
     aus: list = []
     for s, e in sorted(set(roh), key=lambda se: (se[0], -(se[1] - se[0]))):
         etikett = text[s:e]
@@ -2069,6 +2083,8 @@ def allgemeine_kennung(text: str, s: int, e: int, etikett: str | None = None, *,
         return None                                     # BIC/SWIFT: eigene Wertform ohne Ziffergruppen (muster.bic)
     starts = etikett_starts if etikett_starts is not None else frozenset()   # nie kopieren: je Etikett der Seite
                                                                              # gerufen (linear bleiben)
+    if kfz_etikett(etikett):
+        return _kfz_hinter_etikett(text, e, grenze, ist_etikett, starts, s)
 
     def zwischenwort(a, b, umbruch):
         return kennungswert(text, a, _zeilenende(text, a, grenze), etikett, nr=True) is None
@@ -2091,6 +2107,59 @@ def allgemeine_kennung(text: str, s: int, e: int, etikett: str | None = None, *,
             return None                                 # hinter Zwischenwörtern kein Zeitraum ("… für: 2024/2025")
         return Kennungswert(sp[0], sp[1], t.zwischen, t.ankuendigung)
     return _ergaenzung(text, e, etikett, grenze, starts)
+
+
+class _Formtreffer:
+    """Treffer einer Wertform-Funktion mit der Schnittstelle eines re.Match (start, end, group)."""
+
+    __slots__ = ("_text", "_s", "_e")
+
+    def __init__(self, text: str, s: int, e: int):
+        self._text, self._s, self._e = text, s, e
+
+    def start(self, *_):
+        return self._s
+
+    def end(self, *_):
+        return self._e
+
+    def group(self, *_):
+        return self._text[self._s:self._e]
+
+
+class Wertform:
+    """Wertform-Funktion f(text, pos, grenze) -> (start, ende) | None als Ersatz für das re.Pattern der Regel „Etikett
+    + Wert“ (wert_hinter_etikett): match(text, pos) trifft nur einen Wert, der genau bei pos beginnt. So gilt hinter
+    einer Ankündigung nur ein Wert dieser Form ("… lautet ab März 2026: 245 TKD": "ab" ist kein Kennzeichen, der Satz
+    wird bis zum Doppelpunkt weitergelesen)."""
+
+    def __init__(self, funktion):
+        self._funktion = funktion
+
+    def match(self, text: str, pos: int = 0, endpos: int | None = None):
+        if pos >= len(text) or text[pos] in " \t\n":
+            return None
+        grenze = _zeilenende(text, pos, len(text) if endpos is None else min(endpos, len(text)))
+        sp = self._funktion(text, pos, grenze)
+        if sp is None or sp[0] != pos:
+            return None
+        return _Formtreffer(text, sp[0], sp[1])
+
+
+def _kfz_hinter_etikett(text: str, e: int, grenze: int, ist_etikett, starts, s: int) -> Kennungswert | None:
+    """Kennzeichen hinter einem Kfz-Etikett (kfz_etikett) nach derselben Regel „Etikett + Wert“ wie jede Kennung –
+    direkt dahinter ("Versicherungskennzeichen 604 RMX", "Kennzeichen (Mofa): 287 LMV"), hinter Zwischenwörtern bis
+    zu einer Ankündigung ("… für das Verkehrsjahr 2026 lautet 712 KRB", "Kennzeichen des italienischen Lkw: FX 482
+    KL") –, aber mit der Wertform eines Kennzeichens (kfz_wert) statt der einer Nummer."""
+    def anderes_etikett(i):
+        return (i != s and i in starts) or _anderes_kennungsfeld(text, i)
+
+    t = wert_hinter_etikett(text, e, KFZ_WERTFORM, grenze=grenze, ist_etikett=ist_etikett,
+                            max_woerter=MAX_ZWISCHEN_KENNUNG, kennung=True, fremd_pruefen=fremd_fuer_kennung,
+                            anderes_etikett=anderes_etikett)
+    if t is None or (t.zwischen and zeitangabe(text[t.start:t.ende])):
+        return None
+    return Kennungswert(t.start, t.ende, t.zwischen, t.ankuendigung)
 
 
 # BIC/SWIFT-Etiketten: der Wert hat die eigene Form eines BIC (muster.bic, vier Buchstaben Bank, zwei Land …) – Ziffern
@@ -2163,4 +2232,854 @@ def allgemeine_kennungen(text: str, start: int = 0, ende: int | None = None, ist
                                etikett_starts=starts)
         if w is not None:
             aus.append((k, w))
+    return aus
+
+
+# ======================================================================
+# Kfz-Kennzeichen (Runde 5, Paket K2: Domänen-Befunde 19–26, 41, 44)
+# ======================================================================
+# Kfz-Etikett: "Kennzeichen" und seine Zusammensetzungen mit Fahrzeugbezug – Versicherungs-, Kurzzeit-, Oldtimer-,
+# Saison-, Ausfuhr-, Händler-, Wechselkennzeichen, "Vers.-Kennzeichen", "Kfz-Kennzeichen", "E-/H-Kennzeichen", "rotes
+# Kennzeichen", "Kennzeichen-Nr.", "Versicherungsplakette", "Nummernschild" –, nicht Gefahrgut-, Qualitäts-, Prüf-,
+# CE-, Institutions- oder Personenkennzeichen (kein Fahrzeug: das Wort davor gehört zur Zusammensetzung)
+_KFZ_VORSATZ = (r"versicherungs|vers\.|kurzzeit|oldtimer|saison|ausfuhr|export|zoll|h(?:ä|ae)ndler|wechsel|"
+                r"(?:ü|ue)berf(?:ü|ue)hrungs|fahrzeug|kraftfahrzeug|kfz|pkw|lkw|krad|kraftrad|motorrad|mofa|moped|"
+                r"roller|kleinkraftrad|anh(?:ä|ae)nger|wunsch|diplomaten|beh(?:ö|oe)rden|[eh]")
+_KFZ_ADJEKTIV = (r"amtl(?:iche[sn]?|\.)|polizeiliche[sn]?|rote[sn]?|gr(?:ü|ue)ne[sn]?|neue[sn]?|alte[sn]?|"
+                 r"deutsche[sn]?|ausl(?:ä|ae)ndische[sn]?|gegnerische[sn]?|vorl(?:ä|ae)ufige[sn]?")
+KFZ_ETIKETT_RE = re.compile(
+    r"(?<![\wäöüß.\-])(?:"
+    r"(?:(?i:" + _KFZ_ADJEKTIV + r")[ \t]+)?(?:(?i:" + _KFZ_VORSATZ + r")[ \t]*-?[ \t]*)?"
+    r"(?i:kennzeichen|kennz\.)(?:[ \t]*-?[ \t]*(?i:nr\.?|nummer)(?![\wäöüß]))?"
+    r"|(?i:kfz-?kz\.?|kfz-zeichen|nummernschild(?:er)?|versicherungsplakette|kfz-?schild)"
+    r"(?:[ \t]*-?[ \t]*(?i:nr\.?|nummer)(?![\wäöüß]))?"         # "Versicherungsplakette Nr. 712 KRB"
+    r")(?![\wäöüß])")
+
+
+def kfz_etikett(etikett: str) -> bool:
+    """Ist das Etikett ein Kfz-Etikett (KFZ_ETIKETT_RE: "Kennzeichen", "Versicherungskennzeichen-Nr.",
+    "Vers.-Kennzeichen", "rotes Oldtimerkennzeichen", "Versicherungsplakette") – dann hat sein Wert die Form eines
+    Kennzeichens (kfz_wert), nicht die einer Nummer?"""
+    t = " ".join((etikett or "").split()).strip(" :")
+    return bool(t) and KFZ_ETIKETT_RE.fullmatch(t) is not None
+
+
+def unterscheidungszeichen(kuerzel: str) -> bool:
+    """Ist das Kürzel ein amtliches Unterscheidungszeichen (Wissensbasis daten/kfz_unterscheidungszeichen.txt:
+    Verwaltungsbezirke, wieder zugelassene Altkennzeichen, Bund und Länder) – auch so, wie es ohne Umlaut geschrieben
+    wird ("LOE", "LO" für "LÖ")? Ohne Wissensbasis gilt jedes Kürzel (wie vor Runde 5)."""
+    try:
+        from . import wissen
+        return wissen.normalisieren(kuerzel or "") in wissen.menge("kfz_unterscheidungszeichen")
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return True
+
+
+def fahrzeugmarke(wort: str) -> bool:
+    """Ist das Wort eine Fahrzeugmarke der Wissensbasis (daten/fahrzeugmarken.txt: "DAF", "KTM", "Volvo")? Ein Code
+    direkt dahinter ist ein Modell ("DAF XF 480", "KTM RC 390"), kein Kennzeichen."""
+    w = (wort or "").strip(".,;:()[]\"'„“")
+    if not w:
+        return False
+    try:
+        from . import wissen
+        return wissen.normalisieren(w) in wissen.menge("fahrzeugmarken")
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return False
+
+
+# Wertformen eines Kennzeichens hinter einem Kfz-Etikett (kfz_wert) – Trenner auch mit Leerzeichen um den
+# Bindestrich und als Gedankenstrich ("RO - KL 2207", "RO – KL 2207")
+_KFZ_TRENNER = r"(?:[ \t]?[-–‐][ \t]?|[ \t])"
+_KFZ_DE_RE = re.compile(r"([A-ZÄÖÜ]{1,3})" + _KFZ_TRENNER + r"([A-Z]{1,2})[ \t]?(\d{1,4})([EH])?(?![\wäöüß])")
+_KFZ_DE_KLEIN_RE = re.compile(r"([a-zäöü]{1,3})" + _KFZ_TRENNER + r"([a-z]{1,2})[ \t]?(\d{1,4})([eh])?(?![\wäöüß])")
+# Kurzzeit- und rote Kennzeichen: Erkennungsnummer ohne Buchstaben, beginnend mit 03 bis 07 ("RO-04 1287", "RO-07 451",
+# "RO-06 3315")
+_KFZ_SONDER_RE = re.compile(r"([A-ZÄÖÜ]{1,3})[ \t]?[-–‐][ \t]?(0[3-7])[ \t]?(\d{1,4})(?![\wäöüß])")
+# Ausfuhrkennzeichen: Ziffern und ein Buchstabe ("HH 4711 A", "B 1234 C")
+_KFZ_AUSFUHR_RE = re.compile(r"([A-ZÄÖÜ]{1,3})[ \t]?[-–‐]?[ \t]?(\d{1,4})[ \t]?([A-Z])(?![\wäöüß])")
+# Versicherungskennzeichen (Mofa, Moped, E-Scooter): drei Ziffern über drei Buchstaben, auch kompakt und zweizeilig
+_KFZ_VKZ_RE = re.compile(r"(\d{3})(?:[ \t]?|[ \t]*\n[ \t]*)([A-Z]{3})(?![\wäöüß])")
+# ohne Trenner ("ROKL2207", "BGLHK77", "MAB1234E")
+_KFZ_KOMPAKT_RE = re.compile(r"([A-ZÄÖÜ]{2,5})(\d{1,4})([EH])?(?![\wäöüß])")
+# ausländische Formen hinter dem Etikett ("WGM 4471K", "FX 482 KL", "67-BDK-1", "LU 946067", "1A2 3456", "W-12345X")
+_KFZ_AUSLAND_RE = re.compile(r"[A-Z0-9ÄÖÜ]{1,4}(?:[ \t\-·.][A-Z0-9ÄÖÜ]{1,6}){0,3}(?![\wäöüß])")
+_KFZ_GRUPPE_RE = re.compile(r"[A-Z0-9ÄÖÜ]+")
+# Buchstabenteile, die Währungen und Einheiten sind ("100 EUR", "125 CCM", "350 KWH"), und Funktionswörter
+_KFZ_EINHEITEN = frozenset({"EUR", "USD", "CHF", "GBP", "PLN", "CZK", "HUF", "SEK", "NOK", "DKK", "RON", "BGN", "TRY",
+                            "HRK", "RUB", "CCM", "KWH", "KW", "PS", "KM", "KMH", "KG", "CM", "MM", "QM", "STK", "TSD",
+                            "MIO", "MRD", "UHR", "NM", "PCS", "TAGE", "LTR", "DM", "ATS", "ME", "VA", "MWH", "MPH"})
+_KFZ_KLEIN_SPERRE = frozenset(FUNKTIONSWOERTER | {"ca", "tag", "tage", "km", "min", "std", "uhr", "eur", "ab", "bis",
+                                                  "war", "ist", "hat", "nur", "uns", "und", "zu", "um", "so", "da",
+                                                  "wo", "ob", "es", "er", "je", "pro", "mal", "nr", "s", "z", "u",
+                                                  "o", "d", "v", "kg", "mm", "cm", "nm", "ps", "kw"})
+_DEZIMAL_DANACH_RE = re.compile(r"[.,]\d")
+
+
+def _kfz_einheit(teile) -> bool:
+    return any(t.upper() in _KFZ_EINHEITEN for t in teile)
+
+
+def kfz_wert(text: str, pos: int, grenze: int | None = None):
+    """(start, ende) des Kennzeichens ab pos (führender Leerraum übersprungen) hinter einem Kfz-Etikett – oder None:
+    deutsche Form (auch "RO - KL 2207", "RO – KL 2207", klein "ro-xt 913"), Kurzzeit- und rote Kennzeichen ("RO-04
+    1287"), Ausfuhrkennzeichen ("HH 4711 A"), Versicherungskennzeichen ("435 GHT", "435GHT", zweizeilig "435" ⏎ "GHT"),
+    Kompaktform ("ROKL2207") und ausländische Formen ("WGM 4471K", "FX 482 KL", "67-BDK-1"). Hinter dem Etikett gilt
+    jedes Unterscheidungszeichen (auch verlesen oder ausländisch); nie eine Zahl mit Währung oder Einheit ("100 EUR",
+    "125 CCM") und nie ein Wort ohne Ziffer."""
+    grenze = len(text) if grenze is None else min(grenze, len(text))
+    i = pos
+    while i < grenze and text[i] in " \t":
+        i += 1
+    if i >= grenze:
+        return None
+    for regel in (_KFZ_SONDER_RE, _KFZ_DE_RE, _KFZ_AUSFUHR_RE, _KFZ_VKZ_RE, _KFZ_KOMPAKT_RE):
+        m = regel.match(text, i, grenze)
+        if m is None or _DEZIMAL_DANACH_RE.match(text, m.end()):
+            continue
+        if regel is _KFZ_VKZ_RE and _kfz_einheit([m.group(2)]):
+            continue
+        if regel is _KFZ_DE_RE and _kfz_einheit([m.group(1), m.group(2)]):
+            continue
+        if regel is _KFZ_KOMPAKT_RE and (_kfz_einheit([m.group(1)]) or len(m.group(1)) + len(m.group(2)) < 4):
+            continue
+        if EINHEIT_DANACH_RE.match(text, m.end()):
+            continue
+        return m.start(), m.end()
+    m = _KFZ_DE_KLEIN_RE.match(text, i, grenze)
+    if m is not None and m.group(1) not in _KFZ_KLEIN_SPERRE \
+            and (m.group(2) not in _KFZ_KLEIN_SPERRE or re.search(r"[-–‐]", text[m.end(1):m.start(2)])) \
+            and not EINHEIT_DANACH_RE.match(text, m.end()) and not _DEZIMAL_DANACH_RE.match(text, m.end()):
+        return m.start(), m.end()                       # "m - ab 123" mit Bindestrich, nicht "ca ab 12"
+    m = _KFZ_AUSLAND_RE.match(text, i, grenze)
+    if m is None:
+        return None
+    gruppen = _KFZ_GRUPPE_RE.findall(m.group(0))
+    while len(gruppen) > 1 and gruppen[-1].isalpha() and any(len(g) > 3 for g in gruppen):
+        gruppen.pop()                                   # "WGM 4471K VW": ein Wort dahinter gehört nicht dazu
+    if len(gruppen) < len(_KFZ_GRUPPE_RE.findall(m.group(0))):
+        ende = i
+        for g in gruppen:
+            ende = text.index(g, ende) + len(g)
+    else:
+        ende = m.end()
+    wert = text[i:ende]
+    alnum = [c for c in wert if c.isalnum()]
+    if len(alnum) < 4 or not any(c.isdigit() for c in alnum) or not any(c.isalpha() for c in alnum):
+        return None
+    if _kfz_einheit(gruppen) or ist_datum_text(wert) or ist_betrag(wert) or _DEZIMAL_DANACH_RE.match(text, ende) \
+            or EINHEIT_DANACH_RE.match(text, ende):
+        return None
+    return i, ende
+
+
+KFZ_WERTFORM = Wertform(kfz_wert)          # kfz_wert als Wertform der Regel „Etikett + Wert“
+
+
+# Kennzeichen ohne Etikett (kennzeichen_stellen): die deutsche Form mit amtlichem Unterscheidungszeichen
+_KFZ_FREI_RE = re.compile(
+    r"(?<![\wÄÖÜäöü\-/.])([A-ZÄÖÜ]{1,3})([ \t]?[-–‐][ \t]?|[ \t])([A-Z]{1,2})[ \t]?(\d{1,4})([EH])?(?![\wäöüß])"
+    r"(?![ \t]*(?:Uhr|EUR|€|%|Prozent|km|Jahre|Monate|Tage|Punkte)(?![\wäöüß]))")
+_KFZ_SONDER_FREI_RE = re.compile(r"(?<![\wÄÖÜäöü\-/.])([A-ZÄÖÜ]{1,3})[ \t]?[-–‐][ \t]?(0[3-7])[ \t](\d{1,4})"
+                                 r"(?![\wäöüß])")
+_KFZ_KOMPAKT_FREI_RE = re.compile(r"(?<![\wÄÖÜäöü\-/.])([A-ZÄÖÜ]{2,5})(\d{1,4})([EH])?(?![\wäöüß\-/])")
+_KFZ_KLEIN_FREI_RE = re.compile(r"(?<![\wÄÖÜäöü\-/.])([a-zäöü]{1,3})([ \t]?[-–‐][ \t]?|[ \t])([a-z]{1,2})[ \t]?"
+                                r"(\d{1,4})([eh])?(?![\wäöüß])")
+# Kfz-Wort direkt vor der Kompaktform ("Pkw ROKL2207", "Risiko: Anhänger ROKL22", "Kfz-Kennzeichen ROKL2207")
+_KFZ_WORT = (r"Pkw|PKW|Lkw|LKW|Krad|KRAD|Kraftrad|Motorrad|Anh(?:ä|ae)nger|Wohnwagen|Wohnmobil|Kfz|KFZ|Fahrzeug|"
+             r"Roller|Mofa|Moped|Quad|Trike|Traktor|Zugmaschine|Auflieger|Transporter|Bus|Caravan")
+_KFZ_WORT_DAVOR_RE = re.compile(r"(?:(?<![\wäöüß])(?:" + _KFZ_WORT + r")|" + KFZ_ETIKETT_RE.pattern
+                                + r")[ \t]*:?[ \t]*$")
+# Kfz-Wörter im Satz vor einem klein geschriebenen Kennzeichen ("mein Auto (ro - kl 2207)", "… mit seinem Kennzeichen
+# hinterlassen: ro-xt 913"); ohne Bindestrich zählt nur "Kennzeichen" davor ("das Kennzeichen … war ro xt 913")
+_KFZ_SATZWORT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:kennzeichen|kennz\.|nummernschild|auto|autos|wagen|pkw|lkw|kfz|"
+                              r"fahrzeug|fahrzeugs|motorrad|roller|mofa|moped|transporter|anh(?:ä|ae)nger|wohnmobil)"
+                              r"(?![\wäöüß])")
+_KFZ_KENNZEICHEN_WORT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:kennzeichen|kennz\.|nummernschild)(?![\wäöüß])")
+_SATZ_FENSTER = 120
+
+
+def _satz_davor(text: str, s: int) -> str:
+    """Text vor s im selben Satz (höchstens _SATZ_FENSTER Zeichen, nicht über einen Absatz)."""
+    a = max(0, s - _SATZ_FENSTER)
+    davor = text[a:s]
+    for trenner in ("\n\n", ". ", "! ", "? ", "; "):
+        k = davor.rfind(trenner)
+        if k >= 0:
+            davor = davor[k + len(trenner):]
+    return davor
+
+
+def _kompakt_teilbar(buchstaben: str) -> bool:
+    """Lässt sich die Buchstabenfolge der Kompaktform in ein amtliches Unterscheidungszeichen (1–3 Buchstaben) und eine
+    Erkennung aus 1–2 Buchstaben teilen ("ROKL" = "RO" + "KL")?"""
+    for n in (1, 2, 3):
+        rest = len(buchstaben) - n
+        if 1 <= rest <= 2 and unterscheidungszeichen(buchstaben[:n]):
+            return True
+    return False
+
+
+def kennzeichen_stellen(text: str, sperre=frozenset()) -> list:
+    """(start, ende) der deutschen Kfz-Kennzeichen ohne Etikett – gemeinsam für Erkennung (muster.kfz) und
+    Selbstkontrolle (restrisiko): die Form "N-AB 1234" (auch "N AB 1234", "RO - KL 2207", "RO – KL 2207") und die
+    Kurzzeit-/roten Kennzeichen ("RO-04 1287") NUR mit amtlichem Unterscheidungszeichen (unterscheidungszeichen) – das
+    schließt Modellcodes aus ("KTM RC 390", "DAF XF 480", "YZF-R1"), ebenso eine Ziffer mit Dezimalteil (Hubraum: "C-HR
+    1.8", "GT-R 3.8"); die Kompaktform ("ROKL2207") nur direkt hinter einem Kfz-Wort ("Pkw", "Anhänger",
+    "Kennzeichen"); klein geschrieben ("ro-xt 913") nur mit einem Kfz-Wort im Satz davor, ohne Bindestrich nur hinter
+    "Kennzeichen". sperre: Kürzel, die in Versicherungstexten keine Unterscheidungszeichen sind ("KH", "VK", "BU")."""
+    aus = []
+    for m in _KFZ_FREI_RE.finditer(text):
+        kuerzel, trenner, ziffern = m.group(1), m.group(2), m.group(4)
+        if kuerzel in sperre or not unterscheidungszeichen(kuerzel) or _DEZIMAL_DANACH_RE.match(text, m.end()):
+            continue
+        if trenner != "-" and len(ziffern) == 4 and ziffern[:2] in ("19", "20"):
+            continue                                    # "SGB VI 2023", "VVG AB 2008", "S - BU 2024"
+        aus.append((m.start(), m.end()))
+    for m in _KFZ_SONDER_FREI_RE.finditer(text):
+        if m.group(1) not in sperre and unterscheidungszeichen(m.group(1)) \
+                and not _DEZIMAL_DANACH_RE.match(text, m.end()):
+            aus.append((m.start(), m.end()))
+    for m in _KFZ_KOMPAKT_FREI_RE.finditer(text):
+        buchstaben, ziffern = m.group(1), m.group(2)
+        if buchstaben in sperre or _kfz_einheit([buchstaben]) or len(buchstaben) + len(ziffern) < 5 \
+                or not _kompakt_teilbar(buchstaben):
+            continue
+        if _KFZ_WORT_DAVOR_RE.search(text, max(0, m.start() - 40), m.start()):
+            aus.append((m.start(), m.end()))
+    for m in _KFZ_KLEIN_FREI_RE.finditer(text):
+        kuerzel, trenner, buchstaben = m.group(1), m.group(2), m.group(3)
+        if kuerzel in _KFZ_KLEIN_SPERRE or not unterscheidungszeichen(kuerzel) \
+                or (buchstaben in _KFZ_KLEIN_SPERRE and not trenner.strip()) \
+                or _DEZIMAL_DANACH_RE.match(text, m.end()) or EINHEIT_DANACH_RE.match(text, m.end()):
+            continue                                    # "m - ab 123" mit Bindestrich ja, "m ab 123" nicht
+        davor = _satz_davor(text, m.start())
+        if (_KFZ_SATZWORT_RE.search(davor) if trenner.strip() else _KFZ_KENNZEICHEN_WORT_RE.search(davor)):
+            aus.append((m.start(), m.end()))
+    aus.sort()
+    return aus
+
+
+# Ausländische Kennzeichen im Fließtext (Domänen-Befund 24): Formen der Nachbarländer ("WGM 4471K" PL, "FX 482 KL" IT,
+# "AB-123-CD" FR, "67-BDK-1" NL, "1A2 3456" CZ, "W-12345X" AT, "ZH 123456" CH, "34 ABC 1234" TR)
+_KFZ_AUSLAND_FREI_RE = re.compile(
+    r"(?<![\wÄÖÜäöü\-/.])(?:"
+    r"[A-Z]{2}[ \-]\d{3}[ \-][A-Z]{2}"
+    r"|[A-Z]{2,3}[ ]\d{3,5}[A-Z]{0,2}"
+    r"|\d{2}-[A-Z]{2,3}-\d{1,2}|[A-Z]{2}-\d{2,3}-[A-Z]{1,2}|\d-[A-Z]{3}-\d{3}"
+    r"|\d[A-Z]\d[ ]\d{4}"
+    r"|[A-Z]{1,2}-\d{3,5}[A-Z]{1,2}"
+    r"|\d{2}[ ][A-Z]{1,3}[ ]\d{2,4}"
+    r")(?![\wäöüß\-/]|[.,]\d)")
+_FAHRZEUG_WORT = (r"kennzeichen|kennz\.|nummernschild|pkw|lkw|sattelzug|zugmaschine|sattelzugmaschine|auflieger|"
+                  r"sattelauflieger|anh(?:ä|ae)nger|(?:klein)?transporter|lieferwagen|kleinbus|reisebus|bus|fahrzeug|"
+                  r"fahrzeugs|wagen|auto|motorrad|wohnmobil|wohnwagen|kastenwagen|tanklaster|laster|kipper|traktor")
+_FAHRZEUG_WORT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:" + _FAHRZEUG_WORT + r")(?![\wäöüß])")
+_LAND_ADJEKTIV_RE = re.compile(
+    r"(?i)(?<![\wäöüß])(?:polnisch|italienisch|tschechisch|(?:ö|oe)sterreichisch|schweizerisch|schweizer|"
+    r"niederl(?:ä|ae)ndisch|holl(?:ä|ae)ndisch|franz(?:ö|oe)sisch|belgisch|luxemburgisch|d(?:ä|ae)nisch|schwedisch|"
+    r"norwegisch|finnisch|spanisch|portugiesisch|rum(?:ä|ae)nisch|bulgarisch|ungarisch|slowakisch|slowenisch|"
+    r"kroatisch|serbisch|bosnisch|albanisch|mazedonisch|litauisch|lettisch|estnisch|t(?:ü|ue)rkisch|griechisch|"
+    r"ukrainisch|russisch|wei(?:ß|ss)russisch|belarussisch|moldauisch|englisch|britisch|irisch|ausl(?:ä|ae)ndisch)"
+    r"(?:e[nrms]?)?(?![\wäöüß])"
+    r"|\((?:PL|I|IT|CZ|SK|A|AT|CH|NL|F|FR|B|BE|L|LU|DK|S|N|FIN|E|ES|P|RO|BG|H|HU|SLO|HR|SRB|BIH|AL|LT|LV|EST|TR|GR|"
+    r"UA|RUS|BY|MD|GB|UK|IRL)\)")
+_FAHRZEUG_DIREKT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:" + _FAHRZEUG_WORT + r")[ \t]*\(?[ \t]*$")
+
+
+def kennzeichen_im_satz(text: str) -> list:
+    """(start, ende, mit_land) der ausländischen Kennzeichen im Fließtext (_KFZ_AUSLAND_FREI_RE), die direkt hinter
+    einem Fahrzeugwort stehen ("Zugmaschine WGM 4471K", "Kleintransporter (FX 482 KL)", "Pkw (1A2 3456)"); mit_land:
+    im selben Satz ein Länderhinweis ("polnischer Sattelzug", "(PL)") – dann schwärzt die Erkennung (international),
+    sonst meldet die Selbstkontrolle einen Verdacht. Nicht hinter einer Fahrzeugmarke ("DAF XF 480", "Volvo FH 500":
+    ein Modell) und keine deutsche Form mit amtlichem Unterscheidungszeichen (die liest kennzeichen_stellen)."""
+    aus = []
+    for m in _KFZ_AUSLAND_FREI_RE.finditer(text):
+        davor = text[max(0, m.start() - 40):m.start()]
+        wort = re.search(r"([^\s(]+)[ \t]*\(?[ \t]*$", davor)
+        if wort is not None and fahrzeugmarke(wort.group(1)):
+            continue
+        if not _FAHRZEUG_DIREKT_RE.search(davor):
+            continue
+        satz = _satz_davor(text, m.start()) + text[m.start():m.end() + _SATZ_FENSTER].split(". ")[0]
+        gruppen = _KFZ_GRUPPE_RE.findall(m.group(0))
+        if _kfz_einheit(gruppen):
+            continue
+        aus.append((m.start(), m.end(), bool(_LAND_ADJEKTIV_RE.search(satz))))
+    return aus
+
+
+# ======================================================================
+# Ausländische Anschriften (Runde 5, Paket K2: Domänen-Befunde 29, 40) – gemeinsam für Erkennung (detektoren/
+# wissen_kontext.py, Kategorie international) und Selbstkontrolle (restrisiko.py)
+# ======================================================================
+_GROSS_ORT = "A-ZÄÖÜÀ-ÖØ-ÞĀĂĄĆČĎĐĒĖĘĚĞĢĪĮİĶĹĻĽŁŃŅŇŌŐŒŔŘŚŞŠŢŤŪŮŰŲŹŻŽȘȚ"
+_KLEIN_ORT = "a-zäöüßà-öø-ÿāăąćčďđēėęěğģīįıķĺļľłńņňōőœŕřśşšţťūůűųźżžșț"
+_ORT_CAP = rf"[{_GROSS_ORT}][{_KLEIN_ORT}{_GROSS_ORT}'’\-]+"
+_ORT_STADT = rf"{_ORT_CAP}(?:[ \t]+(?:{_ORT_CAP}|\d{{1,2}}))?"
+# Länderhinweis im Umkreis einer Anschrift
+LAND_RE = re.compile(r"(?i:österreich|schweiz|liechtenstein|niederlande|holland|belgien|luxemburg|frankreich|italien|"
+                     r"spanien|portugal|polen|tschechien|slowakei|ungarn|dänemark|schweden|norwegen|finnland|türkei|"
+                     r"kroatien|slowenien|serbien|bosnien|montenegro|albanien|nordmazedonien|mazedonien|kosovo|"
+                     r"rumänien|bulgarien|griechenland|litauen|lettland|estland|ukraine|moldau|moldawien|russland|"
+                     r"belarus|weißrussland|austria|switzerland|netherlands|belgium|france|italy|spain|poland|czech|"
+                     r"hungary|denmark|sweden|norway|turkey|romania|bulgaria|croatia|slovenia|serbia|greece|"
+                     r"united[ \t]+kingdom|großbritannien|england|irland|ireland|românia|polska|česko)")
+# Straßentyp VOR dem Namen (Rumänien, Bulgarien, Kroatien, Slowenien, Polen): "Str. Memorandumului nr. 27", "Strada
+# Avram Iancu 14", "Calea Victoriei nr. 12", "bul. Vitosha 15", "ul. Marszałkowska 10/12"
+_STRASSENTYP_VORN_RE = re.compile(
+    r"(?<![\wäöüß.\-])(?:Str\.|Strada|STR\.|Calea|Aleea|Bd\.|B-dul|Bulevardul|[ȘŞS]os\.|[ȘŞS]oseaua|Pia[țţt]a|"
+    r"Splaiul|Intrarea|bul\.|Bul\.|ul\.|Ul\.|ulica|Ulica|ulitsa|ul\.|trg|Trg)[ \t]+"
+    rf"(?:(?:{_ORT_CAP}|\d{{1,2}}[.]?|de|din|lui|la|cel|na|pod|kod)[ \t]+){{0,3}}{_ORT_CAP},?[ \t]+"
+    r"(?:(?i:nr\.?|no\.?|br\.?|broj)[ \t]*)?\d{1,4}[a-zA-Z]?(?:[ \t]?/[ \t]?\d{1,4}[a-zA-Z]?)?(?![\w])")
+# Straßenklasse mit Nummer – Autobahn, Bundes-, Landes-, Kreis-, Staatsstraße, Europastraße ("Auf der A 8", "B 15",
+# "L 2080", "BAB 9", "St 2089", "E 45"): eine Fahrbahn, keine Anschrift (Domänen-Befund 46; muster.py und restrisiko.py)
+STRASSENKLASSE = r"(?:A|B|L|K|S|E|St|ST|Kr|KR|BAB|Bab|AB)[ \t]?\d{1,4}"
+STRASSENKLASSE_RE = re.compile(r"(?<![\wäöüß])" + STRASSENKLASSE + r"(?![\wäöüß])")
+# sechsstellige PLZ mit Ort (Rumänien, Russland, Weißrussland, Kasachstan …) – nur mit Länderhinweis
+_PLZ6_RE = re.compile(rf"(?<![\w\-/.,])\d{{6}}[ \t]+({_ORT_STADT})(?![\w])")
+# vierstellige PLZ mit Ort (Österreich, Schweiz, Liechtenstein, Dänemark, Ungarn, Belgien …)
+_PLZ4_RE = re.compile(rf"(?<![\w\-/.,])(?:(?:A|AT|CH|FL|L|B|DK|H|N)[ \t]?-[ \t]?)?(\d{{4}})[ \t]+({_ORT_STADT})"
+                      r"(?![\w])")
+_KEIN_PLZ_ORT = frozenset("""
+euro eur chf stück stueck jahre jahren jahr monate monat tage tag wochen stunden minuten prozent personen kinder
+mitarbeiter
+punkte seiten seite umzug vertrieb schaden abteilung kostenstelle bestand bestände summe betrag beitrag mitglied
+kunden kunde verträge vertrag fahrzeuge fahrzeug schäden euro-norm km kilometer meter liter kg mal anzahlung franken
+""".split())
+
+
+def _ort_nicht(wort: str) -> bool:
+    """Ist das erste Wort hinter der Zahl kein Ort ("1500 Euro", "4711 Vertrieb", "2026 Umzug") – eine Einheit, ein
+    Sach- oder Allerweltswort?"""
+    k = (wort or "").strip(".,;:()").casefold()
+    if not k or k in _KEIN_PLZ_ORT:
+        return True
+    try:
+        from . import wissen
+        return bool(wissen.ist_allerweltswort(wort.strip(".,;:()")))
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return False
+
+
+def ort_at_ch(phrase: str) -> bool:
+    """Ein Ort in Österreich, der Schweiz oder Liechtenstein (Wissensbasis daten/orte_at_ch.txt: "Linz", "Zürich",
+    "Bregenz") – auch die ersten Wörter einer längeren Ortsangabe ("Sankt Gallen", "Krems an der Donau")?"""
+    try:
+        from . import wissen
+        index = wissen.index("orte_at_ch")
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return False
+    woerter = (phrase or "").split()
+    for n in range(min(len(woerter), 4), 0, -1):
+        if index.eintrag_fuer(" ".join(woerter[:n])) is not None:
+            return True
+    return False
+
+
+def strassen_vorn(text: str) -> list:
+    """(start, ende) der Straßen mit vorangestelltem Straßentyp (Rumänien, Bulgarien, Kroatien, Slowenien, Polen):
+    "Str. Memorandumului nr. 27", "Calea Victoriei nr. 12", "bul. Vitosha 15" – Name und Hausnummer, der Typ gehört
+    dazu."""
+    return [(m.start(), m.end()) for m in _STRASSENTYP_VORN_RE.finditer(text)]
+
+
+def plz6_mit_land(text: str) -> list:
+    """(start, ende) der sechsstelligen PLZ mit Ort, wenn im Umkreis ein Länderhinweis steht ("400114 Cluj-Napoca,
+    Rumänien") – ohne ihn ist eine sechsstellige Zahl vor einem Wort eher eine Artikel- oder Bestellnummer."""
+    aus = []
+    for m in _PLZ6_RE.finditer(text):
+        if _ort_nicht(m.group(1).split()[0]):
+            continue
+        if LAND_RE.search(text, max(0, m.start() - 120), min(len(text), m.end() + 60)):
+            aus.append((m.start(), m.end()))
+    return aus
+
+
+def plz4_ausland(text: str, strassen) -> list:
+    """(start, ende) der vierstelligen PLZ mit Ort einer ausländischen Anschrift: hinter einer Straße beliebiger Form
+    (strassen: [(start, ende)]; höchstens sechs Zeichen und ein Komma dazwischen: "Seestrasse 12, 8002 Zürich"), vor
+    einer Straße in Klammern ("4040 Linz (Hauptstraße 44/3/12)"), mit Länderhinweis oder Länderkürzel im Umkreis
+    ("CH-3011 Bern", "…, Schweiz") oder mit einem Ort der Nachbarländer ("aus 4040 Linz": daten/orte_at_ch.txt). Keine
+    Einheit und kein Sachwort dahinter ("1500 Euro", "4711 Vertrieb"); eine Jahreszahl ("2025 Hamburg") nur mit Straße,
+    Länderhinweis oder Länderkürzel."""
+    aus = []
+    enden = sorted(e for _, e in strassen)
+    anfaenge = sorted(s for s, _ in strassen)
+    for m in _PLZ4_RE.finditer(text):
+        plz, ort = m.group(1), m.group(2)
+        if _ort_nicht(ort.split()[0]):
+            continue
+        nach_strasse = any(0 <= m.start() - e <= 6 and "\n" not in text[e:m.start()] for e in enden
+                           if m.start() - 8 <= e <= m.start())
+        vor_strasse = any(0 <= s - m.end() <= 3 for s in anfaenge if m.end() <= s <= m.end() + 3)
+        kuerzel = m.group(0)[:1].isalpha()
+        land = bool(LAND_RE.search(text, max(0, m.start() - 120), min(len(text), m.end() + 60)))
+        jahr = plz[:2] in ("19", "20")
+        if not (nach_strasse or vor_strasse or kuerzel or land) and (jahr or not ort_at_ch(ort)):
+            continue
+        aus.append((m.start(), m.end()))
+    return aus
+
+
+# ======================================================================
+# Neue Kategorien (Runde 5, Paket K2: Domänen-Befunde 37, 69, 70, 71, 81, 99–103) – gemeinsam für Erkennung
+# (muster.py) und Selbstkontrolle (restrisiko.py)
+# ======================================================================
+# -- IP-Adresse -------------------------------------------------------------------------------------------------------
+_IPV4_RE = re.compile(r"(?<![\w.:\-/])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\w]|[.:]\d)")
+_IPV6_RE = re.compile(r"(?<![\w:.\-])(?=[0-9A-Fa-f:]*:[0-9A-Fa-f]*:)[0-9A-Fa-f:]{2,39}(?![\w:])")
+_IP_ETIKETT_RE = re.compile(r"(?i)(?<![a-zäöüß])(?:ip(?:v[46])?(?:-?adresse)?|adresse|host|server|router|client|"
+                            r"zugriff|absender|von|aus|via|quelle|source|address)[ \t]*[:=]?[ \t]*\(?[ \t]*$")
+_VERSION_DAVOR_RE = re.compile(r"(?i)(?:version|vers\.|release|build|firmware|software|update|treiber|patch|"
+                               r"stand|revision|rev\.|ver\.|v)[ \t\-]*[:.]?[ \t]*$")
+
+
+def _ipv4_gueltig(m) -> bool:
+    teile = m.groups()
+    return all(int(t) <= 255 and (t == "0" or not t.startswith("0")) for t in teile)
+
+
+def ip_adressen(text: str) -> list:
+    """(start, ende) der IP-Adressen: IPv4 mit vier gültigen Oktetten (bis 255, ohne führende Null) – hinter einem
+    Etikett oder Kontextwort ("IP-Adresse:", "IPv4", "Zugriff von", "Absender-IP") jede, sonst nur in deutlicher Form
+    (mindestens zwei zweistellige Oktette: "84.123.45.67"), nie hinter einem Versionswort ("Version 10.0.19045.1234",
+    "Firmware-Release 4.18.0.147") und keine Gliederung aus einstelligen Teilen ("Abschnitt 1.2.3.4"); IPv6 mit
+    mindestens drei Gruppen, gültig nach der Norm und mit Hex-Buchstabe oder "::" (nie eine Uhrzeit "14:08:30", nie eine
+    MAC-Adresse aus sechs Zweiergruppen)."""
+    aus = []
+    if "." in text:
+        for m in _IPV4_RE.finditer(text):
+            if not _ipv4_gueltig(m):
+                continue
+            davor = text[max(0, m.start() - 30):m.start()].rsplit("\n", 1)[-1]
+            if _VERSION_DAVOR_RE.search(davor):
+                continue
+            deutlich = sum(len(t) >= 2 for t in m.groups()) >= 2
+            if deutlich or _IP_ETIKETT_RE.search(davor):
+                aus.append((m.start(), m.end()))
+    if text.count(":") >= 2:
+        import ipaddress
+        for m in _IPV6_RE.finditer(text):
+            w = m.group(0)
+            gruppen = [g for g in w.split(":") if g]
+            if len(gruppen) < 3 or not ("::" in w or re.search(r"[A-Fa-f]", w)):
+                continue
+            try:
+                ipaddress.IPv6Address(w)
+            except ValueError:
+                continue
+            aus.append((m.start(), m.end()))
+    return aus
+
+
+# -- Standort / Koordinaten -------------------------------------------------------------------------------------------
+_GRAD_PAAR_RE = re.compile(
+    r"(?<![\w.,\-])([-+]?\d{1,2}\.\d{3,8})(?:[ \t]*°)?(?:[ \t]*([NSns])(?![\w]))?[ \t]*[,;/][ \t]*"
+    r"([-+]?\d{1,3}\.\d{3,8})(?:[ \t]*°)?(?:[ \t]*([EOWeow])(?![\w]))?(?![\w]|[.,]\d)")
+_GRAD_EINZELN_RE = re.compile(
+    r"(?i)(?<![\wäöüß])(?:breite(?:ngrad)?|l(?:ä|ae)nge(?:ngrad)?|lat(?:itude)?|lon(?:gitude)?|lng)[ \t]*[:=]?[ \t]*"
+    r"([-+]?\d{1,3}\.\d{3,8})(?:[ \t]*°)?(?:[ \t]*[NSEOW](?![\w]))?(?![\w]|[.,]\d)")
+_DMS_RE = re.compile(
+    r"(?<![\d.,])(\d{1,3})[ \t]?°[ \t]?(\d{1,2})[ \t]?['′’][ \t]?(\d{1,2}(?:[.,]\d+)?)[ \t]?(?:[\"″”]|'')?[ \t]?"
+    r"([NSEOW])(?![\wäöüß])")
+_STANDORT_ETIKETT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:gps|koordinaten|standort|position|geo|lage|unfallort|"
+                                  r"fundort|ortung)(?![\wäöüß])")
+
+
+def koordinaten(text: str) -> list:
+    """(start, ende) der Standortangaben: ein Paar in Dezimalgrad (Breite bis 90, Länge bis 180, mindestens vier
+    Nachkommastellen – hinter "GPS", "Koordinaten", "Standort", "Position" … mindestens drei: "47.85612, 12.12857",
+    "52.5200 N, 13.4050 O"), Breiten- und Längengrad mit Etikett ("Breitengrad 47.85612") und Grad/Minuten/Sekunden mit
+    Himmelsrichtung ("47°51'22.0\\"N"). Einzelne Messwerte mit Dezimalpunkt, Beträge und Versionen bleiben stehen."""
+    aus = []
+    if "." in text:
+        for m in _GRAD_PAAR_RE.finditer(text):
+            breite, laenge = float(m.group(1)), float(m.group(3))
+            if abs(breite) > 90 or abs(laenge) > 180:
+                continue
+            stellen = min(len(m.group(1).split(".")[1]), len(m.group(3).split(".")[1]))
+            mit_richtung = bool(m.group(2) and m.group(4))
+            davor = text[max(0, m.start() - 40):m.start()].rsplit("\n", 1)[-1]
+            if stellen >= 4 or (stellen >= 3 and (mit_richtung or _STANDORT_ETIKETT_RE.search(davor))):
+                aus.append((m.start(1), m.end()))
+        for m in _GRAD_EINZELN_RE.finditer(text):
+            if abs(float(m.group(1))) <= 180 and not any(a <= m.start(1) < b for a, b in aus):
+                aus.append((m.start(1), m.end()))
+    if "°" in text:
+        for m in _DMS_RE.finditer(text):
+            grad = int(m.group(1))
+            if grad <= (90 if m.group(4) in "NS" else 180) and int(m.group(2)) < 60:
+                aus.append((m.start(), m.end()))
+    return sorted(set(aus))
+
+
+# -- Verschleierte E-Mail-Adresse -------------------------------------------------------------------------------------
+_AT_RE = r"[ \t]?(?:[\(\[\{][ \t]?(?:at|ät|AT|@)[ \t]?[\)\]\}]|[ \t]@[ \t])[ \t]?"
+_DOT_RE = r"(?:[ \t]?[\(\[\{][ \t]?(?:dot|DOT|punkt|PUNKT|pkt)[ \t]?[\)\]\}][ \t]?|\.)"
+EMAIL_VERSCHLEIERT_RE = re.compile(
+    r"(?<![\w.\-+%])[\w.\-+%]{1,64}" + _AT_RE + r"[\w\-]{1,63}(?:" + _DOT_RE + r"[\w\-]{1,63}){0,3}" + _DOT_RE
+    + r"(?:de|com|net|org|eu|at|ch|info|biz|io|nl|fr|it|es|pl|tr|uk|co|me|email|online|mail|be|lu|dk|se|no|fi|cz|"
+      r"hu|ro|gr|ru|us|li)(?![\wäöüß])")
+
+
+def email_verschleiert(text: str) -> list:
+    """(start, ende) der verschleierten E-Mail-Adressen: "(at)", "[at]", "{at}", "(ät)" statt "@", "[dot]", "(punkt)"
+    statt des Punkts ("quirin.zw [at] web [dot] de", "quirin.zw(at)web(punkt)de") – nur mit bekannter Endung ("(at)
+    Messe" ist keine Adresse)."""
+    if "at" not in text and "ät" not in text and "AT" not in text and " @ " not in text:
+        return []
+    return [(m.start(), m.end()) for m in EMAIL_VERSCHLEIERT_RE.finditer(text)]
+
+
+# -- Zugangsdaten -----------------------------------------------------------------------------------------------------
+# Etiketten eines Zugangs (Kundenportal, App): Benutzer/-name/-kennung, Login, Kennwort/Passwort, PIN, Aktivierungs-,
+# Freischalt-, Zugangs- und Registrierungscode – nicht als Bestimmungswort ("Benutzerhandbuch", "Kennwortregeln") und
+# nicht hinter einer Plattform ("Signal-Benutzername": ein Profilname)
+_ZUGANG_ETIKETT_RE = re.compile(
+    r"(?<![\wäöüß\-./])(?:"
+    r"(?i:benutzer(?:name|kennung|konto|-?id)?|nutzerkennung|anmelde(?:name|kennung)|login(?:-?(?:name|id|kennung))?|"
+    r"username|user(?:-?id)?|zugangs(?:kennung|name|code|nummer|daten)|kunden-?login)"
+    r"|(?i:(?:initial|einmal|start|erst|transport|online)?-?(?:kennwort|passwort|password|passwd))"
+    r"|(?:PIN|Pin)(?:-?(?:Nr\.?|Nummer|Code))?"
+    r"|(?i:aktivierungs(?:code|schl(?:ü|ue)ssel|nummer|kennung)|freischalt(?:code|nummer|schl(?:ü|ue)ssel)|"
+    r"registrierungs(?:code|schl(?:ü|ue)ssel|nummer)|zugangsschl(?:ü|ue)ssel|einmalcode|tan)"
+    r")(?:[ \t]*\([^()\n]{1,20}\))?(?![\wäöüß\-])")
+_ZUGANG_WERT_RE = re.compile(r"[^\s,;\"„“”«»<>|]{3,64}")
+_ZUGANG_FUELLWORT = frozenset("""
+wird werden wurde ist sind siehe s. vgl. folgt folgen separat gesondert per bitte nicht kein keine keinen unbekannt
+vergessen ändern aendern zurücksetzen zuruecksetzen ihr ihre ihren ihrem ihres der die das den dem des ein eine einen
+wie laut lt. gemäß gemaess noch erhalten erhalten. mitgeteilt mitgeteilt. herr frau firma eingeben eingabe hier unten
+oben vorhanden nein ja leer offen beantragt angefordert neu alt automatisch generiert gültig gueltig
+""".split())
+_ZUGANG_ANKUENDIGUNG_RE = re.compile(r"(?i)[ \t]*(?:lautet|lauten|ist)(?![\wäöüß])[ \t]*:?[ \t]*")
+
+
+def _zugang_wert(text: str, i: int, grenze: int):
+    """(start, ende) eines Zugangswerts ab i: ein Token ohne Leerzeichen (3–64 Zeichen) mit Buchstabe oder Ziffer, das
+    kein Füllwort ist und hinter dem der Satz nicht klein weitergeht ("wird separat zugesandt")."""
+    while i < grenze and text[i] in " \t":
+        i += 1
+    m = _ZUGANG_WERT_RE.match(text, i, grenze)
+    if m is None:
+        return None
+    s, e = m.start(), m.end()
+    while e > s and text[e - 1] in ".,:;)»“”'\"":
+        e -= 1
+    wert = text[s:e]
+    if len(wert) < 3 or not any(c.isalnum() for c in wert) or wert.startswith(("[", "(", "http", "www.")):
+        return None
+    if wert.casefold() in _ZUGANG_FUELLWORT or wert.casefold().rstrip(".:") in _ZUGANG_FUELLWORT:
+        return None
+    if "@" in wert and "." in wert.split("@")[-1]:
+        return None                                     # E-Mail-Adresse: eigene Kategorie
+    rest = text[m.end():min(grenze, m.end() + 40)]
+    naechstes = re.match(r"[ \t]+([^\s]+)", rest)
+    if naechstes is not None and naechstes.group(1)[:1].islower() and wert.isalpha() \
+            and not naechstes.group(1).startswith(("/", "|")):
+        return None                                     # "Kennwort: wird separat zugesandt", "PIN: siehe Brief"
+    if wert[:1].isupper() and wert.isalpha() and wert[1:].islower() and len(wert) > 3:
+        try:
+            from . import wissen
+            if wissen.ist_allerweltswort(wert) or wissen.ist_anrede_titel(wert) or wissen.ist_vorname(wert) \
+                    or wissen.ist_nachname(wert):
+                return None                             # "Benutzer: Herr …", "Benutzername: Max Mustermann"
+        except Exception:  # pragma: no cover - Wissensbasis fehlt
+            pass
+    return s, e
+
+
+def zugangsdaten(text: str) -> list:
+    """(start, ende) der Zugangsdaten hinter ihrem Etikett (Benutzer, Benutzerkennung, Login, Kennwort, Passwort, PIN,
+    Aktivierungs-, Freischalt-, Zugangs-, Registrierungscode, Initialpasswort): mit Trennzeichen (":", "=", Zellgrenze,
+    eine Klammer "(alt)" davor) oder hinter "lautet"/"ist" desselben Satzes (höchstens sechs Wörter Abstand:
+    "Ihr Kennwort für das Kundenportal lautet: Sommer2024!"); ein Etikett am Zeilenende mit Doppelpunkt nimmt den
+    Wert am Anfang der nächsten Zeile. Kein Füllwort ("Kennwort: wird separat zugesandt", "PIN: siehe Brief"), kein
+    Name, keine E-Mail-Adresse."""
+    aus = []
+    for m in _ZUGANG_ETIKETT_RE.finditer(text):
+        e = m.end()
+        zeilenende = text.find("\n", e)
+        zeilenende = len(text) if zeilenende < 0 else zeilenende
+        t = re.match(r"[ \t]*(?:[:=]|\t\t)[ \t]*", text[e:zeilenende + 1])
+        if t is not None:
+            i = e + t.end()
+            if i >= zeilenende and text[e:zeilenende].strip().startswith(":"):
+                folge = text.find("\n", zeilenende + 1)
+                sp = _zugang_wert(text, zeilenende + 1, len(text) if folge < 0 else folge)
+                if sp is not None and not text[sp[1]:(len(text) if folge < 0 else folge)].strip():
+                    aus.append(sp)
+                continue
+            sp = _zugang_wert(text, i, zeilenende)
+            if sp is not None:
+                aus.append(sp)
+            continue
+        # "Ihr Kennwort für das Kundenportal lautet: …": Ankündigung im selben Satz
+        satz = text[e:min(zeilenende, e + 120)]
+        for k, wort in enumerate(re.finditer(r"\S+", satz)):
+            if k > 6 or wort.group(0)[-1:] in ".!?;" and not wort.group(0).endswith(":"):
+                break
+            a = _ZUGANG_ANKUENDIGUNG_RE.match(satz, wort.start())
+            if a is not None and a.end() > wort.start():
+                sp = _zugang_wert(text, e + a.end(), zeilenende)
+                if sp is not None:
+                    aus.append(sp)
+                break
+    return sorted(set(aus))
+
+
+# -- Profil- und Kontonamen -------------------------------------------------------------------------------------------
+_PLATTFORM = (r"eBay|Ebay|EBAY|Kleinanzeigen|Vinted|Instagram|Facebook|TikTok|Tiktok|Snapchat|Signal|Telegram|Threema|"
+              r"Skype|Discord|Twitter|LinkedIn|Linkedin|Xing|XING|YouTube|Youtube|Twitch|Reddit|Pinterest|WhatsApp|"
+              r"Whatsapp|Steam|PayPal|Paypal|Mastodon|Bluesky|Tinder|Etsy|Wallapop|Shpock|Willhaben|Mobile\.de|"
+              r"Autoscout24|Vinted\.de|Momox|Rebuy|Amazon|Airbnb|Booking|Spotify|Netflix|Telegram-Kanal")
+_PROFIL_NAMENSWORT = (r"(?:Nutzer|Benutzer|Mitglieds|Profil|Anzeige|Konto|Account|Verk(?:ä|ae)ufer|K(?:ä|ae)ufer|"
+                      r"Spieler|Kanal|Spitz|Anzeigen|User)-?[Nn]ame|Nickname|Alias|Handle|Profil|Konto|Account|Name|"
+                      r"Benutzer|Nutzer|Kennung|ID|Id|Kanal")
+_PROFIL_ETIKETT_RE = re.compile(
+    r"(?<![\wäöüß\-])(?:"
+    # "eBay-Name", "Signal-Benutzername"
+    r"(?:" + _PLATTFORM + r")[ \t]*-[ \t]*(?:" + _PROFIL_NAMENSWORT + r")"
+    r"|(?:" + _PROFIL_NAMENSWORT.split("|Nickname")[0] + r"|Nickname)"               # "Nutzername", "Profilname"
+    r"(?:[ \t]+(?:auf|bei|in|im)[ \t]+(?:" + _PLATTFORM + r"))?"                       # "Profilname auf Vinted"
+    r"|(?:Snapchat|Signal|Telegram|Threema|Discord|TikTok|Tiktok|Instagram|Skype|Twitter|Mastodon|Bluesky|Xing|XING)"
+    r")(?![\wäöüß\-])")
+_PROFIL_WERT_RE = re.compile(r"@?[A-Za-z0-9ÄÖÜäöüß][A-Za-z0-9ÄÖÜäöüß._\-]{1,40}(?<![._\-])")
+_HANDLE_RE = re.compile(r"(?<![\w@.\-+%/])@([A-Za-z0-9_](?:[A-Za-z0-9_.]{1,38}[A-Za-z0-9_]))(?![\w@]|\.[A-Za-z])")
+_PROFIL_URL_RE = re.compile(
+    r"(?i)(?<![\w.\-/])(?:https?://)?(?:www\.|m\.|de\.|mobile\.)?"
+    r"(?:facebook\.com|fb\.com|instagram\.com|t\.me|telegram\.me|tiktok\.com/@?|twitter\.com|x\.com|threads\.net/@?|"
+    r"linkedin\.com/in|xing\.com/profile|youtube\.com/@?|youtube\.com/(?:c|user|channel)|twitch\.tv|"
+    r"reddit\.com/u(?:ser)?|pinterest\.(?:com|de)|snapchat\.com/add|vinted\.de/member|vinted\.de/members|"
+    r"kleinanzeigen\.de/s-bestandsliste\.html\?userId=|github\.com|onlyfans\.com|mastodon\.social/@?)/"
+    r"(@?[A-Za-z0-9ÄÖÜäöüß][A-Za-z0-9ÄÖÜäöüß._\-]{1,60})")
+_URL_RE = re.compile(r"(?i)(?<![\w@])(?:https?://|www\.)[^\s<>\"'„“”]+|"
+                     r"(?<![\w@./])[\w\-]+(?:\.[\w\-]+)*\.(?:de|com|net|org|eu|info|at|ch|io|me|app)/[^\s<>\"'„“”]*")
+# Parameter von Links mit Personenbezug ("?kdnr=4711081&vsnr=LV2024887766&name=Zwackelhuber")
+_URL_PARAMETER_RE = re.compile(
+    r"(?i)[?&;](?:kdnr|kd|kdnummer|kundennr|kundennummer|kunde|kundenid|kunden_id|vsnr|vsnummer|versnr|vertrag|"
+    r"vertragsnr|vertragsnummer|police|policennr|policennummer|polizze|vn|vp|name|nachname|vorname|fullname|email|"
+    r"mail|e-mail|user|username|benutzer|login|iban|gebdat|geburtsdatum|geb|telefon|tel|mobil|plz|strasse|str|ort|"
+    r"schadennr|schadennummer|antragsnr|antragsnummer|az|aktenzeichen)=([^&#\s\"'<>]+)")
+_PROFIL_FUELLWORT = frozenset("""
+nein ja keine keiner keins nicht vorhanden unbekannt siehe k.a. n/a na entfällt entfaellt kein privat aktiv inaktiv
+gelöscht geloescht gesperrt offen folgt
+""".split())
+
+
+def _personenartig(teil: str) -> bool:
+    """Sieht der Pfadteil eines Profil-Links nach einer Person aus – Trenner zwischen Wortteilen ("quirin.zwackelhuber",
+    "korbi_zeitl84"), Ziffern oder ein Vor-/Nachname der Wissensbasis – und nicht nach einer Organisation der
+    Erlaubnisliste ("allianz.de", "HUKCOBURG")?"""
+    t = teil.lstrip("@")
+    woerter = [w for w in re.split(r"[._\-]+", t) if w]
+    try:
+        from . import wissen
+        if any(wissen.ist_allowlist(w) for w in woerter if len(w) >= 3) or wissen.ist_allowlist(t):
+            return False
+        bekannt = any(wissen.ist_vorname(w.capitalize()) or wissen.ist_nachname(w.capitalize()) for w in woerter
+                      if len(w) >= 3)
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        bekannt = False
+    return len(woerter) >= 2 or any(c.isdigit() for c in t) or bekannt
+
+
+def profilnamen(text: str) -> list:
+    """(start, ende) der Profil- und Kontonamen: "@"-Namen ("@lena.wiesengrund", nicht in einer E-Mail-Adresse), Werte
+    hinter Profil-Etiketten ("Nutzername:", "Mitgliedsname:", "Profilname auf Vinted:", "eBay-Name:", "Signal-
+    Benutzername:", "Snapchat:", "Telegram:" – eine Telefonnummer dahinter liest die Telefonregel), der Pfad eines
+    Profil-Links ("facebook.com/quirin.zwackelhuber", "t.me/lenchen_wiese82") – nur mit personenartigem Teil, nie die
+    Seite einer Organisation ("facebook.com/HUKCOBURG") – und die Werte personenbezogener Parameter eines Links
+    ("?kdnr=4711081&name=Zwackelhuber"). Kein Füllwort ("Telegram: nein", "Signal: nicht vorhanden")."""
+    aus = []
+    if "@" in text:
+        aus += [(m.start(), m.end()) for m in _HANDLE_RE.finditer(text)]
+    for m in _PROFIL_ETIKETT_RE.finditer(text):
+        t = re.match(r"[ \t]*(?:[:=]|\t\t)[ \t]*", text[m.end():m.end() + 6])
+        if t is None:
+            continue
+        i = m.end() + t.end()
+        u = _PROFIL_URL_RE.match(text, i)
+        if u is not None:
+            continue                                    # der Link: unten
+        w = _PROFIL_WERT_RE.match(text, i)
+        if w is None:
+            continue
+        wert = w.group(0)
+        if wert.casefold().lstrip("@") in _PROFIL_FUELLWORT or re.fullmatch(r"[+\d][\d ()/\-]*", wert):
+            continue                                    # Füllwort; eine Telefonnummer liest die Telefonregel
+        rest = re.match(r"[ \t]+([^\s]+)", text[w.end():w.end() + 30])
+        if rest is not None and rest.group(1)[:1].islower() and wert.isalpha():
+            continue                                    # "Signal: nicht vorhanden" (klein weiter: ein Satz)
+        if wert[:1].isupper() and wert.isalpha() and wert[1:].islower():
+            continue                                    # "Name: Weber" liest die Namensregel; "Profil: Privat"
+        aus.append((w.start(), w.end()))
+    if "/" in text:
+        for m in _PROFIL_URL_RE.finditer(text):
+            if _personenartig(m.group(1)):
+                aus.append((m.start(1), m.end(1)))
+        if "=" in text:
+            for u in _URL_RE.finditer(text):
+                for m in _URL_PARAMETER_RE.finditer(u.group(0)):
+                    wert = m.group(1)
+                    if len(wert) >= 3 and any(c.isalnum() for c in wert):
+                        aus.append((u.start() + m.start(1), u.start() + m.end(1)))
+    return sorted(set(aus))
+
+
+# -- Grundbuch und Liegenschaftskataster ------------------------------------------------------------------------------
+_FLURSTUECK_RE = re.compile(
+    r"(?<![\wäöüß])(?:Flurst(?:ü|ue)ck(?:e|s)?|Flst\.?|FlSt\.?|Flurst\.)(?:[ \t]*-?[ \t]*(?:Nr\.?|Nummer|nummer|"
+    r"Nrn\.?))?[ \t]*:?[ \t]*")
+_FLURSTUECK_WERT_RE = re.compile(r"\d{1,5}(?:[ \t]?/[ \t]?\d{1,4})?(?![\w/])")
+_GRUNDBUCHBLATT_RE = re.compile(r"(?<![\wäöüß])Grundbuch(?:-?[Bb]latt|blatt)(?:[ \t]*-?[ \t]*(?:Nr\.?|Nummer))?"
+                                r"[ \t]*:?[ \t]*(\d{1,6})(?![\w/])")
+_GRUNDBUCH_BLATT_RE = re.compile(r"(?<![\wäöüß])Grundbuch(?:es|s)?(?![\wäöüß])[^\n.;]{0,90}?(?<![\wäöüß])"
+                                 r"(?:Blatt|Bl\.)[ \t]*(?:Nr\.?[ \t]*)?(\d{1,6})(?![\w/])")
+_GEMARKUNGSNUMMER_RE = re.compile(r"(?<![\wäöüß])Gemarkung(?:snummer|s-Nr\.?|-Nr\.?|[ \t]+Nr\.?)[ \t]*:?[ \t]*"
+                                  r"(\d{3,6})(?![\w/])")
+
+
+def grundbuch(text: str) -> list:
+    """(start, ende) der Angaben aus Grundbuch und Liegenschaftskataster, die ein Grundstück und damit seinen
+    Eigentümer bestimmen: Flurstücksnummer ("Flurstück 123/4", "Flst.-Nr. 1187/12", "Flurstücke 445/2 und 445/3"),
+    Grundbuchblatt ("Grundbuch von Unterhaching, Blatt 5678", "Grundbuchblatt 9921") und Gemarkungsnummer; nicht
+    "Blatt 2 von 3", nicht "Flur und Treppenhaus". Die Flur allein ("Flur 3") bleibt stehen: eine ein- bis
+    zweistellige Zahl würde als Wert im ganzen Dokument weitergegeben, und ohne Flurstück bestimmt sie kein
+    Grundstück."""
+    if "lurst" not in text and "rundbuch" not in text and "Flst" not in text and "FlSt" not in text \
+            and "Gemarkung" not in text:
+        return []
+    aus = []
+    for m in _FLURSTUECK_RE.finditer(text):
+        i = m.end()
+        for _ in range(6):                              # "Flurstücke 445/2 und 445/3", "123/4, 123/5"
+            w = _FLURSTUECK_WERT_RE.match(text, i)
+            if w is None or (not aus and EINHEIT_DANACH_RE.match(text, w.end())):
+                break
+            aus.append((w.start(), w.end()))
+            folge = re.match(r"[ \t]*(?:,|;|und|u\.|sowie|bzw\.)[ \t]*", text[w.end():w.end() + 12])
+            if folge is None:
+                break
+            i = w.end() + folge.end()
+    for regel in (_GRUNDBUCHBLATT_RE, _GRUNDBUCH_BLATT_RE, _GEMARKUNGSNUMMER_RE):
+        aus += [(m.start(1), m.end(1)) for m in regel.finditer(text)]
+    return sorted(set(aus))
+
+
+# -- Religion und Konfession (Art. 9 DSGVO) ---------------------------------------------------------------------------
+# Kirchensteuermerkmale der Lohnsteuer (rk, ev, lt, rf, ak, fr, die frei- und israelitischen Gemeinden) und
+# ausgeschriebene Bekenntnisse – nur hinter einem Etikett bzw. unter einem Spaltenkopf, nie allein ("Ev. Krankenhaus",
+# "rk-Wert")
+_RELIGION_KUERZEL = frozenset("rk ev lt rf ak fr fa fb fg fm fs ib ih il is iw jd jh".split())
+_RELIGION_WORT = (
+    r"r(?:ö|oe)misch[ \-]?katholisch|r(?:ö|oe)m\.?[ \-]?kath\.?|r\.[ ]?k\.|katholisch|kath\.|"
+    r"evangelisch(?:[ \-](?:lutherisch|reformiert|freikirchlich))?|ev\.[ \-]?(?:luth|ref)\.|evang\.|ev\.|"
+    r"lutherisch|reformiert|franz(?:ö|oe)sisch[ \-]reformiert|alt[ \-]?katholisch|freireligi(?:ö|oe)s|"
+    r"j(?:ü|ue)disch|israelitisch|islamisch|muslimisch|sunnitisch|schiitisch|alevitisch|jesidisch|"
+    r"(?:griechisch|russisch|serbisch|rum(?:ä|ae)nisch|bulgarisch|syrisch|armenisch|koptisch)[ \-]?"
+    r"(?:orthodox|apostolisch)|orthodox|koptisch|buddhistisch|hinduistisch|neuapostolisch|mennonitisch|baptistisch|"
+    r"methodistisch|freikirchlich|anglikanisch|zeugen[ ]jehovas|konfessionslos|ohne[ ](?:konfession|bekenntnis)|"
+    r"katholik(?:in)?|protestant(?:in)?|protestantisch|muslim(?:a|in)?|christ(?:in)?|christlich|jude|j(?:ü|ue)din|"
+    r"islam|christentum|judentum|buddhismus|hinduismus|atheist(?:in)?|atheistisch")
+_RELIGION_WERT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:" + _RELIGION_WORT + r")(?![\wäöüß])")
+_RELIGION_KUERZEL_RE = re.compile(r"(?<![\wäöüß.\-])(" + "|".join(sorted(_RELIGION_KUERZEL))
+                                  + r"|" + "|".join(k.upper() for k in sorted(_RELIGION_KUERZEL))
+                                  + r")(?![\wäöüß\-]|[.,]\d)")
+_RELIGION_ETIKETT = (
+    r"konfession|konf\.|bekenntnis|religion(?:szugeh(?:ö|oe)rigkeit|szugeh\.|sgemeinschaft|sbekenntnis|"
+    r"sangeh(?:ö|oe)rigkeit)?|rel\.|glaubens(?:richtung|gemeinschaft|zugeh(?:ö|oe)rigkeit)|"
+    r"kirchen(?:zugeh(?:ö|oe)rigkeit|steuer(?:[ \-]?merkmal(?:e)?)?|steuermerkmal(?:e)?)|kirche|"
+    r"kist(?:[ \-]?merkmal(?:e)?|m)?\.?|ki\.?[ ]?st\.?(?:[ \-]?merkmal(?:e)?)?|kirchensteuerabzugsmerkmal(?:e)?")
+_RELIGION_ETIKETT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:" + _RELIGION_ETIKETT + r")(?![\wäöüß])")
+_RELIGION_KOPF_RE = re.compile(r"(?i)(?:" + _RELIGION_ETIKETT + r")(?:[ ]?\(?(?:ag|an|stpfl\.?|ehegatte|ehefrau|"
+                               r"ehemann|partner)\)?)?:?")
+_RELIGION_TRENNER_RE = re.compile(r"(?:[ \t]+(?:der|des|von|vom|ihre[rs]?|seine[rs]?)[ \t]+[\wäöüß.\-]+)?"
+                                  r"[ \t]*(?P<ankuendigung>[:=]|\t\t)?[ \t]*")
+# Etiketten, hinter denen ein Wert auch ohne Doppelpunkt steht ("KiSt ev", "Konf. rk", "Kirchensteuer ev 9 %") – hinter
+# "Bekenntnis", "Kirche", "Rel." nur mit Doppelpunkt ("ein klares Bekenntnis ev. zu …": eventuell)
+_RELIGION_OHNE_DOPPELPUNKT_RE = re.compile(r"(?i)kist|ki\.?[ ]?st|kirchensteuer|konf|religion$")
+_RELIGION_FOLGE_RE = re.compile(r"[ \t]*(?:/|,|;|und|u\.)[ \t]*")
+_RELIGION_ZEILEN = 40             # so viele Zeilen unter einem Spaltenkopf "Konf." werden gelesen
+
+
+def _religion_wert(text: str, i: int):
+    """(start, ende) eines Bekenntnisses ab i (Kürzel oder ausgeschriebenes Wort) oder None."""
+    m = _RELIGION_WERT_RE.match(text, i)
+    if m is not None:
+        return m.start(), m.end()
+    m = _RELIGION_KUERZEL_RE.match(text, i)
+    if m is not None:
+        return m.start(), m.end()
+    return None
+
+
+def religion(text: str) -> list:
+    """(start, ende) der Angaben zur Religion bzw. Konfession (Art. 9 DSGVO): Wert hinter einem Etikett
+    ("Konfession: römisch-katholisch", "Kirchensteuermerkmale: rk/ev", "KiSt ev", "Konf.: rk") und unter einem
+    Spaltenkopf ("Konf." ⇥⇥ … , darunter in derselben Zelle "rk"). Nur Bekenntnisse und die Kirchensteuermerkmale –
+    nicht "Konfession: keine Angabe", "KiSt 28,08 EUR", "Ev. Krankenhaus", "rk-Wert"."""
+    if not _RELIGION_ETIKETT_RE.search(text):
+        return []
+    aus = []
+    for m in _RELIGION_ETIKETT_RE.finditer(text):
+        t = _RELIGION_TRENNER_RE.match(text, m.end())
+        if t is None:
+            continue
+        if t.group("ankuendigung") is None and (t.group(0).strip()
+                                                 or not _RELIGION_OHNE_DOPPELPUNKT_RE.match(m.group(0))):
+            continue
+        i = t.end()
+        for _ in range(3):                              # "rk/ev", "ev, rk"
+            w = _religion_wert(text, i)
+            if w is None:
+                break
+            aus.append(w)
+            f = _RELIGION_FOLGE_RE.match(text, w[1])
+            if f is None:
+                break
+            i = f.end()
+    if "\t\t" in text:
+        aus += _religion_spalten(text)
+    return sorted(set(aus))
+
+
+def _religion_spalten(text: str) -> list:
+    """Werte unter einem Spaltenkopf "Konf."/"Konfession"/"KiSt" (Zellen durch "⇥⇥" getrennt): in den folgenden
+    Zeilen die Zelle mit derselben Nummer, wenn sie ein Bekenntnis bzw. Kirchensteuermerkmal ist."""
+    aus = []
+    zeilen = []
+    pos = 0
+    for zeile in text.split("\n"):
+        zeilen.append((pos, zeile))
+        pos += len(zeile) + 1
+    for zi, (z0, zeile) in enumerate(zeilen):
+        if "\t\t" not in zeile:
+            continue
+        zellen = zeile.split("\t\t")
+        koepfe = [k for k, zelle in enumerate(zellen) if _RELIGION_KOPF_RE.fullmatch(zelle.strip())]
+        if not koepfe:
+            continue
+        for z1, folge in zeilen[zi + 1:zi + 1 + _RELIGION_ZEILEN]:
+            if "\t\t" not in folge:
+                if folge.strip():
+                    break
+                continue
+            werte = folge.split("\t\t")
+            if len(werte) != len(zellen):
+                continue
+            versatz = z1
+            starts = []
+            for w in werte:
+                starts.append(versatz)
+                versatz += len(w) + 2
+            for k in koepfe:
+                zelle = werte[k]
+                kern = zelle.strip()
+                if not kern:
+                    continue
+                a = starts[k] + zelle.index(kern)
+                w = _religion_wert(text, a)
+                if w is not None and w[1] == a + len(kern):
+                    aus.append(w)
     return aus

@@ -80,15 +80,16 @@ die Wahl wird gespeichert.
 
 | Schutzstufe | Was angehakt wird |
 |---|---|
-| Ausgewogen | Direkte Kennungen: Namen, Anschriften, Geburtsdaten, IBAN, BIC, E-Mail, Telefon, Vertrags-, Steuer-, Sozialversicherungs-, Krankenversicherten-, Ausweis- und Fahrzeugnummern, Kennzeichen … – mehr Zusammenhang für die KI. |
+| Ausgewogen | Direkte Kennungen: Namen, Anschriften, Geburtsdaten, IBAN, BIC, E-Mail, Telefon, Vertrags-, Steuer-, Sozialversicherungs-, Krankenversicherten-, Ausweis- und Fahrzeugnummern, Kennzeichen, IP-Adressen, Zugangsdaten, Profilnamen, Standort-Koordinaten … – mehr Zusammenhang für die KI. |
 | **Hoch (Standard, empfohlen)** | Zusätzlich Beruf, Arbeitgeber, ausländische Anschriften und Orte ohne PLZ. |
-| Maximal | Zusätzlich Diagnosen und Medikamente, Daten wie „02.09.1983“, die mindestens 14 Jahre zurückliegen (außer kurz hinter Wörtern wie „am“, „vom“ oder „Beginn“), unbekannte Eigennamen bei Personen – und Bilder sowie erkannte Fotos werden abgedeckt (siehe [unten](#bilder-fotos-und-lichtbilder)). Größter Schutz, am wenigsten Zusammenhang für die KI. |
+| Maximal | Zusätzlich Diagnosen, Medikamente und Konfession, Daten wie „02.09.1983“, die mindestens 14 Jahre zurückliegen (außer kurz hinter Wörtern wie „am“, „vom“ oder „Beginn“), unbekannte Eigennamen bei Personen – und Bilder sowie erkannte Fotos werden abgedeckt (siehe [unten](#bilder-fotos-und-lichtbilder)). Größter Schutz, am wenigsten Zusammenhang für die KI. |
 | Benutzerdefiniert | Erscheint, sobald Ihre Häkchen zu keiner Stufe passen, die mindestens so streng ist wie die zuletzt gewählte. Es gelten dann weiter deren Erkennungsregeln – wer in „Maximal“ die Diagnosen abwählt, behält also z. B. das Abdecken der Bilder. |
 
 **Gesundheitsdaten** (Diagnosen, Medikamente) sucht das Programm in jeder Stufe. In
 „Ausgewogen“ und „Hoch“ stehen sie aber **nicht angehakt** in der Fundliste (Zeichen ⚕) und
 bleiben lesbar, solange Sie sie nicht anhaken – der Abschlussdialog der Analyse weist darauf
-hin. In „Maximal“ sind sie angehakt.
+hin. In „Maximal“ sind sie angehakt. Ebenso die **Konfession** (Religion, Kirchensteuermerkmal „rk“,
+„ev“ – wie Gesundheitsdaten eine besondere Kategorie nach Art. 9 DSGVO).
 
 Ändern Sie nach der Analyse die Schutzstufe, ein Häkchen, eine Liste oder die Kundenliste,
 wird die Fundliste zurückgesetzt: Dann bitte erneut analysieren. In der Vorschau gesetzte
@@ -106,29 +107,34 @@ steht unter [Was NICHT erkannt wird](#was-nicht-erkannt-wird).
 |---|---|---|---|---|
 | Personennamen (KI-Erkennung) | Max Mustermann | `[PERSON A], [PERSON B] …` | Ausgewogen | KI-Modell (spaCy), Namenslisten und Regeln; gleiche Person = gleicher Platzhalter im Dokument – auch für den Geburtsnamen hinter „geb.“/„geborene“ („Anna Weber geb. Schulz“) |
 | IBANs | DE89 3704 0044 0532 0130 00 | `[IBAN]` | Ausgewogen | auch mit falscher Prüfziffer, wenn sie eindeutig wie eine IBAN aussieht (Hinweis „Lesefehler?“) |
-| E-Mail-Adressen | max.mustermann@example.de | `[E-MAIL]` | Ausgewogen |  |
+| E-Mail-Adressen | max.mustermann@example.de | `[E-MAIL]` | Ausgewogen | auch verschleiert („name (at) web (punkt) de“, „name [at] gmx [dot] de“) |
 | Telefonnummern | 0171 2345678 | `[TELEFON]` | Ausgewogen |  |
 | Geburtsdaten | geb. am 02.09.1983 | `[GEB-DATUM]` | Ausgewogen | hinter „geb.“, „Geburtsdatum“ … oder hinter einem Namen mit Komma, Stern oder Klammer („Max Mustermann, 02.09.1983“); in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“ |
 | Straße + Hausnummer, Postfach | Hauptstraße 12a | `[ADRESSE]` | Ausgewogen |  |
 | PLZ + Ort | 90402 Nürnberg | `[PLZ ORT]` | Ausgewogen |  |
-| Vertrags-/Kunden-/Schein-/Aktenzeichen | Versicherungsschein-Nr. LV-2024-887766 | `[VERTRAGS-NR]` | Ausgewogen | Nummer hinter einem Etikett wie „Vertrags-Nr.“ – auch hinter Zwischenwörtern („Personalnummer beim Arbeitgeber: 4711“), mit Tausenderpunkten („Kundennummer: 4.711.208“) oder als Code („Geräte-ID: TLX-KQ8B-ZR3M“); auch eVB-Nummer (elektronische Versicherungsbestätigung) und Transferticket der Kfz-Versicherung; ohne Etikett MAC-Adresse, EID einer eSIM, Nummer im Marktstammdatenregister und Aktenzeichen eines Gerichts („3 C 456/24“); nicht Gebühren- und Katalogziffern (GOZ, GOÄ, PZN), Fahrzeugschlüssel (HSN/TSN) und Paragrafen („§ 34d GewO“) |
+| Vertrags-/Kunden-/Schein-/Aktenzeichen | Versicherungsschein-Nr. LV-2024-887766 | `[VERTRAGS-NR]` | Ausgewogen | Nummer hinter einem Etikett wie „Vertrags-Nr.“ – auch hinter Zwischenwörtern („Personalnummer beim Arbeitgeber: 4711“), mit Tausenderpunkten („Kundennummer: 4.711.208“) oder als Code („Geräte-ID: TLX-KQ8B-ZR3M“); auch eVB-Nummer (elektronische Versicherungsbestätigung) und Transferticket der Kfz-Versicherung; ohne Etikett MAC-Adresse, EID einer eSIM, Nummer im Marktstammdatenregister, Aktenzeichen eines Gerichts („3 C 456/24“), Flurstück und Grundbuchblatt; nicht Gebühren- und Katalogziffern (GOZ, GOÄ, PZN), Fahrzeugschlüssel (HSN/TSN) und Paragrafen („§ 34d GewO“) |
 | Sozialversicherungsnummern | 12 345678 A 123 | `[SV-NR]` | Ausgewogen |  |
 | Steuer-IDs | 91064389278 | `[STEUER-ID]` | Ausgewogen | ohne Beschriftung nur mit gültiger Prüfziffer, auch gruppiert („30 268 175 922“) |
 | Steuernummern / USt-IdNr. | Steuernummer: 181/815/08155 | `[STEUER-NR]` | Ausgewogen | ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma (die eines Einzelkaufmanns schon) |
 | Krankenversichertennummern | A123456780 | `[KV-NR]` | Ausgewogen |  |
 | Kindergeldnummern | 009FK407160 | `[KINDERGELD-NR]` | Ausgewogen |  |
-| Kfz-Kennzeichen | N-XY 123 | `[KENNZEICHEN]` | Ausgewogen |  |
+| Kfz-Kennzeichen | N-XY 123 | `[KENNZEICHEN]` | Ausgewogen | nur mit amtlichem Unterscheidungszeichen (nicht Modellcodes wie „KTM RC 390“), auch „RO - KL 2207“ und klein geschrieben; hinter einem Kfz-Etikett („Versicherungskennzeichen:“, „Kurzzeitkennzeichen“, „Versicherungsplakette Nr.“) auch Versicherungs-, Kurzzeit-, rote und Ausfuhrkennzeichen („435 GHT“, „RO-04 1287“) und ausländische Kennzeichen |
 | Fahrzeug-Identnummern (FIN) | WVWZZZ1JZXW000001 | `[FIN]` | Ausgewogen |  |
 | Ausweis-/Pass-/Führerscheinnummern | Ausweisnummer: L01X00T47 | `[AUSWEIS-NR]` | Ausgewogen | mit Etikett; Ausweis- und Passnummern auch ohne Etikett, wenn die Prüfziffer stimmt; auf Ausweiskopien auch die maschinenlesbare Zone |
 | SEPA-Mandatsreferenzen | Mandatsreferenz MR-2024-0815 | `[MANDATSREFERENZ]` | Ausgewogen | nur hinter einem Etikett |
 | BIC (bei IBAN oder Etikett) | COBADEFFXXX | `[BIC]` | Ausgewogen | hinter „BIC“, neben einer IBAN oder in eindeutiger Form (11 Zeichen auf „XXX“ oder mit Ziffer im Ortscode) |
 | Kreditkartennummern | 4111 1111 1111 1111 | `[KREDITKARTE]` | Ausgewogen | auch die Kartenprüfnummer (CVC/CVV, „Kartenprüfnr.“, „CID“) hinter ihrem Etikett und in Kartendaten („…, gültig bis 12/27, 739“) – nur dort, nicht dieselben Ziffern an anderer Stelle; „Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder Gutachten-Prüfnummer) |
-| Ausländische Anschriften und Kennzeichen | Kerkstraat 12, 1017 GC Amsterdam | `[AUSLAND]` | Hoch |  |
+| IP-Adressen | IP-Adresse: 84.123.45.67 | `[IP-ADRESSE]` | Ausgewogen | IPv4 mit gültigen Oktetten (ohne Etikett nur mit IP-Bezug in der Zeile, nie eine Versionsnummer wie „10.0.19045.1234“) und IPv6 |
+| Zugangsdaten (Benutzer, Kennwort, PIN, Code) | Benutzername: maxmuster82 | `[ZUGANGSDATEN]` | Ausgewogen | Benutzername/-kennung, Kennwort, PIN, Aktivierungs- und Freischaltcode hinter ihrem Etikett – nicht „Passwort vergessen?“ oder „PIN: siehe separates Schreiben“ |
+| Profil-/Kontonamen (@-Name, Plattformen) | Instagram @max.muster | `[PROFIL]` | Ausgewogen | @-Namen, Nutzer- und Profilnamen hinter Plattform-Etiketten („eBay-Name:“, „Telegram:“), der Pfad eines Profil-Links („facebook.com/vorname.nachname“) und Kunden-, Vertrags- und Namensangaben in Links („?kdnr=4711081&name=…“) – nicht die Seite einer Firma |
+| Standort/Koordinaten (GPS) | GPS: 48.13715, 11.57612 | `[STANDORT]` | Ausgewogen | Koordinaten als Dezimalgrad-Paar oder in Grad/Minuten/Sekunden |
+| Ausländische Anschriften und Kennzeichen | Kerkstraat 12, 1017 GC Amsterdam | `[AUSLAND]` | Hoch | auch Straßen mit vorangestelltem Straßentyp („Str. Memorandumului nr. 27“, „Calea …“), vierstellige PLZ mit Ort hinter einer Straße oder mit Länderhinweis („8002 Zürich“), sechsstellige PLZ mit Länderhinweis und ausländische Kennzeichen im Satz mit Länderhinweis |
 | Orte ohne PLZ (Ort-Datum-Zeile, Geburtsort) | Musterstadt, 03.04.2025 | `[ORT]` | Hoch | Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“ |
 | Beruf (bei Personen) | Beruf: Elektriker | `[BERUF]` | Hoch | hinter „Beruf:“ oder im Satz („arbeitet als …“) |
 | Arbeitgeber (bei Personen) | Arbeitgeber: Muster Bau GmbH | `[ARBEITGEBER]` | Hoch | hinter „Arbeitgeber:“ oder im Satz; bekannte Versicherer, Banken und Behörden bleiben stehen |
 | Diagnosen, ICD-Codes (Gesundheitsdaten) | Diagnose: Diabetes mellitus (E11.9) | `[DIAGNOSE]` | Maximal | nur bekannte Begriffe und ICD-Codes mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten (⚕, nicht angehakt) |
 | Medikamente (Gesundheitsdaten) | Medikation: Metformin 500 mg | `[MEDIKAMENT]` | Maximal | nur bekannte Begriffe mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten (⚕, nicht angehakt) |
+| Religion/Konfession (Art. 9 DSGVO) | Konfession: römisch-katholisch | `[RELIGION]` | Maximal | Konfession bzw. Kirchensteuermerkmal („rk“, „ev“) hinter ihrem Etikett oder unter einem Spaltenkopf „Konf.“; besondere Kategorie nach Art. 9 DSGVO – in „Ausgewogen“ und „Hoch“ nur angeboten (nicht angehakt) |
 | ALLE Datumsangaben (Vorsicht!) | 15.03.2024 | `[DATUM]` | – (nur von Hand) | Vorsicht: auch Vertrags- und Briefdaten |
 <!-- TABELLE-ENDE -->
 

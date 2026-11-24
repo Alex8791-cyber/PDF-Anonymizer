@@ -83,6 +83,9 @@ LISTEN = {
     "allerweltswoerter_gross": "allerweltswoerter_gross.txt",
     "anreden_titel": "anreden_titel.txt",
     "orte": "orte.txt",
+    "orte_at_ch": "orte_at_ch.txt",
+    "kfz_unterscheidungszeichen": "kfz_unterscheidungszeichen.txt",
+    "fahrzeugmarken": "fahrzeugmarken.txt",
 }
 # Kurznamen (bequemer in Regeln)
 _ALIAS = {

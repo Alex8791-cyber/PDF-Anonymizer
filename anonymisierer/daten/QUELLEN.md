@@ -27,6 +27,12 @@ der MIT-Lizenz frei; für die Listen gelten keine zusätzlichen Bedingungen Drit
 - **Marken.** Arzneimittel-Handelsnamen sowie Namen von Versicherern, Banken und Produkten
   sind Kennzeichen ihrer Inhaber. Sie stehen hier nur als Suchwörter (zum Schwärzen bzw. zum
   bewussten Nicht-Schwärzen) und drücken keine Verbindung zu den Inhabern aus.
+- **Unterscheidungszeichen, Orte und Marken (Runde 5):** Die Unterscheidungszeichen der
+  Kfz-Kennzeichen, die Orte in Österreich, der Schweiz und Liechtenstein und die Fahrzeugmarken
+  sind allgemein bekannte Tatsachen; die Listen wurden 2026 aus allgemeinem Wissen
+  zusammengestellt (kein amtliches Verzeichnis und keine Markendatenbank übernommen). Die
+  Belegquote entfällt wie bei den Orten: Kürzel, Ortsnamen und Marken stehen oft nicht im
+  allgemeinen Vokabular.
 
 ### Hilfsmittel: Vokabular der spaCy-Wortvektoren (CC0)
 
@@ -118,9 +124,13 @@ ersten Aufbau nach festen Regeln erzeugt und stehen ausgeschrieben in den Dateie
 | `etiketten_adresse.txt` | 128 | Feldbezeichner vor Anschriften und Orten einer Person | 85,2 % |
 | `etiketten_kontakt.txt` | 82 | Feldbezeichner für Telefon, Fax, E-Mail, Messenger, Profile | 96,3 % |
 | `etiketten_vertragsdaten.txt` | 213 | Feldbezeichner für Vertrags- und Vorgangsdaten (Beginn, Ablauf, Stand): ein Datum dahinter ist kein Geburtsdatum | 84,0 % |
-| `allerweltswoerter_gross.txt` | 9 296 | Großgeschriebene Wörter aus Versicherungs-, Rechts-, Medizin- und Verwaltungsschreiben, die eine Namenserkennung leicht für Personen hält; enthält **keine** Vor- und Nachnamen, Berufe, Diagnosen und Medikamente (maschinell geprüft) | 92,0 % |
+| `allerweltswoerter_gross.txt` | 9 317 | Großgeschriebene Wörter aus Versicherungs-, Rechts-, Medizin- und Verwaltungsschreiben, die eine Namenserkennung leicht für Personen hält; enthält **keine** Vor- und Nachnamen, Berufe, Diagnosen und Medikamente (maschinell geprüft) | 92,0 % |
 | `anreden_titel.txt` | 303 | Anreden, Grußformeln, akademische, berufliche und Adelstitel, Rollenkürzel (Herr, Frau, Dr. med., Prof., Dipl.-Ing., RA, i. A., gez.) | 93,4 % |
 | `orte.txt` | 903 | Orte (`ist_ort`): Staaten und Länder, historische Staaten und Herkunftsregionen (Polen, Türkei, USA, DDR, Schlesien, Siebenbürgen), Bundesländer, Hauptstädte und große Städte im Ausland in deutscher Schreibweise (Wien, Zürich, Istanbul, Warschau, Breslau), Inseln und Urlaubsregionen (Mallorca, Kreta, Sylt, Balearen), deutsche Mittelstädte (Marburg, Flensburg, Bad Homburg, Sankt Ingbert); dazu kommen die Großstädte aus `wissen.py` | – |
+
+| `orte_at_ch.txt` | 303 | Orte in Österreich, der Schweiz und Liechtenstein (Landeshauptstädte, Bezirks- und Kantonshauptorte, größere Gemeinden): eine vierstellige Postleitzahl davor ist eine ausländische Anschrift („4040 Linz“) | – |
+| `kfz_unterscheidungszeichen.txt` | 734 | Unterscheidungszeichen der deutschen Kfz-Kennzeichen (Verwaltungsbezirke einschließlich der wieder zugelassenen Altkennzeichen, Sonderzeichen von Bund und Ländern): nur mit ihnen gilt „N-AB 1234“ ohne Etikett als Kennzeichen, Modellcodes („KTM RC 390“) nicht | – |
+| `fahrzeugmarken.txt` | 210 | Fahrzeugmarken (Pkw, Lkw, Busse, Anhänger, Wohnwagen, Motorräder, Roller, Landmaschinen): ein Code dahinter ist ein Modell („DAF XF 480“), kein Kennzeichen, und Marke + Modell kein Personenname („Suzuki GSX-R“) | – |
 
 ¹ Anteil der Einträge, deren Wörter (ab drei Buchstaben) alle im CC0-Vokabular vorkommen.
 Eine niedrige Quote heißt nicht „falsch“: lange Komposita, Abkürzungen, Handelsnamen und

@@ -53,7 +53,8 @@ Ablauf:
 
 Öffentlich: analysiere_pdf, analysiere_text, weitergabe_anwenden, LaufWissen, hinweis_kategorien,
 gesundheit_nur_vermutet, ANZEIGE_BEGRIFF, PLATZHALTER_BEGRIFF, HINWEIS_GESUNDHEIT, HINWEIS_GESUNDHEIT_VERMUTET,
-keine_pdf_meldung, datei_repariert, reparatur_erzwingen, bild_schaeden, scan_kaum_lesbar, tintenanteil,
+HINWEIS_RELIGION, MELDUNG_RELIGION, keine_pdf_meldung, datei_repariert, reparatur_erzwingen, bild_schaeden,
+scan_kaum_lesbar, tintenanteil,
 seite_nachweislich_leer, nur_leere_seiten, KAUM_LESBAR_WOERTER, nebenkanaele_pruefen, NEBENKANAELE_LEER,
 HINWEIS_FIRMENANSCHRIFT, HINWEIS_ABSENDER, ANZEIGE_TITEL.
 """
@@ -192,6 +193,10 @@ def _zum_hinweis(meldungen, warnungen, hinweise, code):
 HINWEIS_GESUNDHEIT = "Gesundheitsdaten (Art. 9 DSGVO) – angeboten, nicht angehakt"
 HINWEIS_GESUNDHEIT_VERMUTET = ("möglicherweise Gesundheitsdaten (Art. 9 DSGVO): nur ein Fachbegriff, ohne Etikett "
                                "„Diagnose:“, ICD-Code oder Bezug zu einer Person – angeboten, nicht angehakt")
+HINWEIS_RELIGION = "Religion/Konfession (Art. 9 DSGVO) – angeboten, nicht angehakt"
+MELDUNG_RELIGION = ("Das Dokument enthält Angaben zur Religion bzw. Konfession (z. B. ein Kirchensteuermerkmal). Sie "
+                    "sind nach Art. 9 DSGVO besonders geschützt. Sie stehen in der Fundliste, sind aber nicht angehakt "
+                    "und bleiben deshalb lesbar. Zum Schwärzen bitte anhaken – oder die Schutzstufe „Maximal“ wählen.")
 HINWEIS_ANGEBOTEN = "angeboten, nicht angehakt"
 HINWEIS_BESTANDTEIL = "nur als Namensbestandteil erkannt"
 HINWEIS_WEITERGABE = "aus einem anderen Dokument dieses Laufs übernommen"
@@ -224,6 +229,10 @@ def _ist_gesundheit(kategorie: str) -> bool:
     return kategorie in _gesundheit_kategorien()
 
 
+def _ist_religion(kategorie: str) -> bool:
+    return kategorie in getattr(_muster, "RELIGION", ("religion",))
+
+
 def _nur_vermutet(quellen) -> bool:
     """Beruht eine Stelle/ein Fund nur auf vermuteten Treffern (Quellen-Endung „.vermutet“, dazu höchstens die
     Weitergabe im Dokument)? Dann sind es z. B. nur Leistungsbegriffe einer Tarifübersicht („Physiotherapie“)."""
@@ -235,6 +244,8 @@ def _angebots_hinweis(kategorie: str, vermutet: bool = False) -> str:
     """Hinweis eines nur angebotenen Funds (alle Stellen abgewählt)."""
     if _ist_gesundheit(kategorie):
         return HINWEIS_GESUNDHEIT_VERMUTET if vermutet else HINWEIS_GESUNDHEIT
+    if _ist_religion(kategorie):
+        return HINWEIS_RELIGION
     return f"{_anzeige(kategorie)} – {HINWEIS_ANGEBOTEN}"
 
 
@@ -1426,6 +1437,8 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
     if gesundheit:
         beispiel = None if sicher_angeboten or vermutet_beispiel is None else vermutet_beispiel[1]
         _melde(meldungen, hinweise, "hinweis", "GESUNDHEITSDATEN", _gesundheit_meldungstext(gesundheit, beispiel))
+    if any(_ist_religion(k) for k in angeboten):
+        _melde(meldungen, hinweise, "hinweis", "RELIGION", MELDUNG_RELIGION)
     return funde
 
 
@@ -1649,7 +1662,8 @@ HINWEIS_CODES = frozenset({
     "ABGEBROCHEN", "AUSGABE_PRUEFEN", "BILDER_ABGEDECKT", "BILDER_ENTFERNT", "BILDER_UNGEPRUEFT",
     "FORMULAR_EINGEBRANNT", "GESUNDHEITSDATEN", "LEERE_SEITEN", "LICHTBILD",
     "NACHBARWORT_BESCHAEDIGT", "NEBENKANAL_ENTFERNT", "NICHTS_GESCHWAERZT", "NIE_FREIGABE", "OCR_GELESEN",
-    "OCR_UNPLAUSIBEL", "PLATZHALTER_GEKUERZT", "SEITE_ALS_BILD", "VEKTORGRAFIK", "WENIG_TEXT", "ZUORDNUNG"})
+    "OCR_UNPLAUSIBEL", "PLATZHALTER_GEKUERZT", "RELIGION", "SEITE_ALS_BILD", "VEKTORGRAFIK", "WENIG_TEXT",
+    "ZUORDNUNG"})
 # Analyse-Meldungen, deren Ursache bis in die Ausgabe wirkt (Gutachten R-07): die Schwärzung legt die Ausgabe dann
 # als _PRUEFEN ab. Die Analyse vermerkt sie am Modell (dok.leckrelevant).
 LECKRELEVANTE_CODES = frozenset(c for c, (leck, _) in WARNUNGS_CODES.items() if leck)

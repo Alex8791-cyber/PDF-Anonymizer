@@ -87,9 +87,9 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   (gefundene Angaben darin werden wie sonst geschwärzt); von einem Bild über mindestens die halbe Textseite
   werden nur die Fotos darin abgedeckt. Unterschriften und Handschrift auf Scans bleiben auch in „Maximal“
   stehen.
-- **Sechs neue Kategorien** (26 statt 20): ausländische Anschriften und Kennzeichen `[AUSLAND]`, Orte ohne PLZ
-  `[ORT]`, Beruf `[BERUF]` und Arbeitgeber `[ARBEITGEBER]` (bei Personen), Diagnosen und ICD-Codes
-  `[DIAGNOSE]`, Medikamente `[MEDIKAMENT]`. Gesundheitsdaten erkennt das Programm nur als bekannte Begriffe
+- **Sechs neue Kategorien** (mit den fünf aus Runde 5, siehe unten, 31 statt 20): ausländische Anschriften und
+  Kennzeichen `[AUSLAND]`, Orte ohne PLZ `[ORT]`, Beruf `[BERUF]` und Arbeitgeber `[ARBEITGEBER]` (bei Personen),
+  Diagnosen und ICD-Codes `[DIAGNOSE]`, Medikamente `[MEDIKAMENT]`. Gesundheitsdaten erkennt das Programm nur als bekannte Begriffe
   der Wortlisten, ICD-10-Codes und Körpermaße, jeweils im Gesundheitszusammenhang.
 - **Vorschau-Fenster** (Doppelklick auf eine Datei, Knopf „Vorschau …“ oder Alt+V). „Geplante Schwärzung“:
   rot = wird geschwärzt, grau gestrichelt = nicht, blau = manuell; ein Klick schaltet eine Stelle um oder
@@ -199,6 +199,28 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Pharmazentralnummer (PZN, keine Telefonnummer mehr), Fahrzeugschlüssel (HSN/TSN, „Schlüssel-Nr. 2.1/2.2“),
   Flug-, Sitzplatz- und Zimmernummern, die Nummer einer Vorschrift hinter einem Etikett („Registrierungsnummer: § 34d
   Abs. 1 GewO“, auf Scans „8 34d …“); eine IMEI ist eine Kennung, keine Kreditkarte.
+- **Fünf neue Kategorien (Domänen-Durchsicht, Runde 5):** IP-Adressen `[IP-ADRESSE]` (IPv4 mit gültigen Oktetten,
+  IPv6 – keine Versionsnummern), Zugangsdaten `[ZUGANGSDATEN]` (Benutzername/-kennung, Kennwort, PIN, Aktivierungs-
+  und Freischaltcode hinter ihrem Etikett), Profil- und Kontonamen `[PROFIL]` (@-Namen, „eBay-Name:“, „Telegram:“,
+  Profil-Links, Kunden-, Vertrags- und Namensangaben in Links), Standort-Koordinaten `[STANDORT]` – alle vier in jeder
+  Schutzstufe angehakt – und Religion/Konfession `[RELIGION]` (Kirchensteuermerkmal „rk“/„ev“, auch unter dem
+  Spaltenkopf „Konf.“) wie Gesundheitsdaten: in „Ausgewogen“ und „Hoch“ nur angeboten (Meldung RELIGION), in
+  „Maximal“ angehakt. Gespeicherte Einstellungen bleiben gültig; die neuen Kategorien gelten dort als an. Außerdem:
+  verschleierte E-Mail-Adressen („name (at) web (punkt) de“) und Flurstück, Grundbuchblatt und Gemarkungsnummer.
+- **Kfz-Kennzeichen (Runde 5):** Versicherungskennzeichen („435 GHT“, „435GHT“, zweizeilig) hinter Kfz-Etiketten, im
+  Satz und in Spalten mit Kfz-Kopf; Komposita mit Fahrzeugbezug als Kfz-Etikett (Versicherungs-, Kurzzeit-,
+  Oldtimer-, Saison-, Ausfuhr-, Händler-, Wechselkennzeichen, Versicherungsplakette, „Kennzeichen-Nr.“) – nicht
+  Gefahrgut-, Prüf- oder Qualitätskennzeichen; Kurzzeit-, rote und Ausfuhrkennzeichen; „RO - KL 2207“, „ro-xt 913“ und
+  die Kompaktform „ROKL2207“ hinter einem Kfz-Wort. Ohne Etikett gilt ein Kennzeichen nur mit amtlichem
+  Unterscheidungszeichen (neue Liste in der Wissensbasis): Modellcodes wie „KTM RC 390“ oder „DAF XF 480“ bleiben
+  stehen, ebenso Marke und Modell als Name („Suzuki GSX-R“). Ausländische Kennzeichen im Satz hinter einem
+  Fahrzeugwort werden mit Länderhinweis geschwärzt, sonst von der Restrisiko-Prüfung gemeldet.
+- **Anschriften (Runde 5):** vierstellige PLZ mit Ort (Österreich, Schweiz) hinter einer Straße, mit Länderhinweis
+  oder einem Ort der Nachbarländer („8002 Zürich“), Straßen mit vorangestelltem Straßentyp („Str. Memorandumului nr.
+  27“, „Calea Victoriei nr. 12“, „bul. Vitosha 15“), sechsstellige PLZ mit Länderhinweis. Nicht mehr als Anschrift:
+  Straßenklassen mit Nummer („Auf der A 8“, „B 15“, „L 2080“, „BAB 9“); PLZ ⇥⇥ Ort über einen Spaltentrenner nur mit
+  Straße davor, unter dem Spaltenkopf „PLZ“ oder mit bekanntem Ort – in „Kd.-Nr. ⇥⇥ Name“ ist „10471 ⇥⇥ Ruhstorfer“
+  keine Anschrift.
 
 ### Geändert
 - **Prüfziffern sind nur noch ein Indiz:** Eine IBAN mit falscher Prüfziffer wird trotzdem geschwärzt, wenn

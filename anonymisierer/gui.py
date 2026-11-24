@@ -3426,9 +3426,11 @@ class AnonymisiererApp:
         text = attrappen.profil_beschreibung(PROFILE, name, KATEGORIEN)
         if name == attrappen.BENUTZERDEFINIERT:
             text = (f"Eigene Auswahl der Kategorien (Erkennungsregeln der Stufe „{_profil_name(self.basis_profil)}“).")
-            if set(_profil_wert(PROFILE, self.basis_profil, "hinweis") or ()) & GESUNDHEIT_KATEGORIEN \
-                    - self._aktive_kategorien():
+            offen = set(_profil_wert(PROFILE, self.basis_profil, "hinweis") or ()) - self._aktive_kategorien()
+            if offen & GESUNDHEIT_KATEGORIEN:
                 text += " Nicht angehakte Gesundheitsdaten werden gemeldet und abgewählt angeboten."
+            if "religion" in offen:
+                text += " Nicht angehakte Angaben zur Konfession werden gemeldet und abgewählt angeboten."
         self.profil_beschreibung.config(text=text)
 
     @staticmethod
@@ -3488,10 +3490,12 @@ class AnonymisiererApp:
             kategorien = e.get("kategorien") if isinstance(e.get("kategorien"), dict) else None
             if profil not in echte + (attrappen.BENUTZERDEFINIERT,):
                 # ältere Einstellungen ohne Schutzstufe: unveränderter Standard -> neue Standardstufe,
-                # eigene Auswahl bleibt „Benutzerdefiniert“
+                # eigene Auswahl bleibt „Benutzerdefiniert“. Verglichen werden nur die Kategorien, die die
+                # Einstellungen kennen: später hinzugekommene (IP-Adresse, Zugangsdaten …) gelten als an
                 standard = attrappen._standard_kategorien(KATEGORIEN)
                 gespeichert = {k for k, v in (kategorien or {}).items() if v and k in self.kategorie_vars}
-                if kategorien is None or gespeichert == (standard & set(self.kategorie_vars)):
+                bekannt = set(kategorien or {}) & set(self.kategorie_vars)
+                if kategorien is None or gespeichert == (standard & bekannt):
                     profil = attrappen.STANDARD_PROFIL
                 else:
                     profil = attrappen.BENUTZERDEFINIERT
@@ -4364,6 +4368,7 @@ class AnonymisiererApp:
         gesundheit = [pdf for pdf in ergebnisse if "GESUNDHEITSDATEN" in codes[pdf]]
         vermutet = [pdf for pdf in gesundheit if self._gesundheit_nur_vermutet(ergebnisse[pdf])]
         gesundheit_sicher = [pdf for pdf in gesundheit if pdf not in vermutet]
+        religion = [pdf for pdf in ergebnisse if "RELIGION" in codes[pdf]]
         mit_fehler = [(pdf, e["fehler"]) for pdf, e in ergebnisse.items() if e["fehler"]]
         mit_warnung = [(pdf, e["warnungen"]) for pdf, e in ergebnisse.items() if e["warnungen"]]
         # R-04 (Paket analyse-status): Personendaten nur in Metadaten, Lesezeichen, Anhängen oder XFA – nie
@@ -4549,6 +4554,13 @@ class AnonymisiererApp:
                             f"Fundliste ({MARKE_GESUNDHEIT.strip()}) und bleiben lesbar. Sind es Angaben über eine "
                             f"Person, bitte anhaken oder die Schutzstufe „Maximal“ wählen:"]
                            + [f"  • {self._anzeigename(p)}{self._beispiele(ergebnisse[p])}" for p in vermutet[:10]])
+        if religion:
+            # wie Gesundheitsdaten: in „Ausgewogen“/„Hoch“ nur angeboten (Meldung RELIGION der Engine)
+            art = "warning"
+            bloecke.append(["Angaben zur Religion bzw. Konfession (Art. 9 DSGVO, z. B. Kirchensteuermerkmal) erkannt "
+                            "– sie stehen in der Fundliste, sind aber NICHT angehakt und bleiben deshalb lesbar. Zum "
+                            "Schwärzen bitte die Zeilen „Religion/Konfession …“ anhaken oder die Schutzstufe "
+                            "„Maximal“ wählen:"] + [f"  • {self._anzeigename(p)}" for p in religion[:10]])
         if self.warnungen_anzahl and not gesamt and mit_warnung and not ohne_text:
             art = "warning"
             bloecke.append([f"{self.warnungen_anzahl} Warnung(en) – Details im Protokoll."])

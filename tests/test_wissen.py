@@ -30,6 +30,9 @@ MINDESTGROESSE = {
     "etiketten_vertragsdaten": 100,
     "anreden_titel": 150,
     "orte": 600,
+    "orte_at_ch": 250,
+    "kfz_unterscheidungszeichen": 700,
+    "fahrzeugmarken": 180,
 }
 
 

@@ -46,26 +46,33 @@ BEISPIELE = {
     "mandat": "Mandatsreferenz MR-2024-0815",
     "bic": "COBADEFFXXX",
     "kreditkarte": "4111 1111 1111 1111",
+    "ip": "IP-Adresse: 84.123.45.67",
+    "zugangsdaten": "Benutzername: maxmuster82",
+    "profilname": "Instagram @max.muster",
+    "standort": "GPS: 48.13715, 11.57612",
     "international": "Kerkstraat 12, 1017 GC Amsterdam",
     "ort": "Musterstadt, 03.04.2025",
     "beruf": "Beruf: Elektriker",
     "arbeitgeber": "Arbeitgeber: Muster Bau GmbH",
     "diagnose": "Diagnose: Diabetes mellitus (E11.9)",
     "medikament": "Medikation: Metformin 500 mg",
+    "religion": "Konfession: römisch-katholisch",
     "datum": "15.03.2024",
 }
 ERLAEUTERUNG = {
     "namen": "KI-Modell (spaCy), Namenslisten und Regeln; gleiche Person = gleicher Platzhalter im Dokument – auch "
              "für den Geburtsnamen hinter „geb.“/„geborene“ („Anna Weber geb. Schulz“)",
     "iban": "auch mit falscher Prüfziffer, wenn sie eindeutig wie eine IBAN aussieht (Hinweis „Lesefehler?“)",
+    "email": "auch verschleiert („name (at) web (punkt) de“, „name [at] gmx [dot] de“)",
     "geburt": "hinter „geb.“, „Geburtsdatum“ … oder hinter einem Namen mit Komma, Stern oder Klammer („Max "
               "Mustermann, 02.09.1983“); in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre "
               "zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“",
     "vertrag": "Nummer hinter einem Etikett wie „Vertrags-Nr.“ – auch hinter Zwischenwörtern („Personalnummer beim "
                "Arbeitgeber: 4711“), mit Tausenderpunkten („Kundennummer: 4.711.208“) oder als Code („Geräte-ID: "
                "TLX-KQ8B-ZR3M“); auch eVB-Nummer (elektronische Versicherungsbestätigung) und Transferticket der "
-               "Kfz-Versicherung; ohne Etikett MAC-Adresse, EID einer eSIM, Nummer im Marktstammdatenregister und "
-               "Aktenzeichen eines Gerichts („3 C 456/24“); nicht Gebühren- und Katalogziffern (GOZ, GOÄ, PZN), "
+               "Kfz-Versicherung; ohne Etikett MAC-Adresse, EID einer eSIM, Nummer im Marktstammdatenregister, "
+               "Aktenzeichen eines Gerichts („3 C 456/24“), Flurstück und Grundbuchblatt; nicht Gebühren- und "
+               "Katalogziffern (GOZ, GOÄ, PZN), "
                "Fahrzeugschlüssel (HSN/TSN) und Paragrafen („§ 34d GewO“)",
     "steuerid": "ohne Beschriftung nur mit gültiger Prüfziffer, auch gruppiert („30 268 175 922“)",
     "steuernr": "ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma (die "
@@ -77,6 +84,21 @@ ERLAEUTERUNG = {
     "kreditkarte": "auch die Kartenprüfnummer (CVC/CVV, „Kartenprüfnr.“, „CID“) hinter ihrem Etikett und in "
                    "Kartendaten („…, gültig bis 12/27, 739“) – nur dort, nicht dieselben Ziffern an anderer Stelle; "
                    "„Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder Gutachten-Prüfnummer)",
+    "kfz": "nur mit amtlichem Unterscheidungszeichen (nicht Modellcodes wie „KTM RC 390“), auch „RO - KL 2207“ und "
+           "klein geschrieben; hinter einem Kfz-Etikett („Versicherungskennzeichen:“, „Kurzzeitkennzeichen“, "
+           "„Versicherungsplakette Nr.“) auch Versicherungs-, Kurzzeit-, rote und Ausfuhrkennzeichen („435 GHT“, "
+           "„RO-04 1287“) und ausländische Kennzeichen",
+    "ip": "IPv4 mit gültigen Oktetten (ohne Etikett nur mit IP-Bezug in der Zeile, nie eine Versionsnummer wie "
+          "„10.0.19045.1234“) und IPv6",
+    "zugangsdaten": "Benutzername/-kennung, Kennwort, PIN, Aktivierungs- und Freischaltcode hinter ihrem Etikett – "
+                    "nicht „Passwort vergessen?“ oder „PIN: siehe separates Schreiben“",
+    "profilname": "@-Namen, Nutzer- und Profilnamen hinter Plattform-Etiketten („eBay-Name:“, „Telegram:“), der "
+                  "Pfad eines Profil-Links („facebook.com/vorname.nachname“) und Kunden-, Vertrags- und Namensangaben "
+                  "in Links („?kdnr=4711081&name=…“) – nicht die Seite einer Firma",
+    "standort": "Koordinaten als Dezimalgrad-Paar oder in Grad/Minuten/Sekunden",
+    "international": "auch Straßen mit vorangestelltem Straßentyp („Str. Memorandumului nr. 27“, „Calea …“), "
+                     "vierstellige PLZ mit Ort hinter einer Straße oder mit Länderhinweis („8002 Zürich“), "
+                     "sechsstellige PLZ mit Länderhinweis und ausländische Kennzeichen im Satz mit Länderhinweis",
     "ort": "Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“",
     "beruf": "hinter „Beruf:“ oder im Satz („arbeitet als …“)",
     "arbeitgeber": "hinter „Arbeitgeber:“ oder im Satz; bekannte Versicherer, Banken und Behörden bleiben stehen",
@@ -84,6 +106,9 @@ ERLAEUTERUNG = {
                 "(⚕, nicht angehakt)",
     "medikament": "nur bekannte Begriffe mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten "
                   "(⚕, nicht angehakt)",
+    "religion": "Konfession bzw. Kirchensteuermerkmal („rk“, „ev“) hinter ihrem Etikett oder unter einem "
+                "Spaltenkopf „Konf.“; besondere Kategorie nach Art. 9 DSGVO – in „Ausgewogen“ und „Hoch“ nur "
+                "angeboten (nicht angehakt)",
     "datum": "Vorsicht: auch Vertrags- und Briefdaten",
 }
 # Schutzstufen von der mildesten zur strengsten (Schlüssel in muster.PROFILE, Name in der Tabelle)

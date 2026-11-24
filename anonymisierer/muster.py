@@ -303,6 +303,13 @@ def _email_spannen(text: str) -> list:
                                                                      for a, b in belegt):
                 aus.append(Stelle(m.start(), m.end(), 0.85))
         aus.sort()
+    # verschleierte Adressen ("quirin.zw [at] web [dot] de", "q.zw(at)gmx.de") – dieselbe Form wie in der
+    # Selbstkontrolle (kennungsformen.email_verschleiert)
+    belegt = [(s.start, s.ende) for s in aus]
+    neu = [Stelle(a, e) for a, e in kennungsformen.email_verschleiert(text)
+           if not any(x < e and a < y for x, y in belegt)]
+    if neu:
+        aus = sorted(aus + neu)
     return aus
 
 
@@ -628,7 +635,10 @@ _KEIN_STRASSENWORT = (r"(?!(?:Januar|Februar|März|April|Mai|Juni|Juli|August|Se
                       r"Zuge|Hinblick|Gegensatz|Vordergrund|Folgenden|Weiteren|Übrigen|Regelfall|"
                       r"Einzelfall|Zusammenhang|Vertrag|Tarif|Antrag|Abschnitt|Absatz|Punkt|Kapitel|"
                       r"Ende|Anfang|Moment|Augenblick|Schnitt|Minimum|Maximum|Grunde|Rest|Ganzen|"
-                      r"Einzelnen|Allgemeinen|Besonderen|Nachgang|Vorfeld)(?![\wäöüß]))")
+                      r"Einzelnen|Allgemeinen|Besonderen|Nachgang|Vorfeld)(?![\wäöüß])"
+                      # Straßenklasse mit Nummer ("Auf der A 8", "B 15", "L 2080", "BAB 9", "St 2089", "E 45"):
+                      # eine Fahrbahn, keine Anschrift (Domänen-Befund 46)
+                      r"|" + kennungsformen.STRASSENKLASSE + r"(?![\wäöüß]))")
 _KEINE_EINHEIT = (r"(?![ \t]*(?:Uhr|Jahre?n?|Monate?n?|Tage?n?|Wochen?|Prozent|%|EUR|Euro|€|km|Stunden?|"
                   r"Minuten?|Personen|Kinder|mal|Mio|Mrd|Stück|Jahres|Fahrzeuge|Punkte|Seiten?|Mitarbeiter|"
                   r"Prämien?|Raten?)(?![\wäöüß]))")
@@ -731,7 +741,7 @@ _IN_ZELLE = r"(?:[ ]|\t(?!\t))"
 _ORT_WORT = (r"(?:[A-ZÄÖÜ][a-zäöü]{1,2}\.|[A-ZÄÖÜ][\wäöüß]{1,30}(?:-[\wäöüßA-ZÄÖÜ]{1,30}){0,3}"
              r"|\([A-ZÄÖÜ][\wäöüß]{1,30}\)"
              r"|(?:[aivb]\.[ ]?d\.[ ]?)[A-ZÄÖÜ][\wäöüß]{1,30}\.?"
-             r"|(?:am|an der|in der|bei|im|ob der|a\.[ ]?d\.|v\.[ ]?d\.|i\.[ ]?d\.|b\.|an)" + _IN_ZELLE
+             r"|(?:am|an der|in der|bei|im|ob der|a\.[ ]?d\.|v\.[ ]?d\.|i\.[ ]?d\.|b\.|a\.|an)" + _IN_ZELLE
              + r"+[A-ZÄÖÜ][\wäöüß]{1,30})")
 _PLZ_ORT_RE = re.compile(
     r"(?<![\d\-/,])"
@@ -858,7 +868,8 @@ def _plz_ort_spannen(text: str) -> list:
                 e = s + plz.end() + woerter[anzahl - 1].end()
                 treffer = text[s:e]
         rest = _ORT_REST_RE.search(treffer)
-        if rest and len(treffer.split()) >= 3 and rest.group(0).strip() not in ("Bad", "St", "Neu", "Alt"):
+        if rest and len(treffer.split()) >= 3 and rest.group(0).strip() not in ("Bad", "St", "Neu", "Alt") \
+                and treffer.split()[-2].casefold() not in _ORT_VERBINDER:      # "Wasserburg a. Inn": ein Fluss
             wort = rest.group(0).strip()
             if len(wort) <= 3 and not text[e:e + 1] in ("-", "."):
                 e = s + rest.start()
@@ -873,6 +884,8 @@ def _plz_ort_spannen(text: str) -> list:
                     continue
                 if regel is _PLZ_ZELLENENDE_ORT_RE and not _anschrift_vor_plz_in_zelle(text, s):
                     continue                            # "VW Golf, 45000 ⇥⇥ Benzin": keine Anschrift davor
+                if regel is _PLZ_ZELLE_ORT_RE and not _plz_zelle_anschrift(text, s, m.group(2)):
+                    continue                            # "Kd.-Nr. ⇥⇥ Name": "10471 ⇥⇥ Ruhstorfer" ist keine PLZ
                 woerter = list(re.finditer(r"\S+", m.group(2)))
                 anzahl = _ort_wortzahl([w.group(0) for w in woerter])
                 if anzahl < len(woerter):
@@ -881,6 +894,80 @@ def _plz_ort_spannen(text: str) -> list:
                 belegt.append((s, m.end(2)))
         ergebnisse.sort()
     return ergebnisse
+
+
+_PLZ_KOPF_RE = re.compile(r"(?i)(?<![a-zäöü])(?:plz|postleitzahl|zip)(?![a-zäöü])")
+_KOPF_ZEILEN = 40                 # so weit wird über einer PLZ-Zelle nach dem Spaltenkopf gesucht (Zeilen)
+
+
+def _zellen_der_zeile(text: str, pos: int) -> tuple:
+    """(Zellen der Zeile um pos als [(start, ende)], Nummer der Zelle mit pos, Zeilenanfang)."""
+    a = text.rfind("\n", 0, pos) + 1
+    e = text.find("\n", pos)
+    e = len(text) if e < 0 else e
+    zellen = []
+    i = a
+    while True:
+        t = text.find("\t\t", i, e)
+        zellen.append((i, e if t < 0 else t))
+        if t < 0:
+            break
+        i = t + 2
+    nr = next((k for k, (x, y) in enumerate(zellen) if x <= pos <= y), len(zellen) - 1)
+    return zellen, nr, a
+
+
+def _spaltenkopf_ueber(text: str, zeilenanfang: int, nr: int) -> str | None:
+    """Spaltenkopf über der Zelle Nummer nr: in den Tabellenzeilen darüber (mit Spaltentrenner, ohne Leerzeile
+    dazwischen) die nächste Zelle derselben Nummer ohne Ziffer ("PLZ", "Kd.-Nr.", "VN_PLZ") – None ohne Tabelle."""
+    ende = zeilenanfang - 1
+    for _ in range(_KOPF_ZEILEN):
+        if ende <= 0:
+            return None
+        anfang = text.rfind("\n", 0, ende) + 1
+        zeile = text[anfang:ende]
+        if "\t\t" not in zeile:
+            return None
+        zellen = zeile.split("\t\t")
+        if nr < len(zellen):
+            kopf = zellen[nr].strip()
+            if kopf and not any(c.isdigit() for c in kopf) and len(kopf) <= 30:
+                return kopf
+        ende = anfang - 1
+    return None
+
+
+def _ort_bekannt(ort: str) -> bool:
+    """Ein Ort der Wissensbasis (orte.txt, Großstädte) – auch die ersten Wörter einer längeren Ortsangabe ("Bad
+    Homburg v. d. Höhe", "Wasserburg a. Inn")?"""
+    try:
+        from . import wissen
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return True
+    woerter = ort.split()
+    try:
+        return any(wissen.ist_ort(" ".join(woerter[:n])) for n in range(min(len(woerter), 3), 0, -1))
+    except Exception:  # pragma: no cover - Wissensbasis beschädigt
+        return True
+
+
+def _plz_zelle_anschrift(text: str, s: int, ort: str) -> bool:
+    """Gehört die PLZ-Zelle an s mit der Ort-Zelle daneben zu einer Anschrift (Domänen-Befund 94: in "Kd.-Nr. ⇥⇥
+    Name" ist "10471 ⇥⇥ Ruhstorfer" eine Kundennummer mit Nachnamen)? Ja mit Straße oder Anschrift-Etikett in der
+    Zelle davor bzw. am Ende der Zeile darüber, unter einem Spaltenkopf "PLZ" ("VN_PLZ", "PLZ/Ort") oder – ohne
+    anderen Spaltenkopf darüber – mit einem bekannten Ort ("27568 ⇥⇥ Bremerhaven")."""
+    zellen, nr, zeilenanfang = _zellen_der_zeile(text, s)
+    davor = text[zellen[nr - 1][0]:zellen[nr - 1][1]] if nr > 0 else ""
+    if nr == 0 and zeilenanfang > 0:
+        davor = text[text.rfind("\n", 0, zeilenanfang - 1) + 1:zeilenanfang - 1].rsplit("\t\t", 1)[-1]
+    davor = davor.rstrip(" ,;")
+    if davor and (_ANSCHRIFT_ETIKETT_DAVOR_RE.search(davor)
+                  or any(st.ende == len(davor) for st in _strasse_spannen(davor))):
+        return True
+    kopf = _spaltenkopf_ueber(text, zeilenanfang, nr)
+    if kopf is not None:
+        return bool(_PLZ_KOPF_RE.search(kopf))
+    return _ort_bekannt(ort)
 
 
 def _zellenanfang(text: str, pos: int) -> int:
@@ -909,8 +996,11 @@ def plz_ort_zellenpaar(text: str, start: int, ende: int) -> bool:
     m = _ZELLENPAAR_RE.fullmatch(text, start, ende)
     if m is None:
         return False
-    if text[_zellenanfang(text, start):start].strip(" ") and not _anschrift_vor_plz_in_zelle(text, start):
-        return False                                    # vor der PLZ steht etwas anderes in ihrer Zelle
+    if text[_zellenanfang(text, start):start].strip(" "):
+        if not _anschrift_vor_plz_in_zelle(text, start):
+            return False                                # vor der PLZ steht etwas anderes in ihrer Zelle
+    elif not _plz_zelle_anschrift(text, start, m.group(2)):
+        return False                                    # reine Zahlzelle ohne Anschrift-Bezug ("Kd.-Nr.")
     if not _ZELLENENDE_RE.match(text, ende):
         return False                                    # die Ort-Zelle geht weiter ("73610 ⇥⇥ Mateusz Grabowski")
     woerter = m.group(2).split()
@@ -1736,29 +1826,15 @@ _KFZ_SPERRE = {
 }
 # Hinweis: KH (Bad Kreuznach), VK (Völklingen), TK (Teltow? nein) stehen oben, weil sie in
 # Versicherungstexten praktisch immer Sparten-Kürzel sind (KH = Kfz-Haftpflicht, VK = Vollkasko).
-_KFZ_RE = re.compile(
-    r"(?<![\wÄÖÜäöü\-])([A-ZÄÖÜ]{1,3})([-\s])([A-Z]{1,2})[ \t]?(\d{1,4})([EH])?"
-    r"(?![\wäöüß])(?![ \t]*(?:Uhr|EUR|€|%|Prozent|km|Jahre|Monate|Tage|Punkte)(?![\wäöüß]))")
-_KFZ_KLEIN_RE = re.compile(
-    r"(?i:Kennzeichen)[ \t]*:?[ \t]*((?-i:[a-zäöü]{1,3}[-\s][a-z]{1,2}[ \t]?\d{1,4}[eh]?))(?![\wäöüß])")
 
 
 def _kfz_spannen(text: str) -> list:
-    aus = []
-    for m in _KFZ_RE.finditer(text):
-        kuerzel, trenner, ziffern = m.group(1), m.group(2), m.group(4)
-        if kuerzel in _KFZ_SPERRE:
-            continue
-        if trenner == "\n":
-            continue                                     # kein Kennzeichen über einen Zeilenumbruch
-        # "SGB VI 2023", "VVG AB 2008": Leerzeichen-Trenner + Jahreszahl -> kein Kennzeichen
-        if trenner != "-" and len(ziffern) == 4 and ziffern[:2] in ("19", "20"):
-            continue
-        aus.append(Stelle(m.start(), m.end()))
-    for m in _KFZ_KLEIN_RE.finditer(text):
-        aus.append(Stelle(m.start(1), m.end(1)))
-    aus.sort()
-    return aus
+    """Kennzeichen ohne Etikett nach der gemeinsamen Regel (kennungsformen.kennzeichen_stellen, Runde 5): deutsche
+    Form mit amtlichem Unterscheidungszeichen der Wissensbasis (auch "RO - KL 2207", Kurzzeit- und rote Kennzeichen
+    "RO-04 1287"), Kompaktform hinter einem Kfz-Wort ("Pkw ROKL2207"), klein geschrieben mit Kfz-Wort im Satz – nie ein
+    Modellcode ("KTM RC 390", "C-HR 1.8"). Hinter einem Kfz-Etikett liest die Strukturregel jede Kennzeichenform
+    (kennungsformen.kfz_wert)."""
+    return [Stelle(s, e) for s, e in kennungsformen.kennzeichen_stellen(text, _KFZ_SPERRE)]
 
 
 def finde_kennzeichen_stellen(text):
@@ -1770,6 +1846,54 @@ def finde_kennzeichen(text):
     nicht aber Normen/Bedingungswerke/Typen (DIN EN 1234, AVB KH 2008, BMW X5, ISO 9001,
     römische Zahlen in Aktenzeichen wie "IV ZR 123/19")."""
     return [text[s:e] for s, e in finde_kennzeichen_stellen(text)]
+
+
+# ----------------------------------------------------------------------
+# IP-Adresse, Zugangsdaten, Profil-/Kontoname, Standort, Religion (Runde 5, Domänen-Durchsicht) – die Formen stehen in
+# kennungsformen.py: dieselben liest die Selbstkontrolle
+# ----------------------------------------------------------------------
+def _ip_spannen(text: str) -> list:
+    return [Stelle(a, e) for a, e in kennungsformen.ip_adressen(text)]
+
+
+def _zugangsdaten_spannen(text: str) -> list:
+    return [Stelle(a, e) for a, e in kennungsformen.zugangsdaten(text)]
+
+
+def _profilname_spannen(text: str) -> list:
+    return [Stelle(a, e) for a, e in kennungsformen.profilnamen(text)]
+
+
+def _standort_spannen(text: str) -> list:
+    return [Stelle(a, e) for a, e in kennungsformen.koordinaten(text)]
+
+
+def _religion_spannen(text: str) -> list:
+    return [Stelle(a, e) for a, e in kennungsformen.religion(text)]
+
+
+def _text_schnittstelle(spannen_funktion, name: str, doc: str):
+    def finde(text):
+        return [text[s.start:s.ende] for s in _auf_eingabe(text, spannen_funktion) if s.streng]
+    finde.__name__ = name
+    finde.__doc__ = doc
+    return finde
+
+
+finde_ip = _text_schnittstelle(
+    _ip_spannen, "finde_ip", "IP-Adressen: IPv4 mit gültigen Oktetten (ohne Etikett nur mit IP-Bezug in der Zeile, "
+    "nie eine Versionsnummer), IPv6.")
+finde_zugangsdaten = _text_schnittstelle(
+    _zugangsdaten_spannen, "finde_zugangsdaten", "Zugangsdaten hinter ihrem Etikett: Benutzername/-kennung, "
+    "Kennwort, PIN, Aktivierungs- und Freischaltcode – nicht \"Passwort vergessen?\".")
+finde_profilnamen = _text_schnittstelle(
+    _profilname_spannen, "finde_profilnamen", "Profil- und Kontonamen: @-Namen, Nutzer-/Profilnamen hinter "
+    "Plattform-Etiketten, Profil-Links und personenbezogene Parameter in Links.")
+finde_standort = _text_schnittstelle(
+    _standort_spannen, "finde_standort", "Standort-Koordinaten: Dezimalgrad-Paare und Grad/Minuten/Sekunden.")
+finde_religion = _text_schnittstelle(
+    _religion_spannen, "finde_religion", "Religion/Konfession hinter ihrem Etikett oder unter einem Spaltenkopf "
+    "(Kirchensteuermerkmal, Bekenntnis; besondere Kategorie nach Art. 9 DSGVO).")
 
 
 # ----------------------------------------------------------------------
@@ -1813,7 +1937,9 @@ SPANNEN = {
     "svnr": _svnr_spannen, "steuerid": _steuerid_spannen, "steuernr": _steuernr_spannen,
     "kvnr": _kvnr_spannen, "kindergeld": _kindergeld_spannen, "kfz": _kfz_spannen, "fin": _fin_spannen,
     "ausweis": _ausweis_spannen, "mandat": _mandat_spannen, "bic": _bic_spannen,
-    "kreditkarte": _kreditkarte_spannen, "datum": _datum_spannen,
+    "kreditkarte": _kreditkarte_spannen, "datum": _datum_spannen, "ip": _ip_spannen,
+    "zugangsdaten": _zugangsdaten_spannen, "profilname": _profilname_spannen, "standort": _standort_spannen,
+    "religion": _religion_spannen,
 }
 # Jede Text-Schnittstelle kennt ihre Kategorie: Detektoren nehmen dann die Stellen-Schnittstelle (wird eine
 # Funktion in KATEGORIEN ersetzt, z. B. in Tests, fehlt das Merkmal und es gilt der Fundtext)
@@ -1823,7 +1949,8 @@ for _k, _f in (("iban", finde_iban), ("email", finde_email), ("telefon", finde_t
                ("steuernr", finde_steuernummer), ("kvnr", finde_kv_nummer), ("kindergeld", finde_kindergeldnummer),
                ("kfz", finde_kennzeichen), ("fin", finde_fin), ("ausweis", finde_ausweisnummer),
                ("mandat", finde_mandatsreferenz), ("bic", finde_bic), ("kreditkarte", finde_kreditkarte),
-               ("datum", finde_alle_daten)):
+               ("datum", finde_alle_daten), ("ip", finde_ip), ("zugangsdaten", finde_zugangsdaten),
+               ("profilname", finde_profilnamen), ("standort", finde_standort), ("religion", finde_religion)):
     _f.kategorie = _k
 
 
@@ -1862,12 +1989,17 @@ KATEGORIEN = [
     ("mandat",      "SEPA-Mandatsreferenzen",                    "[MANDATSREFERENZ]", finde_mandatsreferenz, True),
     ("bic",         "BIC (bei IBAN oder Etikett)",               "[BIC]",            finde_bic,             True),
     ("kreditkarte", "Kreditkartennummern",                       "[KREDITKARTE]",    finde_kreditkarte,     True),
+    ("ip",          "IP-Adressen",                               "[IP-ADRESSE]",     finde_ip,              True),
+    ("zugangsdaten", "Zugangsdaten (Benutzer, Kennwort, PIN, Code)", "[ZUGANGSDATEN]", finde_zugangsdaten,   True),
+    ("profilname",  "Profil-/Kontonamen (@-Name, Plattformen)",  "[PROFIL]",         finde_profilnamen,     True),
+    ("standort",    "Standort/Koordinaten (GPS)",                "[STANDORT]",       finde_standort,        True),
     ("international", "Ausländische Anschriften und Kennzeichen", "[AUSLAND]",       finde_ausland,         True),
     ("ort",         "Orte ohne PLZ (Ort-Datum-Zeile, Geburtsort)", "[ORT]",          finde_orte,            True),
     ("beruf",       "Beruf (bei Personen)",                      "[BERUF]",          finde_berufe,          True),
     ("arbeitgeber", "Arbeitgeber (bei Personen)",                "[ARBEITGEBER]",    finde_arbeitgeber,     True),
     ("diagnose",    "Diagnosen, ICD-Codes (Gesundheitsdaten)",   "[DIAGNOSE]",       finde_diagnosen,       False),
     ("medikament",  "Medikamente (Gesundheitsdaten)",            "[MEDIKAMENT]",     finde_medikamente,     False),
+    ("religion",    "Religion/Konfession (Art. 9 DSGVO)",        "[RELIGION]",       finde_religion,        False),
     ("datum",       "ALLE Datumsangaben (Vorsicht!)",            "[DATUM]",          finde_alle_daten,      False),
 ]
 
@@ -1876,8 +2008,9 @@ KATEGORIEN = [
 # eine Kontonummer mit führender 0 wird nicht zur [TELEFON].
 KATEGORIE_PRIORITAET = [
     "iban", "steuerid", "svnr", "kvnr", "kindergeld", "steuernr", "fin", "kreditkarte", "bic",
-    "ausweis", "mandat", "email", "geburt", "kfz", "strasse", "plzort", "international", "vertrag", "telefon",
-    "diagnose", "medikament", "arbeitgeber", "beruf", "ort", "datum",
+    "ausweis", "mandat", "email", "ip", "standort", "zugangsdaten", "profilname", "geburt", "kfz", "strasse",
+    "plzort", "international", "vertrag", "telefon", "diagnose", "medikament", "religion", "arbeitgeber", "beruf",
+    "ort", "datum",
 ]
 
 # ----------------------------------------------------------------------
@@ -1885,31 +2018,37 @@ KATEGORIE_PRIORITAET = [
 # ----------------------------------------------------------------------
 _KERN = {k for k, _, _, _, an in KATEGORIEN if an} - {"beruf", "arbeitgeber", "international", "ort"}
 GESUNDHEIT = frozenset({"diagnose", "medikament"})
+# besondere Kategorien nach Art. 9 DSGVO: in „ausgewogen“/„hoch“ erkannt, aber nur gemeldet und abgewählt angeboten,
+# in „maximal“ geschwärzt – Gesundheitsdaten und (seit Runde 5) Religion/Konfession
+RELIGION = frozenset({"religion"})
+ART9 = GESUNDHEIT | RELIGION
 PROFILE = {
     "ausgewogen": {
         "aktive": frozenset(_KERN),
-        "hinweis": GESUNDHEIT,                 # erkannt, aber nur gemeldet und abgewählt angeboten
+        "hinweis": ART9,                       # erkannt, aber nur gemeldet und abgewählt angeboten
         "beschreibung": "Direkte Kennungen: Namen, Anschrift, IBAN, Telefon, Nummern … – mehr Zusammenhang "
-                        "für die KI. Gesundheitsdaten werden gemeldet und können angehakt werden.",
+                        "für die KI. Gesundheitsdaten und Konfession werden gemeldet und können angehakt werden.",
         "optionen": {"alle_geburtsdaten": False, "unbekannte_eigennamen": False, "bilder_schwaerzen": False},
     },
     "hoch": {
         "aktive": frozenset(_KERN | {"beruf", "arbeitgeber", "international", "ort"}),
-        "hinweis": GESUNDHEIT,
+        "hinweis": ART9,
         "beschreibung": "Empfohlen. Zusätzlich: Beruf, Arbeitgeber, ausländische Anschriften, Orte. "
-                        "Gesundheitsdaten (Diagnosen, Medikamente) werden gemeldet und können angehakt werden.",
+                        "Gesundheitsdaten (Diagnosen, Medikamente) und Konfession werden gemeldet und können "
+                        "angehakt werden.",
         "optionen": {"alle_geburtsdaten": False, "unbekannte_eigennamen": False, "bilder_schwaerzen": False},
     },
     "maximal": {
-        "aktive": frozenset(_KERN | {"beruf", "arbeitgeber", "international", "ort"} | GESUNDHEIT),
+        "aktive": frozenset(_KERN | {"beruf", "arbeitgeber", "international", "ort"} | ART9),
         # hier aktiv; nur wer sie selbst abwählt (Benutzerdefiniert), bekommt sie gemeldet und abgewählt angeboten
-        "hinweis": GESUNDHEIT,
+        "hinweis": ART9,
         # bilder_schwaerzen (fotos.seite_pruefen): Bilder auf Textseiten, Fotobereiche auf Scans – Striche wie
         # Unterschrift und Handschrift entfernt die Fotoerkennung vorab, sie bleiben auf Scans und Fotos stehen, und
         # gezeichnete Linien (Vektorgrafik) sieht die Bildprüfung nicht: abgedeckt nur als eigenes Rasterbild. Nicht
         # länger als bisher (die Beschreibung steht im Hauptfenster über der Fundliste)
         "beschreibung": "Größter Schutz, weniger Zusammenhang für die KI. Zusätzlich: Diagnosen, Medikamente, "
-                        "alle plausiblen Geburtsdaten, unbekannte Eigennamen bei Personen, Bilder und Fotobereiche "
+                        "Konfession, alle plausiblen Geburtsdaten, unbekannte Eigennamen bei Personen, Bilder und "
+                        "Fotobereiche "
                         "(Unterschriften und Handschrift nur, wenn als eigenes Bild eingefügt).",
         "optionen": {"alle_geburtsdaten": True, "unbekannte_eigennamen": True, "bilder_schwaerzen": True},
     },
@@ -1924,7 +2063,7 @@ def profil(name: str | None) -> dict:
 
 def hinweis_kategorien(profil_name: str | None, aktive) -> set:
     """Kategorien, die in dieser Schutzstufe erkannt, aber nur gemeldet und abgewählt angeboten werden
-    (Gesundheitsdaten in „hoch“/„ausgewogen“) – ohne die, die die Nutzerin selbst angehakt hat."""
+    (Gesundheitsdaten und Konfession in „hoch“/„ausgewogen“) – ohne die, die die Nutzerin selbst angehakt hat."""
     return set(profil(profil_name).get("hinweis", ())) - set(aktive or ())
 
 

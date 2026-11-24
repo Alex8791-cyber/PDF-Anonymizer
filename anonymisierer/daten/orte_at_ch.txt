@@ -1,0 +1,309 @@
+# Orte in Österreich, der Schweiz und Liechtenstein (Landeshauptstädte, Bezirks- und Kantonshauptorte, größere
+# Gemeinden), wie sie hinter einer vierstelligen Postleitzahl stehen: „8002 Zürich“, „4040 Linz“ – der Ort zeigt die
+# ausländische Anschrift auch ohne Länderwort.
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+Aarau
+Absam
+Adliswil
+Affoltern am Albis
+Allschwil
+Altaussee
+Altdorf
+Althofen
+Altstätten
+Amriswil
+Amstetten
+Ansfelden
+Appenzell
+Arbon
+Arth
+Attnang-Puchheim
+Baar
+Bad Aussee
+Bad Fischau
+Bad Gastein
+Bad Hall
+Bad Ischl
+Bad Radkersburg
+Bad Vöslau
+Baden
+Balzers
+Basel
+Bellinzona
+Belp
+Bern
+Berndorf
+Biel
+Bischofshofen
+Bleiburg
+Bludenz
+Braunau am Inn
+Bregenz
+Brig
+Bruck an der Leitha
+Bruck an der Mur
+Brugg
+Brunn am Gebirge
+Buchs
+Bülach
+Bulle
+Burgdorf
+Carouge
+Cham
+Chur
+Davos
+Delsberg
+Deutschlandsberg
+Dietikon
+Dornbirn
+Dübendorf
+Ebensee
+Ebikon
+Ebreichsdorf
+Eferding
+Einsiedeln
+Eisenerz
+Eisenstadt
+Emmen
+Enns
+Eschen
+Feldbach
+Feldkirch
+Feldkirchen
+Ferlach
+Fieberbrunn
+Flawil
+Frauenfeld
+Freiburg im Üechtland
+Freistadt
+Friesach
+Fürstenfeld
+Gamprin
+Gänserndorf
+Genf
+Gerasdorf
+Glarus
+Gleisdorf
+Gmünd
+Gmunden
+Gossau
+Graz
+Grenchen
+Grieskirchen
+Güssing
+Hall
+Hall in Tirol
+Hallein
+Hard
+Hartberg
+Heerbrugg
+Herisau
+Hermagor
+Herzogenburg
+Hinwil
+Hohenems
+Hollabrunn
+Horgen
+Horn
+Horw
+Illnau-Effretikon
+Imst
+Innsbruck
+Interlaken
+Ischgl
+Ittigen
+Jennersdorf
+Judenburg
+Kapfenberg
+Kindberg
+Kirchberg in Tirol
+Kirchdorf an der Krems
+Kitzbühel
+Klagenfurt
+Klosterneuburg
+Kloten
+Knittelfeld
+Köflach
+Köniz
+Korneuburg
+Krems an der Donau
+Kreuzlingen
+Kriens
+Kufstein
+Küsnacht
+La Chaux-de-Fonds
+Laa an der Thaya
+Lachen
+Lancy
+Landeck
+Langenthal
+Lausanne
+Leibnitz
+Lenzburg
+Leoben
+Leonding
+Lienz
+Liestal
+Liezen
+Lilienfeld
+Linz
+Locarno
+Lugano
+Lustenau
+Luzern
+Lyss
+Marchtrenk
+Martigny
+Matrei in Osttirol
+Mattersburg
+Mauren
+Mayrhofen
+Meilen
+Melk
+Meyrin
+Mistelbach
+Mittersill
+Mödling
+Möhlin
+Mondsee
+Monthey
+Montreux
+Morges
+Münsingen
+Murau
+Muri
+Muri bei Bern
+Mürzzuschlag
+Muttenz
+Neuenburg
+Neuhausen am Rheinfall
+Neunkirchen
+Neusiedl am See
+Nyon
+Oberpullendorf
+Oberwart
+Oftringen
+Olten
+Opfikon
+Ostermundigen
+Perchtoldsdorf
+Perg
+Pfäffikon
+Planken
+Pöchlarn
+Pratteln
+Pully
+Purkersdorf
+Radstadt
+Rankweil
+Rapperswil-Jona
+Regensdorf
+Reinach
+Renens
+Retz
+Reutte
+Rheinfelden
+Ried im Innkreis
+Riehen
+Rohrbach
+Romanshorn
+Rorschach
+Ruggell
+Rum
+Rüti
+Saalfelden
+Salzburg
+Sankt Andrä
+Sankt Gallen
+Sankt Johann im Pongau
+Sankt Johann in Tirol
+Sankt Moritz
+Sankt Pölten
+Sankt Veit an der Glan
+Sankt Wolfgang
+Sargans
+Sarnen
+Schaan
+Schaffhausen
+Schärding
+Scheibbs
+Schellenberg
+Schladming
+Schlieren
+Schwaz
+Schwechat
+Schwyz
+Seekirchen am Wallersee
+Siders
+Sitten
+Sölden
+Solothurn
+Spiez
+Spittal an der Drau
+Stadl-Paura
+Stäfa
+Stans
+Steffisburg
+Steinhausen
+Steyr
+Stockerau
+Sursee
+Tamsweg
+Telfs
+Ternitz
+Thalwil
+Thun
+Traiskirchen
+Traun
+Treibach
+Triesen
+Triesenberg
+Tulln
+Tulln an der Donau
+Uster
+Uzwil
+Vaduz
+Velden am Wörther See
+Vernier
+Vevey
+Villach
+Visp
+Vöcklabruck
+Vöcklamarkt
+Voitsberg
+Völkermarkt
+Wädenswil
+Waidhofen an der Thaya
+Waidhofen an der Ybbs
+Wallisellen
+Wals-Siezenheim
+Wattens
+Weinfelden
+Weiz
+Wels
+Wettingen
+Wetzikon
+Widnau
+Wien
+Wiener Neustadt
+Wil
+Winterthur
+Wohlen
+Wolfsberg
+Wolkersdorf
+Worb
+Wörgl
+Ybbs an der Donau
+Yverdon-les-Bains
+Zell am See
+Zell am Ziller
+Zermatt
+Zirl
+Zofingen
+Zollikofen
+Zollikon
+Zug
+Zürich
+Zwettl
