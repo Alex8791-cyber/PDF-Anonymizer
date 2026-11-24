@@ -218,13 +218,14 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Name („Suzuki GSX-R“). Ausländische Kennzeichen im Satz hinter einem Fahrzeugwort werden mit Länderhinweis geschwärzt,
   sonst von der Restrisiko-Prüfung gemeldet. Ein Datum hinter dem Etikett („Kennzeichen AM 29.03.2025“ in Versalien) ist
   kein Kennzeichen.
-- **Anschriften (Runde 5):** vierstellige PLZ mit Ort (Österreich, Schweiz) hinter einer Straße, mit Länderhinweis
-  oder einem Ort der Nachbarländer („8002 Zürich“), Straßen mit vorangestelltem Straßentyp („Str. Memorandumului nr.
-  27“, „Calea Victoriei nr. 12“, „bul. Vitosha 15“), sechsstellige PLZ mit Länderhinweis. Nicht mehr als Anschrift:
-  Straßenklassen mit Nummer („Auf der A 8“, „B 15“, „L 2080“, „BAB 9“); PLZ ⇥⇥ Ort über einen Spaltentrenner nur mit
-  Straße davor (auch mit Hausnummernbereich „33-35“), unter dem Spaltenkopf „PLZ“ oder mit bekanntem Ort – in
-  „Kd.-Nr. ⇥⇥ Name“ ist „10471 ⇥⇥ Ruhstorfer“ keine Anschrift. Hinter „Unfallort:“ ist „BAB 9, km 381,2“ weder
-  Straße noch Ort.
+- **Anschriften (Runde 5):** vierstellige PLZ mit Ort (Österreich, Schweiz) hinter einer Straße, mit Länderhinweis oder
+  einem Ort der Nachbarländer („8002 Zürich“, auch mehrteilig ganz: „6060 Hall in Tirol“, „4820 Bad Ischl“; ein Ort, der
+  zugleich ein deutsches Wort ist, nur am Ende der Angabe – nicht „1500 Zug um Zug“, „5000 Meilen gutgeschrieben“),
+  Straßen mit vorangestelltem Straßentyp („Str. Memorandumului nr. 27“, „Calea Victoriei nr. 12“, „bul. Vitosha 15“),
+  sechsstellige PLZ mit Länderhinweis. Nicht mehr als Anschrift: Straßenklassen mit Nummer („Auf der A 8“, „B 15“, „L
+  2080“, „BAB 9“); PLZ ⇥⇥ Ort über einen Spaltentrenner nur mit Straße davor (auch mit Hausnummernbereich „33-35“),
+  unter dem Spaltenkopf „PLZ“ oder mit bekanntem Ort – in „Kd.-Nr. ⇥⇥ Name“ ist „10471 ⇥⇥ Ruhstorfer“ keine Anschrift.
+  Hinter „Unfallort:“ ist „BAB 9, km 381,2“ weder Straße noch Ort.
 
 ### Geändert
 - **Prüfziffern sind nur noch ein Indiz:** Eine IBAN mit falscher Prüfziffer wird trotzdem geschwärzt, wenn

@@ -571,6 +571,40 @@ def test_b29_gegenproben(zeile, frei):
     assert _nicht_geschwaerzt(zeile, frei, funde), _paare(funde)
 
 
+@pytest.mark.parametrize("zeile, frei", [
+    # Orte der Nachbarländer, die zugleich deutsche Wörter sind (daten/orte_at_ch_mehrdeutig.txt), mitten im Satz
+    ("Ihrem Bonuskonto wurden 5000 Meilen gutgeschrieben.", "5000 Meilen"),
+    ("Nach 1500 Meilen Fahrt fiel die Klimaanlage aus.", "1500 Meilen"),
+    ("Sturmschaden im Forst: 1200 Eschen umgestürzt.", "1200 Eschen"),
+    ("Lieferung von 1200 Planken für die Terrasse", "1200 Planken"),
+    ("Der Restbetrag von 1500 Zug um Zug gegen Übergabe des Fahrzeugs.", "1500 Zug"),
+    # ein Ortsname als Anfang eines Kompositums
+    ("Rechnung 4711 Bern-Express Kurier", "4711 Bern-Express"),
+    ("Lieferung von 1200 Muri-Platten", "1200 Muri-Platten"),
+])
+def test_b29_ortsname_als_wort_ist_keine_anschrift(zeile, frei):
+    funde = _funde(zeile)
+    assert _nicht_geschwaerzt(zeile, frei, funde), _paare(funde)
+    assert _nicht_gemeldet(zeile, frei), [(v.text, v.grund) for v in pruefe_text(zeile)]
+
+
+@pytest.mark.parametrize("zeile, wert", [
+    ("Frau Gesche Oberrauch, 6300 Zug", "6300 Zug"),           # mehrdeutiger Ort am Ende der Angabe
+    ("Frau Gesche Oberrauch, Seestrasse 12, 6300 Zug", "6300 Zug"),
+    ("Herr Kurt Bühler, 8706 Meilen, Schweiz", "8706 Meilen"),
+    ("Zustellanschrift: CH-6300 Zug", "CH-6300 Zug"),
+    ("Herr Okke Lindlbauer, 4540 Bad Hall", "4540 Bad Hall"),   # „Bad“ allein ist ein Wort, „Bad Hall“ ein Ort
+    ("Kurhausstraße 3, 4820 Bad Ischl", "4820 Bad Ischl"),
+    ("aus 6060 Hall in Tirol", "6060 Hall in Tirol"),           # ein mehrteiliger Ort ganz
+    ("Hauptplatz 3, 8600 Bruck an der Mur", "8600 Bruck an der Mur"),
+])
+def test_b29_orte_der_nachbarlaender(zeile, wert):
+    text = f"Angaben zur Unfallgegnerin\n{zeile}"
+    funde = _funde(text)
+    assert _abgedeckt(text, wert, funde), _paare(funde)
+    assert _gemeldet(zeile, wert), [(v.text, v.grund) for v in pruefe_text(zeile)]
+
+
 # ======================================================================
 # Befund 40: ausländische Straßen mit vorangestelltem Straßentyp, sechsstellige PLZ mit Länderhinweis
 # ======================================================================

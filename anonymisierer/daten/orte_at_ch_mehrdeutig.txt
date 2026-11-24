@@ -1,0 +1,23 @@
+# Orte in Österreich, der Schweiz und Liechtenstein, die zugleich gewöhnliche deutsche Wörter sind (Zug, Meilen,
+# Eschen, Planken, Horn …): ohne Straße, Länderhinweis oder Länderkürzel gilt eine vierstellige Zahl davor nur am Ende
+# der Angabe als Anschrift („6300 Zug“), nicht mitten im Satz („1500 Zug um Zug“, „5000 Meilen gutgeschrieben“).
+# Jeder Eintrag steht auch in orte_at_ch.txt.
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+Baden
+Buchs
+Bulle
+Eisenerz
+Eschen
+Hall
+Hard
+Horn
+Lachen
+Meilen
+Planken
+Rum
+Sitten
+Thun
+Wels
+Zug

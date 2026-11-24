@@ -15,7 +15,7 @@ Zeile) und danach mit --schreiben einsortieren lassen. Geprüft werden:
 - der Kern jedes Namens mit Partikel ("Vries" aus "de Vries") steht als eigener Nachname
   in der Liste, außer er ist Vorname oder Allerweltswort ("Marco", "Meer")
 - jeder Eintrag von nachnamen_mehrdeutig ist ein Nachname, jeder von vornamen_mehrdeutig
-  ein Vorname
+  ein Vorname, jeder von orte_at_ch_mehrdeutig ein Ort aus orte_at_ch
 - Berufe und Einzelwörter der Erlaubnisliste, die zugleich Nachnamen sind, stehen in
   nachnamen_mehrdeutig (Regeln brauchen dort Kontext)
 
@@ -116,6 +116,10 @@ def querpruefungen() -> list[str]:
     for eintrag in wissen.liste("vornamen_mehrdeutig"):
         if not wissen.ist_vorname(eintrag):
             probleme.append(f"vornamen_mehrdeutig: {eintrag!r} fehlt in vornamen")
+    orte_at_ch = wissen.index("orte_at_ch")
+    for eintrag in wissen.liste("orte_at_ch_mehrdeutig"):
+        if orte_at_ch.eintrag_fuer(eintrag) is None:
+            probleme.append(f"orte_at_ch_mehrdeutig: {eintrag!r} fehlt in orte_at_ch")
     for eintrag in wissen.liste("berufe"):
         if wissen.ist_nachname(eintrag) and not wissen.ist_mehrdeutig(eintrag):
             probleme.append(f"berufe: {eintrag!r} ist auch Nachname, fehlt in nachnamen_mehrdeutig")

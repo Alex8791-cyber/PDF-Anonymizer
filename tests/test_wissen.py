@@ -31,6 +31,7 @@ MINDESTGROESSE = {
     "anreden_titel": 150,
     "orte": 600,
     "orte_at_ch": 250,
+    "orte_at_ch_mehrdeutig": 12,
     "kfz_unterscheidungszeichen": 700,
     "fahrzeugmarken": 180,
 }
@@ -126,6 +127,12 @@ def test_mehrdeutige_nachnamen_sind_nachnamen():
 
 def test_mehrdeutige_vornamen_sind_vornamen():
     assert [e for e in w.liste("vornamen_mehrdeutig") if not w.ist_vorname(e)] == []
+
+
+def test_mehrdeutige_orte_der_nachbarlaender_sind_orte():
+    """Jeder Ort aus orte_at_ch_mehrdeutig steht auch in orte_at_ch (sonst greift die Regel nie)."""
+    orte = w.index("orte_at_ch")
+    assert [e for e in w.liste("orte_at_ch_mehrdeutig") if orte.eintrag_fuer(e) is None] == []
 
 
 def test_berufe_die_nachnamen_sind_gelten_als_mehrdeutig():

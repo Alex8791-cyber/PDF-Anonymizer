@@ -84,6 +84,7 @@ LISTEN = {
     "anreden_titel": "anreden_titel.txt",
     "orte": "orte.txt",
     "orte_at_ch": "orte_at_ch.txt",
+    "orte_at_ch_mehrdeutig": "orte_at_ch_mehrdeutig.txt",
     "kfz_unterscheidungszeichen": "kfz_unterscheidungszeichen.txt",
     "fahrzeugmarken": "fahrzeugmarken.txt",
 }

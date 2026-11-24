@@ -2587,6 +2587,41 @@ def ort_at_ch(phrase: str) -> bool:
     return False
 
 
+_WORT_DANACH_RE = re.compile(r"[ \t]*[^\W\d_]")
+
+
+def _ort_ab(text: str, pos: int):
+    """Der Ort der Nachbarländer, der bei pos beginnt – der längste Eintrag von daten/orte_at_ch.txt auf derselben
+    Zeile ("Bad Ischl", "Hall in Tirol", "Bruck an der Mur") als wissen.Vorkommen (start/ende relativ zu pos) –
+    oder None; nie der Anfang eines Kompositums ("Bern-Express", "Muri-Platten", "Baden-Württemberg")."""
+    try:
+        from . import wissen
+        index = wissen.index("orte_at_ch")
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return None
+    ende = text.find("\n", pos)
+    treffer = index.finde(text[pos:len(text) if ende < 0 else ende][:80])
+    if not treffer or treffer[0].start != 0:
+        return None
+    danach = text[pos + treffer[0].ende:pos + treffer[0].ende + 1]
+    return None if danach and (danach.isalnum() or danach in "-‐–") else treffer[0]
+
+
+def _ort_allein_anschrift(text: str, pos: int, ort) -> bool:
+    """Zeigt der Ort ab pos (ort: _ort_ab) ohne Straße, Länderhinweis oder Länderkürzel eine ausländische Anschrift?
+    Nur ein Ort der Nachbarländer; einer, der zugleich ein deutsches Wort ist (daten/orte_at_ch_mehrdeutig.txt: "Zug",
+    "Meilen", "Eschen"), nur am Ende der Angabe ("Frau G. Oberrauch, 6300 Zug") – nicht mitten im Satz ("1500 Zug um
+    Zug", "5000 Meilen gutgeschrieben", "1200 Eschen umgestürzt")."""
+    if ort is None:
+        return False
+    try:
+        from . import wissen
+        mehrdeutig = wissen.menge("orte_at_ch_mehrdeutig")
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return False
+    return wissen.normalisieren(ort.eintrag) not in mehrdeutig or not _WORT_DANACH_RE.match(text, pos + ort.ende)
+
+
 def strassen_vorn(text: str) -> list:
     """(start, ende) der Straßen mit vorangestelltem Straßentyp (Rumänien, Bulgarien, Kroatien, Slowenien, Polen):
     "Str. Memorandumului nr. 27", "Calea Victoriei nr. 12", "bul. Vitosha 15" – Name und Hausnummer, der Typ gehört
@@ -2610,25 +2645,28 @@ def plz4_ausland(text: str, strassen) -> list:
     """(start, ende) der vierstelligen PLZ mit Ort einer ausländischen Anschrift: hinter einer Straße beliebiger Form
     (strassen: [(start, ende)]; höchstens sechs Zeichen und ein Komma dazwischen: "Seestrasse 12, 8002 Zürich"), vor
     einer Straße in Klammern ("4040 Linz (Hauptstraße 44/3/12)"), mit Länderhinweis oder Länderkürzel im Umkreis
-    ("CH-3011 Bern", "…, Schweiz") oder mit einem Ort der Nachbarländer ("aus 4040 Linz": daten/orte_at_ch.txt). Keine
-    Einheit und kein Sachwort dahinter ("1500 Euro", "4711 Vertrieb"); eine Jahreszahl ("2025 Hamburg") nur mit Straße,
-    Länderhinweis oder Länderkürzel."""
+    ("CH-3011 Bern", "…, Schweiz") oder mit einem Ort der Nachbarländer ("aus 4040 Linz": daten/orte_at_ch.txt; ein
+    Ort, der zugleich ein deutsches Wort ist, nur am Ende der Angabe: _ort_allein_anschrift). Keine Einheit und kein
+    Sachwort dahinter ("1500 Euro", "4711 Vertrieb"); eine Jahreszahl ("2025 Hamburg") nur mit Straße, Länderhinweis
+    oder Länderkürzel."""
     aus = []
     enden = sorted(e for _, e in strassen)
     anfaenge = sorted(s for s, _ in strassen)
     for m in _PLZ4_RE.finditer(text):
-        plz, ort = m.group(1), m.group(2)
-        if _ort_nicht(ort.split()[0]):
-            continue
+        plz, bekannt = m.group(1), _ort_ab(text, m.start(2))
+        if bekannt is None and _ort_nicht(m.group(2).split()[0]):
+            continue                                    # "Bad Ischl" ist ein Ort, "1500 Euro" keiner
         nach_strasse = any(0 <= m.start() - e <= 6 and "\n" not in text[e:m.start()] for e in enden
                            if m.start() - 8 <= e <= m.start())
         vor_strasse = any(0 <= s - m.end() <= 3 for s in anfaenge if m.end() <= s <= m.end() + 3)
         kuerzel = m.group(0)[:1].isalpha()
         land = bool(LAND_RE.search(text, max(0, m.start() - 120), min(len(text), m.end() + 60)))
         jahr = plz[:2] in ("19", "20")
-        if not (nach_strasse or vor_strasse or kuerzel or land) and (jahr or not ort_at_ch(ort)):
+        if not (nach_strasse or vor_strasse or kuerzel or land) \
+                and (jahr or not _ort_allein_anschrift(text, m.start(2), bekannt)):
             continue
-        aus.append((m.start(), m.end()))
+        # ein mehrteiliger Ort gehört ganz dazu ("6060 Hall in Tirol", "8600 Bruck an der Mur")
+        aus.append((m.start(), max(m.end(), m.start(2) + bekannt.ende) if bekannt is not None else m.end()))
     return aus
 
 
