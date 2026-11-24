@@ -224,12 +224,15 @@ def _treffer(s, e, text, si, gruppe=None) -> Treffer:
 # R1 "Nachname, Vorname"
 # ----------------------------------------------------------------------
 _W = f"[{_GROSS}][{_KLEIN}{_GROSS}'’]*(?:-[{_GROSS}{_KLEIN}][{_KLEIN}{_GROSS}'’]*)*"
+# Lücke zwischen Namenswörtern: Leerzeichen oder ein einzelner Tabulator – nie der Spaltentrenner "\t\t" (Befund 91:
+# "Mooslechner, Anton ⇥⇥ PHV" – die Sparte der Nachbarspalte ist kein zweiter Vorname)
+_LUECKE = r"(?:[ ]|(?<!\t)\t(?!\t))+"
 _PART_RE = r"(?:(?:von|van|de|der|den|di|da|del|della|du|le|la|ter|ten|zu|zum|zur|vom|al|el|Freiherr|Freifrau|Graf|" \
-           r"VON|VAN|DE|DER|DEN|FREIHERR|FREIFRAU|GRAF|ZU|VOM)[ \t]+)"
+           r"VON|VAN|DE|DER|DEN|FREIHERR|FREIFRAU|GRAF|ZU|VOM)" + _LUECKE + ")"
 _KOMMA_RE = re.compile(
-    rf"(?<![{_KLEIN}{_GROSS}\-])(?P<nach>{_PART_RE}*{_W}(?:[ \t]+{_W})?)[ \t]*,[ \t]*(?:\n[ \t]*)?"
-    rf"(?P<vor>{_W}(?:[ \t]+{_W})?)(?P<partikel>(?:[ \t]+(?:von|van|de|der|den|di|da|zu|zum|zur|vom|ter|ten)"
-    rf"(?:[ \t]+(?:der|den|dem|de|la))?)?)(?![{_KLEIN}{_GROSS}])")
+    rf"(?<![{_KLEIN}{_GROSS}\-])(?P<nach>{_PART_RE}*{_W}(?:{_LUECKE}{_W})?)[ \t]*,[ \t]*(?:\n[ \t]*)?"
+    rf"(?P<vor>{_W}(?:{_LUECKE}{_W})?)(?P<partikel>(?:{_LUECKE}(?:von|van|de|der|den|di|da|zu|zum|zur|vom|ter|ten)"
+    rf"(?:{_LUECKE}(?:der|den|dem|de|la))?)?)(?![{_KLEIN}{_GROSS}])")
 
 
 _LAUFNUMMER_IN_ZEILE_RE = re.compile(r"(?:^|[ \t])(?P<nr>[2-9]|[1-9]\d)\.[ \t]+$")
@@ -288,9 +291,11 @@ def _komma_namen(text: str) -> list:
         if any(w.casefold() in _KEIN_NAME or _art(w)[4] and not _art(w)[2] for w in nach_woerter):
             continue
         # zweites Wort hinter dem Vornamen nur, wenn es ein Vorname sein kann – nie ein Wort wie "GEB" ("WEBER, ANNA
-        # GEB. SCHULZ": dahinter steht der Geburtsname, namen.geburtsnamen)
-        vor_gekuerzt = len(vor_woerter) == 2 and (vor_woerter[1].casefold() in _KEIN_NAME
-                                                   or not (_art(vor_woerter[1])[0] or _versal(vor_woerter[1])))
+        # GEB. SCHULZ": dahinter steht der Geburtsname, namen.geburtsnamen); ein Wort in Versalien nur, wenn auch der
+        # erste Vorname in Versalien steht ("MOOSLECHNER, ANTON JOSEF") – sonst ist es ein Kürzel der Nachbarspalte
+        # ("Mooslechner, Anton PHV" einer OCR-Zeile ohne Tabulator, Befund 91)
+        vor_gekuerzt = len(vor_woerter) == 2 and (vor_woerter[1].casefold() in _KEIN_NAME or not (
+            _art(vor_woerter[1])[0] or (_versal(vor_woerter[1]) and _versal(vor_woerter[0]))))
         if vor_gekuerzt:
             vor_ende = m.start("vor") + len(vor_woerter[0])
         else:

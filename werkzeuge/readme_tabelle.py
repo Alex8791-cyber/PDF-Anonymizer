@@ -62,7 +62,8 @@ ERLAEUTERUNG = {
               "oder Klammer („Max Mustermann, 02.09.1983“) – bei Kindern und Mitversicherten („Kind 2: Lea Brandl, "
               "30.06.2018“) in jedem Alter; in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre "
               "zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“",
-    "vertrag": "Nummer hinter einem Etikett wie „Vertrags-Nr.“; auch eVB-Nummer (elektronische "
+    "vertrag": "Nummer hinter einem Etikett wie „Vertrags-Nr.“ oder in einer Tabellenspalte mit solchem Kopf (dort "
+               "auch mit Tausenderpunkten: „7.712.345“ unter „Vertrag“); auch eVB-Nummer (elektronische "
                "Versicherungsbestätigung) und Transferticket der Kfz-Versicherung",
     "steuerid": "ohne Beschriftung nur mit gültiger Prüfziffer",
     "steuernr": "ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma (die von "
@@ -76,7 +77,8 @@ ERLAEUTERUNG = {
                    "„Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder Gutachten-Prüfnummer)",
     "ort": "Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“",
     "beruf": "hinter „Beruf:“, im Satz („arbeitet als …“), in der Spalte „Beruf“/„Tätigkeit“ einer "
-             "Personenliste und im Beruf-Feld eines Kastenformulars (Wert unter dem Feldbezeichner)",
+             "Personenliste und im Beruf-Feld eines Kastenformulars (Wert unter dem Feldbezeichner, auch unter „Beruf "
+             "des Ehepartners“)",
     "arbeitgeber": "hinter „Arbeitgeber:“ oder im Satz; bekannte Versicherer, Banken und Behörden bleiben stehen",
     "diagnose": "nur bekannte Begriffe und ICD-Codes mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten "
                 "(⚕, nicht angehakt)",

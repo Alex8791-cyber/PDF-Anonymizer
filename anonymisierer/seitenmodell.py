@@ -578,6 +578,7 @@ class Seite:
         self.ocr_boxen: list = ocr_boxen or []
         self.ocr_modus: str = "nein"          # "nein" | "seite" | "bilder"
         self.ocr_winkel = None                # erkannte Ausrichtung der Scan-Seite (Kontroll-OCR)
+        self.ocr_schraeg = 0.0                # geschätzte, von der OCR nicht herausgedrehte Schräglage (Grad)
         self.ocr_woerter: int = 0             # Anzahl OCR-Wörter
         self.felder: list = []
         # Durchsuchbarer Scan (unsichtbare Textebene + OCR derselben Bildstelle), siehe _textebene_verknuepfen:
@@ -2016,6 +2017,24 @@ def _ocr_holen(dienst, pfad, nr, clip=None):
     return list(woerter or []), warnung, None, None, None
 
 
+def _ocr_schraeg(dienst, pfad, nr) -> float:
+    """Geschätzte Schräglage (Grad, Vorzeichen wie ocr.schraeglage_schaetzen) einer per OCR gelesenen Scan-Seite,
+    die die OCR NICHT gerade gerückt gelesen hat (unter ocr.SCHRAEG_KORREKTUR_AB: die Wortkästen sind dann die
+    waagerechten Bänder der schrägen Zeilen, die Schräglage steckt nur noch im Versatz der Zeilen gegeneinander) –
+    aus dem Zwischenspeicher des Dienstes, ohne neuen OCR-Lauf; 0.0, wenn unbekannt oder schon herausgedreht."""
+    frage = getattr(dienst, "schraeglage_falls_bekannt", None)
+    if frage is None or pfad is None:
+        return 0.0
+    try:
+        bekannt = frage(pfad, nr, OCR_DPI)
+    except Exception:
+        return 0.0
+    if not bekannt:
+        return 0.0
+    schraeg, korrektur = bekannt
+    return 0.0 if korrektur else float(schraeg or 0.0)
+
+
 def _ocr_warnung_melden(warnungen, meldungen, warnung, plausibel, anzahl, dienst_meldungen, nr):
     """Warnung des Dienstes als Text in die Warnungen (wie bisher) und strukturiert in die Meldungen –
     mit den Codes des Dienstes, sonst grob eingeordnet."""
@@ -2159,6 +2178,8 @@ def _dokument_aufbauen(doc, pfad, ocr, ocr_cache, melde, fortschritt, abbruch, w
         m.ocr_modus = modus
         m.ocr_winkel = winkel
         m.ocr_woerter = len(woerter or [])
+        if modus == "seite" and woerter:
+            m.ocr_schraeg = _ocr_schraeg(ocr, pfad, nr)
         if analyse_meldungen and modus == "seite" and woerter is not None:
             if woerter:
                 if len(woerter) < 25:

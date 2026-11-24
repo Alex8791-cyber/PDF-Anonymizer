@@ -297,10 +297,14 @@ def gesundheit(dok, kontext):
 # ======================================================================
 # Beruf und Arbeitgeber
 # ======================================================================
+# Genitiv hinter "Beruf": wessen Beruf ("Beruf des Ehepartners", "Beruf der versicherten Person", "Beruf der zu
+# versichernden Person") – höchstens ein kleingeschriebenes Wort vor dem großgeschriebenen Rollenwort
+_BERUF_GENITIV = r"(?:[ \t]+(?:des|der)(?:[ \t]+(?:zu[ \t]+)?[a-zäöüß]+)?[ \t]+[A-ZÄÖÜ][\wäöüß\-]*)"
 _BERUF_ETIKETT_RE = re.compile(
     r"(?<![\wäöüß])(?i:(?:ausgeübte[rn]?|derzeitige[rn]?|jetzige[rn]?|erlernte[rn]?|aktuelle[rn]?|"
     r"zuletzt[ \t]+ausgeübte[rn]?)[ \t]+)?"
-    r"(?:Beruf|Berufsbezeichnung|Berufsstand|Berufsgruppe|(?i:Tätigkeit)|berufliche[ \t]+Tätigkeit|Stellung[ \t]+im[ \t]+Beruf|"
+    rf"(?:Beruf{_BERUF_GENITIV}?|Berufsbezeichnung|Berufsstand|Berufsgruppe|(?i:Tätigkeit)|berufliche[ \t]+Tätigkeit|"
+    r"Stellung[ \t]+im[ \t]+Beruf|"
     r"Occupation|Profession)(?P<ag>[ \t]*/[ \t]*(?:Tätigkeit|Arbeitgeber|Stellung|Branche))?(?![\wäöüß])"
     r"(?:[ \t]*\([^)\n]{1,20}\))?(?:[ \t]*:[ \t]*|\t+[ \t]*)")
 _BERUF_VOR_RE = re.compile(
@@ -366,7 +370,8 @@ _PERSONEN_KOPF_RE = re.compile(r"(?i)(?<![\wäöüß])(?:name|vorname|nachname|v
 # "Pflegehelferin")
 _BERUF_KOPF_ZEILE_RE = re.compile(
     r"(?m)^[ \t]*(?i:(?:ausgeübte[rn]?|derzeitige[rn]?|jetzige[rn]?|erlernte[rn]?|aktuelle[rn]?)[ \t]+)?"
-    r"(?:Beruf|Berufsbezeichnung|(?i:Tätigkeit)|berufliche[ \t]+Tätigkeit)(?:[ \t]*\([^)\n]{1,30}\))?[ \t]*\n"
+    rf"(?:Beruf{_BERUF_GENITIV}?|Berufsbezeichnung|(?i:Tätigkeit)|berufliche[ \t]+Tätigkeit)"
+    r"(?:[ \t]*\([^)\n]{1,30}\))?[ \t]*\n"
     r"[ \t]*(?=[^\W\d_])")
 
 
@@ -440,16 +445,18 @@ def _beruf_unter_etikett(text: str) -> list:
 # Beruf-Etikett als ganze Zelle einer Formularzeile ("Telefon ⇥⇥ Beruf (genaue Tätigkeit)")
 _BERUF_ZELLE_RE = re.compile(
     r"(?i:(?:ausgeübte[rn]?|derzeitige[rn]?|jetzige[rn]?|erlernte[rn]?|aktuelle[rn]?)[ \t]+)?"
-    r"(?:Beruf|Berufsbezeichnung|(?i:Tätigkeit)|berufliche[ \t]+Tätigkeit)(?:[ \t]*\([^)\n]{1,30}\))?[ \t]*:?")
+    rf"(?:Beruf{_BERUF_GENITIV}?|Berufsbezeichnung|(?i:Tätigkeit)|berufliche[ \t]+Tätigkeit)"
+    r"(?:[ \t]*\([^)\n]{1,30}\))?[ \t]*:?")
 
 
 def _beruf_in_formularzeile(text: str) -> list:
     """Kastenformular mit mehreren Feldern je Zeile, wie die OCR es vom Scan liest: eine Zeile nur aus
     Feldbezeichnern ("Telefon ⇥⇥ Beruf (genaue Tätigkeit)"), darunter die Werte in gleich vielen Zellen
-    ("08631 98765 ⇥⇥ Pflegehelferin"). Die Zelle unter dem Beruf-Etikett ist der Beruf (Befund 87). Ist eine
-    Kopfzelle kein Feldbezeichner oder passt die Zellenzahl nicht (leeres Feld), gilt nichts. Unter dem
-    mehrdeutigen „Tätigkeit“ (auch eine Arbeit: „Datum ⇥⇥ Tätigkeit“ ⏎ „12.03.2026 ⇥⇥ Beratung“) muss der Wert
-    einen Beruf der Wissensbasis enthalten."""
+    ("08631 98765 ⇥⇥ Pflegehelferin"). Die Zelle unter einem Beruf-Etikett ist der Beruf (Befund 87), auch unter
+    mehreren ("Beruf des Ehepartners ⇥⇥ Beruf" ⏎ "Erzieherin ⇥⇥ Pflegehelferin"). Ist eine andere Kopfzelle kein
+    Feldbezeichner oder passt die Zellenzahl nicht (leeres Feld), gilt nichts. Unter dem mehrdeutigen „Tätigkeit“
+    (auch eine Arbeit: „Datum ⇥⇥ Tätigkeit“ ⏎ „12.03.2026 ⇥⇥ Beratung“) muss der Wert einen Beruf der Wissensbasis
+    enthalten."""
     aus = []
     zeilen = text.split("\n")
     anfang = 0
@@ -459,21 +466,22 @@ def _beruf_in_formularzeile(text: str) -> list:
             continue
         kopf = _zellen(zeile, za)
         nr = [k for k, (_, _, t) in enumerate(kopf) if _BERUF_ZELLE_RE.fullmatch(t)]
-        if len(kopf) < 2 or len(nr) != 1:
+        if len(kopf) < 2 or not nr:
             continue
-        if not all(_feldbezeichner(t.rstrip(":").strip()) for k, (_, _, t) in enumerate(kopf) if k != nr[0]):
+        if not all(_feldbezeichner(t.rstrip(":").strip()) for k, (_, _, t) in enumerate(kopf) if k not in nr):
             continue
         werte = _zellen(zeilen[i + 1], anfang)
         if len(werte) != len(kopf):
             continue
-        a, b, wert = werte[nr[0]]
-        if _kein_beruf(wert):
-            continue
-        etikett = re.sub(r"\([^)]*\)", "", kopf[nr[0]][2])
-        if not re.search(r"(?i)beruf", etikett) and not wissen.index("berufe").finde(wert):
-            continue                                   # "Tätigkeit": nur mit Beruf der Wissensbasis
-        s0 = a + (len(text[a:b]) - len(text[a:b].lstrip()))
-        aus.append((s0, s0 + len(wert)))
+        for k in nr:
+            a, b, wert = werte[k]
+            if _kein_beruf(wert):
+                continue
+            etikett = re.sub(r"\([^)]*\)", "", kopf[k][2])
+            if not re.search(r"(?i)beruf", etikett) and not wissen.index("berufe").finde(wert):
+                continue                               # "Tätigkeit": nur mit Beruf der Wissensbasis
+            s0 = a + (len(text[a:b]) - len(text[a:b].lstrip()))
+            aus.append((s0, s0 + len(wert)))
     return aus
 
 

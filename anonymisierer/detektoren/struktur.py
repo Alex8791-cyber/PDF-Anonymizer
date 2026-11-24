@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import datetime
 import functools
+import math
 import re
 from bisect import bisect_left, bisect_right
 from typing import NamedTuple
@@ -153,13 +154,35 @@ class Lage:
         roh = [e if e[7] else e[:7] + (e[5] - e[3],) + e[8:] for e in roh]
         self.schraege = _schraege(roh)
         s = self.schraege
+        # Leicht schräger Scan, den die OCR nicht gerade gerückt gelesen hat (unter ocr.SCHRAEG_KORREKTUR_AB, Befund
+        # 85): jedes OCR-Wort trägt das waagerechte Band seiner ganzen Zeile, die Neigung steckt nur im Versatz der
+        # Zeilen gegeneinander (rechte Spalte eines Kastenformulars höher als die linke). Dann wird jede OCR-Zeile
+        # als Ganzes um die geschätzte Neigung des Seitenbilds zurückgedreht – um die Mitte der Zeile, damit ihre
+        # Wörter in einer Reihe bleiben.
+        band = 0.0
+        if not s and not self.richtung:
+            band = math.tan(math.radians(float(getattr(seite, "ocr_schraeg", 0.0) or 0.0)))
+            if abs(band) > 0.1:
+                band = 0.0
+        mitte_x: dict = {}
+        if band:
+            for e in roh:
+                if e[8]:
+                    a, b = mitte_x.get(e[6], (e[2], e[4]))
+                    mitte_x[e[6]] = (min(a, e[2]), max(b, e[4]))
         woerter = []
         for start, ende, x0, y0, x1, y1, zid, hoehe, ocr in roh:
             if s:
                 cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
                 dx, dy = s * cy, -s * cx
                 x0, x1, y0, y1 = x0 + dx, x1 + dx, y0 + dy, y1 + dy
+            elif band and ocr:
+                a, b = mitte_x[zid]
+                dx, dy = band * (y0 + y1) / 2, -band * (a + b) / 2
+                x0, x1, y0, y1 = x0 + dx, x1 + dx, y0 + dy, y1 + dy
             woerter.append(Wort(start, ende, x0, y0, x1, y1, zid, hoehe, ocr))
+        if band:
+            self.schraege = band
         self.woerter = woerter
         self.wort_anfaenge = [w.start for w in woerter]
         je_zeile: dict = {}
@@ -1002,6 +1025,9 @@ def namen_spanne(text: str, pos: int, grenze: int, komma: bool = True, max_woert
             wort = tok[:-1] if tok.endswith(".") else tok
             if wort.casefold() in FUNKTIONSWOERTER or not wort_namensartig(wort):
                 break
+            if woerter and len(wort) <= 4 and wort.isalpha() and wort.isupper() and not wort_bekannter_name(wort) \
+                    and not text[woerter[-1][0]:woerter[-1][1]].isupper():
+                break                                # "Mooslechner, Anton PHV": ein Kürzel, kein weiterer Name
             if wort.casefold() in DATUMSWOERTER and not (vor_komma or echte):
                 break
             woerter.append((ts, ts + len(wort), "name"))
@@ -1219,8 +1245,8 @@ def plz_ort_kappen(text: str, s: int, e: int) -> int | None:
     erstes = worte[0].group(0)
     kern = erstes.strip("(),.")
     zwischen = text[basis:basis + worte[0].start()]
-    if "\n" in zwischen and ist_etikett_oder_allerwelt(kern):
-        return None                                   # "16963\nVorstand": Folgezeile ist kein Ort
+    if "\n" in zwischen and (ist_etikett_oder_allerwelt(kern) or kern.casefold() in NEUTRALE_KOEPFE):
+        return None                                   # "16963\nVorstand", "98765\nBeruf": Folgezeile ist kein Ort
     if ist_etikett_wort(kern) and kern.casefold() not in ORTSZUSATZ_WOERTER:
         return None                                   # "17205 USt-IdNr"
     versal = kern.isupper()
@@ -1525,7 +1551,9 @@ def _adress_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
             k = i + len(text[i:e]) - len(text[i:e].lstrip())
             return [Wert(k, k + len(text[i:e].strip()), "strasse")]
         m = re.match(r"[A-ZÄÖÜ][\wäöüß'’.\-]*(?:[ ][A-Za-zÄÖÜäöüß][\wäöüß'’.\-]*){0,4}", text[i:e])
-        if m and text[i:i + m.end()].casefold() not in NEUTRALE_KOEPFE:
+        if m and text[i:i + m.end()].casefold() not in NEUTRALE_KOEPFE \
+                and etikett_fuer_text(text[i:i + m.end()]) is None:
+            # das nächste Feld-Etikett ist kein Straßenname ("Straße, Hausnummer ⇥⇥ PLZ" einer Etikettzeile)
             ende = i + m.end()
             n = re.match(r"[ ]?" + _HAUSNUMMER_RE.pattern, text[ende:e])
             if n:

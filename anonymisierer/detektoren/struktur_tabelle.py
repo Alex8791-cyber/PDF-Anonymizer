@@ -8,14 +8,26 @@ OCR-Zeilen haben keine Tabulatoren, schräge Scans verschieben die Zeilen):
    ("Sparte", "Beitrag"), mindestens ein Personen-, Kennungs-, Geburts-, Anschrift- oder Kontakt-Etikett,
    kein Wert in der Reihe. Zellen werden an Etiketten in Spalten geteilt ("Nr. Kunde (Name, Vorname)" ->
    "Nr." | "Kunde (Name, Vorname)", "Beitrag p.a. Ablauf" -> "Beitrag p.a." | "Ablauf").
-3. Datenreihen darunter bis zum Tabellenende (große Lücke, Fließtext, neue Kopfreihe); Wörter werden der
-   Spalte mit der größten x-Überlappung zugeordnet, Wörter ohne Überlappung erben die Spalte ihrer Zelle.
-   Mehrzeilige Zellen und Seitenumbrüche (mit oder ohne wiederholten Kopf) werden fortgesetzt.
+3. Datenreihen darunter bis zum Tabellenende (große Lücke, Fließtext, neue Kopfreihe, kleiner gesetzte Zeile aus
+   Etiketten ohne Werte: die nächste Etikettzeile eines Kastenformulars); Wörter werden der Spalte mit der größten
+   x-Überlappung zugeordnet, Wörter ohne Überlappung erben die Spalte ihrer Zelle. Seitenumbrüche (mit oder ohne
+   wiederholten Kopf) werden fortgesetzt.
+   Mehrzeilige Zellen (Zellumbruch in schmalen Spalten: "Eheleute" ⏎ "Gstettner", "Am Gänsbichl" ⏎ "4, 84453
+   Mühldorf a. Inn"): eine Folgezeile gehört zur Zelle darüber, wenn sie keine neue Zeile der Tabelle beginnt – nur
+   Personen- und Anschriftspalten belegt, jede davon schon in der ersten Zeile des Datensatzes, weniger belegte
+   Spalten, keine Kennung, kein Datum, kein Betrag, Namensteile ohne Ziffern, kein größerer Abstand als zwischen
+   den Reihen. Der Zellinhalt wird dann zusätzlich als Ganzes gelesen (Zeilen mit Leerzeichen verbunden); ein Wert
+   über den Umbruch wird je Zeile eine Stelle (gruppe = der ganze Wert: ein Fund, das Bruchstück selbst wird nicht
+   weitergegeben).
 4. Werte je Spaltenart: Person -> Namen, Kennung -> vertrag (bzw. iban, kfz …), Geburt -> geburt (das
    Spaltenetikett entscheidet: Vertragsdaten wie "Beginn"/"Ablauf" bleiben stehen), Anschrift -> plzort /
    strasse, Kontakt -> telefon / email. Spalten OHNE Etikett: zeigen mindestens drei Werte dieselbe
    Kennungsform (Ziffern mit Buchstaben/Trennern, keine Beträge, Prozente, Daten, Postleitzahlen) und hat
    die Tabelle eine Personenspalte, sind es Kennungen (vertrag).
+   Namen brauchen einen Beleg: einen Vor- oder Nachnamen der Wissensbasis, die Partnerspalte "Vorname", eine belegte
+   Namensspalte – oder eine Anrede, einen Titel bzw. eine Personengruppe davor in der Zelle ("Eheleute Gstettner",
+   "Erbengemeinschaft Ruhstorfer"); mit "und", "/" oder "&" verbundene Namen derselben Zelle teilen ihn ("Baltasar
+   Wiesenhofer und Walburga Oberprieler").
 """
 
 from __future__ import annotations
@@ -24,13 +36,15 @@ import re
 from bisect import bisect_left
 from typing import NamedTuple
 
+from .. import personenkontext
 from . import Treffer, detektor
-from .struktur import (_ORG_ROLLEN_RE, _ROH_FUNKTIONSWORT, _ROH_KEIN_WOHNORT, _ROH_ORTSZUSATZ, ABKUERZUNG_RE,
-                       ALLE_KATEGORIEN, PARTIKEL, PII_ARTEN, SICHERHEIT_SPALTE, Lage,
+from .struktur import (_ANREDEN, _ORG_ROLLEN_RE, _ROH_FUNKTIONSWORT, _ROH_KEIN_WOHNORT, _ROH_ORTSZUSATZ,
+                       ABKUERZUNG_RE, ALLE_KATEGORIEN, PARTIKEL, PII_ARTEN, SICHERHEIT_SPALTE, Lage,
                        _wissen, NR_VORSATZ_RE, allgemein_hinter, allgemeiner_wert_passt, datums_spannen,
                        eigene_wertform, eigener_wert, etikett_fuer_text, etiketten, geburtsdatum_plausibel,
                        ist_kennungsform, kennung_spanne, lage, muster_spannen, namen_spanne, ort_spanne,
-                       plz_ort_spannen, strasse_spanne, ueberlappung, _muster, _vergleichsform)
+                       plz_ort_spannen, strasse_spanne, ueberlappung, wort_namensartig, _muster, _vergleichsform,
+                       _wort_ist_titel)
 
 QUELLE = "struktur.tabelle"
 _EINHEITEN = frozenset({"eur", "euro", "€", "%", "p.a.", "chf", "usd", "gbp", "mtl.", "monatlich", "jährlich",
@@ -272,15 +286,21 @@ class _Tabelle:
         self.werte: list = [[] for _ in spalten]      # je Spalte: [(seite_nr, start, ende, reihe_nr)]
         self.reihen = 0
         self.letzte_y1 = kopf.y1
+        self.anker = frozenset()                      # belegte Spalten der ersten Zeile des letzten Datensatzes
+        self.umbrochen: set = set()                   # (Spalte, Reihe) mit Folgezeilen (Zellumbruch)
 
 
-def _datenreihen(text: str, reihen: list, i_kopf: int, tab: _Tabelle, h: float, nr: int, ist_kopf) -> int:
-    """Liest Datenreihen ab reihen[i_kopf + 1]; liefert den Index der ersten Reihe nach der Tabelle."""
+def _datenreihen(text: str, reihen: list, i_kopf: int, tab: _Tabelle, h: float, nr: int, ist_kopf,
+                 hat_etikett=None) -> int:
+    """Liest Datenreihen ab reihen[i_kopf + 1]; liefert den Index der ersten Reihe nach der Tabelle.
+    hat_etikett(start, ende): steht im Textbereich ein Etikett der Wissensbasis (für die Etikettzeile eines
+    Kastenformulars, die die Tabelle beendet)."""
     spalten = tab.spalten
     links = min(sp.x0 for sp in spalten) - 2.5 * h
     rechts = max(sp.x1 for sp in spalten) + 6 * h
     abstand = None
     einzeln = 0
+    groesse = None                                   # Schriftgröße der letzten Datenreihe
     vorige_y1 = reihen[i_kopf].y1 if i_kopf >= 0 else None
     i = i_kopf + 1
     while i < len(reihen):
@@ -304,12 +324,23 @@ def _datenreihen(text: str, reihen: list, i_kopf: int, tab: _Tabelle, h: float, 
             break                                    # "Tarif: …": ein Formularblock nach der Tabelle – nicht aber
             #                                          ein OCR-Rest mit Doppelpunkt mitten in einer vollen Reihe
             #                                          ("13 Mazur, Weronika | Abs: | 16.08.66 | …")
+        if groesse is not None and hat_etikett is not None and _etikettzeile(text, zellen, groesse, hat_etikett):
+            break                                    # nächste Etikettzeile eines Kastenformulars (Befund 93)
         teile = []
         for z in zellen:
             teile += [(idx, s, e) for idx, s, e in _zuordnen(spalten, z, h) if idx is not None]
         if not teile:
             break
         belegte = {idx for idx, _, _ in teile}
+        luecke = r.y0 - vorige_y1 if vorige_y1 is not None else None
+        if tab.reihen and _folgezeile(text, teile, belegte, tab, h, luecke, abstand):
+            # Zellumbruch: die Zeile setzt die Zellen des letzten Datensatzes fort (Befund 84)
+            for idx, s, e in teile:
+                tab.werte[idx].append((nr, s, e, tab.reihen - 1))
+                tab.umbrochen.add((idx, tab.reihen - 1))
+            vorige_y1 = r.y1
+            i += 1
+            continue
         if len(belegte) == 1:
             idx = next(iter(belegte))
             sp = spalten[idx]
@@ -329,10 +360,111 @@ def _datenreihen(text: str, reihen: list, i_kopf: int, tab: _Tabelle, h: float, 
             if d > 0:
                 abstand = d if abstand is None else min(max(abstand, d), 2.0 * abstand)
         vorige_y1 = r.y1
+        tab.anker = frozenset(belegte)
+        groesse = _schriftgroesse(zellen)
         tab.reihen += 1
         i += 1
     tab.letzte_y1 = vorige_y1 or tab.letzte_y1
     return i
+
+
+# ----------------------------------------------------------------------
+# Zellumbruch (Befund 84) und Etikettzeilen eines Kastenformulars (Befund 93)
+# ----------------------------------------------------------------------
+_VERBINDER_VORN_RE = re.compile(r"(?:und|u\.|&|\+|/|,)[ \t]*", re.IGNORECASE)
+_VERBINDER_RE = re.compile(r"[ \t]*(?:/|&|\+|,|und|u\.)[ \t]*$")
+
+
+def _schriftgroesse(zellen) -> float:
+    """Schriftgröße einer Reihe: Median der Wortgrößen (Textebene: Schriftgrad, OCR: Höhe der Wortkästen)."""
+    hoehen = sorted(w.hoehe for z in zellen for w in z.woerter if w.hoehe > 0)
+    return hoehen[len(hoehen) // 2] if hoehen else 0.0
+
+
+def _etikettzeile(text: str, zellen: list, groesse: float, hat_etikett) -> bool:
+    """Beginnt mit der Reihe ein neuer Kopf – die nächste Etikettzeile eines Kastenformulars ("Ausgeübter Beruf ⇥⇥
+    Arbeitgeber" unter "Pflegehelferin ⇥⇥ Seniorenstift St. Josef", "Eintritt ⇥⇥ Steuer-ID ⇥⇥ Beitragsgruppe" unter
+    der Wertzeile einer Entgeltabrechnung)? Kleiner gesetzt als die Datenreihe darüber, mindestens zwei Zellen, keine
+    Ziffern (kein Wert, Datum, Betrag) und mindestens ein Etikett der Wissensbasis. Auch wenn sie selbst kein
+    vollständiger Kopf ist: ihre Werte gehören nicht zu den Spalten darüber."""
+    if len(zellen) < 2 or not groesse:
+        return False
+    eigen = _schriftgroesse(zellen)
+    if not eigen or eigen > 0.85 * groesse:
+        return False
+    if any(_WERTARTIG_RE.search(text, z.start, z.ende) for z in zellen):
+        return False
+    return any(hat_etikett(z.start, z.ende) for z in zellen)
+
+
+def _namensteil(inhalt: str) -> bool:
+    """Kann der Zellinhalt einen Namen fortsetzen: ohne Ziffern und Doppelpunkt, nach einem Verbinder ("und", "&",
+    "/") großgeschrieben ("Gstettner", "und Walburga", "Severin und Afra", "Schwarzenböck/Lechleitner")?"""
+    if not inhalt or ":" in inhalt or any(c.isdigit() for c in inhalt):
+        return False
+    rest = inhalt[_VERBINDER_VORN_RE.match(inhalt).end():] if _VERBINDER_VORN_RE.match(inhalt) else inhalt
+    return bool(rest) and rest[0].isupper() and len(rest.split()) <= 5
+
+
+def _folgezeile(text: str, teile: list, belegte: set, tab: _Tabelle, h: float, luecke, abstand) -> bool:
+    """Ist die Reihe die nächste Zeile der Zellen darüber (Zellumbruch in schmalen Spalten: "Eheleute" ⏎ "Gstettner",
+    "Am Gänsbichl" ⏎ "4, 84453 Mühldorf a. Inn")? Nur, wenn sie keine neue Zeile der Tabelle beginnt: weniger belegte
+    Spalten als die erste Zeile des Datensatzes und jede davon dort schon belegt (die Spaltenlage passt), nur
+    Personen- und Anschriftspalten (keine Kennung, kein Datum, kein Betrag, keine Sparte – Spalten ohne
+    Personenetikett beginnen den nächsten Vertrag), Namensteile ohne Ziffern, kein größerer Abstand als zwischen den
+    Reihen."""
+    anker = tab.anker
+    if not anker or not belegte < anker:
+        return False
+    if luecke is not None and luecke > max(1.3 * abstand if abstand else 0.9 * h, 0.5 * h):
+        return False
+    for idx, s, e in teile:
+        arten = tab.spalten[idx].arten
+        inhalt = text[s:e].strip(" \t")
+        if "person" in arten:
+            if not _namensteil(inhalt):
+                return False
+        elif "adresse" in arten:
+            if not inhalt or ":" in inhalt or not (inhalt[0].isupper() or inhalt[0].isdigit()):
+                return False
+        else:
+            return False
+    return True
+
+
+def _verbunden(teile: list, dok) -> tuple:
+    """Zellinhalt über mehrere Zeilen als ein Text: (text, [(seite, start, ende, versatz)]) – Zeilen mit Leerzeichen
+    verbunden; ein Bindestrich am Zeilenende verbindet ohne Leerzeichen ("Schwarzenböck-" ⏎ "Lechleitner")."""
+    stuecke = []
+    aus = ""
+    for nr, s, e, _ in teile:
+        t = dok.seiten[nr].text
+        while s < e and t[s] in " \t":
+            s += 1
+        while e > s and t[e - 1] in " \t":
+            e -= 1
+        if e <= s:
+            continue
+        if aus and not aus.endswith("-"):
+            aus += " "
+        stuecke.append((nr, s, e, len(aus)))
+        aus += t[s:e]
+    return aus, stuecke
+
+
+def _zurueck(stuecke: list, a: int, b: int, text: str = "") -> list:
+    """Spanne [a, b) im verbundenen Text -> [(seite, start, ende)] je Zeile; Leerzeichen und Satzzeichen am Rand
+    eines Zeilenstücks entfallen ("Haberl," ⏎ "Josefa" -> "Haberl" und "Josefa")."""
+    aus = []
+    for nr, s, e, versatz in stuecke:
+        lo, hi = max(a, versatz), min(b, versatz + (e - s))
+        while text and hi > lo and text[lo] in " \t,;":
+            lo += 1
+        while text and hi > lo and text[hi - 1] in " \t,;":
+            hi -= 1
+        if hi > lo:
+            aus.append((nr, s + lo - versatz, s + hi - versatz))
+    return aus
 
 
 _ETIKETT_DOPPELPUNKT_RE = re.compile(r"[A-Za-zÄÖÜäöüß)][ ]?:(?:[ \t]|$)")
@@ -413,10 +545,13 @@ def _namen(text: str, s: int, e: int, nur_bekannt: bool = False) -> list:
     sp = namen_spanne(text, pos, e)
     if sp is None and not _EINRICHTUNG_RE.search(text[s:e]):
         # Betriebswort vor dem Namen ("Physiotherapie Tran", "Praxis Dr. Haidari"): ein bis zwei Wörter überspringen;
-        # Einrichtungen ("Krankenhaus St. Ansgar", "Apotheke am Markt") sind keine Personen
+        # Einrichtungen ("Krankenhaus St. Ansgar", "Apotheke am Markt") sind keine Personen. Hinter einer
+        # Personengruppe ("Erbengemeinschaft Ruhstorfer") steht ein Familienname, auch ein unbekannter (den Beleg
+        # prüft _werte_der_tabelle)
         for m in list(re.finditer(r"[ \t]+", text[s:e]))[:2]:
             kandidat = namen_spanne(text, s + m.end(), e)
-            if kandidat is not None and kandidat.bekannt:
+            if kandidat is not None and (kandidat.bekannt or any(
+                    personenkontext.personengruppe(w) for w in text[s:kandidat.start].split())):
                 sp, pos = kandidat, kandidat.start
                 break
     while pos < e:
@@ -432,6 +567,50 @@ def _namen(text: str, s: int, e: int, nur_bekannt: bool = False) -> list:
         pos = sp.ende + m.end()
         sp = None
     return aus
+
+
+_ZELLWORT_RE = re.compile(r"[^\s,;/&+]+")
+_KETTE_RE = re.compile(r"[ \t]*(?:/|&|\+|,|;|und|u\.)[ \t]*")
+
+
+def _kontext_beleg(text: str, zs: int, a: int) -> bool:
+    """Steht vor dem Namen in seiner Zelle eine Anrede, ein Titel oder eine Personengruppe – direkt oder über weitere
+    Namen und Verbinder ("Eheleute Gstettner", "Eheleute Severin und Afra Gstettner", "Dr. Lechleitner",
+    "Grundstücksgemeinschaft Schwarzenböck/Lechleitner")? Dann ist in einer Personenspalte auch ein unbekanntes Wort
+    ein Name."""
+    for m in reversed(list(_ZELLWORT_RE.finditer(text, zs, a))):
+        w = m.group(0)
+        k = w.casefold()
+        if k in _ANREDEN or _wort_ist_titel(w) or personenkontext.personengruppe(w):
+            return True
+        if k in ("und", "u.") or k in PARTIKEL or (w[:1].isupper() and wort_namensartig(w.rstrip(".,"))):
+            continue
+        return False
+    return False
+
+
+def _zellwerte(text: str, s: int, e: int, sp: Spalte, karten_tabelle: bool = False) -> list:
+    """Werte eines Zellteils wie _wert_fuer_spalte, je Wert mit Kontextbeleg: [(a, b, kategorie, gruppe, beleg)].
+    beleg (nur Namen): eine Anrede, ein Titel oder eine Personengruppe davor in der Zelle – oder ein mit "und", "/",
+    "&" verbundener Name derselben Zelle ist bekannt bzw. so belegt ("Baltasar Wiesenhofer und Walburga
+    Oberprieler")."""
+    gefunden = _wert_fuer_spalte(text, s, e, sp, karten_tabelle)
+    if "person" not in sp.arten:
+        return [(a, b, kat, gruppe, False) for a, b, kat, gruppe in gefunden]
+    namen = sorted((a, b) for a, b, kat, _ in gefunden if kat == "namen")
+    ketten, kette = [], []
+    for a, b in namen:
+        if kette and not _KETTE_RE.fullmatch(text, kette[-1][1], a):
+            ketten.append(kette)
+            kette = []
+        kette.append((a, b))
+    if kette:
+        ketten.append(kette)
+    belegt = set()
+    for kette in ketten:
+        if any(_kontext_beleg(text, s, a) or _namensbeleg(text[a:b]) for a, b in kette):
+            belegt.update(kette)
+    return [(a, b, kat, gruppe, kat == "namen" and (a, b) in belegt) for a, b, kat, gruppe in gefunden]
 
 
 def _namensbeleg(name: str) -> bool:
@@ -470,12 +649,28 @@ def _kennung(text: str, s: int, e: int, kategorie: str | None, eintrag: str = ""
         if art == "cvc":
             kategorie = "vertrag"
     sp = kennung_spanne(text, i, e, 3)
+    if sp is None and art is None and kategorie in (None, "vertrag"):
+        sp = _nummer_in_betragsform(text, i, e)
     if sp is None or (art is not None and not allgemeiner_wert_passt(text[sp[0]:sp[1]])):
         return []
     kat = kategorie or "vertrag"
     if kat == "iban" and _muster is not None and not _muster.finde_iban(text[sp[0]:sp[1]]):
         kat = "vertrag"
     return [(sp[0], sp[1], kat, None)]
+
+
+# ganze Zelle in Betragsform ohne Nachkommastellen ("7.712.345")
+_BETRAGSFORM_RE = re.compile(r"\d{1,3}(?:\.\d{3})+")
+
+
+def _nummer_in_betragsform(text: str, i: int, e: int):
+    """Ganze Zelle einer Kennungsspalte in Betragsform ohne Nachkommastellen ("7.712.345" unter "Vertrag"): unter
+    diesem Spaltenkopf eine Nummer mit Tausenderpunkten, kein Betrag ("1.712,35" bleibt einer). Ab fünf Ziffern wie
+    die Ziffernfolgen der Selbstkontrolle (restrisiko._betragsform_unter_kennungskopf). (start, ende) oder None."""
+    inhalt = text[i:e].rstrip()
+    if not _BETRAGSFORM_RE.fullmatch(inhalt) or sum(c.isdigit() for c in inhalt) < 5:
+        return None
+    return i, i + len(inhalt)
 
 
 def _geburt(text: str, s: int, e: int) -> list:
@@ -561,16 +756,17 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
         if not werte:
             continue
         arten = sp.arten
-        roh = []          # (seite, start, ende, kategorie, gruppe, reihe)
+        roh = []          # (seite, start, ende, kategorie, gruppe, reihe, beleg)
         for nr, s, e, reihe in werte:
             text = dok.seiten[nr].text
-            gefunden = _wert_fuer_spalte(text, s, e, sp, karten_tabelle)
-            for a, b, kat, gruppe in gefunden:
-                roh.append((nr, a, b, kat, gruppe, reihe))
+            gefunden = _zellwerte(text, s, e, sp, karten_tabelle)
+            for a, b, kat, gruppe, beleg in gefunden:
+                roh.append((nr, a, b, kat, gruppe, reihe, beleg))
             if not gefunden and idx in namensspalte:
                 m = _GANZER_NAME_RE.match(text, s, e)
                 if m and not text[m.end():e].strip():
-                    ganze_zellen.append((nr, m.start(1), m.end(1), "namen", None, reihe, idx))
+                    ganze_zellen.append((nr, m.start(1), m.end(1), "namen", None, reihe, idx, False))
+        roh += _umbrochene_zellen(dok, tab, idx, sp, karten_tabelle)
         if not arten & PII_ARTEN and "vertragsdaten" not in arten:
             # Spalte ohne Personen-Etikett ("Nr.", unbekannter Kopf): Kennungsform in >= 3 Werten
             if hat_person:
@@ -583,13 +779,14 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
                     nicht_leer += 1
                     if ist_kennungsform(inhalt):
                         a = s + dok.seiten[nr].text[s:e].index(inhalt)
-                        kandidaten.append((nr, a, a + len(inhalt), "vertrag", None, reihe))
+                        kandidaten.append((nr, a, a + len(inhalt), "vertrag", None, reihe, False))
                 if len(kandidaten) >= 3 and len(kandidaten) >= 0.6 * nicht_leer:
                     roh.extend(kandidaten)
-        for nr, a, b, kat, gruppe, reihe in roh:
-            treffer.append((nr, a, b, kat, gruppe, reihe, idx))
+        for nr, a, b, kat, gruppe, reihe, beleg in roh:
+            treffer.append((nr, a, b, kat, gruppe, reihe, idx, beleg))
     # Namen brauchen einen Beleg: ein bekannter Vor- oder Nachname in der Zelle – oder, bei getrennten Spalten
-    # "Name" und "Vorname", in der Partnerzelle derselben Reihe ("von Schönau" neben "Silke").
+    # "Name" und "Vorname", in der Partnerzelle derselben Reihe ("von Schönau" neben "Silke") – oder eine Anrede,
+    # ein Titel bzw. eine Personengruppe davor in der Zelle (beleg aus _zellwerte: "Eheleute Gstettner").
     # "Berlin, Hamburg" in der Kundenspalte ist kein Name.
     paar_idx = set(namensspalte)
     belegt = set()
@@ -609,7 +806,7 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
         if belegt_je_spalte.get(idx, 0) >= 3 and belegt_je_spalte[idx] >= 0.5 * max(1, nicht_leer):
             sichere_spalten.add(idx)
     treffer = [t for k, t in enumerate(treffer)
-               if t[3] != "namen" or k in belegt or (t[6] in paar_idx and t[5] in belegt_paar)
+               if t[3] != "namen" or k in belegt or t[7] or (t[6] in paar_idx and t[5] in belegt_paar)
                or t[6] in sichere_spalten]
     treffer += [t for t in ganze_zellen if t[6] in sichere_spalten]
     # Personen über Spalten "Name" + "Vorname" derselben Reihe gruppieren
@@ -631,8 +828,36 @@ def _werte_der_tabelle(dok, tab: _Tabelle) -> list:
             neu.append(t)
         treffer = neu
     aus = []
-    for nr, a, b, kat, gruppe, _, _ in treffer:
+    gesehen = {}
+    for nr, a, b, kat, gruppe, *_ in treffer:
+        # dieselbe Stelle aus der Zeile und aus der ganzen umbrochenen Zelle: einmal, mit der Gruppe des ganzen Werts
+        schl = (nr, a, b, kat)
+        if schl in gesehen:
+            if gruppe and not aus[gesehen[schl]].gruppe:
+                aus[gesehen[schl]] = aus[gesehen[schl]]._replace(gruppe=gruppe)
+            continue
+        gesehen[schl] = len(aus)
         aus.append(Treffer(dok.global_(nr, a), dok.global_(nr, b), kat, QUELLE, SICHERHEIT_SPALTE, gruppe))
+    return aus
+
+
+def _umbrochene_zellen(dok, tab: _Tabelle, idx: int, sp: Spalte, karten_tabelle: bool) -> list:
+    """Zellen einer Spalte über mehrere Zeilen (Zellumbruch, Befund 84) als Ganzes gelesen:
+    [(seite, start, ende, kategorie, gruppe, reihe, beleg)]. Ein Wert über den Umbruch ("Am Gänsbichl" ⏎ "4",
+    "84347" ⏎ "Pfarrkirchen", "Afra" ⏎ "Gstettner") wird je Zeile eine Stelle mit dem ganzen Wert als Gruppe: bei
+    Namen derselbe Personenschlüssel, sonst ein Fund ohne Weitergabe des Bruchstücks (analyse)."""
+    aus = []
+    for reihe in sorted(r for i, r in tab.umbrochen if i == idx):
+        teile = [w for w in tab.werte[idx] if w[3] == reihe]
+        verbunden, stuecke = _verbunden(teile, dok)
+        if len(stuecke) < 2:
+            continue
+        for a, b, kat, gruppe, beleg in _zellwerte(verbunden, 0, len(verbunden), sp, karten_tabelle):
+            orte = _zurueck(stuecke, a, b, verbunden)
+            if len(orte) > 1:
+                gruppe = verbunden[a:b] if kat != "namen" or not gruppe else gruppe
+            for nr, s, e in orte:
+                aus.append((nr, s, e, kat, gruppe, reihe, beleg))
     return aus
 
 
@@ -666,6 +891,9 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
     def ist_kopf(r):
         return _kopf_spalten(text, r, ets, starts, breite) is not None
 
+    def hat_etikett(s, e):
+        return bool(_etiketten_in(ets, starts, s, e))
+
     i = 0
     if offen is not None:
         # Seitenumbruch: ohne wiederholten Kopf die Reihen am Seitenanfang in den alten Spalten lesen
@@ -674,7 +902,7 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
         if not any(ist_kopf(r) for r in vorn):
             for i0 in range(len(vorn)):
                 kandidat = _Tabelle(offen.spalten, reihen[i0])
-                j = _datenreihen(text, reihen, i0 - 1, kandidat, h, nr, ist_kopf)
+                j = _datenreihen(text, reihen, i0 - 1, kandidat, h, nr, ist_kopf, hat_etikett)
                 if kandidat.reihen >= 2 and _passt_zur_tabelle(dok, kandidat):
                     treffer += _werte_der_tabelle(dok, kandidat)
                     tab, i = kandidat, j
@@ -703,7 +931,7 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
             i += 1
             continue
         tab = _Tabelle(spalten, reihen[kopf_ende])
-        j = _datenreihen(text, reihen, kopf_ende, tab, h, nr, ist_kopf)
+        j = _datenreihen(text, reihen, kopf_ende, tab, h, nr, ist_kopf, hat_etikett)
         if tab.reihen:
             treffer += _werte_der_tabelle(dok, tab)
             offen = tab if _bis_seitenende(lg, tab) else None

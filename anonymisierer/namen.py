@@ -670,6 +670,16 @@ def _an_umbruechen_teilen(text: str, spannen) -> set:
     return aus
 
 
+def _kuerzel_hinter_name(vorn: str, wort: str) -> bool:
+    """Ein kurzes Kürzel in Versalien hinter einem Namen in gewöhnlicher Schreibweise, das kein Name der Wissensbasis
+    ist ("Severin BU", "Anton PHV": die Sparte der Nachbarspalte einer OCR-Zeile ohne Tabulator, Befund 91) – nicht
+    hinter einem Namen in Versalien ("MÜLLER ANNA")."""
+    kern = wort.strip(".,;:")
+    if not (2 <= len(kern) <= 4 and kern.isalpha() and kern.isupper()) or vorn.isupper():
+        return False
+    return not _wissen_art(kern.title())[0]
+
+
 def _bereinigen(text: str, start: int, ende: int):
     """Anreden/Titel vorn, Satzzeichen und Namensende-Wörter hinten abstreifen.
     Liefert (start, ende) oder None."""
@@ -702,7 +712,8 @@ def _bereinigen(text: str, start: int, ende: int):
                 and _nachname_hinter_vorname(text, start, start + m.start(), m.group(1))):
             break                                    # "Eckhard Freitag", "Erika Mai": Nachname, kein Wochentag
         if (wort in _NAMENSENDE or wort in NAMEN_STOPPLISTE or wort in _FIRMENWOERTER
-                or _STRASSENSUFFIX_RE.search(wort) or any(c.isdigit() for c in wort) or _rang_kuerzel(m.group(1))):
+                or _STRASSENSUFFIX_RE.search(wort) or any(c.isdigit() for c in wort) or _rang_kuerzel(m.group(1))
+                or _kuerzel_hinter_name(text[start:start + m.start()], m.group(1))):
             ende = start + m.start()
         else:
             break

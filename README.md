@@ -111,7 +111,7 @@ steht unter [Was NICHT erkannt wird](#was-nicht-erkannt-wird).
 | Geburtsdaten | geb. am 02.09.1983 | `[GEB-DATUM]` | Ausgewogen | hinter „geb.“, „Geburtsdatum“, „Geburt des Kindes am“ … oder hinter einem Namen mit Komma, Stern oder Klammer („Max Mustermann, 02.09.1983“) – bei Kindern und Mitversicherten („Kind 2: Lea Brandl, 30.06.2018“) in jedem Alter; in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“ |
 | Straße + Hausnummer, Postfach | Hauptstraße 12a | `[ADRESSE]` | Ausgewogen |  |
 | PLZ + Ort | 90402 Nürnberg | `[PLZ ORT]` | Ausgewogen |  |
-| Vertrags-/Kunden-/Schein-/Aktenzeichen | Versicherungsschein-Nr. LV-2024-887766 | `[VERTRAGS-NR]` | Ausgewogen | Nummer hinter einem Etikett wie „Vertrags-Nr.“; auch eVB-Nummer (elektronische Versicherungsbestätigung) und Transferticket der Kfz-Versicherung |
+| Vertrags-/Kunden-/Schein-/Aktenzeichen | Versicherungsschein-Nr. LV-2024-887766 | `[VERTRAGS-NR]` | Ausgewogen | Nummer hinter einem Etikett wie „Vertrags-Nr.“ oder in einer Tabellenspalte mit solchem Kopf (dort auch mit Tausenderpunkten: „7.712.345“ unter „Vertrag“); auch eVB-Nummer (elektronische Versicherungsbestätigung) und Transferticket der Kfz-Versicherung |
 | Sozialversicherungsnummern | 12 345678 A 123 | `[SV-NR]` | Ausgewogen |  |
 | Steuer-IDs | 91064389278 | `[STEUER-ID]` | Ausgewogen | ohne Beschriftung nur mit gültiger Prüfziffer |
 | Steuernummern / USt-IdNr. | Steuernummer: 181/815/08155 | `[STEUER-NR]` | Ausgewogen | ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma (die von Einzelkaufleuten, Inhabern und Freiberuflern schon) |
@@ -125,7 +125,7 @@ steht unter [Was NICHT erkannt wird](#was-nicht-erkannt-wird).
 | Kreditkartennummern | 4111 1111 1111 1111 | `[KREDITKARTE]` | Ausgewogen | auch die Kartenprüfnummer (CVC/CVV, „Kartenprüfnr.“, „CID“) hinter ihrem Etikett und in Kartendaten („…, gültig bis 12/27, 739“) – nur dort, nicht dieselben Ziffern an anderer Stelle; „Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder Gutachten-Prüfnummer) |
 | Ausländische Anschriften und Kennzeichen | Kerkstraat 12, 1017 GC Amsterdam | `[AUSLAND]` | Hoch |  |
 | Orte ohne PLZ (Ort-Datum-Zeile, Geburtsort) | Musterstadt, 03.04.2025 | `[ORT]` | Hoch | Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“ |
-| Beruf (bei Personen) | Beruf: Elektriker | `[BERUF]` | Hoch | hinter „Beruf:“, im Satz („arbeitet als …“), in der Spalte „Beruf“/„Tätigkeit“ einer Personenliste und im Beruf-Feld eines Kastenformulars (Wert unter dem Feldbezeichner) |
+| Beruf (bei Personen) | Beruf: Elektriker | `[BERUF]` | Hoch | hinter „Beruf:“, im Satz („arbeitet als …“), in der Spalte „Beruf“/„Tätigkeit“ einer Personenliste und im Beruf-Feld eines Kastenformulars (Wert unter dem Feldbezeichner, auch unter „Beruf des Ehepartners“) |
 | Arbeitgeber (bei Personen) | Arbeitgeber: Muster Bau GmbH | `[ARBEITGEBER]` | Hoch | hinter „Arbeitgeber:“ oder im Satz; bekannte Versicherer, Banken und Behörden bleiben stehen |
 | Diagnosen, ICD-Codes (Gesundheitsdaten) | Diagnose: Diabetes mellitus (E11.9) | `[DIAGNOSE]` | Maximal | nur bekannte Begriffe und ICD-Codes mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten (⚕, nicht angehakt) |
 | Medikamente (Gesundheitsdaten) | Medikation: Metformin 500 mg | `[MEDIKAMENT]` | Maximal | nur bekannte Begriffe mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten (⚕, nicht angehakt) |

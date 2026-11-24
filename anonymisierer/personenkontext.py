@@ -30,7 +30,7 @@ GbR oder Erbengemeinschaft.
     ust_umgebung(text, start) -> str, ust_id_der_firma(umgebung) -> bool, ust_id_einer_person(umgebung) -> bool
     zb1_seite(text) -> bool, zb1_personenfelder(text) -> [(start, ende)], zb1_anschrift_etiketten(text),
     zb1_anschriftfelder(text) -> [(start, ende)], ZB1_FELDCODE_RE
-    gemeinschaft_namen(text, sachwort) -> [(start, ende)]
+    gemeinschaft_namen(text, sachwort) -> [(start, ende)], personengruppe(wort) -> bool
     ORG_SPALTEN, organisations_spalte(text, pos) -> bool
 """
 
@@ -465,10 +465,21 @@ def organisations_spalte(text: str, pos: int) -> bool:
 # ist der Familienname der Gesellschafter – auch unbekannt ("Felsberger GbR", "Erbengemeinschaft Riedlinger").
 # Fantasie- oder Objektnamen ("Sonnenhof GbR") werden dabei mitgeschwärzt; das ist harmlos.
 _NAMENSWORT = r"[A-ZÄÖÜ][a-zäöüß'’]+(?:-[A-ZÄÖÜ][a-zäöüß'’]+)?"
-_GBR_RE = re.compile(rf"(?<![\w\-])(?P<name>{_NAMENSWORT}(?:[ \t]*(?:&|und|\+)[ \t]*{_NAMENSWORT})?)[ \t]+GbR"
-                     r"(?![\wäöüß])")
-_GEMEINSCHAFT_RE = re.compile(rf"(?<![\w\-])(?:Erben|Grundstücks|Bruchteils)gemeinschaft[ \t]+(?P<name>{_NAMENSWORT})"
-                              r"(?![\wäöüß])")
+# Lücke zwischen den Wörtern: Leerzeichen oder ein einzelner Tabulator – nie der Spaltentrenner "\t\t" (Befund 91:
+# "Grundstücksgemeinschaft ⇥⇥ Sonnleitenstraße" ist Personen- und Anschriftspalte, kein Name)
+_LUECKE = r"(?:[ ]|(?<!\t)\t(?!\t))"
+_GBR_RE = re.compile(rf"(?<![\w\-])(?P<name>{_NAMENSWORT}(?:{_LUECKE}*(?:&|und|\+){_LUECKE}*{_NAMENSWORT})?)"
+                     rf"{_LUECKE}+GbR(?![\wäöüß])")
+# Gemeinschaften natürlicher Personen: das Wort davor kündigt Familiennamen an ("Erbengemeinschaft Ruhstorfer")
+_PERSONENGRUPPE = r"(?:Erben|Grundstücks|Bruchteils)gemeinschaft"
+_PERSONENGRUPPE_RE = re.compile(_PERSONENGRUPPE)
+_GEMEINSCHAFT_RE = re.compile(rf"(?<![\w\-]){_PERSONENGRUPPE}{_LUECKE}+(?P<name>{_NAMENSWORT})(?![\wäöüß])")
+
+
+def personengruppe(wort: str) -> bool:
+    """Ist das Wort eine Gemeinschaft natürlicher Personen ("Erbengemeinschaft", "Grundstücksgemeinschaft")? Dahinter
+    stehen Familiennamen – auch in der nächsten Zeile einer Tabellenzelle (struktur_tabelle, Befund 84)."""
+    return bool(_PERSONENGRUPPE_RE.fullmatch(wort or ""))
 
 
 # Artikel, Pronomen und Sachwörter vor "GbR" ("Die GbR besteht …", "Ihre GbR", "Praxis GbR")

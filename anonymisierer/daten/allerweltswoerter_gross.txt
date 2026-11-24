@@ -1547,6 +1547,7 @@ Brillenzuschuss
 Brötchenservice
 Browserverlauf
 Bruchteil
+Bruchteilsgemeinschaft
 Brusthöhe
 Bruttoarbeitslohn
 Bruttobeitrag
@@ -3425,6 +3426,7 @@ Grundsteuer
 Grundstück
 Grundstücke
 Grundstücksfläche
+Grundstücksgemeinschaft
 Grundstücksgrenze
 Grundstufe
 Grundsumme
@@ -3458,6 +3460,7 @@ Gutachtens
 Gutachterkosten
 Gutachterverfahren
 Güteklasse
+Gütergemeinschaft
 Guthaben
 Guthabenkonto
 Gutschein

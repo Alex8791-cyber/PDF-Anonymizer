@@ -1248,6 +1248,13 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
         k = fund_schluessel(roh, modus)
         if not k:
             continue
+        if t.kategorie != "namen" and t.gruppe:
+            # Bruchstück eines über zwei Zeilen umbrochenen Werts (Tabellenzelle: "Am Gänsbichl" ⏎ "4,"): ein Fund
+            # des ganzen Werts; das Bruchstück selbst wird nicht weitergegeben – die Hausnummer "4" oder der Ort
+            # allein stünden sonst überall im Dokument
+            schl = (t.kategorie, fund_schluessel(t.gruppe, modus) or k)
+            kandidaten.append(_Kandidat(t.start, t.ende, t.kategorie, schl, t.quelle, t.sicherheit, 0))
+            continue
         if t.kategorie == "namen":
             k = namensschluessel(k)
         schl = (t.kategorie, k)

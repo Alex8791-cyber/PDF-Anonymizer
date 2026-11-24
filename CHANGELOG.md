@@ -308,6 +308,20 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Telefonnummer oder Zahl galt als Modellbezeichnung, „Max Mustermann, 02.09.1961: …“ und Geburtsdaten hinter
   „Dr.“ galten als Behandlungsdatum, Doppelnamen wie „Schmidt-Wald“ wurden nicht mehr gemeldet, und „Markt
   Schwaben“ verlor seinen Ortsnamen.
+- **Tabellen und Scans (Domänen-Durchsicht, Runde 5):** Bricht eine Tabellenzelle in eine zweite Zeile um
+  („Eheleute“ ⏎ „Gstettner“, „Am Gänsbichl“ ⏎ „4, 84453 Mühldorf a. Inn“), wird sie als Ganzes gelesen: Namen und
+  Anschriften darin werden geschwärzt, beide Teile einer Person tragen denselben Platzhalter, und ein Bruchstück wie
+  die Hausnummer „4“ wird nicht an anderen Stellen geschwärzt. Leicht schief eingezogene Scans (unter 1°) behalten
+  in Kastenformularen und kleinen Tabellen ihre Spalten (PLZ, Ort, Arbeitgeber, Vers.-Nr., Geburtsdatum unter
+  „geb. am“). In Kastenformularen und Abrechnungen mit mehreren Etikett- und Wertzeilen beginnt jede Etikettzeile
+  einen neuen Kopf: „Kreditinstitut“ und die Sparkasse werden nicht mehr zum Arbeitgeber, das Etikett „Beruf“ nicht
+  mehr Teil der Telefonnummer, die Beitragsgruppe „1111“ keine SV-Nummer; Berufe unter „Beruf des Ehepartners“
+  werden geschwärzt. Namen enden am Spaltentrenner („Mooslechner, Anton ⇥ PHV“: die Sparte ist kein Vorname und
+  trägt nicht mehr den Platzhalter des Kunden), eine Vertragsnummer mit Tausenderpunkten („7.712.345“) unter einem
+  Kennungs-Spaltenkopf wird geschwärzt. Die Restrisiko-Prüfung meldet keinen Fehlverdacht mehr für Spaltenköpfe und
+  Etikettwörter („Sparte“, „Ausgeübter Beruf“, „Given names“, „Lieu de naissance“) und Ortsnamen in Firmennamen
+  („Hausverwaltung Inntal GmbH“) – ein solcher Verdacht machte die Datei `_PRUEFEN`, lag aber nicht auf dem Leck;
+  umbrochene Straßen und Nummern mit Tausenderpunkten unter einem Kennungskopf meldet sie dagegen.
 
 ### Sicherheit
 - Manche PDFs (z. B. aus LibreOffice) enthielten nach dem Schwärzen das ungeschwärzte Originalbild unsichtbar

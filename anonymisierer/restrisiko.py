@@ -244,6 +244,10 @@ _FUNKTIONSPOSTFAECHER = frozenset({
     "ombudsmann", "aufsicht", "kanzlei", "praxis", "team",
 })
 # Rechtsformen und Wörter, die eine Organisation kennzeichnen (Briefkopf/Fußzeile eines Unternehmens)
+# Rechtsform einer juristischen Person direkt hinter dem Wort ("Hausverwaltung Inntal GmbH": ein Firmenname, kein
+# Familienname einer Person; Personengesellschaften wie KG, OHG, GbR, e.K. nennen oft Personen)
+_JURISTISCH_DANACH_RE = re.compile(r"[ \t]+(?:GmbH|gGmbH|AG|SE|KGaA|mbH|UG|e\.[ \t]?V\.|eG|VVaG|a\.[ \t]?G\.)"
+                                   r"(?![\wäöüß])")
 _RECHTSFORM_RE = re.compile(
     r"(?<![\w])(?:AG|GmbH|mbH|SE|KG|KGaA|OHG|GbR|e\.\s?V\.|eG|e\.\s?G\.|VVaG|V\.V\.a\.G\.|a\.\s?G\.|AöR|KdöR|"
     r"Ltd\.?|S\.A\.|N\.V\.|B\.V\.|Inc\.|PartG(?:mbB)?|UG|(?i:v{1,3}a[gq]|gmbh|kgaa))(?![\w])")
@@ -362,6 +366,16 @@ _STRASSE_PRAEP_RE = re.compile(
     r"(?:[A-ZÄÖÜ][\wäöüßÄÖÜ\-]+[ ]){0,2}[A-ZÄÖÜ][\wäöüßÄÖÜ\-]+)[ \t]{1,2}"
     r"(\d{1,4}(?:[ ]?[a-zA-Z](?![\w]))?)"
     r"(?![\w,.]\d|[\d])", re.IGNORECASE)
+# Straßenname ohne Hausnummer als ganze Zelle (Zellumbruch: die Hausnummer steht am Anfang der Zeile darunter)
+_STRASSENNAME_ZELLE_RE = re.compile(
+    r"(?:[A-ZÄÖÜ][\wäöüßÄÖÜ'.]*[\s\-]){0,3}[A-ZÄÖÜ]?[\wäöüßÄÖÜ\-]*" + _STRASSEN_ENDUNG + r"\.?"
+    r"|(?:Am|An der|An den|An dem|Auf der|Auf dem|Auf den|Im|In der|In den|In dem|Zum|Zur|Hinter der|Hinter dem|"
+    r"Hinter den|Unter den|Unter der|Vor dem|Vor den|Über der|Bei der|Platz der|Platz des|Alt|Neue|Alte|Obere|"
+    r"Untere|Kleine|Große|Lange|Hohe)[\s\-](?:[A-ZÄÖÜ][\wäöüßÄÖÜ\-]+[ ]){0,2}[A-ZÄÖÜ][\wäöüßÄÖÜ\-]+",
+    re.IGNORECASE)
+_HAUSNUMMER_VORN_RE = re.compile(r"[ \t]*(\d{1,4}(?:[ ]?[a-zA-Z])?)(?![\w.])")
+# ganze Zelle in Betragsform ohne Nachkommastellen ("7.712.345") – unter einem Kennungs-Spaltenkopf eine Nummer
+_BETRAGSFORM_ZELLE_RE = re.compile(r"\d{1,3}(?:\.\d{3})+")
 # Wörter, mit denen ein Straßenname beginnen kann, die aber auch gewöhnliche Wörter sind ("Straße des 17. Juni")
 _STRASSEN_ANFANG = frozenset({"straße", "strasse", "str", "platz", "weg", "allee", "gasse", "ring", "damm", "ufer",
                               "chaussee", "am", "an", "auf", "im", "in", "zum", "zur", "unter", "hinter", "vor",
@@ -1684,6 +1698,72 @@ class _Seitenpruefung:
             self._org[schluessel] = treffer >= 2 and treffer >= 0.4 * len(zellen)
         return self._org[schluessel]
 
+    def _datenzeile(self, z) -> bool:
+        """Datenzeile einer Tabelle: mehrere Zellen, Ziffern oder Platzhalter darin, keine Kopfzeile – ihre Zellen
+        sind Werte ihrer Spalten, auch die ohne Ziffern (erste Zeile einer umbrochenen Zelle, Befund 84)."""
+        schluessel = ("daten", z.id)
+        if schluessel not in self._org:
+            zeile = self.zeilen_text(z)
+            zellen = [t for t in re.split(r"\t+", zeile) if t.strip()]
+            self._org[schluessel] = (len(zellen) >= 2 and not self._kopfzeile(z)
+                                     and (any(c.isdigit() for c in zeile) or bool(_PLATZHALTER_RE.search(zeile))))
+        return self._org[schluessel]
+
+    def _schriftgroesse(self, z) -> float:
+        """Median der Schriftgröße einer Zeile ohne Platzhalter (0.0, wenn dort nur Platzhalter stehen)."""
+        zeile = self.zeilen_text(z)
+        gesperrt = [(m.start(), m.end()) for m in _PLATZHALTER_RE.finditer(zeile)]
+        abb, zeichen = self.m.abbildung, self.m.zeichen
+        groessen = []
+        for i in range(z.start, min(z.ende, len(abb))):
+            if self.text[i].isspace() or any(a <= i - z.start < b for a, b in gesperrt):
+                continue
+            g = abb[i]
+            if g >= 0 and zeichen[g].groesse:
+                groessen.append(zeichen[g].groesse)
+        groessen.sort()
+        return groessen[len(groessen) // 2] if groessen else 0.0
+
+    def _etikettzeile(self, z) -> bool:
+        """Etikettzeile eines Kastenformulars ("Ausgeübter Beruf ⇥⇥ Arbeitgeber" über den Werten): mehrere Zellen, keine
+        Ziffern und keine Platzhalter, ein Etikett der Wissensbasis in einer Zelle – und darunter die Werte: kleiner
+        gesetzt als die nächste Zeile darunter oder darunter nur Platzhalter (die geschwärzten Werte). Ihre Wörter sind
+        Feldbezeichner, keine Werte der Tabellenspalte darüber (Befund 90; die Erkennung beendet dort die Tabelle,
+        struktur_tabelle)."""
+        schluessel = ("etikettzeile", z.id)
+        if schluessel in self._org:
+            return self._org[schluessel]
+        self._org[schluessel] = False
+        zeile = self.zeilen_text(z)
+        zellen = [t.strip().rstrip(":") for t in re.split(r"\t+", zeile) if t.strip()]
+        if (len(zellen) < 2 or z.rect is None or any(c.isdigit() for c in zeile) or _PLATZHALTER_RE.search(zeile)
+                or not any(self.w.ist_etikett(t) for t in zellen)):
+            return False
+        unten = self.zeile_darunter(z, z.rect.x0, z.rect.x1)
+        if unten is None:
+            return False
+        eigen, darunter = self._schriftgroesse(z), self._schriftgroesse(unten)
+        werte = re.sub(r"[\s,.;:]+", "", _PLATZHALTER_RE.sub("", self.zeilen_text(unten)))
+        self._org[schluessel] = (not werte and _PLATZHALTER_RE.search(self.zeilen_text(unten)) is not None) \
+            or (eigen > 0 and darunter > 0 and eigen <= 0.85 * darunter)
+        return self._org[schluessel]
+
+    def zeile_darunter(self, z, x0: float, x1: float):
+        """Nächste Zeile unter z nach der Lage auf der Seite (höchstens eine Zeilenhöhe Abstand), die im x-Bereich
+        [x0, x1] Zeichen hat (dieselbe Tabellenspalte), oder None."""
+        if z is None or z.rect is None:
+            return None
+        hoehe = max(z.rect.height, 4.0)
+        beste = None
+        for y in self.m.zeilen:
+            r = y.rect
+            if r is None or y.id == z.id or r.y0 < z.rect.y1 - 0.3 * hoehe or r.y0 - z.rect.y1 > hoehe \
+                    or r.x1 < x0 or r.x0 > x1:
+                continue
+            if (beste is None or r.y0 < beste.rect.y0) and any(x0 - 2 <= xm <= x1 + 2 for _, xm in self.zeichen_x(y)):
+                beste = y
+        return beste
+
     def spaltenkopf(self, s: int, e: int, arten, streng: bool = True):
         """Tabellenspalte: (Art, Etikett) des Spaltenkopfs über der Stelle – die Zellen darüber werden nach
         oben durchgegangen, solange sie Werte (Ziffern, Platzhalter) tragen; die erste Zelle mit einem Etikett
@@ -1695,6 +1775,8 @@ class _Seitenpruefung:
         eigene = self.zeilen_text(z)
         if re.match(r"\s*[^\t:]{1,40}:\s*\t", eigene) and not self._kopfzeile(z):
             return None                        # Schlüssel-Wert-Zeile ("Tarif:  ZahnPlus 80"), keine Tabelle
+        if self._etikettzeile(z):
+            return None                        # selbst eine Etikettzeile (Kastenformular), kein Wert der Spalte
         leer = 0
         oben = z.rect.y0
         hoehe = max(z.rect.height, 8.0)
@@ -1715,6 +1797,8 @@ class _Seitenpruefung:
             if not kurz and (zelle.endswith(":") or not self._kopfzeile(y)):
                 if any(c.isdigit() for c in zelle) or self.ist_platzhalter_bei(zs, ze):
                     continue
+                if not zelle.endswith(":") and self._datenzeile(y):
+                    continue                   # Wert einer Datenzeile derselben Spalte ("Eheleute" ⏎ "Gstettner")
                 return None
             for art in arten:
                 index = self.w.index(art)
@@ -1749,6 +1833,9 @@ class _Seitenpruefung:
             self._daten(z, zeile)
             self._kontakt(z, zeile)
             self._anschriften(z, zeile)
+            if "\t" in zeile:
+                self._umbrochene_strasse(z, zeile)
+                self._betragsform_unter_kennungskopf(z, zeile)
         self._namen()
         self._geburtsname_etiketten()
         self._zb1_felder()
@@ -2511,6 +2598,47 @@ class _Seitenpruefung:
                 continue
             self.neu(o + s, o + s + len(text), f"Angabe hinter Etikett »{v.text}«", "anschrift")
 
+    def _umbrochene_strasse(self, z, zeile: str):
+        """Straßenname am Ende einer Zelle in einer Spalte mit Anschrift-Etikett im Kopf, die Hausnummer am Anfang
+        derselben Zelle in der Zeile darunter ("Am Gänsbichl" ⏎ "4, 84453 Mühldorf a. Inn": Zellumbruch einer
+        Bestandsliste, Befund 84) – die Erkennung liest die Zelle als Ganzes (struktur_tabelle)."""
+        o = z.start
+        for m in re.finditer(r"[^\t]+", zeile):
+            zelle = m.group(0).strip(" ,")
+            if not zelle or len(zelle.split()) > 4 or not _STRASSENNAME_ZELLE_RE.fullmatch(zelle):
+                continue
+            s = o + m.start() + m.group(0).index(zelle)
+            e = s + len(zelle)
+            if self.ist_gesperrt(s, e) or self.org_kontext(s) or self.w.ist_etikett(zelle.split()[-1]):
+                continue
+            b = self.box(s, e)
+            unten = self.zeile_darunter(z, b.x0, b.x1) if b is not None else None
+            if unten is None:
+                continue
+            darunter, ds, _ = self.zelle_ueber(unten, b.x0, b.x1)
+            nummer = _HAUSNUMMER_VORN_RE.match(darunter)
+            if nummer is None or self.spaltenkopf(s, e, ("adresse",)) is None:
+                continue
+            self.neu(s, e, "Anschrift (Straße + Hausnummer)", "anschrift")
+            ns, ne = ds + nummer.start(1), ds + nummer.end(1)
+            if not self.ist_gesperrt(ns, ne):
+                self.neu(ns, ne, "Anschrift (Straße + Hausnummer)", "anschrift")
+
+    def _betragsform_unter_kennungskopf(self, z, zeile: str):
+        """Ganze Zelle in Betragsform ohne Nachkommastellen ("7.712.345") unter einem Kennungs-Spaltenkopf
+        ("Vertrag", "Vers.-Nr."): dort eine Vertrags- oder Kennnummer mit Tausenderpunkten – die Maske der Beträge
+        verdeckt sie sonst. Dieselbe Regel wie die Erkennung (struktur_tabelle._nummer_in_betragsform)."""
+        o = z.start
+        for m in re.finditer(r"[^\t]+", zeile):
+            zelle = m.group(0).strip()
+            if not _BETRAGSFORM_ZELLE_RE.fullmatch(zelle) or _ziffern(zelle) < MIN_ZIFFERN:
+                continue
+            s = o + m.start() + m.group(0).index(zelle)
+            e = s + len(zelle)
+            if self.ist_gesperrt(s, e) or self.org_kontext(s) or self.spaltenkopf(s, e, ("kennung",)) is None:
+                continue
+            self.neu(s, e, "Ziffernfolge unter einem Kennungs-Spaltenkopf (Nummer mit Tausenderpunkten)", "kennung")
+
     def _platzhalter_darunter(self, z) -> bool:
         """Beginnt die Zeile unter z (auf der Seite, nicht in der Textfolge – Platzhalter stehen im Modell als eigene
         Zeilen) mit einem Platzhalter?"""
@@ -2835,7 +2963,31 @@ class _Seitenpruefung:
             if vn or nn or doppelname(i):
                 return True
             return not (self._wort_harmlos(w) or _ORG_WORT_RE.search(w) or _RECHTSFORM_RE.fullmatch(w)
-                        or self._strassenwort(i, woerter) or re.search(r"(?i)" + _STRASSEN_ENDUNG + r"$", w))
+                        or self._strassenwort(i, woerter) or re.search(r"(?i)" + _STRASSEN_ENDUNG + r"$", w)
+                        or self.w.frage("ist_ort", w) or _JURISTISCH_DANACH_RE.match(text, woerter[i][1]))
+
+        etikett_spannen: dict = {}
+
+        def im_etikett(i) -> bool:
+            """Steht das Wort in einem mehrteiligen Feld-Etikett der Wissensbasis ("Given names", "Lieu de naissance",
+            "Place of birth" auf einer Ausweiskopie, Befund 90)? Dann ist es ein Etikettwort, kein Eigenname."""
+            s, e = woerter[i][0], woerter[i][1]
+            z = self.zeile(s)
+            if z is None:
+                return False
+            spannen = etikett_spannen.get(z.id)
+            if spannen is None:
+                spannen = []
+                zeile = self.zeilen_text(z)
+                for art in ("person", "datum_geburt", "adresse", "kontakt", "kennung", "vertragsdaten"):
+                    index = self.w.index(art)
+                    try:
+                        treffer = index.finde(zeile) if index is not None else []
+                    except Exception:
+                        treffer = []
+                    spannen += [(z.start + v.start, z.start + v.ende) for v in treffer if " " in v.text.strip()]
+                etikett_spannen[z.id] = spannen
+            return any(a <= s and e <= b for a, b in spannen)
 
         for i, (s, e, w, k) in enumerate(woerter):
             if firmenname(i) and namenswort(i) and not (self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e)):
@@ -2903,6 +3055,8 @@ class _Seitenpruefung:
                 kontext = etikett = True                # Tabellenspalte "Vorname", "Name", "Kunde"
             if len(w) < 2 or (w.isupper() and len(w) <= 3 and not kontext) or w.lower() in _ANREDE_ZUSATZ:
                 continue
+            if im_etikett(i):
+                continue                                # "Vornamen / Given names / Prénoms": Etikett, kein Name
             if (vn or nn) and kontext and not allow and not self.w.ist_etikett(w):
                 self.neu(s, e, "mehrdeutiger Name im Personenkontext", "name")
                 continue
