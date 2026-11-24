@@ -9,8 +9,9 @@
                        "wissen.gesundheit.vermutet", Sicherheit 0.5 (erkannt wird er trotzdem).
     wissen.beruf       Beruf hinter einem Etikett (Beruf:, ausgeübte Tätigkeit:) oder im Satz (arbeitet als,
                        ist … von Beruf), in der Spalte "Beruf"/"Tätigkeit" einer Personentabelle und unter dem
-                       Etikett eines Kastenformulars ("Beruf (genaue Tätigkeit)" ⏎ "Pflegehelferin") -> "beruf";
-                       die Nachbarzelle einer Kopfzeile ist kein Beruf
+                       Etikett eines Kastenformulars ("Beruf (genaue Tätigkeit)" ⏎ "Pflegehelferin"), auch in einer
+                       Formularzeile aus Feldbezeichnern mit der Wertzeile darunter (Scan: "Telefon ⇥⇥ Beruf" ⏎
+                       "08631 98765 ⇥⇥ Pflegehelferin") -> "beruf"; die Nachbarzelle einer Kopfzeile ist kein Beruf
     org.arbeitgeber    Organisation hinter "Arbeitgeber:" oder im Satz (beschäftigt bei, arbeitet … bei der …)
                        -> "arbeitgeber"; Versicherer, Banken und Behörden der Erlaubnisliste bleiben IMMER stehen
     ort                Ort ohne PLZ: Ort-Datum-Zeilen ("St. Ingbert, 03.04.2025"), Geburts-/Wohnort hinter einem
@@ -375,16 +376,21 @@ def _zellen(zeile: str, versatz: int) -> list:
             if z.group(0).strip()]
 
 
+def _feldbezeichner(wert: str) -> bool:
+    """Ist der Text ein Feldbezeichner der Wissensbasis ("Telefon", "Arbeitgeber", "PLZ", "Geburtsdatum")?"""
+    try:
+        return any(wissen.index(f"etiketten_{art}").eintrag_fuer(wert) for art in wissen.ETIKETTEN_ARTEN)
+    except Exception:
+        return False
+
+
 def _kein_beruf(wert: str) -> bool:
     """Ziffern, Ankreuzwerte, Feldbezeichner oder mehr als fünf Wörter: kein Beruf."""
     if not wert or not wert[0].isalpha() or any(c.isdigit() for c in wert) or len(wert.split()) > 5:
         return True
     if wert.casefold() in {"ja", "nein", "keine", "keine angabe", "entfällt", "ohne", "k. a.", "k.a.", "-"}:
         return True
-    try:
-        return any(wissen.index(f"etiketten_{art}").eintrag_fuer(wert) for art in wissen.ETIKETTEN_ARTEN)
-    except Exception:
-        return False
+    return _feldbezeichner(wert)
 
 
 def _beruf_spalte(text: str, m):
@@ -431,6 +437,41 @@ def _beruf_unter_etikett(text: str) -> list:
     return aus
 
 
+# Beruf-Etikett als ganze Zelle einer Formularzeile ("Telefon ⇥⇥ Beruf (genaue Tätigkeit)")
+_BERUF_ZELLE_RE = re.compile(
+    r"(?i:(?:ausgeübte[rn]?|derzeitige[rn]?|jetzige[rn]?|erlernte[rn]?|aktuelle[rn]?)[ \t]+)?"
+    r"(?:Beruf|Berufsbezeichnung|(?i:Tätigkeit)|berufliche[ \t]+Tätigkeit)(?:[ \t]*\([^)\n]{1,30}\))?[ \t]*:?")
+
+
+def _beruf_in_formularzeile(text: str) -> list:
+    """Kastenformular mit mehreren Feldern je Zeile, wie die OCR es vom Scan liest: eine Zeile nur aus
+    Feldbezeichnern ("Telefon ⇥⇥ Beruf (genaue Tätigkeit)"), darunter die Werte in gleich vielen Zellen
+    ("08631 98765 ⇥⇥ Pflegehelferin"). Die Zelle unter dem Beruf-Etikett ist der Beruf (Befund 87). Ist eine
+    Kopfzelle kein Feldbezeichner oder passt die Zellenzahl nicht (leeres Feld), gilt nichts."""
+    aus = []
+    zeilen = text.split("\n")
+    anfang = 0
+    for i, zeile in enumerate(zeilen[:-1]):
+        za, anfang = anfang, anfang + len(zeile) + 1
+        if "\t" not in zeile or not _BERUF_ZELLE_RE.search(zeile):
+            continue
+        kopf = _zellen(zeile, za)
+        nr = [k for k, (_, _, t) in enumerate(kopf) if _BERUF_ZELLE_RE.fullmatch(t)]
+        if len(kopf) < 2 or len(nr) != 1:
+            continue
+        if not all(_feldbezeichner(t.rstrip(":").strip()) for k, (_, _, t) in enumerate(kopf) if k != nr[0]):
+            continue
+        werte = _zellen(zeilen[i + 1], anfang)
+        if len(werte) != len(kopf):
+            continue
+        a, b, wert = werte[nr[0]]
+        if _kein_beruf(wert):
+            continue
+        s0 = a + (len(text[a:b]) - len(text[a:b].lstrip()))
+        aus.append((s0, s0 + len(wert)))
+    return aus
+
+
 def berufe_stellen(text: str) -> list:
     """Berufsangaben hinter einem Etikett ("Beruf: Verkäuferin", "Ausgeübter Beruf:⇥⇥Pharmareferentin") oder
     im Satz ("arbeitet als Zahnärztin", "ist von Beruf Schreiner", "Schreiner von Beruf")."""
@@ -446,6 +487,7 @@ def berufe_stellen(text: str) -> list:
         if w:
             aus.append(w)
     aus += _beruf_unter_etikett(text)
+    aus += _beruf_in_formularzeile(text)
     for m in _BERUF_VOR_RE.finditer(text):
         w = _beruf_wert(text, m.end(), False)
         if w:

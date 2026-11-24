@@ -4,7 +4,8 @@ Regeln (jede liefert Stellen der Kategorie "namen", Quelle "wissen.namen"):
   R1  "Nachname, Vorname" – auch in Versalien, mit Laufnummer davor ("2 Aßmann, Torsten"), Partikel vorn
       oder hinten ("van Dijk, Maarten", "Heyde, Anna von der"); der Vorname steht in der Liste; in Listen auch
       "Nachname, V." am Zellen- bzw. Zeilenanfang ("Oberprieler, S."), "Nachname/Vorname" in Versalien
-      ("KRANICH/BIRGIT MRS") und Aufzählungen mit ";" ("Kranich, Detlef, 12.04.1969; Kranich, Jona")
+      ("KRANICH/BIRGIT MRS", R1b) und Aufzählungen mit ";" ("Kranich, Detlef, 12.04.1969; Kranich, Jona") oder
+      mit Laufnummern in einer Zeile ("1. Kranich, Detlef 2. Kranich, Birgit")
   R2  Vorname (Liste) + Nachname: "Sana Siddiqui", "Eckhard Freitag", "Erika Mai" (mehrdeutige Wörter nur, wenn
       der andere Teil eindeutig ein Name ist), auch über EINEN Zeilenumbruch ("Faisal⏎Patel"), unbekannter
       Vorname + bekannter Nachname ("Conceição Ferreira"), Initiale + Nachname ("A. Schmid", "V. De Luca")
@@ -231,6 +232,20 @@ _KOMMA_RE = re.compile(
     rf"(?:[ \t]+(?:der|den|dem|de|la))?)?)(?![{_KLEIN}{_GROSS}])")
 
 
+_LAUFNUMMER_IN_ZEILE_RE = re.compile(r"(?:^|[ \t])(?P<nr>[2-9]|[1-9]\d)\.[ \t]+$")
+
+
+def _laufnummer_in_zeile(davor: str) -> bool:
+    """Steht direkt vor dem Namen die Laufnummer einer Aufzählung in derselben Zeile ("Teilnehmer: 1. Kranich,
+    Detlef 2. Kranich, Birgit")? Die vorige Nummer muss in der Zeile vor einem großgeschriebenen Wort stehen – eine
+    einzelne Zahl mit Punkt ("Seite 2.") ist kein Aufzählungsanfang."""
+    m = _LAUFNUMMER_IN_ZEILE_RE.search(davor)
+    if not m:
+        return False
+    vorige = int(m.group("nr")) - 1
+    return re.search(rf"(?:^|[ \t:;]){vorige}\.[ \t]+[{_GROSS}]", davor[:m.start()]) is not None
+
+
 def _komma_namen(text: str) -> list:
     aus = []
     for m in _KOMMA_RE.finditer(text):
@@ -284,10 +299,11 @@ def _komma_namen(text: str) -> list:
         vor_mehrdeutig = _art(erster_vor)[1]
         zeilenanfang = text.rfind("\n", 0, m.start()) + 1
         davor = text[zeilenanfang:m.start()]
-        # Anfang eines Segments: Zeile, Zelle, hinter einer Laufnummer, einem Etikett, in einer Liste hinter ";" und im
-        # Kurzrubrum hinter "./." ("Kranzbühler, Josef ./. Felsberger, Rainer"; "Reisende: …; Kranich, Jona, …")
+        # Anfang eines Segments: Zeile, Zelle, hinter einer Laufnummer (auch der nächsten einer Aufzählung in derselben
+        # Zeile), einem Etikett, in einer Liste hinter ";" und im Kurzrubrum hinter "./." ("Kranzbühler, Josef ./.
+        # Felsberger, Rainer"; "Reisende: …; Kranich, Jona, …"; "1. Kranich, Detlef 2. Kranich, Birgit")
         zellenanfang = (not davor.strip() or davor.endswith("\t") or re.fullmatch(r"[ \t]*\d{1,4}\.?[ \t]+", davor)
-                        or davor.rstrip().endswith((":", ";", "./.")))
+                        or davor.rstrip().endswith((":", ";", "./.")) or _laufnummer_in_zeile(davor))
         if vor_mehrdeutig and not nach_bekannt:
             continue
         if not nach_bekannt and not zellenanfang:
@@ -375,9 +391,10 @@ def _vorname_nachname(text: str, tokens: list) -> list:
         marke_davor = i > 0 and tokens[i - 1].naechster_trenner == " " \
             and tokens[i - 1].text.rstrip(".").casefold() in _MARKEN                # "Seat Leon Sportstourer"
         if not _nachname_moeglich(nw, streng=False) or w.casefold() in _MARKEN or _sach_etikett_davor(text, t.start) \
-                or marke_davor or _in_sachnamen(text, t.start, nt.ende) or personenkontext.tierangabe(text, t.start):
+                or marke_davor or _in_sachnamen(text, t.start, nt.ende) or personenkontext.tierangabe(text, t.start) \
+                or personenkontext.organisations_spalte(text, t.start):
             i = j + 1
-            continue
+            continue                                         # "Versicherer" ⏎ "Adam Riese": ein Versicherer
         if not nach_bekannt and (partikel == [] and _art(nw)[0] and not _art(nw)[2]):
             i = j + 1
             continue                                         # zwei Vornamen ohne Nachnamen
@@ -398,6 +415,36 @@ def _vorname_nachname(text: str, tokens: list) -> list:
 
 _INITIALE_RE = re.compile(rf"(?<![{_KLEIN}{_GROSS}.])([{_GROSS}])\.(?:[ \t]?[{_GROSS}]\.)?[ \t]?"
                           rf"((?:(?:de|De|di|Di|van|Van|von|da|Da|del|Del|le|Le|La)[ \t]+)?{_W})")
+
+
+# ----------------------------------------------------------------------
+# R1b Flugschein-Format "NACHNAME/VORNAME [MR|MRS|MS]" ("KRANICH/BIRGIT MRS", "OSTERKAMP/JULIANE MS"): beide Teile
+#     sind Namen, wenn der Vorname eindeutig in der Liste steht; die Anrede dahinter bleibt stehen
+# ----------------------------------------------------------------------
+_FLUG_ANREDEN = frozenset({"MR", "MRS", "MS", "MISS", "MSTR", "CHD", "INF"})
+_SCHRAEG_NAME_RE = re.compile(rf"(?<![\w/])(?P<nach>{_W})/(?P<vor>{_W}(?:[ ]{_W})?)(?![\w/])")
+
+
+def _schraegstrich_namen(text: str) -> list:
+    aus = []
+    if "/" not in text:
+        return aus
+    for m in _SCHRAEG_NAME_RE.finditer(text):
+        vor = m.group("vor").split()
+        if vor[-1] in _FLUG_ANREDEN:
+            vor = vor[:-1]
+        if not vor or vor[0] in _FLUG_ANREDEN:
+            continue
+        art = _art(vor[0].title() if vor[0].isupper() else vor[0])
+        if not art[0] or art[1] or art[4]:
+            continue                                   # Vorname eindeutig aus der Liste ("Hin/Rückflug" nicht)
+        nach = m.group("nach")
+        if not _rang_name_moeglich(nach.title() if nach.isupper() else nach):
+            continue
+        aus.append(_treffer(m.start("nach"), m.end("nach"), text, 0.7))
+        ende = m.start("vor") + len(" ".join(vor))
+        aus.append(_treffer(m.start("vor"), ende, text, 0.7))
+    return aus
 
 
 def _initiale_nachname(text: str) -> list:
@@ -586,9 +633,15 @@ def _firmen_namen(text: str, tokens: list) -> list:
         if len(w) < 3:
             continue
         vor, vor_m, nach, nach_m, allerwelt, allow = _art(w)
+        davor = text[max(0, t.start - 40):t.start]
+        if not nach and not allow and w.casefold() not in _KEIN_NAME and _FIRMA_VOR_RE.search(davor) \
+                and personenkontext.namensgestalt(w, wissen):
+            # unbekannter Familienname hinter einer Geschäftsbezeichnung ("Physiotherapie Oberprieler") – wie die
+            # Selbstkontrolle (restrisiko: Name in einer Firmenbezeichnung)
+            aus.append(_treffer(t.start, t.ende - (1 if t.text.endswith(".") else 0), text, 0.6))
+            continue
         if not nach or allow or w.casefold() in _KEIN_NAME:
             continue
-        davor = text[max(0, t.start - 40):t.start]
         danach = text[t.ende:t.ende + 40]
         gross = _ist_gross(w)
         if _FIRMA_VOR_RE.search(davor) and (gross or not nach_m):
@@ -733,6 +786,7 @@ def namen_stellen(text: str) -> list:
     tokens = _tokens(text)
     treffer = []
     treffer += _komma_namen(text)
+    treffer += _schraegstrich_namen(text)
     treffer += _vorname_nachname(text, tokens)
     treffer += _initiale_nachname(text)
     treffer += _unbekannter_vorname(text, tokens)

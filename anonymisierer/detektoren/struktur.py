@@ -479,6 +479,10 @@ def _etiketten_roh(text: str) -> list:
         if len(wort) < 5 or _NUMMERN_FREMD.match(wort):
             continue
         aus.append((m.start(1), m.end(1), "kennung", wort))
+    # Feldcode C.1.3 einer Zulassungsbescheinigung Teil I: das Anschrift-Etikett des Halters (Befund 32 der
+    # Domänen-Durchsicht; nur auf einer erkennbaren Zulassungsbescheinigung, sonst Gliederungsnummer)
+    for s, e in personenkontext.zb1_anschrift_etiketten(text):
+        aus.append((s, e, "adresse", "Anschrift"))
     return aus
 
 
@@ -1620,6 +1624,8 @@ def wert_bereich_rechts(seite, lg: Lage, et: Etikett, alle: list, idx: int):
     if et.ende < len(text) and text[et.ende].isalnum():
         return None
     mit_trenner = bool(trenner.strip(" ")) or "\t" in trenner or len(trenner) >= 2
+    if not mit_trenner and personenkontext.ZB1_FELDCODE_RE.fullmatch(text[et.start:et.ende]):
+        mit_trenner = True                           # Feldcode ("C.1.3"): der Wert folgt direkt, wie hinter ":"
     zelle = lg.zelle_bei(s)
     if zelle is None:
         return None

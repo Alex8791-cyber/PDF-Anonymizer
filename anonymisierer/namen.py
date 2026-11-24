@@ -404,8 +404,8 @@ def _ner_sachtreffer(text: str, start: int, ende: int, teile: list) -> bool:
         return True                                       # "Böckmann TPV", "Logan MCV", "Bosch GSR"
     # Modellcode dahinter in derselben Zelle (personenkontext, wie die Selbstkontrolle) – "PHV" oder "540" in der
     # nächsten Tabellenspalte gehört nicht zum Namen
-    modell = personenkontext.MODELLCODE_DANACH_RE.match(text, ende) if not paar else None
-    if modell and (modell.group("code") is None or _code_wort(modell.group("code"))):
+    # (Datum, Jahreszahl, Betrag oder Telefonnummer dahinter sind kein Modellcode: "Jendrik Wimmersberger 14.05.1979")
+    if not paar and personenkontext.modellcode_danach(text, ende, lambda code: not _code_wort(code), teile):
         return True                                       # "Tabbert Rossini 540", "Fronius Symo 10.0-3-M"; nicht "FAX"
     if _RECHTSFORM_DANACH_RE.match(text, ende) or any(_ORG_TEIL_RE.search(t) for t in teile):
         return True                                       # "Sixt GmbH …", "Stadtwerke Rosenheim"
@@ -422,7 +422,8 @@ def _ner_sachtreffer(text: str, start: int, ende: int, teile: list) -> bool:
         return True                                       # "M. Parkinson" – nicht "M. Weber"
     if any(personenkontext.fachwort_medizin(t, wissen) for t in teile):
         return True                                       # "Rezidivierende Lumboischialgie"; nicht "Rimas Petraitis"
-    if not namen and any(_PARTIZIP_RE.fullmatch(t) or _ISCH_RE.fullmatch(t) for t in teile):
+    # nur ein Wort allein: in "Okke Gesslert" ist das zweite Wort ein Familienname, kein Partizip
+    if not namen and len(teile) == 1 and (_PARTIZIP_RE.fullmatch(teile[0]) or _ISCH_RE.fullmatch(teile[0])):
         return True                                       # "Ausgefertigt", "Beglaubigt", "Gegnerischer"
     return False
 
@@ -905,6 +906,8 @@ def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
         return True                           # "Frau Mai", "Nachname: Freitag"
     if norm in NAMEN_STOPPLISTE or (norm in VERSICHERER_NAMEN and not mit_anrede):
         return False
+    if not mit_anrede and personenkontext.organisations_spalte(text, start):
+        return False                          # "Versicherer" ⏎ "Adam Riese": ein Versicherer, keine Person
     teile = _namensteile(name)
     if not teile:
         return False

@@ -6,8 +6,10 @@ Familienversicherung, Kindertarif, Reise- und Gruppenversicherung stehen Geburts
 ("Kind 2: Bastian Leutgeb, 30.06.2018", "Kinder: Ben (02.05.2019) und Lotta (17.10.2021)", "Reisende: Kranich,
 Detlef, 12.04.1969; …", die Kinderliste mit Tabstopps unter "Kinder:"). Ein Datum direkt am Namen ist dort ein
 Geburtsdatum in jedem Alter – aber nur mit einer Familien-/Versichertenrolle in derselben Zeile vor dem Namen oder als
-Überschrift des Blocks darüber, ohne Titel, Praxis oder Klinik vor dem Namen (ein Behandler: sein Datum ist ein
-Behandlungsdatum) und ohne Behandlungstext hinter dem Datum ("…, 03.11.2012: Meniskusoperation").
+Überschrift des Blocks darüber und nicht als Behandlungsdatum: Titel, Praxis oder Klinik vor dem Namen UND ein
+Behandlungstext hinter dem Datum ("Dr. Ute Kranzfelder, 03.11.2012: Meniskusoperation"). Eines allein genügt nicht:
+"Versicherungsnehmer: Dr. Anna Weber, 12.03.1965" und "Max Mustermann, 02.09.1961: Antrag unterschrieben" nennen
+Geburtsdaten.
 
 Dazu weitere geteilte Personenregeln derselben Durchsicht: Namen in Wohn- und Nachbarschaftsangaben ("unseres
 Nachbarn Felsberger", "EG links (Hackenschmied)"), Tierangaben, medizinische Fachwörter, Marken, Modelle und
@@ -23,10 +25,13 @@ GbR oder Erbengemeinschaft.
     wohn_kontext_namen(text) -> [(start, ende)], namensgestalt(wort, wissen) -> bool
     tierangabe(text, start) -> bool, medizinisch(wort, text, start, wissen) -> bool,
     fachwort_medizin(wort, wissen) -> bool, diagnose(wort, wissen) -> bool
-    MODELLCODE_DANACH_RE, sachnamen_stellen(zeile, wissen) -> [(start, ende)]
+    MODELLCODE_DANACH_RE, modellcode_danach(text, ende, wortgestalt) -> bool,
+    sachnamen_stellen(zeile, wissen) -> [(start, ende)]
     ust_umgebung(text, start) -> str, ust_id_der_firma(umgebung) -> bool, ust_id_einer_person(umgebung) -> bool
-    zb1_seite(text) -> bool, zb1_personenfelder(text) -> [(start, ende)]
+    zb1_seite(text) -> bool, zb1_personenfelder(text) -> [(start, ende)], zb1_anschrift_etiketten(text),
+    zb1_anschriftfelder(text) -> [(start, ende)], ZB1_FELDCODE_RE
     gemeinschaft_namen(text, sachwort) -> [(start, ende)]
+    ORG_SPALTEN, organisations_spalte(text, pos) -> bool
 """
 
 from __future__ import annotations
@@ -83,10 +88,24 @@ def familien_rolle_in_zeile(text: str, zeilenanfang: int, name_start: int) -> bo
     return bool(FAMILIE_RE.search(text, zeilenanfang, max(zeilenanfang, name_start)))
 
 
-def behandlungsdatum(davor_bis_name: str, text: str, datum_ende: int) -> bool:
-    """Ist das Datum ein Behandlungsdatum: Titel, Praxis oder Klinik vor dem Namen, oder ein Behandlungstext hinter
-    dem Datum ("Dr. Ute Kranzfelder, 03.11.2012: Meniskusoperation links")?"""
-    return bool(BEHANDLER_DAVOR_RE.search(davor_bis_name)) or bool(_TEXT_DAHINTER_RE.match(text, datum_ende))
+# Name (oder sein Platzhalter) am Ende des Texts vor dem Datum, samt Trenner ("Dr. med. [PERSON A], ")
+_NAME_AM_ENDE_RE = re.compile(r"(?:\[[^\]\n]{1,20}\]|(?:[^\W\d_][\w'’\-]*[ \t]+){0,3}[^\W\d_][\w'’\-]*)"
+                              r"[ \t]*[,(*\-–]?[ \t]*$")
+
+
+def behandler_vor_name(davor: str) -> bool:
+    """Steht ein Titel, eine Praxis oder Klinik direkt vor dem Namen? davor: der Text bis zum Namen ("Dr. ") oder bis
+    zum Datum ("Dr. [PERSON A], ") – ein Name bzw. Platzhalter am Ende wird übersprungen."""
+    m = _NAME_AM_ENDE_RE.search(davor)
+    return bool(BEHANDLER_DAVOR_RE.search(davor[:m.start()] if m else davor))
+
+
+def behandlungsdatum(davor: str, text: str, datum_ende: int) -> bool:
+    """Ist das Datum ein Behandlungsdatum: ein Behandler vor dem Namen (behandler_vor_name) UND ein Behandlungstext
+    hinter dem Datum ("Dr. Ute Kranzfelder, 03.11.2012: Meniskusoperation links")? Eines allein genügt nicht – das
+    Geburtsdatum einer Person mit Doktortitel ("Versicherungsnehmer: Dr. Anna Weber, 12.03.1965") und ein Datum mit
+    Ereignis ("Max Mustermann, 02.09.1961: Antrag unterschrieben") bleiben Geburtsdaten."""
+    return bool(_TEXT_DAHINTER_RE.match(text, datum_ende)) and behandler_vor_name(davor)
 
 
 # ----------------------------------------------------------------------
@@ -254,6 +273,34 @@ def medizinisch(wort: str, text: str = "", start: int = 0, wissen=None) -> bool:
 # ein Modellcode nur ohne Wortgestalt ("FAX" ist keiner; prüft der Aufrufer)
 MODELLCODE_DANACH_RE = re.compile(r" +(?:(?P<code>[A-Z]{2,5})(?=[ \t,;.]|$)|[A-Z]{1,5}-?\d|"
                                   r"\d+[A-Za-z]{1,3}(?![\wäöüß])|\d{1,4}(?:[.,\-/]\d+)+|\d{3,4}(?![\d.,]))")
+# Zahlen hinter einem Namen, die kein Modellcode sind: Datum ("Jendrik Wimmersberger 14.05.1979" – oft das
+# Geburtsdatum), Uhrzeit, Betrag, Jahreszahl ("… 2019 erstmals") und Telefonnummer ("… 0151 22334455")
+_KEIN_MODELLCODE_RE = re.compile(r"(?:0?[1-9]|[12]\d|3[01])[./](?:0?[1-9]|1[0-2])[./](?:\d{4}|\d{2})?(?!\d)"
+                                 r"|\d{1,2}:\d{2}(?!\d)|\d{1,3}(?:\.\d{3})*,\d{2}(?!\d)|(?:19|20)\d{2}(?![\d.,\-])"
+                                 r"|0\d")
+
+
+_NUR_ZAHL_RE = re.compile(r"\d{3,4}(?![\d.,\-/\wäöüß])")
+
+
+def modellcode_danach(text: str, ende: int, wortgestalt=None, woerter=()) -> bool:
+    """Steht direkt hinter der Stelle (nur Leerzeichen dazwischen, dieselbe Zelle) ein Modellcode ("Rossini 540",
+    "Symo 10.0-3-M", "GSR 18V-55", "Böckmann TPV")? Ein Kürzel in Versalien nur ohne Wortgestalt (wortgestalt(code)
+    -> bool: "FAX" ist keiner); Datum, Uhrzeit, Betrag, Jahreszahl und Telefonnummer sind nie ein Modellcode – sonst
+    verlöre ein Name davor seinen Personenbezug. Eine bloße Zahl ("4711") zählt nicht hinter einem Wort mit der
+    Gestalt eines Familiennamens (woerter: die Wörter der Stelle; "Fokko Grübelhuber 4711"). Eine Regel für
+    Erkennung (namen.py) und Selbstkontrolle."""
+    m = MODELLCODE_DANACH_RE.match(text, ende)
+    if m is None:
+        return False
+    if m.group("code") is not None:
+        return not (wortgestalt is not None and wortgestalt(m.group("code")))
+    pos = ende
+    while pos < len(text) and text[pos] == " ":
+        pos += 1
+    if _KEIN_MODELLCODE_RE.match(text, pos):
+        return False
+    return not (_NUR_ZAHL_RE.match(text, pos) and any(namensgestalt(w) for w in woerter))
 
 
 def sachnamen_stellen(zeile: str, wissen) -> list:
@@ -336,6 +383,82 @@ def zb1_personenfelder(text: str) -> list:
             continue
         aus.append((m.start("wert"), m.start("wert") + len(wert)))
     return aus
+
+
+# Feld C.1.3 (Anschrift des Halters), auch verlesen ("0.1.3", "C,1.3"): auf einer Zulassungsbescheinigung ein
+# Anschrift-Etikett – der Wert steht direkt dahinter bis zum Zellen- oder Zeilenende ("C.1.3  HOFMARK 7, 84140
+# GANGKOFEN"); ein Straßenname ohne Straßenwort ("Hofmark 7") wird nur über dieses Etikett erkannt
+ZB1_ANSCHRIFTFELD_RE = re.compile(r"(?m)(?:^|\t)[ \t]*(?P<code>[C0O][.,][ ]?[1lI][.,][ ]?3)(?![\w.,])"
+                                  r"[ \t:]*(?:(?i:Anschrift)[ \t:]+)?(?P<wert>[^\t\n]*)")
+# ein Feldcode der Zulassungsbescheinigung als ganzes Wort ("C.1.3", "0.1.1", "D.2.1", "P.1") – auf ihr ein
+# Feld-Etikett, kein Rest eines geschwärzten Werts (Selbstkontrolle)
+ZB1_FELDCODE_RE = re.compile(r"[A-Z0][.,][ ]?[1-9lI](?:[.,][ ]?[1-9lI])?")
+
+
+def zb1_anschrift_etiketten(text: str) -> list:
+    """(start, ende) der Feldcodes C.1.3 einer Zulassungsbescheinigung Teil I (Anschrift-Etikett); ohne
+    Zulassungsbescheinigung: keine."""
+    if "1" not in text or not zb1_seite(text):
+        return []
+    return [(m.start("code"), m.end("code")) for m in ZB1_ANSCHRIFTFELD_RE.finditer(text)]
+
+
+def zb1_anschriftfelder(text: str) -> list:
+    """(start, ende) der Werte im Feld C.1.3 einer Zulassungsbescheinigung Teil I (höchstens acht Wörter bis zum
+    Zellen- oder Zeilenende); ohne Zulassungsbescheinigung oder ohne Wert: keine."""
+    if "1" not in text or not zb1_seite(text):
+        return []
+    aus = []
+    for m in ZB1_ANSCHRIFTFELD_RE.finditer(text):
+        wert = m.group("wert").rstrip(" .,;:")
+        if not wert.strip() or len(wert.split()) > 8:
+            continue
+        aus.append((m.start("wert"), m.start("wert") + len(wert)))
+    return aus
+
+
+# Spalten mit Organisationen (Befund 92): im Angebotsvergleich steht unter "Versicherer" der Versicherer, auch wenn sein
+# Name aus Vor- und Nachnamen besteht ("Adam Riese", "Roland") – keine Person. Erkannt an der Kopfzelle derselben
+# Spalte (gleicher Zellenplatz in einer Kopfzeile mit gleich vielen Zellen) bis zu ORG_SPALTE_ZEILEN Zeilen höher,
+# ohne Leerzeile dazwischen; Schlüssel-Wert-Felder ("Versicherer: …") behandeln die Sach-Etiketten der Namensregeln
+ORG_SPALTEN = ("Versicherer", "Versicherungsgesellschaft", "Gesellschaft", "Anbieter", "Risikoträger",
+               "Vorversicherer", "Bank", "Kreditinstitut", "Krankenkasse")
+_ORG_SPALTE_RE = re.compile(r"(?i)(?:" + "|".join(ORG_SPALTEN) + r")[ \t]*:?")
+ORG_SPALTE_ZEILEN = 40
+
+
+def _zellen(zeile: str) -> list:
+    """(start, ende) der nicht leeren Zellen einer Zeile (Trenner: Tabulator)."""
+    return [(m.start(), m.end()) for m in re.finditer(r"[^\t]+", zeile) if zeile[m.start():m.end()].strip()]
+
+
+def organisations_spalte(text: str, pos: int) -> bool:
+    """Steht die Stelle pos in einer Tabellenspalte, deren Kopfzelle eine Organisation ankündigt ("Versicherer" ⏎
+    "Adam Riese")? Dieselbe Regel für die Erkennung (namen.py, wissen_namen) und die Selbstkontrolle."""
+    za = text.rfind("\n", 0, pos) + 1
+    ze = text.find("\n", pos)
+    zeile = text[za:len(text) if ze < 0 else ze]
+    if "\t" not in zeile:
+        return False
+    zellen = _zellen(zeile)
+    nr = next((i for i, (a, b) in enumerate(zellen) if a <= pos - za < b), None)
+    if nr is None:
+        return False
+    ende = za - 1
+    for _ in range(ORG_SPALTE_ZEILEN):
+        if ende <= 0:
+            return False
+        anfang = text.rfind("\n", 0, ende) + 1
+        oben = text[anfang:ende]
+        if not oben.strip():
+            return False                     # Leerzeile: die Tabelle ist zu Ende
+        kopf = _zellen(oben)
+        if len(kopf) == len(zellen):
+            a, b = kopf[nr]
+            if _ORG_SPALTE_RE.fullmatch(oben[a:b].strip()):
+                return True
+        ende = anfang - 1
+    return False
 
 
 # Gesellschaften bürgerlichen Rechts und Gemeinschaften natürlicher Personen (Befund 63): der Name davor bzw. dahinter

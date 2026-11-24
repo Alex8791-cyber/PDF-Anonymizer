@@ -782,3 +782,244 @@ def test_befund_43_selbstkontrolle_nachbarzelle_ist_kein_modell(zeilen, name, pl
 ])
 def test_befunde_15_43_60_selbstkontrolle_ohne_fehlverdacht(text):
     assert _verdacht(text) == []
+
+
+# ----------------------------------------------------------------------
+# Zulassungsbescheinigung Teil I: Feld C.1.3 ist das Anschrift-Etikett des Halters (Befund 32, Teil Anschrift)
+# ----------------------------------------------------------------------
+_ZB1_KOPF = ["ZULASSUNGSBESCHEINIGUNG TEIL I", "A  M-KS 4471\t\tB  14.09.2020", "C.1.1  STEINLECHNER",
+             "C.1.2  GUNTRAM"]
+
+
+def _spalten_pdf(pfad, zeilen):
+    """Text-PDF: Zellen einer Zeile ("\\t\\t") stehen in eigenen Spalten wie in den Falldateien der Durchsicht."""
+    import pymupdf as fitz
+    doc = fitz.open()
+    seite = doc.new_page(width=595, height=842)
+    y = 80
+    for zeile in zeilen:
+        teile = zeile.split("\t\t")
+        for i, teil in enumerate(teile):
+            seite.insert_text(((60, 250, 420)[i] if len(teile) > 1 else 60, y), teil, fontsize=11,
+                              fontname="helv")
+        y += 18
+    doc.save(pfad)
+    doc.close()
+    return pfad
+
+
+@pytest.mark.parametrize("zeile, strasse", [
+    ("C.1.3  HOFMARK 7, 84140 GANGKOFEN", "HOFMARK 7"),           # Straßenname ohne Straßenwort
+    ("C.1.3 Hofmark 7, 84140 Gangkofen", "Hofmark 7"),            # ein Leerzeichen hinter dem Feldcode
+    ("0.1.3  HOFMARK 7", "HOFMARK 7"),                            # Feldcode verlesen (Scan), ohne PLZ
+])
+def test_befund_32_zb1_anschrift_im_feld_c13(zeile, strasse):
+    text = "\n".join(_ZB1_KOPF + [zeile])
+    assert _deckt(_geschwaerzt(_funde(text), "strasse"), strasse)
+    assert _gemeldet(text, strasse)                               # bliebe sie lesbar: Verdacht
+
+
+@pytest.mark.parametrize("zeilen, wert", [
+    (["Allgemeine Versicherungsbedingungen", "C.1.3  Hofmark 7 der Bedingungen gilt entsprechend"], "Hofmark"),
+    (["Inhaltsverzeichnis", "C.1.1  Sachschäden", "C.1.3  Vermögensschäden 12"], "Vermögensschäden"),
+])
+def test_befund_32_gegenproben_c13_ohne_zulassungsbescheinigung(zeilen, wert):
+    text = "\n".join(zeilen)
+    assert not _deckt(_geschwaerzt(_funde(text)), wert)
+    assert not _gemeldet(text, wert)
+
+
+def test_befund_32_selbstkontrolle_feldcode_ist_kein_rest():
+    """Feldcodes der Zulassungsbescheinigung neben den Platzhaltern der geschwärzten Werte sind Etiketten – kein
+    "Rest neben Platzhalter" (Fehlverdacht in der Durchsicht: "C.1.3"); ein echter Rest bleibt Verdacht."""
+    platzhalter = ["[PERSON A]", "[PERSON B]", "[ADRESSE]", "[PLZ ORT]"]
+    text = "\n".join(["ZULASSUNGSBESCHEINIGUNG TEIL I", "C.1.1  [PERSON A]", "C.1.2  [PERSON B]",
+                      "C.1.3  [ADRESSE], [PLZ ORT]"])
+    assert _verdacht(text, platzhalter=platzhalter) == []
+    rest = text.replace("C.1.3  [ADRESSE]", "C.1.3  Untere [ADRESSE]")
+    assert _gemeldet(rest, "Untere", platzhalter=platzhalter)
+
+
+def test_befund_32_zb1_ende_zu_ende_ohne_fehlverdacht(tmp_path):
+    """Ende zu Ende (Textebene): Name, Vornamen und Anschrift der Zulassungsbescheinigung sind geschwärzt, die
+    Selbstkontrolle meldet weder einen Wert noch den Feldcode "C.1.3"."""
+    from anonymisierer.analyse import analysiere_pdf
+    from anonymisierer.schwaerzung import schwaerze_pdf
+    pdf = _spalten_pdf(tmp_path / "zb1.pdf", _ZB1_KOPF + ["C.1.3  HOFMARK 7, 84140 GANGKOFEN"])
+    a = analysiere_pdf(pdf, ALLE, [], [])
+    e = schwaerze_pdf(pdf, a["funde"], modell=a.get("modell"), ziel_ordner=tmp_path / "aus")
+    import pymupdf as fitz
+    with fitz.open(e["ausgabe"]) as d:
+        ausgabe = "\n".join(s.get_text() for s in d)
+    for wert in ("STEINLECHNER", "GUNTRAM", "HOFMARK", "84140"):
+        assert wert not in ausgabe, ausgabe
+    assert not [v.text for v in e["verdacht"] if "C.1" in v.text], e["verdacht"]
+
+
+# ----------------------------------------------------------------------
+# Versicherer aus Vor-/Nachnamen in der Spalte "Versicherer" (Befund 92): keine Personen
+# ----------------------------------------------------------------------
+_VERGLEICH = ["Angebotsvergleich Privathaftpflicht", "Versicherer\t\tTarif\t\tDeckungssumme",
+              "Adam Riese\t\tXXL\t\t50 Mio. EUR", "Roland\t\tKomfort\t\t20 Mio. EUR",
+              "Haftpflichtkasse\t\tEinfach Komplett\t\t50 Mio. EUR"]
+
+
+def test_befund_92_versicherer_spalte_ohne_namen_und_ohne_verdacht():
+    text = "\n".join(_VERGLEICH)
+    namen = _namen(text)
+    assert not _deckt(namen, "Adam") and not _deckt(namen, "Roland"), namen
+    assert _verdacht(text) == []
+
+
+def test_befund_92_versicherer_spalte_variante_gesellschaft_ende_zu_ende(tmp_path):
+    """Variante als PDF mit Spalten (auch der Zellen-Durchgang der KI): "Gesellschaft" als Spaltenkopf."""
+    from anonymisierer.analyse import analysiere_pdf
+    zeilen = ["Gesellschaft\t\tTarif\t\tJahresbeitrag", "Adam Riese\t\tXL\t\t48,90 EUR",
+              "Roland\t\tKomfort\t\t52,10 EUR"]
+    a = analysiere_pdf(_spalten_pdf(tmp_path / "vergleich.pdf", zeilen), ALLE, [], [])
+    assert not [f["text"] for f in a["funde"] if f["kategorie"] == "namen"], a["funde"]
+
+
+@pytest.mark.parametrize("zeilen, name", [
+    (["Versicherungsnehmer: Adam Riese"], "Adam Riese"),                  # Personen-Etikett: eine Person
+    (["Sehr geehrter Herr Adam Riese,"], "Adam Riese"),
+    (["Name\t\tVersicherer", "Adam Riese\t\tHUK-COBURG"], "Adam Riese"),  # Spalte "Name", nicht "Versicherer"
+    (["Ihr Berater Roland hat angerufen."], "Roland"),
+])
+def test_befund_92_gegenproben_personen_bleiben(zeilen, name):
+    text = "\n".join(zeilen)
+    assert _deckt(_namen(text), name)
+    assert _gemeldet(text, name.split()[0])
+
+
+# ----------------------------------------------------------------------
+# Gegenproben zur Modellcode-Regel ("Tabbert Rossini 540"): Datum, Jahreszahl, Telefonnummer und eine bloße Zahl
+# hinter einem Familiennamen machen einen Namen nicht zur Sache – weder in der Erkennung noch in der Selbstkontrolle
+# ----------------------------------------------------------------------
+@braucht_modell
+@pytest.mark.parametrize("zeile, name", [
+    ("Anwesend: Jendrik Wimmersberger 14.05.1979, Hausmeister", "Wimmersberger"),     # Geburtsdatum dahinter
+    ("Mitglied Fokko Grübelhuber 4711 im Verein", "Grübelhuber"),                     # Mitgliedsnummer
+])
+def test_modellcode_gegenproben_name_vor_datum_oder_zahl_bleibt_name(zeile, name):
+    assert _deckt(_namen(zeile), name)
+
+
+@pytest.mark.parametrize("zeile, name", [
+    ("Gesprächspartner war Okke Brünnhuber 12.03.2025 telefonisch.", "Brünnhuber"),
+    ("Den Schaden meldete Gunnar Wittmannsgruber 2019 erstmals.", "Wittmannsgruber"),
+    ("Kontakt: Tjark Ommerborn 0151 22334455", "Ommerborn"),
+])
+def test_modellcode_gegenproben_selbstkontrolle_meldet_name_vor_datum_jahr_telefon(zeile, name):
+    assert _gemeldet(zeile, name)
+
+
+@pytest.mark.parametrize("zeile, wert", [
+    ("Wohnwagen Hymer Exsis 588", "Exsis"),                          # unbekannte Marke + Modell + Nummer
+    ("Wechselrichter: Fronius Symo 10.0-3-M", "Symo"),
+])
+def test_modellcode_bleibt_fuer_modelle(zeile, wert):
+    assert not _deckt(_namen(zeile), wert)
+    assert not _gemeldet(zeile, wert)
+
+
+# ----------------------------------------------------------------------
+# Gegenproben zu Befund 14: ein Behandlungsdatum braucht beides – Behandler vor dem Namen UND Behandlungstext hinter
+# dem Datum. Das Geburtsdatum einer Person mit Doktortitel und ein Datum mit Ereignistext bleiben Geburtsdaten.
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("zeile, datum", [
+    ("Versicherungsnehmer: Dr. Anna Weber, 12.03.1965", "12.03.1965"),
+    ("Versicherte Person: Dr. Jens Abendroth (14.05.1971)", "14.05.1971"),
+    ("Prof. Dr. Klaus Meier, 03.11.1958", "03.11.1958"),
+    ("Max Mustermann, 02.09.1961: Antrag unterschrieben", "02.09.1961"),
+])
+def test_befund_14_gegenproben_geburtsdatum_mit_titel_oder_ereignistext_bleibt(zeile, datum):
+    assert datum in _geschwaerzt(_funde(zeile), "geburt")
+    assert _gemeldet(zeile, datum)
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Bearbeitet von Schmidt-Wald am Montag", "Schmidt-Wald"),       # Doppelname mit Sachwort-Teil neben Nachname
+    ("Kopie an Brinkmann-Stein", "Brinkmann-Stein"),
+])
+def test_befunde_66_83_gegenproben_doppelname_mit_sachwort_teil_bleibt_verdacht(text, wert):
+    assert _gemeldet(text, wert)
+
+
+# ----------------------------------------------------------------------
+# Domänen-Messung (Fortsetzung): Flugschein-Format "NACHNAME/VORNAME MS" ohne die KI (Befund 9, Fall
+# airline_namensformat) und ein unbekannter Familienname hinter einer Geschäftsbezeichnung (Fall k3_schweigepflicht)
+# ----------------------------------------------------------------------
+def test_befund_9_flugschein_format_ende_zu_ende(tmp_path):
+    from anonymisierer.analyse import analysiere_pdf
+    a = analysiere_pdf(_spalten_pdf(tmp_path / "ticket.pdf", ["Passagier: KRANICH/DETLEF MR",
+                                                              "Name: OSTERKAMP/JULIANE MS"]), ALLE, [], [])
+    namen = {f["text"] for f in a["funde"] if f["kategorie"] == "namen"}
+    for n in ("KRANICH", "DETLEF", "OSTERKAMP", "JULIANE"):
+        assert _deckt(namen, n), (n, namen)
+    assert not any("MR" in n.split() or "MS" in n.split() for n in namen), namen
+
+
+@pytest.mark.parametrize("zeile", ["Hin/Rückflug am 12.07.2026", "Kauf/Verkauf", "Ehemann/Ehefrau", "AN/AUS",
+                                   "Bad Tölz/Wolfratshausen"])
+def test_befund_9_gegenproben_schraegstrich_ohne_vorname(zeile):
+    assert _namen(zeile) == set()
+
+
+@pytest.mark.parametrize("zeile, name", [
+    ("– Physiotherapie Oberprieler, Stadtplatz 8, 84347 Pfarrkirchen (Behandlung 03–05/2024)", "Oberprieler"),
+    ("Spedition Hinterberger übernimmt den Transport.", "Hinterberger"),
+])
+def test_name_in_firmenbezeichnung_auch_unbekannt(zeile, name):
+    assert _deckt(_namen(zeile), name)
+    assert _gemeldet(zeile, name)
+
+
+@pytest.mark.parametrize("zeile", ["Physiotherapie Zentrum Erding", "Praxis Sonnenschein", "Werkstatt Nordring"])
+def test_name_in_firmenbezeichnung_gegenproben(zeile):
+    assert _namen(zeile) == set()
+
+
+# ----------------------------------------------------------------------
+# Domänen-Messung (Fortsetzung): Kastenformular auf dem Scan liest die OCR als Zeile aus Feldbezeichnern und
+# Wertzeile darunter (Befund 87, Fälle k4_kasten3_*, k6_kasten3_schief04, k8_kasten3_*), Teilnehmerliste mit
+# Laufnummern in einer Zeile (Befund 10, Fall reise_buchung_pnr)
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("zeilen, beruf", [
+    (["Telefon\t\tBeruf (genaue Tätigkeit)", "08631 98765\t\tPflegehelferin", "IBAN"], "Pflegehelferin"),
+    (["Beruf\t\tArbeitgeber", "Dachdecker\t\tHolzbau Gruber GmbH"], "Dachdecker"),
+    (["Geburtsdatum\t\tausgeübte Tätigkeit\t\tTelefon", "02.08.1958\t\tAuszubildende Zimmerin\t\t0170 1234567"],
+     "Auszubildende Zimmerin"),
+])
+def test_befund_87_beruf_in_formularzeile_unter_feldbezeichnern(zeilen, beruf):
+    assert beruf in _geschwaerzt(_funde("\n".join(zeilen)), "beruf")
+
+
+@pytest.mark.parametrize("zeilen, wert", [
+    (["Telefon\t\tBeruf (genaue Tätigkeit)", "08631 98765"], "08631 98765"),           # Feld leer
+    (["Telefon\t\tBeruf", "08631 98765\t\tja"], "ja"),                                  # Ankreuzwert
+    (["Telefon\t\tBeruf", "Arbeitgeber\t\tKreditinstitut"], "Kreditinstitut"),          # Feldbezeichner
+    (["Wir prüfen\t\tTätigkeit", "Ihre Angaben\t\tsorgfältig"], "sorgfältig"),          # keine Feldbezeichner
+    (["Telefon\t\tBeruf\t\tOrt", "08631 98765\t\tMühldorf"], "Mühldorf"),              # Zellenzahl passt nicht
+])
+def test_befund_87_formularzeile_gegenproben(zeilen, wert):
+    assert wert not in _geschwaerzt(_funde("\n".join(zeilen)), "beruf")
+
+
+@pytest.mark.parametrize("zeile, namen", [
+    ("Teilnehmer: 1. Kranich, Detlef 2. Kranich, Birgit 3. Kranich, Jona (Kind, 12 J.)", ["Birgit", "Jona"]),
+    ("Reisende: 1. Ostermaier, Helga\t\t2. Ostermaier, Korbinian", ["Helga", "Korbinian"]),
+])
+def test_befund_10_teilnehmerliste_mit_laufnummern_in_einer_zeile(zeile, namen):
+    gefunden = _namen(zeile)
+    for n in namen:
+        assert _deckt(gefunden, n), (n, gefunden)
+
+
+@pytest.mark.parametrize("zeile, wert", [
+    ("Anlagen: 1. Antrag vom 03.02.2026 2. Rechnung, Birgit hat sie unterschrieben", "Rechnung"),
+    ("Unterlagen: 1. Antrag 2. Vollmacht, Birgit unterschreibt", "Vollmacht"),
+    ("Seite 2. Abschnitt, Peter fragt nach", "Abschnitt"),
+])
+def test_befund_10_laufnummer_gegenproben(zeile, wert):
+    assert not _deckt(_namen(zeile), wert)

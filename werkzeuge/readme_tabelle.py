@@ -75,8 +75,8 @@ ERLAEUTERUNG = {
                    "Kartendaten („…, gültig bis 12/27, 739“) – nur dort, nicht dieselben Ziffern an anderer Stelle; "
                    "„Prüfnummer“ allein nur neben einer Kartenangabe (keine TÜV- oder Gutachten-Prüfnummer)",
     "ort": "Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“",
-    "beruf": "hinter „Beruf:“, im Satz („arbeitet als …“) und in der Spalte „Beruf“/„Tätigkeit“ einer "
-             "Personenliste",
+    "beruf": "hinter „Beruf:“, im Satz („arbeitet als …“), in der Spalte „Beruf“/„Tätigkeit“ einer "
+             "Personenliste und im Beruf-Feld eines Kastenformulars (Wert unter dem Feldbezeichner)",
     "arbeitgeber": "hinter „Arbeitgeber:“ oder im Satz; bekannte Versicherer, Banken und Behörden bleiben stehen",
     "diagnose": "nur bekannte Begriffe und ICD-Codes mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten "
                 "(⚕, nicht angehakt)",

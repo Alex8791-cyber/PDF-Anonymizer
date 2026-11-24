@@ -708,6 +708,8 @@ def ist_ort(phrase: str) -> bool:
 _ORTSGATTUNG_RE = re.compile(r"(?:halle|gebiet|schule|platz|piste|loipe|lift|garage|gelände|anlage|zentrum|center|"
                              r"bahnhof|flughafen|klinik|kreuzung|einmündung|stelle|bahn|park|wohnung|station|markt)$",
                              re.IGNORECASE)
+# Wörter, mit denen Gemeindenamen beginnen ("Markt Schwaben", "Markt Indersdorf") – vorn kein Gattungswort
+_ORTSNAMEN_ANFANG = frozenset({"markt"})
 # Verbindungswörter zwischen Gattungswort und Ort ("Turnhalle der Mittelschule Erding", "Parkplatz am Rathaus")
 ORTS_VERBINDER = frozenset({"der", "des", "dem", "den", "die", "am", "an", "im", "in", "bei", "beim", "vor", "hinter",
                             "neben", "auf", "zum", "zur", "von", "vom"})
@@ -716,9 +718,9 @@ ORTS_VERBINDER = frozenset({"der", "des", "dem", "den", "die", "am", "an", "im",
 def ist_ortsgattung(wort: str) -> bool:
     """Gattungswort für einen Ort ("Turnhalle", "Skigebiet", "Tiefgarage", "Parkplatz"), kein Ortsname: der Kopf einer
     Ortsangabe wie "Unfallort: Skigebiet Sudelfeld" – der Ort ist der Eigenname dahinter. Bekannte Orte und Nachnamen
-    sind nie Gattungswörter."""
+    sind nie Gattungswörter, ebenso wenig "Markt" allein: "Markt Schwaben", "Markt Indersdorf" sind Gemeindenamen."""
     w = (wort or "").strip(".,;:")
-    if len(w) < 4 or not w[:1].isupper() or ist_ort(w) or ist_nachname(w):
+    if len(w) < 4 or not w[:1].isupper() or ist_ort(w) or ist_nachname(w) or w.casefold() in _ORTSNAMEN_ANFANG:
         return False
     return bool(_ORTSGATTUNG_RE.search(w)) or ist_allerweltswort(w)
 

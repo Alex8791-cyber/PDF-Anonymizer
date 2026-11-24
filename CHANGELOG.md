@@ -298,6 +298,16 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   („Tschernyschow ⇥ PHV“ bleibt ein Name), und Familiennamen wie „Petraitis“, „Klose“ oder die Initiale in „M.
   Weber“ gelten nie als Diagnose. Die Restrisiko-Prüfung kennt dieselben Regeln und meldet weniger Fehlverdacht
   (TAN-Komposita, „Die Scheibe …“, Miteigentumsanteile, Modellnummern, „Ihnen“).
+  Nachgezogen: die Anschrift im Feld C.1.3 der Zulassungsbescheinigung (Feldcode allein ist kein Rest), Namen im
+  Flugschein-Format „KRANICH/BIRGIT MRS“, Teilnehmerlisten mit Laufnummern in einer Zeile („1. Kranich, Detlef
+  2. Kranich, Birgit“), unbekannte Familiennamen hinter einer Geschäftsbezeichnung („Physiotherapie Oberprieler“)
+  und der Beruf unter seinem Feldbezeichner, wenn die OCR das Kastenformular als Zeile aus Feldbezeichnern liest
+  („Telefon ⇥ Beruf“ ⏎ „08631 98765 ⇥ Pflegehelferin“). Personennamen in einer Versicherer-, Bank- oder
+  Krankenkassen-Spalte („Adam Riese“ unter „Versicherer“) gelten als Organisation – in Erkennung und
+  Restrisiko-Prüfung. Behoben wurden dabei Rückschritte derselben Runde: ein Name vor einem Datum, Jahr, einer
+  Telefonnummer oder Zahl galt als Modellbezeichnung, „Max Mustermann, 02.09.1961: …“ und Geburtsdaten hinter
+  „Dr.“ galten als Behandlungsdatum, Doppelnamen wie „Schmidt-Wald“ wurden nicht mehr gemeldet, und „Markt
+  Schwaben“ verlor seinen Ortsnamen.
 
 ### Sicherheit
 - Manche PDFs (z. B. aus LibreOffice) enthielten nach dem Schwärzen das ungeschwärzte Originalbild unsichtbar
