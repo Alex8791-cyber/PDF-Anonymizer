@@ -447,7 +447,9 @@ def _beruf_in_formularzeile(text: str) -> list:
     """Kastenformular mit mehreren Feldern je Zeile, wie die OCR es vom Scan liest: eine Zeile nur aus
     Feldbezeichnern ("Telefon ⇥⇥ Beruf (genaue Tätigkeit)"), darunter die Werte in gleich vielen Zellen
     ("08631 98765 ⇥⇥ Pflegehelferin"). Die Zelle unter dem Beruf-Etikett ist der Beruf (Befund 87). Ist eine
-    Kopfzelle kein Feldbezeichner oder passt die Zellenzahl nicht (leeres Feld), gilt nichts."""
+    Kopfzelle kein Feldbezeichner oder passt die Zellenzahl nicht (leeres Feld), gilt nichts. Unter dem
+    mehrdeutigen „Tätigkeit“ (auch eine Arbeit: „Datum ⇥⇥ Tätigkeit“ ⏎ „12.03.2026 ⇥⇥ Beratung“) muss der Wert
+    einen Beruf der Wissensbasis enthalten."""
     aus = []
     zeilen = text.split("\n")
     anfang = 0
@@ -467,6 +469,9 @@ def _beruf_in_formularzeile(text: str) -> list:
         a, b, wert = werte[nr[0]]
         if _kein_beruf(wert):
             continue
+        etikett = re.sub(r"\([^)]*\)", "", kopf[nr[0]][2])
+        if not re.search(r"(?i)beruf", etikett) and not wissen.index("berufe").finde(wert):
+            continue                                   # "Tätigkeit": nur mit Beruf der Wissensbasis
         s0 = a + (len(text[a:b]) - len(text[a:b].lstrip()))
         aus.append((s0, s0 + len(wert)))
     return aus

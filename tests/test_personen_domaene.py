@@ -1001,6 +1001,7 @@ def test_befund_87_beruf_in_formularzeile_unter_feldbezeichnern(zeilen, beruf):
     (["Telefon\t\tBeruf", "Arbeitgeber\t\tKreditinstitut"], "Kreditinstitut"),          # Feldbezeichner
     (["Wir prüfen\t\tTätigkeit", "Ihre Angaben\t\tsorgfältig"], "sorgfältig"),          # keine Feldbezeichner
     (["Telefon\t\tBeruf\t\tOrt", "08631 98765\t\tMühldorf"], "Mühldorf"),              # Zellenzahl passt nicht
+    (["Datum\t\tTätigkeit", "12.03.2026\t\tBeratung"], "Beratung"),                    # Arbeit, kein Beruf
 ])
 def test_befund_87_formularzeile_gegenproben(zeilen, wert):
     assert wert not in _geschwaerzt(_funde("\n".join(zeilen)), "beruf")
