@@ -1295,6 +1295,27 @@ def test_github_action():
     assert set(daten["jobs"]["pytest"]["strategy"]["matrix"]["os"]) == {"ubuntu-latest", "windows-latest"}
 
 
+def test_github_action_installiert_testpakete_ausserhalb_der_exe():
+    """CI-Lauf auf 2090752: tests/test_tabellen_scans.py erzeugt schräg gescannte Seiten mit Pillow, die GitHub-Action
+    installierte es nicht – sieben Tests schlugen mit „No module named 'PIL'“ fehl (lokal war Pillow zufällig
+    vorhanden). Pillow und pyyaml brauchen nur die Tests und die Domänen-Probe: Sie gehören in die
+    Installationsschritte der Jobs „pytest“ und „domaenenprobe“ und in die Anleitung der README, aber nicht in
+    requirements-dev.txt, denn EXE-bauen.bat installiert diese Datei und PyInstaller packte Pillow sonst in die EXE."""
+    yaml = pytest.importorskip("yaml")
+    daten = yaml.safe_load(_lies(".github/workflows/tests.yml"))
+
+    def pakete(job):
+        return " ".join(s.get("run", "") for s in daten["jobs"][job]["steps"] if "pip install" in s.get("run", "")).split()
+
+    assert {"pyyaml", "pillow"} <= set(pakete("pytest")), pakete("pytest")
+    assert "pillow" in pakete("domaenenprobe"), pakete("domaenenprobe")
+    assert "pillow" not in [w.lower() for w in pakete("exe")], pakete("exe")
+    dev = _lies("requirements-dev.txt").lower()
+    assert "pillow" not in dev and "pyyaml" not in dev
+    assert "requirements-dev.txt pyyaml pillow" in _abschnitt(_lies("README.md"), "## Mitentwickeln und Tests")
+    assert "**Pillow**" in _lies("werkzeuge/domaenenprobe/README.md")
+
+
 def test_github_action_rechte_zeitlimits_screenshots_und_exe_job():
     """AD-05: nur Leserechte, Zeitlimits, Auflösung und Layout-Screenshots, EXE-Bau auf windows-latest."""
     text = _lies(".github/workflows/tests.yml")

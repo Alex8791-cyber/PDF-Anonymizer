@@ -553,6 +553,10 @@ Auslieferung und Dokumentation nach dem Review „Auslieferung/Doku“ (AD-01 �
 - Neuer Job **`domaenenprobe`** (ubuntu-latest), nur von Hand („Run workflow“ mit Haken „domaenenprobe“): misst die
   volle Domänen-Probe mit der Tesseract-Kommandozeile und lädt `bericht.md` und `ergebnis.json` als Artefakt
   `domaenenprobe-bericht` hoch. Die Jobs `pytest` und `exe` laufen unverändert.
+- Der Job `pytest` installiert zusätzlich Pillow – wie pyyaml nur für Tests: `tests/test_tabellen_scans.py`
+  erzeugt damit die schräg gescannten Seiten; ohne es schlugen sieben Tests mit „No module named 'PIL'“ fehl.
+  Der Job `domaenenprobe` installiert es ebenfalls (Scan-Varianten der Falldateien). In `requirements-dev.txt`
+  steht es bewusst nicht: `EXE-bauen.bat` installiert diese Datei, und PyInstaller packte Pillow sonst in die EXE.
 
 ### Dokumentation
 - README: „Was NICHT erkannt wird“ behauptete fälschlich, Versicherten-, Fahrzeug-Ident- und

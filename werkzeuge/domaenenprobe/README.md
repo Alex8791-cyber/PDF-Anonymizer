@@ -62,6 +62,9 @@ Voraussetzungen:
   `fonts-dejavu-core`). Fehlen sie (Windows ohne DejaVu), nimmt die Probe Arial bzw. Consolas, schreibt einen Hinweis
   ins Protokoll und vermerkt die Ersatzschrift im Bericht; die Ergebnisse sind dann nur eingeschränkt mit der
   Referenz vergleichbar. `DOMAENENPROBE_SCHRIFT` und `DOMAENENPROBE_SCHRIFT_MONO` geben andere Schriftdateien vor.
+- **Pillow** (`python -m pip install --only-binary=:all: pillow`) für die Scan-Varianten der Fälle (Drehung,
+  JPEG). Das Programm selbst braucht es nicht; deshalb steht es weder in `requirements.txt` noch in
+  `requirements-dev.txt`.
 - Unter Linux laufen die Messprozesse mit `nice -n 15`, unter Windows mit niedriger Priorität; Unterprozesse
   starten ohne Shell, Protokolle und Ergebnisse sind UTF-8.
 

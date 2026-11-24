@@ -707,9 +707,13 @@ Tesseract** – nur den entpackten Ordner. Auch die Visual-C++-Laufzeit liegt da
 ## Mitentwickeln und Tests
 
 ```bash
-python -m pip install --only-binary=:all: -r requirements.txt -r requirements-dev.txt
+python -m pip install --only-binary=:all: -r requirements.txt -r requirements-dev.txt pyyaml pillow
 python -m pytest -q --timeout=300 tests/
 ```
+
+`pyyaml` und `Pillow` brauchen nur die Tests (Prüfung der GitHub-Action, Scans mit Schräglage) und die
+Domänen-Probe. Sie stehen bewusst nicht in `requirements-dev.txt`, weil der EXE-Bau diese Datei installiert und
+PyInstaller Pillow sonst mit in die EXE packen würde.
 
 Unter Linux brauchen die Oberflächentests ein Display (z. B. `xvfb-run -a python -m pytest …`);
 die Layout-Tests starten für die geprüften Bildschirmgrößen bei Bedarf eigene Xvfb-Displays

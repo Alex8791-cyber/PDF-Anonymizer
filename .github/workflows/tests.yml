@@ -52,10 +52,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends xvfb tk scrot
 
+      # pyyaml (Prüfung dieser Datei) und Pillow (Scans mit Schräglage in tests/test_tabellen_scans.py) brauchen nur
+      # die Tests. Sie stehen nicht in requirements-dev.txt: EXE-bauen.bat installiert diese Datei, und PyInstaller
+      # packte Pillow sonst in die EXE (pymupdf importiert es optional).
       - name: Pakete installieren (nur fertige Wheels, kein Quellbau)
         timeout-minutes: 15
         run: |
-          python -m pip install --only-binary=:all: -r requirements.txt -r requirements-dev.txt pyyaml
+          python -m pip install --only-binary=:all: -r requirements.txt -r requirements-dev.txt pyyaml pillow
 
       - name: Installation pruefen
         timeout-minutes: 5
@@ -250,10 +253,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends tesseract-ocr fonts-dejavu-core
 
+      # Pillow für die Scan-Varianten der Falldateien (Drehung, JPEG); das Programm selbst braucht es nicht.
       - name: Pakete installieren (nur fertige Wheels, kein Quellbau)
         timeout-minutes: 15
         run: |
-          python -m pip install --only-binary=:all: -r requirements.txt
+          python -m pip install --only-binary=:all: -r requirements.txt pillow
 
       - name: Domänen-Probe messen und mit der Referenz vergleichen
         timeout-minutes: 75
