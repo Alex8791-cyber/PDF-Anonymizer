@@ -357,8 +357,8 @@ def _tel_gueltig(treffer: str) -> bool:
 def _telefon_spannen(text: str) -> list:
     aus = []
     for m in _TEL_RE.finditer(text):
-        if _tel_gueltig(m.group(0)):
-            aus.append(Stelle(m.start(), m.end()))
+        if _tel_gueltig(m.group(0)) and not kennungsformen.katalognummer(text, m.start(), m.end()):
+            aus.append(Stelle(m.start(), m.end()))       # PZN ("PZN 04884569"): eine Katalognummer
     # hinter einem Etikett ("Tel.", "Mobil", "erreichen Sie mich unter"): auch über einen Umbruch
     belegt = [(s.start, s.ende) for s in aus]
     for k in _TEL_KONTEXT_RE.finditer(text):
@@ -1132,8 +1132,15 @@ def _vertrag_spannen(text: str) -> list:
                 wert = _nummer_am_folgezeilenanfang(text, zeilenende)
         if wert:
             anfang = text.find(wert, m.end())
-            if anfang >= 0:
+            # "Registrierungsnummer: 8 34d Abs. 1 GewO": die Nummer einer Vorschrift (Paragrafenzeichen verlesen)
+            if anfang >= 0 and not kennungsformen.vorschrift(text, anfang, anfang + len(wert)):
                 treffer.append((anfang, anfang + len(wert)))
+    # Kennungen mit eigener Form ohne Etikett: MAC-Adresse, EID einer eSIM, Nummer im Marktstammdatenregister,
+    # Aktenzeichen eines Gerichts ("Das Verfahren 3 C 456/24 vor dem AG Ebersberg …") – dieselbe Form wie in der
+    # Selbstkontrolle (kennungsformen)
+    treffer.extend((a, e) for a, e, _ in kennungsformen.kennungen_ohne_etikett(text))
+    # Handelsregisternummer (HRA) eines Einzelkaufmanns bzw. Betriebs mit Inhaber: Angabe einer Person
+    treffer.extend(kennungsformen.einzelkaufmann_register(text))
     # Kennung ohne "Nr." hinter einem Vertragswort
     for m in _KENNUNG_WORT_RE.finditer(text):
         w = _KENNUNG_WERT_RE.match(text, m.end())
@@ -1252,8 +1259,10 @@ def _steuerid_spannen(text: str) -> list:
         gueltig = _steuer_id_gueltig(wert)
         aus.append(Stelle(s, s + len(wert), 1.0 if gueltig else 0.8, True,
                           None if gueltig else HINWEIS_PRUEFZIFFER))
-    # 2) Ohne Beschriftung: freistehende 11-stellige Nummer mit gültiger Prüfziffer + Struktur
-    for m in re.finditer(r"(?<!\d)(\d{11})(?!\d)", text):
+    # 2) Ohne Beschriftung: freistehende 11-stellige Nummer mit gültiger Prüfziffer + Struktur – auch so gruppiert, wie
+    #    sie auf Bescheiden steht ("30 268 175 922": 2-3-3-3); so werden auch mehrere Nummern hinter EINEM Etikett
+    #    gefunden ("Identifikationsnummern: 47 036 892 451 (Ehemann), 65 129 830 677 (Ehefrau)")
+    for m in re.finditer(r"(?<![\d.,])(\d{11}|\d{2} \d{3} \d{3} \d{3})(?![\d]|[.,]\d)", text):
         if _steuer_id_gueltig(m.group(1)) and _steuer_id_struktur(m.group(1)):
             aus.append(Stelle(m.start(1), m.end(1), 1.0))
     aus.sort()
@@ -1291,7 +1300,7 @@ _STEUERNR_ETIKETT_RE = re.compile(
     r"(?:[ \t]+lautet)?[ \t]*:?[ \t]*"
     r"(\d{10,13}|\d{2,5}(?:[ \t]{0,2}/[ \t]{0,2}\d{1,5}){1,3}|\d{2,5}(?:[ \t]\d{3,5}){1,2})(?![\d/])")
 _UST_ID_RE = re.compile(r"(?i:USt[-\s]?Id(?:Nr)?\.?|Umsatzsteuer-?(?:Identifikationsnummer|ID|IdNr\.?))"
-                        r"[ \t]*:?[ \t]*(DE[ \t]?\d{9})(?!\d)")
+                        r"[ \t]*:?[ \t]*(DE[ \t]?\d{9}|DE[ \t]?\d{3}[ \t]\d{3}[ \t]\d{3})(?!\d)")
 # Firmenzusammenhang einer USt-IdNr. (Fußzeile des Versicherers, Gutachten EQ-16): dann keine Person
 _FIRMEN_KONTEXT_RE = re.compile(
     r"(?<![\wäöüß])(?:GmbH|AG|SE|KG|KGaA|OHG|mbH|e\.\s?V\.|eG|VVaG|a\.\s?G\.|gAG|Versicherung\w*|"
@@ -1314,8 +1323,8 @@ def _steuernr_spannen(text: str) -> list:
                 break
         ende = text.find("\n", m.end())
         umgebung = text[anfang:ende if ende >= 0 else len(text)]
-        if _FIRMEN_KONTEXT_RE.search(umgebung):
-            continue
+        if _FIRMEN_KONTEXT_RE.search(umgebung) and not kennungsformen.einzelkaufmann_block(text, m.start(1)):
+            continue                                    # (ein Einzelkaufmann ist eine Person: Domänen-Befund 55)
         aus.append(Stelle(m.start(1), m.end(1)))
     return sorted(set(aus))
 
@@ -1582,6 +1591,8 @@ _KARTE_RE = re.compile(r"(?<![\d])(?:[23456]\d{3}(?:[ \-]?\d{4}){2}[ \-]?\d{1,4}
 _KARTE_KONTEXT_RE = re.compile(r"(?i:kreditkart|karten-?(?:nr|nummer)|kartennummer|visa|master\s?card|"
                                r"american\s+express|amex|maestro|diners|jcb|card)")
 _IBAN_KOPF_DAVOR_RE = re.compile(r"[A-Za-z]{2}\d{2}[ \t]?$")
+# Etikett einer Gerätekennung in derselben Zeile davor ("IMEI:", "IMEI 1:", "IMEI (SIM 1):", "ICCID", "SIM-Karte")
+_GERAETENUMMER_DAVOR_RE = re.compile(r"(?i)(?<![\w])(?:imei|iccid|imsi|eid|sim(?:-karte)?)(?![a-z])[^\n]{0,25}$")
 
 
 # Kartenprüfnummer einer Zahlungskarte (CVC/CVV, 3 oder 4 Ziffern, auch als Kammfeld "7 3 9"): hinter einem
@@ -1683,6 +1694,10 @@ def _kreditkarte_spannen(text: str) -> list:
             continue
         if _IBAN_KOPF_DAVOR_RE.search(text[max(0, m.start() - 6):m.start()]):
             continue                                       # Ziffergruppen einer IBAN
+        davor = text[max(0, m.start() - 40):m.start()]
+        if _GERAETENUMMER_DAVOR_RE.search(davor) and not _KARTE_KONTEXT_RE.search(davor):
+            continue                                       # IMEI/ICCID (Luhn wie eine Karte): eine Gerätekennung,
+                                                           # die das Kennungs-Etikett liest (Domänen-Befund 98)
         if _luhn_gueltig(k):
             aus.append(Stelle(m.start(), m.end()))
         elif _KARTE_KONTEXT_RE.search(text[max(0, m.start() - 60):m.start()]):

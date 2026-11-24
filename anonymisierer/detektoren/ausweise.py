@@ -248,6 +248,18 @@ def _nummer_lesen(nf: str, ab: int) -> str | None:
     return None
 
 
+def _nummer_roh(nf: str, ab: int) -> str | None:
+    """Dokumentnummer (9 Zeichen ab `ab`) so, wie die OCR sie las – auch wenn die Prüfziffer nicht stimmt ("CAKR7NT2X1"
+    für "C4KR7NT2X1": die OCR verliest 4 als A in MRZ und Sichtzone gleich). Nur mit Buchstabe oder Ziffer an jeder
+    Stelle des Kerns, mindestens sechs Zeichen und einer Ziffer."""
+    if ab < 0 or len(nf) < ab + 10:
+        return None
+    kern = nf[ab:ab + 9].rstrip("<")
+    if len(kern) < 6 or "<" in kern or not any(c.isdigit() for c in kern) or not kern.isalnum():
+        return None
+    return kern
+
+
 def mrz_zonen(zeilen: list, angaben: list | None = None) -> list:
     """zeilen: [(start, text)] in Lesereihenfolge. Liefert [(start, ende, kategorie, sicherheit, gruppe)] als
     Stellen im Bezugstext (start + Index in der Zeile). `angaben` (Liste) bekommt je Zone ein Dict mit den
@@ -342,12 +354,15 @@ def mrz_zonen(zeilen: list, angaben: list | None = None) -> list:
             if angabe["nummer"] is None:
                 if kopf_hier:
                     angabe["nummer"] = _nummer_lesen(nf, kopf_hier)          # TD1 Zeile 1
+                    angabe["nummer_roh"] = angabe.get("nummer_roh") or _nummer_roh(nf, kopf_hier)
                 elif format_ != "td1":
                     # TD2/TD3 Zeile 2: Nummer vor Prüfziffer und Staatsangehörigkeit, 13 Stellen vor dem Geburtsdatum
                     # (verliert die OCR Zeichen am Zeilenanfang, verschiebt sich nur der Anfang)
                     p = _datumspaar(nf, felder)
                     angabe["nummer"] = _nummer_lesen(nf, p - 13) if p is not None and p >= 13 else None
                     angabe["nummer"] = angabe["nummer"] or _nummer_lesen(nf, 0)
+                    if p is not None and p >= 13:
+                        angabe["nummer_roh"] = angabe.get("nummer_roh") or _nummer_roh(nf, p - 13)
             stuecke = [(s, e) for s, e in _stuecke(nf, kopf_hier) if any(c.isalnum() for c in nf[s:e])]
             if not stuecke:
                 continue
@@ -570,8 +585,12 @@ def mrz(dok, kontext):
         geburt_ok = bool(angabe["geburt"]) and (kopf or bool(angabe["nummer"]))
         if not (nummer_ok or geburt_ok or kopf):
             continue
-        angabe = dict(angabe, nummer=angabe["nummer"] if nummer_ok else None,
-                      geburt=angabe["geburt"] if geburt_ok else None)
+        nummer = angabe["nummer"] if nummer_ok else None
+        if nummer is None and kopf and geburt_ok and angabe.get("nummer_roh"):
+            # Prüfziffer der Nummer verlesen, die Zone aber bestätigt (Kopf und Geburtsdatum mit Prüfziffer): die
+            # gelesene Nummer sucht die gedruckte – die OCR verliest beide gleich ("CAKR7NT2X", Domänen-Befund 89)
+            nummer = angabe["nummer_roh"]
+        angabe = dict(angabe, nummer=nummer, geburt=angabe["geburt"] if geburt_ok else None)
         gruppe = " ".join(t.capitalize() for t in angabe["vornamen"] + angabe["nachname"]) or None
         for s, e, kat in sichtzone_stellen(dok.text, angabe):
             treffer.append(Treffer(s, e, kat, QUELLE_MRZ + ".sichtzone", 0.9, gruppe if kat == "namen" else None))

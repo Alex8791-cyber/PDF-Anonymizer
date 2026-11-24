@@ -733,6 +733,10 @@ def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
         return False
     if _KENNUNGS_ETIKETT_NAME_RE.search(name) or kennungsformen.GEBURTSNAME_ETIKETT_RE.fullmatch(name.strip()):
         return False                          # "Prüfnr.", "Kartenprüfnr.", "Geburtsnamc" (OCR): ein Etikett, kein Name
+    woerter = name.split()
+    if woerter and kennungsformen.nummern_wort(woerter[0].rstrip(".:")) and not any(
+            _wissen_wort("ist_vorname", w) or _wissen_wort("ist_nachname", w) for w in woerter[1:]):
+        return False                          # "Tätowiernummer Zuchtbuch:": ein Kennungs-Etikett mit Ergänzung
     norm = re.sub(r"\s+", " ", name.lower()).strip()
     if regel and _kalendername(text, start, norm):
         return True                           # "Frau Mai", "Nachname: Freitag"

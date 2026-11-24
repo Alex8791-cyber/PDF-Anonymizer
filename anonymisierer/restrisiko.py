@@ -350,6 +350,10 @@ _STRASSE_PRAEP_RE = re.compile(
     r"(?:[A-ZÄÖÜ][\wäöüßÄÖÜ\-]+[ ]){0,2}[A-ZÄÖÜ][\wäöüßÄÖÜ\-]+)[ \t]{1,2}"
     r"(\d{1,4}(?:[ ]?[a-zA-Z](?![\w]))?)"
     r"(?![\w,.]\d|[\d])", re.IGNORECASE)
+# Verweis statt Straße: ein klein geschriebenes Verweiswort vor einem bloßen Straßenwort ("laut Feld 5", "gem. Feld 7",
+# "siehe Platz 2") – eine Straße schreibt ihren Artikel groß ("Am Feld 5", "Im Grund 3")
+_VERWEIS_STRASSE_RE = re.compile(r"(?:^|[ \t])(?:laut|lt\.|gem\.|gemäß|siehe|vgl\.|aus|in|im|nach|unter)[ \t]+"
+                                 + r"(?i:" + _STRASSEN_ENDUNG + r")$")
 # Wörter, mit denen ein Straßenname beginnen kann, die aber auch gewöhnliche Wörter sind ("Straße des 17. Juni")
 _STRASSEN_ANFANG = frozenset({"straße", "strasse", "str", "platz", "weg", "allee", "gasse", "ring", "damm", "ufer",
                               "chaussee", "am", "an", "auf", "im", "in", "zum", "zur", "unter", "hinter", "vor",
@@ -444,6 +448,9 @@ _AUSWEIS_ETIKETT_RE = re.compile(
 # 4c: getrennt gebaut hatten beide dieselben Lücken); hier kommen die Kartenangabe des Platzhalters [KREDITKARTE] und
 # die eVB mit Einfügungen der Texterkennung dazu ("K7/H3MY9P", auf jeder Zeile: die Ausgabe kann OCR-Text tragen)
 _FORM_GRUND = {"evb": "eVB-Nummer", "ticket": "Transferticket", "cvc": "Kartenprüfnummer"}
+_OHNE_ETIKETT_GRUND = {"mac": "MAC-Adresse (Gerätekennung)", "eid": "EID einer eSIM (Gerätekennung)",
+                       "mastr": "Nummer im Marktstammdatenregister (Anlage bzw. Betreiber)",
+                       "aktenzeichen": "Aktenzeichen eines Gerichts oder einer Staatsanwaltschaft"}
 _KREDITKARTE_PLATZHALTER_RE = re.compile(r"\[KREDITKARTE\]")
 # Geburtsname direkt hinter "geb." / "geb:" / "geborene" ("[PERSON A] geb. Quarnstedt", "GEB. QUARNSTEDT") – nicht
 # "Gebr." (Gebrüder), nicht "Geb." am Satz-/Zeilenanfang (Gebäude, Gebühr), nicht über eine Spaltenlücke
@@ -1867,8 +1874,11 @@ class _Seitenpruefung:
         davor = zeile[max(0, s - 40):s]
         if _ORG_NUMMER_RE.search(davor) or _GLAEUBIGER_ID_RE.match(stueck):
             return                                   # Handelsregister, USt-IdNr., BLZ, Gläubiger-ID, Formular
-        if _EINHEIT_RE.match(zeile[e:e + 14]) or _WAEHRUNG_VOR_RE.search(davor):
-            return
+        if kennungsformen.katalognummer(self.text, g_s, g_e):
+            return                                   # Pharmazentralnummer (PZN): Katalognummer eines Arzneimittels
+        if _EINHEIT_RE.match(zeile[e:e + 14]) or _WAEHRUNG_VOR_RE.search(davor.rsplit("\t", 1)[-1]):
+            return                                   # Währung davor nur in derselben Zelle ("449,00 EUR ⇥⇥ 62231874":
+                                                     # die Seriennummer steht in der Zelle hinter dem Preis)
         if re.fullmatch(r"\d{1,3}/\d{1,3}", stueck):
             return                                   # Verhältnis/Tarifstufe "300/150"
         if _ICD_RE.fullmatch(stueck) and self._diagnoseschluessel(z, zeile, s, e, g_s, g_e):
@@ -2021,6 +2031,17 @@ class _Seitenpruefung:
                 else:
                     grund = "kennungsartige Zeichenfolge (Ausweis-/Dokumentnummer?)"
                 self.neu(o + m.start(1), o + m.end(1), grund, "form")
+        # Kennungen mit eigener Form ohne Etikett (MAC-Adresse, EID einer eSIM, MaStR-Nummer, Aktenzeichen eines
+        # Gerichts mit Gerichtswort in der Zeile): dieselben Formen wie in der Erkennung
+        # (kennungsformen.kennungen_ohne_etikett)
+        for s, e, art in kennungsformen.kennungen_ohne_etikett(zeile):
+            if not self.ist_platzhalter_bei(o + s, o + e) and not self.org_wert(o + s, o + e):
+                self.neu(o + s, o + e, _OHNE_ETIKETT_GRUND[art], "form")
+        # Handelsregisternummer (HRA) und USt-IdNr. im Angabenblock eines Einzelkaufmanns: Angaben einer Person (die
+        # Ausnahmen der Organisation gelten dort nicht, kennungsformen.einzelkaufmann_block)
+        for g_s, g_e in self._einzelkaufmann():
+            if z.start <= g_s < z.ende and not self.ist_platzhalter_bei(g_s, g_e):
+                self.neu(g_s, g_e, "Register- bzw. USt-Nummer eines Einzelkaufmanns (Person)", "form")
         # Kennungen mit eigener Wertform hinter ihrem Etikett (eVB-Nummer, Transferticket, Kartenprüfnummer)
         self._formen_hinter_etikett(z, zeile, maske)
         # Kennungs-Etikett + Wert mit Ziffern (auch kurze: "Az. 123 C 45/24")
@@ -2047,6 +2068,9 @@ class _Seitenpruefung:
                     or re.fullmatch(r"[\d\s.,]+[€%]?", w) or any(maske[s:s + len(w)]) or _GLAEUBIGER_ID_RE.match(w)
                     or self.ist_platzhalter_bei(o + s, o + s + len(w))):
                 continue
+            if kennungsformen.vorschrift(zeile, s, s + len(w)):
+                continue                                # "Registrierungsnummer: ███ S 34d GewO" (Scan der Ausgabe):
+                                                        # die Nummer einer Vorschrift – wie die Erkennung
             if kennungsformen.etikett_art(v.text) is not None and not (
                     kennungsformen.nummer_etikett(v.text) and kennungsformen.kennungsform(
                         w, zeitraum_erlaubt=kennungsformen.allgemeines_nummer_etikett(v.text))):
@@ -2107,18 +2131,55 @@ class _Seitenpruefung:
                     grund = (f"Wert hinter Etikett »{etikett}«" if f.art == "allgemein"
                              else f"{_FORM_GRUND[f.art]} hinter Etikett »{etikett}«")
                     # hinter "Nr." ist "2024/25" eine laufende Nummer, kein Zeitraum: die Maske gilt dort nicht
-                    funde.setdefault(zf.id, []).append((f.start, f.ende, grund, f.art == "allgemein"))
-            for s0, e0, grund in self._spalten_kennungen():
+                    funde.setdefault(zf.id, []).append((f.start, f.ende, grund, f.art == "allgemein", False))
+            # jedes andere Kennungs-Etikett: dieselbe Regel „Etikett + Wert“ wie die Erkennung
+            # (kennungsformen.allgemeine_kennungen) – auch hinter Zwischenwörtern ("Personalnummer beim Arbeitgeber:
+            # 4711"), mit Laufnummer ("IMEI 1: …") und in Tausenderpunkt-Form ("Kundennummer: 4.711.208": die
+            # Betragsmaske gilt dort nicht, die Regel prüft Währung und Einheit selbst)
+            for k, w in self._allgemeine_kennungen():
+                if any(k.ende <= ps < w.start for ps, _ in self.platzhalter):
+                    continue                            # der Wert des Etiketts ist schon ersetzt ("Kundennummer:
+                                                        # [VERTRAGS-NR] …"): dahinter beginnt etwas anderes
+                zf = self.zeile(w.start)
+                if zf is not None:
+                    funde.setdefault(zf.id, []).append(
+                        (w.start, w.ende, f"Wert hinter Etikett »{' '.join(k.etikett.split())}«", True, True))
+            for s0, e0, grund, ohne_maske in self._spalten_kennungen():
                 zf = self.zeile(s0)
                 if zf is not None:
-                    funde.setdefault(zf.id, []).append((s0, e0, grund, False))
+                    funde.setdefault(zf.id, []).append((s0, e0, grund, ohne_maske, ohne_maske))
             self._org["kennungsfunde"] = funde
-        for g_s, g_e, grund, ohne_maske in funde.get(z.id, ()):
+        for g_s, g_e, grund, ohne_maske, org_pruefen in funde.get(z.id, ()):
             ls, le = g_s - z.start, min(g_e, z.ende) - z.start
             if (not ohne_maske and any(maske[max(0, ls):max(0, le)])) or self.ist_gesperrt(g_s, g_e) \
-                    or self.ist_platzhalter_bei(g_s, g_e):
-                continue
+                    or self.ist_platzhalter_bei(g_s, g_e) or (org_pruefen and self.org_wert(g_s, g_e)):
+                continue                                # org_wert: Angabe der Organisation (Fußbereich, Briefkopf)
             self.neu(g_s, g_e, grund, "etikett")
+
+    def _allgemeine_kennungen(self) -> list:
+        """[(Kennungsetikett, Kennungswert)] der Seite nach der gemeinsamen Regel „Etikett + Wert“
+        (kennungsformen.allgemeine_kennungen), einmal je Seite."""
+        if "allgemeine_kennungen" not in self._org:
+            self._org["allgemeine_kennungen"] = kennungsformen.allgemeine_kennungen(self.text,
+                                                                                   ist_etikett=self.w.ist_etikett)
+        return self._org["allgemeine_kennungen"]
+
+    def _einzelkaufmann(self) -> list:
+        """(start, ende) der HRA-Nummern und USt-IdNr. im Angabenblock eines Einzelkaufmanns, einmal je Seite."""
+        if "einzelkaufmann" not in self._org:
+            stellen = kennungsformen.einzelkaufmann_register(self.text)
+            if stellen or kennungsformen.einzelkaufmann_erwaehnt(self.text):      # auch "e. K." mit Leerzeichen
+                stellen += [(m.start(), m.end()) for m in kennungsformen.UST_ID_WERT_RE.finditer(self.text)
+                            if kennungsformen.einzelkaufmann_block(self.text, m.start())]
+            self._org["einzelkaufmann"] = stellen
+        return self._org["einzelkaufmann"]
+
+    def _kennungs_koepfe(self) -> set:
+        """(start, ende) der allgemeinen Kennungs-Etiketten der Seite (kennungsformen.kennungs_etiketten), einmal je
+        Seite – Kandidaten für Spaltenköpfe ("Vertragsnr.", "Seriennummer")."""
+        if "kennungs_koepfe" not in self._org:
+            self._org["kennungs_koepfe"] = {(k.start, k.ende) for k in kennungsformen.kennungs_etiketten(self.text)}
+        return self._org["kennungs_koepfe"]
 
     def _zeilen_nach_lage(self) -> list:
         """Zeilen mit Lage auf der Seite, von oben nach unten (zwischengespeichert)."""
@@ -2128,14 +2189,19 @@ class _Seitenpruefung:
         return self._org["zeilen_lage"]
 
     def _spalten_kennungen(self) -> list:
-        """(start, ende, Grund) der Werte in Tabellenspalten mit dem Etikett einer eVB-Nummer, eines Transfertickets
-        oder einer Kartenprüfnummer im Kopf ("eVB-Nummer" über "KXH4PMQ"), auch mit einem Kopf über zwei Zeilen
-        ("Versicherungs-" ⏎ "bestätigung"); "Prüfnr." nur in einer Kopfzeile mit Kartenangabe ("Kartennummer"). Unter
-        dem Kopf zählt ein Wert nur mit Ziffer (eVB, Transferticket) bzw. als ganze Zelle ohne Einheit
-        (Kartenprüfnummer). Gelesen wird von jedem Kopf abwärts bis zu einer Absatzlücke – je Kopf höchstens
-        SPALTE_ZEILEN Zeilen (die Prüfung wächst linear mit der Seite)."""
+        """(start, ende, Grund, ohne Maske) der Werte in Tabellenspalten mit dem Etikett einer eVB-Nummer, eines
+        Transfertickets oder einer Kartenprüfnummer im Kopf ("eVB-Nummer" über "KXH4PMQ"), auch mit einem Kopf über
+        zwei Zeilen ("Versicherungs-" ⏎ "bestätigung"); "Prüfnr." nur in einer Kopfzeile mit Kartenangabe
+        ("Kartennummer"). Unter dem Kopf zählt ein Wert nur mit Ziffer (eVB, Transferticket) bzw. als ganze Zelle ohne
+        Einheit (Kartenprüfnummer). Unter jedem anderen Kennungs-Etikett als Kopf ("Vertragsnr.", "Seriennummer") eine
+        ganze Zelle mit der Form einer Kennung wie hinter dem Etikett (kennungsformen.kennungswert – auch
+        Tausenderpunkt-Gruppen "12.345.678", kurze Seriennummern "4521"; nie ein Betrag), wie die Erkennung
+        (struktur.tabelle). Gelesen wird von jedem Kopf abwärts bis zu einer Absatzlücke bzw. zum nächsten Etikett –
+        je Kopf höchstens SPALTE_ZEILEN Zeilen (die Prüfung wächst linear mit der Seite)."""
         text = self.text
-        if not kennungsformen.ETIKETT_RE.search(text) and "-\t" not in text and not re.search(r"-[ \t]*\n", text):
+        koepfe = self._kennungs_koepfe()
+        if not koepfe and not kennungsformen.ETIKETT_RE.search(text) and "-\t" not in text \
+                and not re.search(r"-[ \t]*\n", text):
             return []
         zeilen = self._zeilen_nach_lage()
         aus = []
@@ -2162,6 +2228,8 @@ class _Seitenpruefung:
                         if art is not None:
                             kopf, erste = v, i + 2
                             break
+                if art is None and (cs, ce) in koepfe:
+                    art = "allgemein"                   # "Vertragsnr.", "Seriennummer": jedes Kennungs-Etikett
                 if art is None:
                     continue
                 if art == "pruef" and not kennungsformen.KARTENANGABE_RE.search(zt) and not any(
@@ -2182,6 +2250,13 @@ class _Seitenpruefung:
                     if kennungsformen.etikett_art(zelle.strip()) is not None:
                         break                           # nächster Kopf
                     vorn = len(zelle) - len(zelle.lstrip())
+                    if form == "allgemein":
+                        if self.w.ist_etikett(zelle.strip()) or self.w.ist_etikett(zelle.strip().rstrip(".:")):
+                            break                       # nächster Kopf bzw. Feld
+                        sp = kennungsformen.kennungswert(text, zs + vorn, ze, kopf, nr=True)
+                        if sp is not None and not text[sp[1]:ze].strip(" .,;)"):
+                            aus.append((sp[0], sp[1], f"Wert in der Spalte »{' '.join(kopf.split())}«", True))
+                        continue
                     w = kennungsformen.WERT_RE[form].match(text, zs + vorn, ze)
                     if w is None or text[w.end():ze].strip(" .,;)"):
                         continue                        # nur die ganze Zelle ("2024 wurde …" ist Fließtext)
@@ -2193,7 +2268,8 @@ class _Seitenpruefung:
                         continue
                     if form == "cvc" and kennungsformen.EINHEIT_DANACH_RE.match(text, w.end(), ze):
                         continue
-                    aus.append((w.start(), w.end(), f"{_FORM_GRUND[form]} in der Spalte »{' '.join(kopf.split())}«"))
+                    aus.append((w.start(), w.end(), f"{_FORM_GRUND[form]} in der Spalte »{' '.join(kopf.split())}«",
+                                False))
         return aus
 
     # Datumsangaben
@@ -2325,6 +2401,8 @@ class _Seitenpruefung:
                     continue                                 # "Zeile 5", "Weg 3", "Grund 2" – kein Straßenname
                 if re.match(r"(?i)(?:seite|tel|fax|nr|abs|ziff|anlage|tarif|stand|version|kapitel|punkt)\b", wort):
                     continue
+                if _VERWEIS_STRASSE_RE.search(wort):
+                    continue                                 # "Führerscheinnummer laut Feld 5": Verweis auf ein Feld
                 self.neu(s, o + m.end(), "Anschrift (Straße + Hausnummer)", "anschrift")
         for m in _POSTFACH_RE.finditer(zeile):
             if not self.org_kontext(o + m.start()):

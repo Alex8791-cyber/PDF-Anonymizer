@@ -14,6 +14,8 @@ Zeichen, die auf der Seite stehen ("HFY:4312", nicht "HFY 4312"). Die Formprüfu
 Etiketten, Mindestlängen) bleiben unverändert streng – die Lesart macht nur den Lesefehler rückgängig.
 
 Reparaturen (nur innerhalb von OCR-Zeilen):
+  * FIN mit O/Q/I (in einer FIN nie erlaubt): in einem Lauf aus 17 Großbuchstaben/Ziffern mit vier Ziffern am Ende
+    werden O/Q zu 0 und I zu 1 ("WFOEXXGCDEKA12345" -> "WF0EXXGCDEKA12345").
   * Buchstaben in Ziffernfolgen: ein Lauf aus Ziffern und verwechselbaren Buchstaben, mindestens zur Hälfte
     Ziffern, wird ganz zu Ziffern ("8O331" -> "80331", "O171" -> "0171", "S081827865" -> "5081827865") – Buchstaben
     zwischen Ziffern oder EIN Buchstabe am Rand; ein Block aus mehreren Buchstaben am Rand nur aus O/I/l
@@ -238,10 +240,31 @@ def _gruppe_rechts(t: str, i: int) -> int:
     return n
 
 
+# FIN mit Buchstaben, die in einer FIN nie stehen (ISO 3779: kein I, O, Q): die OCR liest die Null der
+# Herstellerkennung als O ("WFOEXXGCDEKA12345" für WF0…, "WOLOAHL…" für W0L…) – in einem Lauf aus genau 17
+# Großbuchstaben/Ziffern, der auf vier Ziffern endet, werden O/Q zu 0 und I zu 1 (Domänen-Befund 33)
+_FIN_LAUF_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z0-9]{13}[0-9OIQ]{4}(?![A-Za-z0-9])")
+_FIN_VERWECHSLUNG = {"O": "0", "Q": "0", "I": "1"}
+
+
+def _fin_laeufe(t: str, z: list) -> None:
+    for m in _FIN_LAUF_RE.finditer(t):
+        lauf = m.group(0)
+        if not any(c in _FIN_VERWECHSLUNG for c in lauf):
+            continue
+        neu = "".join(_FIN_VERWECHSLUNG.get(c, c) for c in lauf)
+        if not neu[-4:].isdigit() or sum(c.isdigit() for c in neu) < 5 or sum(c.isalpha() for c in neu) < 2:
+            continue
+        for k, c in enumerate(lauf):
+            if c in _FIN_VERWECHSLUNG:
+                z[m.start() + k] = _FIN_VERWECHSLUNG[c]
+
+
 def reparieren(t: str) -> str:
     """Reparierte Lesart eines OCR-Textstücks (gleich lang). Siehe Modulkopf."""
     z = list(t)
     _ziffern_laeufe(t, z)
+    _fin_laeufe(t, z)
     zw = "".join(z)
     for m in _DOPPELPUNKT_RE.finditer(zw):
         links, rechts = _gruppe_links(zw, m.start()), _gruppe_rechts(zw, m.start())

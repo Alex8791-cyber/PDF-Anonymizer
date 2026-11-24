@@ -111,10 +111,10 @@ steht unter [Was NICHT erkannt wird](#was-nicht-erkannt-wird).
 | Geburtsdaten | geb. am 02.09.1983 | `[GEB-DATUM]` | Ausgewogen | hinter „geb.“, „Geburtsdatum“ … oder hinter einem Namen mit Komma, Stern oder Klammer („Max Mustermann, 02.09.1983“); in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“ |
 | Straße + Hausnummer, Postfach | Hauptstraße 12a | `[ADRESSE]` | Ausgewogen |  |
 | PLZ + Ort | 90402 Nürnberg | `[PLZ ORT]` | Ausgewogen |  |
-| Vertrags-/Kunden-/Schein-/Aktenzeichen | Versicherungsschein-Nr. LV-2024-887766 | `[VERTRAGS-NR]` | Ausgewogen | Nummer hinter einem Etikett wie „Vertrags-Nr.“; auch eVB-Nummer (elektronische Versicherungsbestätigung) und Transferticket der Kfz-Versicherung |
+| Vertrags-/Kunden-/Schein-/Aktenzeichen | Versicherungsschein-Nr. LV-2024-887766 | `[VERTRAGS-NR]` | Ausgewogen | Nummer hinter einem Etikett wie „Vertrags-Nr.“ – auch hinter Zwischenwörtern („Personalnummer beim Arbeitgeber: 4711“), mit Tausenderpunkten („Kundennummer: 4.711.208“) oder als Code („Geräte-ID: TLX-KQ8B-ZR3M“); auch eVB-Nummer (elektronische Versicherungsbestätigung) und Transferticket der Kfz-Versicherung; ohne Etikett MAC-Adresse, EID einer eSIM, Nummer im Marktstammdatenregister und Aktenzeichen eines Gerichts („3 C 456/24“); nicht Gebühren- und Katalogziffern (GOZ, GOÄ, PZN), Fahrzeugschlüssel (HSN/TSN) und Paragrafen („§ 34d GewO“) |
 | Sozialversicherungsnummern | 12 345678 A 123 | `[SV-NR]` | Ausgewogen |  |
-| Steuer-IDs | 91064389278 | `[STEUER-ID]` | Ausgewogen | ohne Beschriftung nur mit gültiger Prüfziffer |
-| Steuernummern / USt-IdNr. | Steuernummer: 181/815/08155 | `[STEUER-NR]` | Ausgewogen | ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma |
+| Steuer-IDs | 91064389278 | `[STEUER-ID]` | Ausgewogen | ohne Beschriftung nur mit gültiger Prüfziffer, auch gruppiert („30 268 175 922“) |
+| Steuernummern / USt-IdNr. | Steuernummer: 181/815/08155 | `[STEUER-NR]` | Ausgewogen | ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma (die eines Einzelkaufmanns schon) |
 | Krankenversichertennummern | A123456780 | `[KV-NR]` | Ausgewogen |  |
 | Kindergeldnummern | 009FK407160 | `[KINDERGELD-NR]` | Ausgewogen |  |
 | Kfz-Kennzeichen | N-XY 123 | `[KENNZEICHEN]` | Ausgewogen |  |

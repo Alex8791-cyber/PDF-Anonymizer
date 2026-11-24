@@ -857,9 +857,11 @@ def test_selbstkontrolle_ohne_fehlalarm_durch_platzhalter(tmp_path):
     funde = [fund("Person", "[PERSON A]"), fund("Thomas Bergmann", "[PERSON B]"), fund("Ing", "[PERSON C]"),
              fund("Vertrags", "[VERTRAGS-NR]", "vertrag")]
     e = schwaerze_pdf(pdf, funde)
-    # keine Reste der Selbstkontrolle durch Platzhalter; _PRUEFEN darf nur der (berechtigte) Restrisiko-Verdacht
-    # "Hofmann" auslösen – der Nachname bleibt stehen, weil nur "Ing" als Fund übergeben wurde
-    assert e["reste"] == [] and [v.text for v in e["verdacht"]] == ["Hofmann"], e
+    # keine Reste der Selbstkontrolle durch Platzhalter; _PRUEFEN dürfen nur die (berechtigten) Restrisiko-Verdachte
+    # "4711" und "Hofmann" auslösen – die Vertragsnummer hinter "Vertragsnummer" und der Nachname bleiben stehen, weil
+    # nur "Vertrags" und "Ing" als Fund übergeben wurden (die Erkennung schwärzt beide; die Selbstkontrolle meldet den
+    # Wert hinter dem Kennungs-Etikett nach derselben Regel, kennungsformen.allgemeine_kennungen)
+    assert e["reste"] == [] and [v.text for v in e["verdacht"]] == ["4711", "Hofmann"], e
     text = volltext(e["ausgabe"])
     assert "[PERSON A]" in text and "[PERSON B]" in text
     assert "Vertragsnummer" in text, "'Vertrags' ist kein Ganzwort – bleibt stehen"

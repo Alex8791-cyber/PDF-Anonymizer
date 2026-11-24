@@ -387,21 +387,19 @@ _KENNUNG_KATEGORIE = [
     (re.compile(r"mandat"), "mandat"),
     (re.compile(r"kreditkarte|karten ?n|kartennr|karten ?pruf|\bcv[cv]\d?\b|\bcav\d?\b"), "kreditkarte"),
 ]
-# Kennungs-Etiketten, deren Wert NICHT zur Person gehört (Kennung des Gläubigers/Versicherers)
-_KENNUNG_FREMD_RE = re.compile(r"glaubiger|bankleitzahl|\bblz\b|\bust\b|umsatzsteuer|wirtschafts ?ident|\bw idnr\b|"
-                               r"bankverbindung|kontoverbindung")
+# Kennungs-Etiketten, deren Wert NICHT zur Person gehört (Kennung des Gläubigers/Versicherers). Bank- und
+# Kontoverbindung gehören seit Runde 5 nicht mehr dazu: "Kontoverbindung: 7362514098" ist das Konto der Person, im
+# Briefkopf der Organisation steht dahinter eine Bank oder IBAN, keine Kennungsform
+_KENNUNG_FREMD_RE = re.compile(r"glaubiger|bankleitzahl|\bblz\b|\bust\b|umsatzsteuer|wirtschafts ?ident|\bw idnr\b")
 _KONTAKT_TELEFON_RE = re.compile(r"tel|fax|mobil|handy|ruf|durchwahl|\bdw\b|festnetz|phone|cell|whatsapp|"
                                  r"erreichbar|threema|telegram|signal")
 _KONTAKT_EMAIL_RE = re.compile(r"mail|e post|de mail|\bbea\b")
 
-# zusammengesetzte Nummern-Etiketten, die in keiner Liste stehen ("Bestandsnummer", "Mitglieds-ID")
-_NUMMERN_WORT_RE = re.compile(
-    r"(?<![\w.\-])([A-ZÄÖÜa-zäöü][\wäöüß]*?(?:[-._][\wäöüßÄÖÜ]+)*?(?:[Nn]ummer|NUMMER|[-_]?[Nn]r\.?|[-_]?NR\.?|"
-    r"[-_]ID|[-_]Id|[Kk]ennung|KENNUNG|[Kk]ennziffer))(?![\w])")
-_NUMMERN_FREMD = re.compile(
-    r"(?i)^(?:telefon|tel|fax|telefax|ruf|handy|mobil|mobilfunk|festnetz|haus|artikel|art|position|pos|seiten?|"
-    r"version|tarif|produkt|bankleit|material|modell|typ|zimmer|raum|kapitel|absatz|paragraph|ziffer|zeilen?|"
-    r"lfd|laufende|fortlaufende|kenn|bestell|serien|geräte|gerate|zähler|zahler|post|hnr|nr)[-.]?")
+# zusammengesetzte Nummern-Etiketten, die in keiner Liste stehen ("Bestandsnummer", "Mitglieds-ID", "BG-Nummer",
+# "Vorg.-Nr.") und ihre Ausnahmen (Rufnummern, Kataloge, Gliederung, Fahrzeugschlüssel): dieselben wie in der
+# Selbstkontrolle (kennungsformen.py)
+_NUMMERN_WORT_RE = kennungsformen.NUMMERN_WORT_RE
+_NUMMERN_FREMD = kennungsformen.NUMMERN_FREMD
 
 # neutrale Spaltenköpfe (kein Personenbezug): trennen Kopfzeilen in Spalten, Werte bleiben stehen
 NEUTRALE_KOEPFE = frozenset("""
@@ -476,9 +474,13 @@ def _etiketten_roh(text: str) -> list:
             aus.append((v.start, v.ende, art, v.eintrag))
     for m in _NUMMERN_WORT_RE.finditer(text):
         wort = m.group(1)
-        if len(wort) < 5 or _NUMMERN_FREMD.match(wort):
+        if not kennungsformen.nummern_wort(wort):
             continue
         aus.append((m.start(1), m.end(1), "kennung", wort))
+    # "Nummer der Bedarfsgemeinschaft", "Nr. des Nationalpasses": die Nummer eines Gegenstands
+    for m in kennungsformen.NUMMER_DER_RE.finditer(text):
+        if kennungsformen.stamm_der_nummer(m.group(1)):
+            aus.append((m.start(), m.end(), "kennung", f"{m.group(1)}-Nummer"))
     return aus
 
 
@@ -569,7 +571,7 @@ def etiketten(seite) -> list:
         if arten <= {"adresse", "laufend", "neutral"} and text[s:e].casefold().rstrip(".") in ("nr", "nummer", "no"):
             # "Lebensversicherung Nr. …", "Personalausweis (Nr. …)": Nr. hinter einem Substantiv ist eine Kennung
             vor = _NR_VORWORT_RE.search(text, max(lg.zelle_bei(s).start if lg.zelle_bei(s) else 0, s - 60), s)
-            if vor and not _STRASSENWORT_RE.search(vor.group(1)):
+            if vor and not _STRASSENWORT_RE.search(vor.group(1)) and kennungsformen.stamm_vor_nr(vor.group(1)):
                 stamm = vor.group(1)
                 kategorie = kennung_kategorie(f"{stamm} Nr.")
                 if kategorie is not None:
@@ -613,7 +615,7 @@ def etikett_fuer_text(text: str, mit_vertragsdaten: bool = False):
         if e is not None:
             arten.add(art)
             eintrag = eintrag or e
-    if not arten and _NUMMERN_WORT_RE.fullmatch(sauber) and not _NUMMERN_FREMD.match(sauber):
+    if not arten and kennungsformen.nummern_wort(sauber):
         arten, eintrag = {"kennung"}, sauber
     if not arten and _muster is not None and (_muster.eigene_wertform(sauber) or _muster.pruefnummer_etikett(sauber)):
         arten, eintrag = {"kennung"}, sauber          # "Versicherungsbestätigung" (zweizeiliger Kopf), "CVC", "Prüfnr."
@@ -632,7 +634,9 @@ def etikett_fuer_text(text: str, mit_vertragsdaten: bool = False):
     elif "kontakt" in arten:
         kategorie = kontakt_kategorie(eintrag)
     return Etikett(0, 0, frozenset(arten), kategorie, eintrag)
-_NR_VORWORT_RE = re.compile(r"([A-ZÄÖÜ][\wäöüß\-]{3,})[ \t]*\(?[ \t]*$")
+# Substantiv oder Kürzel aus Großbuchstaben vor "Nr." ("Lebensversicherung Nr. …", "HKP Nr. …"); Gliederungs-,
+# Katalog- und Straßenwörter schließt kennungsformen.stamm_vor_nr aus ("Pos. Nr.", "GOÄ Nr.", "Tel. Nr.")
+_NR_VORWORT_RE = re.compile(r"(?<![\wäöüß\-.])([A-ZÄÖÜ][\wäöüß\-]{3,}|[A-ZÄÖÜ]{2,4})[ \t]*\(?[ \t]*$")
 _STRASSENWORT_RE = re.compile(r"(?i)(?:str|straße|strasse|weg|platz|allee|gasse|ring|damm|ufer|haus|zimmer|raum|"
                               r"seite|position|artikel|tarif|produkt|anlage|ziffer|abschnitt|paragraph)$")
 
@@ -640,14 +644,12 @@ _STRASSENWORT_RE = re.compile(r"(?i)(?:str|straße|strasse|weg|platz|allee|gasse
 # ----------------------------------------------------------------------
 # Wertformen
 # ----------------------------------------------------------------------
-_TOKEN_RE = re.compile(r"[A-Za-zÄÖÜäöü0-9][A-Za-zÄÖÜäöüß0-9\-./]*")
-_BETRAG_RE = re.compile(r"[-+]?\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|[-+]?\d+,\d{1,2}|[-+]?\d{1,3}(?:'\d{3})+")
-_DATUM_VOLL_RE = re.compile(r"\d{1,2}\.\d{1,2}\.(?:\d{4}|\d{2})|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/(?:\d{4}|\d{2})|"
-                            r"\d{1,2}\.\d{4}|\d{2}/\d{4}")
-_SPERRE = frozenset({"EUR", "USD", "CHF", "GBP", "IBAN", "BIC", "BLZ", "NR", "TEL", "FAX", "UHR", "KM", "AG", "KG",
-                     "SE", "GMBH", "VVG", "SGB", "BGB", "AVB", "PS", "KW", "CM", "MM", "QM", "ST", "STK", "MIO",
-                     "MRD", "TSD", "CO", "BZW", "UND", "VON", "VOM", "BIS", "AB", "AM", "IM", "IN", "ZU", "DE",
-                     "DM", "PDF", "ID", "NO", "ABS", "NRN", "SEITE"})
+# Wertform einer Kennung: dieselbe wie in der Selbstkontrolle (kennungsformen.kennung_spanne – auch Tausenderpunkt-
+# Gruppen hinter einem Nummer-Etikett und Registerzeichen in Aktenzeichen, Runde 5)
+_TOKEN_RE = kennungsformen.KENNUNG_TOKEN_RE
+_BETRAG_RE = kennungsformen.BETRAG_RE
+_DATUM_VOLL_RE = kennungsformen.DATUM_VOLL_RE
+_SPERRE = kennungsformen.KENNUNG_SPERRE
 
 
 def _versalien(text: str) -> bool:
@@ -656,75 +658,10 @@ def _versalien(text: str) -> bool:
     return not buchstaben or sum(c.isupper() for c in buchstaben) > 0.7 * len(buchstaben)
 
 
-def ist_betrag(tok: str) -> bool:
-    return bool(_BETRAG_RE.fullmatch(tok))
-
-
-def ist_datum_text(tok: str) -> bool:
-    return bool(_DATUM_VOLL_RE.fullmatch(tok))
-
-
-def _kennung_token(tok: str, erstes: bool, naechstes: str = "") -> bool:
-    if not tok:
-        return False
-    if len(tok) == 1 and tok.isalpha():
-        # einzelner Buchstabe: nur zwischen bzw. vor Ziffergruppen ("03 241061 C 515", "HL V 591")
-        return tok.isupper() and any(c.isdigit() for c in naechstes)
-    if any(c.isdigit() for c in tok):
-        if ist_betrag(tok) or ist_datum_text(tok):
-            return False
-        if tok.endswith("%"):
-            return False
-        return True
-    if not tok.isalpha():
-        # Buchstaben mit Trennern, aber ohne Ziffer ("KH-AB"): nur als Präfix
-        teile = [t for t in re.split(r"[-./]", tok) if t]
-        return bool(teile) and all(t.isupper() and len(t) <= 4 for t in teile) and erstes
-    return tok.isupper() and len(tok) <= 4 and tok not in _SPERRE
-
-
-def kennung_spanne(text: str, pos: int, grenze: int, min_ziffern: int = 3):
-    """Kennung ab pos (führender Leerraum wird übersprungen): Folge von Tokens mit Ziffern bzw. kurzen
-    Großbuchstaben-Kürzeln ("KH 0815 4471 2", "LV/24/4058468", "D-Y3TV-NW64X-52", "7 111 562 795"),
-    durch einfache Leerzeichen getrennt. Endet an Wort, Satzzeichen, Tabulator, Zeilenende.
-    Keine Daten, Beträge, Jahreszahlen. Liefert (start, ende) oder None."""
-    i = pos
-    while i < grenze and text[i] in " \t":
-        i += 1
-    tokens = []
-    j = i
-    while j < grenze:
-        m = _TOKEN_RE.match(text, j, grenze)
-        if not m:
-            break
-        roh = m.group(0)
-        kern = roh.rstrip(".-/")
-        n = _TOKEN_RE.match(text, m.end() + 1, grenze) if m.end() < grenze and text[m.end()] == " " else None
-        if not _kennung_token(kern, not tokens, n.group(0) if n else ""):
-            break
-        tokens.append((m.start(), m.start() + len(kern)))
-        j = m.end()
-        if len(kern) != len(roh):
-            break                                   # Satzzeichen am Ende beendet den Wert
-        if j + 1 < grenze and text[j] == " " and text[j + 1] not in " \t\n":
-            j += 1
-            continue
-        break
-    while tokens and not any(c.isdigit() for c in text[tokens[-1][0]:tokens[-1][1]]):
-        tokens.pop()
-    if not tokens:
-        return None
-    s, e = tokens[0][0], tokens[-1][1]
-    wert = text[s:e]
-    ziffern = sum(c.isdigit() for c in wert)
-    if ziffern < min_ziffern or len(wert) < 4:
-        return None
-    kompakt = wert.replace(" ", "")
-    if kompakt.isdigit() and len(kompakt) == 4 and kompakt[:2] in ("19", "20"):
-        return None                                 # Jahreszahl
-    if ist_datum_text(kompakt) or ist_betrag(wert):
-        return None
-    return s, e
+ist_betrag = kennungsformen.ist_betrag
+ist_datum_text = kennungsformen.ist_datum_text
+_kennung_token = kennungsformen.kennung_token
+kennung_spanne = kennungsformen.kennung_spanne
 
 
 def ist_kennungsform(wert: str, min_ziffern: int = 5) -> bool:
@@ -1342,10 +1279,16 @@ def eigener_wert(text: str, s: int, e: int, art: str, kategorie: str | None, ver
 
 def _kennungs_wert(text: str, s: int, e: int, kategorie: str, streng: bool, eintrag: str = "",
                    etikett_text: str = "", darunter: bool = False) -> list:
-    # "Nr." vor dem Wert gehört zum Etikett ("Versicherungsschein-" / "Nr. KH 0815 4471 2")
+    # "Nr." vor dem Wert gehört zum Etikett ("Versicherungsschein-" / "Nr. KH 0815 4471 2"), ebenso "#" ("Ticket
+    # #A-4711"); hinter einem Schlüssel-Etikett mit Feldverweis ("Schlüssel-Nr. 2.1/2.2: 0005/CXY") steht ein
+    # Fahrzeugschlüssel (HSN/TSN), keine Kennung
     m = NR_VORSATZ_RE.match(text, s, e)
     if m and m.end() < e:
         s = m.end()
+    if s < e and text[s] == "#":
+        s += 1
+    if kennungsformen.fahrzeugschluessel(text, etikett_text or eintrag, s):
+        return []
     art = eigene_wertform(eintrag)
     if art is not None:
         # eVB, Transferticket, Kartenprüfnummer: ihre eigene Form – hinter einem Nummer-Etikett ZUSÄTZLICH der
@@ -1367,7 +1310,16 @@ def _kennungs_wert(text: str, s: int, e: int, kategorie: str, streng: bool, eint
         for a, b in muster_spannen(_muster.finde_iban, text, s, e):
             if a - s <= 2:
                 return [Wert(a, b, "iban")]
-    sp = kennung_spanne(text, s, e, 2 if kategorie in ("mandat", "ausweis") else 3)
+    # Tausenderpunkt-Gruppen hinter einem Nummer-Etikett ("Kundennummer: 4.711.208"), Codes mit Trennern und wenigen
+    # Ziffern ("Geräte-ID: TLX-KQ8B-ZR3M"); keine Gliederungsnummer, keine Zahl mit Einheit (kennungsformen)
+    sp = kennung_spanne(text, s, e, 2 if kategorie in ("mandat", "ausweis") else 3,
+                        punkte=kennungsformen.punkte_erlaubt(eintrag))
+    if sp is not None and kennungsformen.wert_ausgeschlossen(text, sp[0], sp[1]):
+        sp = None
+    if sp is None and art is None:
+        sp = kennungsformen.code_spanne(text, s, e)
+        if sp is not None and kennungsformen.vorschrift(text, sp[0], sp[1]):
+            sp = None                                   # "§ 34d"/"8 34d Abs. 1 GewO": Nummer einer Vorschrift
     if sp is None or (art is not None and not allgemeiner_wert_passt(eintrag, text[sp[0]:sp[1]])):
         return []
     a, b = sp
@@ -1565,7 +1517,7 @@ def _namens_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
 # ----------------------------------------------------------------------
 # Etikett -> Wertbereich
 # ----------------------------------------------------------------------
-_TRENNER_RE = re.compile(r"[ \t]*(?:\([^()\n]{1,25}\)[ \t]*)?(?:[:=][ \t]*|\.{2,}[ \t]*|…+[ \t]*|_{3,}[ \t]*|"
+_TRENNER_RE = re.compile(r"[ \t]*(?:\([^()\n]{1,25}\)[ \t]*)?(?:[:=#][ \t]*|\.{2,}[ \t]*|…+[ \t]*|_{3,}[ \t]*|"
                          r"[ \t]+[-–][ \t]+|\t+[ \t]*|[ \t]{2,})?")
 
 
@@ -1882,6 +1834,8 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
         if art is not None and not _muster.eigener_rohwert(art, sauber) and not \
                 allgemeiner_wert_passt(et.eintrag, sauber):
             return None                                 # eVB, Transferticket, CVC: "gültig bis 12/2025" ist keine
+        if kennungsformen.ausweis_wort(et.eintrag) and not re.search(r"(?<![\w])[A-Z0-9]{6,12}(?![\w])", sauber):
+            return None                                 # "Führerschein: Klasse B seit 2011": kein Ausweis-Wert
         return s, e
     art = eigene_wertform(et.eintrag)
     b = bereich(anfang, zeile.ende)
@@ -1981,6 +1935,34 @@ def kennung_folgezeile(seite, lg: Lage, et: Etikett) -> list:
         if sp and sp[0] - anfang <= 1 and (art is None or allgemeiner_wert_passt(et.eintrag, text[sp[0]:sp[1]])):
             return [Wert(sp[0], sp[1], kategorie or "vertrag")]
     return []
+
+
+def kennung_zwischen(seite, lg: Lage, et: Etikett, kennung_starts: frozenset) -> list:
+    """Wert eines Kennungs-Etiketts nach der gemeinsamen Regel „Etikett + Wert“ (kennungsformen.allgemeine_kennung):
+    hinter Zwischenwörtern desselben Satzes bis zu einer Ankündigung ("Personalnummer beim Arbeitgeber: 4711",
+    "Vertragsnummer beim Vorversicherer: KH-55 667 788", "Führerschein Klasse 3 vom 12.04.1985, Nr. 355/85"), hinter
+    einer Laufnummer ("IMEI 1: 35 693803 564380 9") oder einer kurzen Ergänzung am Zeilenende ("Kennnummer der Karte
+    80276 00157 0098765432"). Abbruch an einem anderen Kennungs-Etikett derselben Seite; die Etiketten mit eigener
+    Wertform (eVB, Transferticket, Kartenprüfnummer) liest muster.py. kennung_starts: Anfänge aller Kennungs-Etiketten
+    der Seite (einmal je Seite gebildet: je Etikett neu gebildet wüchse die Laufzeit quadratisch)."""
+    text = seite.text
+    if et.unscharf or not et.kategorie or kennungsformen.etikett_art(et.eintrag) is not None \
+            or kennungsformen.etikett_art(text[et.start:et.ende]) is not None:
+        return []                                       # eVB, Transferticket, CVC, "Prüfnummer": eigene Regel
+    zeile = seite.zeile_von(et.start)
+    if zeile is None:
+        return []
+    grenze = text.find("\n", zeile.ende + 1)
+    grenze = len(text) if grenze < 0 else grenze
+    etikett = et.eintrag if et.eintrag and not et.eintrag.endswith("-Nummer") else text[et.start:et.ende]
+    w = kennungsformen.allgemeine_kennung(text, et.start, et.ende, etikett, grenze=grenze,
+                                          etikett_starts=kennung_starts)
+    if w is None:
+        return []
+    kat = et.kategorie
+    if kat == "iban" and (_muster is None or not _muster.finde_iban(text[w.start:w.ende])):
+        kat = "vertrag"
+    return [Wert(w.start, w.ende, kat)]
 
 
 # ----------------------------------------------------------------------
@@ -2131,6 +2113,7 @@ def etikett_wert(dok, kontext):
         if not alle:
             continue
         starts = {et.start for et in alle if et.arten & (PII_ARTEN | {"vertragsdaten"})}
+        kennung_starts = frozenset(et.start for et in alle if "kennung" in et.arten)
         koepfe: dict = {}
         for idx, et in enumerate(alle):
             if not et.arten & PII_ARTEN:
@@ -2155,6 +2138,8 @@ def etikett_wert(dok, kontext):
                 quelle_sicherheit = SICHERHEIT_ETIKETT
             if not werte and "kennung" in et.arten:
                 werte = kennung_folgezeile(seite, lg, et)
+            if not werte and "kennung" in et.arten and not kopfzeile(seite, lg, et.start, alle, koepfe):
+                werte = kennung_zwischen(seite, lg, et, kennung_starts)
             quelle = "struktur.etikett_wert"
             if not werte and not kopfzeile(seite, lg, et.start, alle, koepfe):
                 werte = ocr_rohwert(seite, lg, et, alle)

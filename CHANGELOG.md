@@ -181,6 +181,24 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   „Geburtsnamc“ und „[7][3][9]“. Auf Scans meldet die Restrisiko-Prüfung Schrift hinter einem
   Kennungs-Etikett, die die Texterkennung nicht lesen konnte – etwa ein Kammfeld mit einer Ziffer je Kästchen
   („Kennungsangabe: Schrift hinter einem Kennungs-Etikett … nicht verlässlich lesbar“, Ausgabe `_PRUEFEN`).
+- **Erkennung: Kennungen allgemein (Domänen-Durchsicht aller Maklersparten).** Dieselbe Regel „Etikett + Wert“ gilt
+  jetzt für JEDES Kennungs-Etikett, in Erkennung und Restrisiko-Prüfung gleich (`kennungsformen.allgemeine_kennung`):
+  Zwischenwörter bis zu einer Ankündigung („Personalnummer beim Arbeitgeber: 4711“, „Vertragsnummer beim
+  Vorversicherer: …“, „Seriennummer laut Rechnung: …“, „Führerschein Klasse 3 vom 12.04.1985, Nr. 355/85“), Schluss am
+  Satzende, an einem anderen Etikett oder Feld und nach 8 Wörtern. Neue Wertformen hinter einem Etikett:
+  Tausenderpunkt-Gruppen ohne Währung („Kundennummer: 4.711.208“, auch in der Spalte unter „Vertragsnr.“), Codes mit
+  Trennern und wenigen Ziffern („Geräte-ID: TLX-KQ8B-ZR3M“), Buchungscodes („PNR: KXQRZN“, nie ein Wort wie
+  „STORNO“), „#“ als Trenner, eine Laufnummer vor dem Wert („IMEI 1: …“); ohne Etikett MAC-Adresse, EID einer eSIM,
+  Nummer im Marktstammdatenregister („SEE912345678901“), gruppierte Steuer-ID mit gültiger Prüfziffer und
+  Aktenzeichen eines Gerichts mit Gerichtswort im Satz („Das Verfahren 3 C 456/24 …“). Rund 190 neue Etiketten
+  (Ausweis- und Fahrzeugpapiere ohne „Nr.“ mit Dokumentform, Konten, Geräte, Tiere, Register, Reise, „BG-Nummer“,
+  „Vorg.-Nr.“, „Nummer der Bedarfsgemeinschaft“, „HKP Nr.“),
+  Tabellen mit nur einem Kennungs-Etikett im Kopf („Gegenstand ⇥ Kaufpreis ⇥ Seriennummer“), HRA-Nummer und USt-IdNr.
+  eines Einzelkaufmanns (e.K., „Inhaber:“), die FIN auf Scans mit O statt 0 („WFOEXX…“) und die Passnummer der
+  Sichtzone über eine verlesene MRZ. Weniger Über-Schwärzung: Gebühren- und Katalogspalten (GOZ, GOÄ, EBM, BEL) und die
+  Pharmazentralnummer (PZN, keine Telefonnummer mehr), Fahrzeugschlüssel (HSN/TSN, „Schlüssel-Nr. 2.1/2.2“),
+  Flug-, Sitzplatz- und Zimmernummern, die Nummer einer Vorschrift hinter einem Etikett („Registrierungsnummer: § 34d
+  Abs. 1 GewO“, auf Scans „8 34d …“); eine IMEI ist eine Kennung, keine Kreditkarte.
 
 ### Geändert
 - **Prüfziffern sind nur noch ein Indiz:** Eine IBAN mit falscher Prüfziffer wird trotzdem geschwärzt, wenn

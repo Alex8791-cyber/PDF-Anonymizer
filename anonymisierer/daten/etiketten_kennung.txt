@@ -40,6 +40,7 @@ Antragsnr.
 Antragsnummer
 Arbeitnehmer-Nr.
 Arbeitnehmernummer
+Aufenthaltstitel
 Auftrag Nr.
 Auftrags Nr.
 Auftrags-ID
@@ -47,15 +48,18 @@ Auftrags-Nr.
 Auftrags-Nummer
 Auftragsnr.
 Auftragsnummer
+Ausweis
 Ausweis Nr.
 Ausweis-Nr
 Ausweis-Nr.
 Ausweis-Nummer
+Ausweises
 Ausweisnr.
 Ausweisnummer
 Az
 Az.
 Az. der Polizei
+AZR-Nummer
 Bankverbindung
 Bauspar-Nr.
 Bausparnummer
@@ -69,6 +73,8 @@ Bearbeitungs-Nr.
 Bearbeitungs-Nummer
 Bearbeitungsnr.
 Bearbeitungsnummer
+Bedarfsgemeinschafts-Nummer
+Bedarfsgemeinschaftsnummer
 Beihilfe Nr.
 Beihilfe-Nr
 Beihilfe-Nr.
@@ -103,14 +109,22 @@ Betriebs-Nr.
 Betriebs-Nummer
 Betriebsnr.
 Betriebsnummer
+BG-Nr.
+BG-Nummer
 BIC
 BIC/SWIFT
+Bluetooth-Adresse
+Booking Code
+Booking Number
+Booking Reference
 Buchungs Nr.
+Buchungs-Code
 Buchungs-Nr.
 Buchungs-Nummer
 Buchungscode
 Buchungsnr.
 Buchungsnummer
+Buchungsreferenz
 Buchungszeichen
 CAV
 CVC
@@ -131,11 +145,17 @@ Depot-Nr.
 Depot-Nummer
 Depotnr.
 Depotnummer
+Device-ID
 Dienstnummer
 eGK-Nummer
+Equidenpass
+Equidenpass-Nr.
+eSIM-EID
+eTIN
 eVB
 eVB-Nr.
 eVB-Nummer
+Express Service Code
 Fahrgestell Nr.
 Fahrgestell-Nr
 Fahrgestell-Nr.
@@ -144,10 +164,16 @@ Fahrgestellnr.
 Fahrgestellnummer
 Fahrzeug-Identifizierungsnummer
 Fahrzeug-Identnummer
+Fahrzeugbrief
+Fahrzeugbrief-Nr.
+Fahrzeugbriefnummer
 Fahrzeugident-Nr.
 Fahrzeugidentifikationsnummer
 Fahrzeugidentifizierungsnummer
 Fahrzeugkennzeichen
+Fahrzeugschein
+Fahrzeugschein-Nr.
+Fahrzeugscheinnummer
 Fall Nr.
 Fall-ID
 Fall-Nr
@@ -155,6 +181,9 @@ Fall-Nr.
 Fall-Nummer
 Fallnr.
 Fallnummer
+Festgeldkonto
+File-Key
+Filekey
 FIN
 FIN-Nr.
 Finanzierungs Nr.
@@ -162,18 +191,27 @@ Finanzierungs-Nr.
 Finanzierungs-Nummer
 Finanzierungsnr.
 Finanzierungsnummer
+Flottenkarte
 Forderungs Nr.
 Forderungs-Nr.
 Forderungs-Nummer
 Forderungsnr.
 Forderungsnummer
+Frequent Flyer
+Frequent Flyer No.
+Frequent Flyer Number
+Führerschein
 Führerschein Nr.
 Führerschein-Nr
 Führerschein-Nr.
 Führerschein-Nummer
+Führerscheines
 Führerscheinnr.
 Führerscheinnummer
+Führerscheins
 Geräte Nr.
+Geräte-ID
+Geräte-Kennung
 Geräte-Nr.
 Geräte-Nummer
 Gerätenr.
@@ -186,6 +224,7 @@ Geschäftsnr.
 Geschäftsnummer
 Geschäftspartnernummer
 Geschäftszeichen
+Girokonto
 Gläubiger-ID
 Gläubiger-ID-Nr.
 Gläubiger-Identifikationsnummer
@@ -200,9 +239,17 @@ Gutachtennr.
 Gutachtennummer
 GZ
 Gz.
+HKP Nr.
+HKP-Nr.
+HKP-Nummer
+Hundemarke
+Hundesteuermarke
 IBAN
+ICCID
 Id-Nr.
+Ident-Vorgang
 Identifikationsnummer
+Identifizierungsvorgang
 IdNr
 IdNr.
 IHK-Reg.-Nr.
@@ -222,6 +269,12 @@ Ihre Versicherungsnummer
 Ihre Vertragsnummer
 Ihre Zeichen
 IMEI
+IMEI 1
+IMEI 2
+IMEI1
+IMEI2
+IMSI
+Installations-ID
 Karten Nr.
 Karten-Nr.
 Karten-Nummer
@@ -236,6 +289,9 @@ Kd.Nr.
 Kd_Nr
 KdNr
 KdNr.
+Kenn-Nr.
+Kennnummer
+Kennnummer der Karte
 Kennz.
 Kennzeichen
 Kennziffer
@@ -250,6 +306,7 @@ Kindergeld-Nummer
 Kindergeldnr.
 Kindergeldnummer
 KNr.
+Konto
 Konto Nr.
 Konto-Nr.
 Konto-Nummer
@@ -302,7 +359,10 @@ Kundenreferenz
 KV-Nr
 KV-Nr.
 KV-Nummer
+KVA Nr.
+KVA-Nr.
 KVNR
+Ladekarte
 Leasingvertrags Nr.
 Leasingvertrags-Nr.
 Leasingvertrags-Nummer
@@ -318,6 +378,7 @@ Leistungsfallnr.
 Leistungsfallnummer
 Leistungsnummer
 MA-Nr.
+MAC-Adresse
 Makler Nr.
 Makler-Nr.
 Makler-Nummer
@@ -330,6 +391,10 @@ Mandatsref.
 Mandatsreferenz
 Mandatsreferenznummer
 Marktlokations-ID
+Marktstammdatenregister-Nummer
+Marktstammdatenregisternummer
+MaStR-Nr.
+MaStR-Nummer
 Matr.-Nr.
 Matrikel Nr.
 Matrikel-Nr.
@@ -362,6 +427,7 @@ Objekt-Nr.
 Objekt-Nummer
 Objektnr.
 Objektnummer
+P-Konto
 Partner-Nr.
 Partnernummer
 Pass Nr.
@@ -372,6 +438,8 @@ Passnr.
 Passnummer
 Pat.-ID
 Pat.-Nr.
+Patient ID
+Patient No.
 Patienten Nr.
 Patienten-ID
 Patienten-Nr.
@@ -384,16 +452,21 @@ Personal Nr.
 Personal-ID
 Personal-Nr.
 Personal-Nummer
+Personalausweis
 Personalausweis Nr.
 Personalausweis-Nr
 Personalausweis-Nr.
 Personalausweis-Nummer
+Personalausweises
 Personalausweisnr.
 Personalausweisnummer
 Personalnr.
 Personalnummer
 Personenkennzahl
 Personenkennziffer
+Persönliche Kennnummer
+Pfändungsschutzkonto
+PNR
 PNr.
 Police
 Police-Nr.
@@ -412,6 +485,7 @@ Polizzen-Nr.
 Polizzen-Nummer
 Polizzennr.
 Polizzennummer
+Postnummer
 Re.-Nr.
 Rechn.-Nr.
 Rechnung Nr.
@@ -421,6 +495,7 @@ Rechnungs-Nr.
 Rechnungs-Nummer
 Rechnungsnr.
 Rechnungsnummer
+Record Locator
 Ref.
 Ref. Nr.
 Ref.-Nr.
@@ -429,15 +504,18 @@ Referenz Nr.
 Referenz-ID
 Referenz-Nr.
 Referenz-Nummer
+Referenzkonto
 Referenznr.
 Referenznummer
 Reg.-Nr.
 Registernummer
 Registrierungs-Nr.
 Registrierungsnummer
+Reisepass
 Reisepass Nr.
 Reisepass-Nr.
 Reisepass-Nummer
+Reisepasses
 Reisepassnr.
 Reisepassnummer
 Renten Nr.
@@ -453,6 +531,7 @@ Rentenversicherungs-Nummer
 Rentenversicherungsnr.
 Rentenversicherungsnummer
 Rentenzeichen
+Reservierungscode
 Reservierungsnummer
 RG-Nr.
 Rg.-Nr.
@@ -461,6 +540,7 @@ Risikonummer
 RV-Nr.
 RV-Nummer
 RVNR
+S/N
 Sch.-Nr.
 Schaden Nr.
 Schaden-ID
@@ -488,6 +568,10 @@ Serien-Nr.
 Serien-Nummer
 Seriennr.
 Seriennummer
+Service Tag
+Service-Tag
+Servicetag
+SIM-Karte
 SIM-Kartennummer
 Sozialversicherungs Nr.
 Sozialversicherungs-Nr
@@ -495,6 +579,7 @@ Sozialversicherungs-Nr.
 Sozialversicherungs-Nummer
 Sozialversicherungsnr.
 Sozialversicherungsnummer
+Sparkonto
 St-Nr.
 St.-Nr.
 St.Nr.
@@ -508,6 +593,8 @@ Steuer_Nr
 Steueridentifikationsnummer
 Steuerliche Identifikationsnummer
 Steuerliche IdNr.
+Steuermarke
+Steuermarken-Nr.
 Steuernr.
 Steuernummer
 StNr.
@@ -524,10 +611,17 @@ Tagebuch-Nr.
 Tagebuch-Nummer
 Tagebuchnr.
 Tagebuchnummer
+Tagesgeldkonto
+Tankkarte
+Täto-Nr.
+Tätowiernummer
+Tätowierung
 Tax ID
 Tgb.-Nr.
 Ticket
+Ticket No.
 Ticket Nr.
+Ticket Number
 Ticket-ID
 Ticket-Nr.
 Ticket-Nummer
@@ -544,6 +638,8 @@ Transferticket
 Transferticket-Nr.
 Transferticket-Nummer
 Transferticketnummer
+UELN
+UELN-Nr.
 Umsatzsteuer-Identifikationsnummer
 Unfall Nr.
 Unfall-Nr.
@@ -575,6 +671,7 @@ Vermittlernr.
 Vermittlernummer
 Vermittlerregister-Nr.
 Vermittlerregisternummer
+Verrechnungskonto
 Vers-Nr.
 Vers.-Nr.
 Vers.-Schein-Nr.
@@ -628,6 +725,9 @@ Vertragsnr.
 Vertragsnummer
 Vertriebspartnernummer
 Verwendungszweck
+Video-Ident
+VideoIdent
+VideoIdent-ID
 VIN
 VN-Nr.
 Vorgang
@@ -646,7 +746,9 @@ VS_Nr
 VSNR
 VSNr.
 W-IdNr.
+Werbe-ID
 Wirtschafts-Identifikationsnummer
+WLAN-MAC
 Wohnungsnummer
 Zähler Nr.
 Zähler-Nr.
@@ -657,9 +759,19 @@ Zählernummer
 Zählpunkt
 Zählpunktbezeichnung
 Zahlungsreferenz
+ZB I
+ZB II
+ZB Teil I
+ZB Teil II
 Zertifikatsnummer
+Zuchtbuch-Nr.
+Zuchtbuchnummer
 Zulage-Nr.
 Zulagen-Nr.
 Zulagennummer
 Zulagenr.
 Zulagenummer
+Zulassungsbescheinigung Teil 1
+Zulassungsbescheinigung Teil 2
+Zulassungsbescheinigung Teil I
+Zulassungsbescheinigung Teil II

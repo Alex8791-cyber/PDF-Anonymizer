@@ -62,6 +62,16 @@ ersten Aufbau nach festen Regeln erzeugt und stehen ausgeschrieben in den Dateie
   Fußballprofi, selbstständig).
 - **Etiketten für Kennungen:** zu 71 Stämmen die Schreibweisen „Stammnummer“,
   „Stamm-Nummer“, „Stamm-Nr.“, „Stamm Nr.“ und „Stammnr.“ (Vertragsnummer, Vertrags-Nr. …).
+  Runde 5 (Domänen-Durchsicht aller Maklersparten) ergänzte von Hand die Kennungen, die dort
+  ohne Etikett blieben: Ausweis-, Führerschein- und Fahrzeugpapiere ohne „Nr.“ (Reisepass,
+  Führerschein, Zulassungsbescheinigung Teil I/II, ZB II, Fahrzeugbrief), Konten ohne „Nr.“
+  (Konto, Girokonto, Sparkonto, P-Konto), Geräte (Geräte-ID, Service-Tag, S/N, MAC-Adresse,
+  ICCID, eSIM-EID, IMSI, IMEI 1/2), Tiere (Tätowierung, Zuchtbuchnummer, Hundesteuermarke, UELN),
+  Behörden und Register (BG-Nummer, AZR-Nummer, MaStR-Nummer, eTIN, Postnummer), Reise
+  (Filekey, Buchungsreferenz, PNR, Ticket Number, Frequent Flyer) und Heil- und Kostenplan
+  (HKP Nr.); die Wertform prüft die Regel „Etikett + Wert“ (`kennungsformen.py`). „MAC“ und
+  „EID“ allein fehlen bewusst: beide sind auch Familiennamen („Anna Weber geb. Mac Allister“) –
+  die MAC-Adresse und die EID einer eSIM erkennt ihre eigene Form auch ohne Etikett.
 - **Etiketten für Personen:** zu Rollenwörtern mit „(in)“ die Formen „Fahrer“, „Fahrerin“,
   „Fahrer/in“, „Fahrer(in)“, „Fahrer/-in“.
 - **Familiennamen:** 265 weibliche Formen ostslawischer und bulgarischer Namen
@@ -103,7 +113,7 @@ ersten Aufbau nach festen Regeln erzeugt und stehen ausgeschrieben in den Dateie
 | `medikamente.txt` | 1 508 | 750 Wirkstoffe und 758 in Deutschland gebräuchliche Handelsnamen | 28,1 % |
 | `versicherer_und_organisationen.txt` | 1 343 | **Erlaubnisliste**: Versicherer, Pools, Maklerverbünde, Behörden, Sozialversicherungsträger, Krankenkassen, Banken, Verbände, Produkt-, Tarif- und Rechtsbegriffe | 88,2 % |
 | `etiketten_person.txt` | 620 | Feldbezeichner und Rollenwörter vor Personen (Versicherungsnehmer, Name, Zeuge) | 92,3 % |
-| `etiketten_kennung.txt` | 582 | Feldbezeichner vor Kennungen (Vertrags-, Kunden-, Schadennummer, Aktenzeichen, Steuer-ID, Kennzeichen) | 66,5 % |
+| `etiketten_kennung.txt` | 772 | Feldbezeichner vor Kennungen (Vertrags-, Kunden-, Schadennummer, Aktenzeichen, Steuer-ID, Kennzeichen, Ausweis- und Fahrzeugpapiere, Konten, Geräte-, Tier- und Buchungskennungen) | 66,5 % |
 | `etiketten_datum_geburt.txt` | 64 | Feldbezeichner für Geburts-, Sterbe- und Heiratsdaten | 95,3 % |
 | `etiketten_adresse.txt` | 128 | Feldbezeichner vor Anschriften und Orten einer Person | 85,2 % |
 | `etiketten_kontakt.txt` | 82 | Feldbezeichner für Telefon, Fax, E-Mail, Messenger, Profile | 96,3 % |

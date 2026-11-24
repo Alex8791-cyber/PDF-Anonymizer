@@ -61,10 +61,15 @@ ERLAEUTERUNG = {
     "geburt": "hinter „geb.“, „Geburtsdatum“ … oder hinter einem Namen mit Komma, Stern oder Klammer („Max "
               "Mustermann, 02.09.1983“); in „Maximal“ zusätzlich Daten wie „02.09.1983“, die mindestens 14 Jahre "
               "zurückliegen – außer kurz hinter Wörtern wie „am“, „vom“, „seit“ oder „Beginn“",
-    "vertrag": "Nummer hinter einem Etikett wie „Vertrags-Nr.“; auch eVB-Nummer (elektronische "
-               "Versicherungsbestätigung) und Transferticket der Kfz-Versicherung",
-    "steuerid": "ohne Beschriftung nur mit gültiger Prüfziffer",
-    "steuernr": "ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma",
+    "vertrag": "Nummer hinter einem Etikett wie „Vertrags-Nr.“ – auch hinter Zwischenwörtern („Personalnummer beim "
+               "Arbeitgeber: 4711“), mit Tausenderpunkten („Kundennummer: 4.711.208“) oder als Code („Geräte-ID: "
+               "TLX-KQ8B-ZR3M“); auch eVB-Nummer (elektronische Versicherungsbestätigung) und Transferticket der "
+               "Kfz-Versicherung; ohne Etikett MAC-Adresse, EID einer eSIM, Nummer im Marktstammdatenregister und "
+               "Aktenzeichen eines Gerichts („3 C 456/24“); nicht Gebühren- und Katalogziffern (GOZ, GOÄ, PZN), "
+               "Fahrzeugschlüssel (HSN/TSN) und Paragrafen („§ 34d GewO“)",
+    "steuerid": "ohne Beschriftung nur mit gültiger Prüfziffer, auch gruppiert („30 268 175 922“)",
+    "steuernr": "ohne Etikett nur mit Schrägstrichen; USt-IdNr. nur mit Etikett und nicht die einer Firma (die "
+                "eines Einzelkaufmanns schon)",
     "ausweis": "mit Etikett; Ausweis- und Passnummern auch ohne Etikett, wenn die Prüfziffer stimmt; auf "
                "Ausweiskopien auch die maschinenlesbare Zone",
     "mandat": "nur hinter einem Etikett",

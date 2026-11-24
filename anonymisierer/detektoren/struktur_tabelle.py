@@ -147,9 +147,14 @@ def _kopf_spalten(text: str, reihe: Reihe, ets: list, starts: list, breite: floa
         return None
     mit_etikett = [t for t in teile if t[2] is not None]
     pii = [t for t in mit_etikett if t[2].arten & PII_ARTEN]
-    if len(mit_etikett) < 2 or not pii:
-        return None
     unbekannt = [t for t in teile if t[2] is None]
+    # ein einziges Etikett im Kopf genügt, wenn es eine Kennung benennt und die Reihe aus mindestens drei kurzen
+    # Kopfwörtern besteht ("Gegenstand ⇥⇥ Kaufpreis ⇥⇥ Seriennummer": Stehlgutliste, Domänen-Befund 48) – die
+    # Werte darunter prüft die Wertform der Kennung (keine Beträge, Daten, Mengen)
+    nur_kennung = (len(mit_etikett) == 1 and len(teile) >= 3 and pii and pii[0][2].arten <= {"kennung"}
+                   and all(len(inhalt.split()) <= 2 and inhalt.strip()[:1].isupper() for _, _, _, inhalt in unbekannt))
+    if (len(mit_etikett) < 2 and not nur_kennung) or not pii:
+        return None
     for _, _, _, inhalt in unbekannt:
         # unbekannte Kopfteile: kurz, ohne Namen ("Györi, Réka" ist ein Wert, kein Kopf)
         if "," in inhalt or len(inhalt.split()) > 3:
@@ -470,7 +475,10 @@ def _kennung(text: str, s: int, e: int, kategorie: str | None, eintrag: str = ""
             return eigen
         if art == "cvc":
             kategorie = "vertrag"
-    sp = kennung_spanne(text, i, e, 3)
+    # dieselbe Wertform wie hinter einem Etikett (kennungsformen.kennungswert): auch Tausenderpunkt-Gruppen unter einem
+    # Nummer-Kopf ("12.345.678" unter "Vertragsnr.", Domänen-Befunde 1, 67) und Codes mit Trennern – keine Beträge,
+    # Versionsnummern und Zahlen mit Einheit
+    sp = kennungsformen.kennungswert(text, i, e, eintrag, nr=True) if art is None else kennung_spanne(text, i, e, 3)
     if sp is None or (art is not None and not allgemeiner_wert_passt(eintrag, text[sp[0]:sp[1]])):
         return []
     kat = kategorie or "vertrag"
