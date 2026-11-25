@@ -447,7 +447,8 @@ _SATZENDE_RE = re.compile(r"[.!?;\n]")
 # "als Zeugin geladen"; Abnahme 2 V3)
 _ROLLE_ARBEIT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:tätig|beschäftigt|angestellt|arbeitet\w{0,2}|gearbeitet|"
                               r"verdient\w{0,2}|jobbt|aushilf\w{0,4}|nebenjob\w{0,2}|hauptberuflich|nebenberuflich|"
-                              r"unterwegs|hilft|half|für[ \t]+(?:einen|eine|ein)[ \t]+[A-ZÄÖÜ]\w+)(?![\wäöüß])")
+                              r"unterwegs|hilft|half|für[ \t]+(?:einen|eine|ein)[ \t]+[A-ZÄÖÜ]\w+|"
+                              r"bei[ \t]+(?:einer|einem|der|dem)[ \t]+[A-ZÄÖÜ]\w+)(?![\wäöüß])")
 _ROLLE_VORGANG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:unfall\w{0,6}|beteiligt|schaden\w{0,6}|geladen|termin\w{0,2}|"
                                r"bestellt|bestallung\w{0,8}|eingesetzt|vollmacht\w{0,2}|gericht\w{0,6}|haftet|"
                                r"haftbar|verantwortlich|(?:seine[rsm]?|ihre[rsm]?|des|der)[ \t]+(?:Mutter|Vaters?|Eltern|"
@@ -2428,6 +2429,14 @@ class _Seitenpruefung:
             for s, e in kennungsformen.schloss_feld_folgezeile(vorzeile, zeile):
                 if not self.ist_platzhalter_bei(o + s, o + e):
                     self.neu(o + s, o + e, "Zugangscode (Ziffern unter einem Schloss als Feldname)", "kennung")
+            # "Code" am Zeilenanfang, das Schloss am Ende der Zeile davor ("Bitte an der Haustür klingeln" ⏎
+            # "Code 1357"; Abnahme 2 V1)
+            if zeile.lstrip(" \t").startswith("Code"):
+                versatz = len(vorzeile) + 1
+                for s, e in kennungsformen.zugangscode_verdacht(vorzeile + "\n" + zeile):
+                    if s >= versatz and not self.ist_platzhalter_bei(o + s - versatz, o + e - versatz):
+                        self.neu(o + s - versatz, o + e - versatz,
+                                 "Zugangscode (Ziffern hinter „Code“ oder einem Schloss)", "kennung")
         # Handelsregisternummer (HRA) und USt-IdNr. im Angabenblock eines Einzelkaufmanns bzw. Inhabers: Angaben einer
         # Person (die Ausnahmen der Organisation gelten dort nicht; dieselbe Regel wie die Erkennung,
         # kennungsformen.einzelkaufmann_block und ust_id_der_firma, Domänen-Befunde 55 und 77)
@@ -3434,6 +3443,20 @@ class _Seitenpruefung:
                 return True                             # nicht vor Datum, Jahr, Betrag, Telefonnummer
             return personenkontext.tierangabe(text, s)
 
+        def unbekannter_vorname(j) -> bool:
+            """Ein großgeschriebenes Wort ohne Eintrag in der Wissensbasis, das ein Vorname sein kann ("Kreszenz"):
+            kein Allerwelts-, Berufs-, Orts-, Etikett- oder Funktionswort, keine Beugungsendung eines Adjektivs
+            ("Erfahrene Bergsteiger", "Neuen Behälter"), keine Substantiv-Endung, kein zusammengesetztes Hauptwort."""
+            w2 = woerter[j][2]
+            vn2, nn2, vnm2, nnm2, aw2, tit2, allow2, part2 = arten[j]
+            return (gross(j) and namenswort(j) and not (vn2 or nn2 or aw2 or tit2 or allow2 or part2)
+                    and 3 <= len(w2) <= 14 and w2.isalpha() and not w2.isupper()
+                    and w2.lower() not in _STOPPWOERTER and w2.lower() not in _ARTIKEL
+                    and not kennungsformen.ist_funktionswort(w2)
+                    and not re.search(r"(?:e|en|er|es|em)$", w2)
+                    and not _NOMEN_ENDUNG.search(w2) and not self.w.frage("ist_beruf", w2)
+                    and not self.w.frage("ist_ort", w2) and not self.w.ist_etikett(w2) and not self._kompositum(w2))
+
         def artikel_davor(i) -> bool:
             """Steht direkt davor ein Artikel oder Begleiter ("Die Scheibe", "eine Weber-Grillstation")? Dann ist das
             großgeschriebene Wort ein Substantiv (Befund 66)."""
@@ -3578,8 +3601,13 @@ class _Seitenpruefung:
                      and not (not (vn or nn) and personenkontext.ORG_EINHEIT_RE.search(self.zeilen_text(z_wort))))
             geboren = geburtsname(i)
             rolle = s in wohn_starts or partei(i) or name_amt(i)
+            # ein Name der Wissensbasis direkt hinter "laut"/"gemäß" ("laut Vorwerk war der Keller trocken"): die Quelle
+            # einer Aussage, meist eine Person (Abnahme 2, widerlegt-3) – nur für mehrdeutige Namen, die sonst
+            # ohne Kontext bleiben
+            laut = ((vn or nn) and not aw and personenkontext.PERSON_LAUT_DAVOR_RE.search(
+                text[max(text.rfind("\n", max(0, s - 30), s) + 1, s - 30, 0):s]) is not None)
             kontext = (titel or platzhalter or etikett or links_vorname or rechts_nachname or komma_paar or gruss
-                       or geboren or rolle)
+                       or geboren or rolle or laut)
             if personenkontext.tierangabe(text, s) or (personenkontext.medizinisch(w, text, s, self.w.modul)
                                                        and not titel):
                 continue                                # "Abstammung: v. Gribaldi", "Baker-Zyste", "Morbus Scheuermann"
@@ -3634,6 +3662,16 @@ class _Seitenpruefung:
             if links_vorname and not allow and (w.lower() in _KALENDERWOERTER or not aw) \
                     and not _NOMEN_ENDUNG.search(w) and not self.w.ist_etikett(w):
                 self.neu(s, e, "Name direkt hinter einem Vornamen", "name")
+                continue
+            # ein Familienname nach seiner Gestalt direkt hinter einem unbekannten großgeschriebenen Wort ("Kreszenz
+            # Moosbichler aus Inzell hat angerufen", "Grüße aus Inzell von Kreszenz Moosbichler"): Vor- und
+            # Familienname, auch wenn der Vorname nicht in der Wissensbasis steht (Abnahme 2 V6)
+            if not (vn or nn or aw or allow) and i > 0 and direkt(i, i - 1) \
+                    and personenkontext.namensgestalt(w, self.w.modul) and not _sachwort_er(w) \
+                    and unbekannter_vorname(i - 1) and not self.w.ist_etikett(w) and not firma_danach(i) \
+                    and not text[e:e + 2].lstrip(")").startswith(":"):
+                self.neu(woerter[i - 1][0], woerter[i - 1][1], "Vorname vor einem Familiennamen (nach Gestalt)", "name")
+                self.neu(s, e, "Familienname nach Gestalt hinter einem Vornamen", "name")
                 continue
             if aw or allow or len(w) < 4 or _NOMEN_ENDUNG.search(w) or self.w.ist_etikett(w) or firma_danach(i) \
                     or w.casefold() in kennungsformen.KEIN_NAMENSWERT:

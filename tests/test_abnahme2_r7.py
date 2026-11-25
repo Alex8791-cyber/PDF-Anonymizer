@@ -11,6 +11,7 @@ import pytest
 from anonymisierer import muster
 from anonymisierer.analyse import analysiere_pdf, analysiere_text
 from anonymisierer.restrisiko import pruefe_text
+from conftest import braucht_modell
 
 ALLE = {k for k, _, _, _, an in muster.KATEGORIEN if an}
 
@@ -902,3 +903,109 @@ def test_a2_13_feldnamen_ohne_werte_wachsen_linear():
 ])
 def test_a2_15_name_in_partnerschaft(text, name):
     assert _weg_oder_gemeldet(text, name), (_stellen(_funde(text)), _verdacht(text))
+
+
+# ----------------------------------------------------------------------
+# Reste nach der Endmessung 54ea1f5 (Proben der Prüfer A und B)
+# ----------------------------------------------------------------------
+# V7/N7: Personenwort mit Begleiter – ein Eigenname im Satz ist die Person, ein Substantiv nicht (Wortart der KI)
+@braucht_modell
+@pytest.mark.parametrize("text, name", [
+    ("Schadenschilderung Leitungswasser\nbeim Nachbarn Grohe war alles trocken.", "Grohe"),     # A n7_beim_nachbarn
+    ("Unfallhergang\nWir haben mit dem Zeugen Grohe telefoniert.", "Grohe"),                    # A fc02
+    ("Das Auto gehört dem Schwager Grohe.", "Grohe"),
+    ("Der Vermieter Kranawetter hat gekündigt.", "Kranawetter"),
+])
+def test_v7_personenwort_mit_begleiter_eigenname(text, name):
+    assert _geschwaerzt(text, name, "namen"), _stellen(_funde(text))
+
+
+@braucht_modell
+@pytest.mark.parametrize("text, wort", [
+    ("Er hat dem Nachbarn Wasser abgegraben.", "Wasser"),
+    ("Beim Nachbarn Regen gemessen.", "Regen"),
+    ("Wir haben dem Vermieter Bescheid gegeben.", "Bescheid"),
+    ("Er hat dem Kollegen Geld geliehen.", "Geld"),
+    ("Wir haben dem Mieter Auto und Schlüssel übergeben.", "Auto"),
+    ("Er hat dem Nachbarn Strom abgezapft.", "Strom"),
+    ("Dem Patienten Insulin verabreicht.", "Insulin"),
+    ("Er schickte dem Sachbearbeiter Fotos.", "Fotos"),
+])
+def test_v7_personenwort_mit_begleiter_substantiv_bleibt(text, wort):
+    assert not _beruehrt(text, wort), _stellen(_funde(text))
+
+
+# V1: "Code" unter einer Zeile, die nur ein Schloss nennt (Erkennung), und hinter einem Satz bzw. einer Zeile mit dem
+# Schloss (Selbstkontrolle)
+@pytest.mark.parametrize("text, wert", [
+    ("Haustür\nCode 1357", "1357"),
+    ("Tor zur Tiefgarage\nCode 4455", "4455"),
+    ("„Garage“\nCode 1199", "1199"),
+    ("Die Kellertür\nCode 2580", "2580"),
+])
+def test_v1_code_unter_einer_zeile_mit_schloss(text, wert):
+    assert _geschwaerzt(text, wert, "zugangsdaten"), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text, wert", [
+    ('Schlüsselbox am Eingang "Haustür". Code 1357', "1357"),                  # A-Sonde
+    ("Der Schlüssel liegt im Tresor. Code 3141.", "3141"),
+    ("Bitte an der Haustür klingeln\nCode 1357", "1357"),
+    ("Zugang über die Garage,\nCode 1199", "1199"),
+])
+def test_v1_code_hinter_schloss_im_satz_davor_gemeldet(text, wert):
+    assert _weg_oder_gemeldet(text, wert)
+    assert any(wert in t for t, _ in _verdacht(text)), _verdacht(text)
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Garagentor\nCode E-04 blinkt", "E-04"),
+    ("Das Garagentor zeigt einen Fehler. Code 3017", "3017"),
+    ("Schaden an der Haustür. Code 4711 laut Schadenkatalog.", "4711"),
+    ("Produkt: Haustür\nCode 1357", "1357"),
+    ("Die Haustür ist neu. Der Code 128 steht auf dem Etikett.", "128"),
+])
+def test_v1_code_satz_davor_gegenproben(text, wert):
+    assert _lesbar_ohne_meldung(text, wert), (_stellen(_funde(text)), _verdacht(text))
+
+
+# widerlegt-3: ein mehrdeutiger Name der Wissensbasis direkt hinter "laut" – gemeldet
+@pytest.mark.parametrize("text", ["laut Vorwerk war der Keller trocken.", "Laut Vorwerk war der Keller trocken."])
+def test_widerlegt3_mehrdeutiger_name_hinter_laut_gemeldet(text):
+    assert _weg_oder_gemeldet(text, "Vorwerk"), _verdacht(text)
+
+
+@pytest.mark.parametrize("text, wort", [
+    ("Laut Vertrag ist der Keller mitversichert.", "Vertrag"),
+    ("Laut Gutachten war der Keller trocken.", "Gutachten"),
+    ("laut Polizei war es dunkel.", "Polizei"),
+    ("Gemäß Paragraph 5 gilt die Frist.", "Paragraph"),
+])
+def test_widerlegt3_laut_gegenproben(text, wort):
+    assert _lesbar_ohne_meldung(text, wort), _verdacht(text)
+
+
+# V6: unbekannter Vorname vor einem Familiennamen nach Gestalt – gemeldet
+@pytest.mark.parametrize("text", ["Liebe Grüße aus Inzell von Kreszenz Moosbichler",
+                                  "Kreszenz Moosbichler aus Inzell hat angerufen."])
+def test_v6_unbekannter_vorname_vor_familienname_nach_gestalt(text):
+    assert _weg_oder_gemeldet(text, "Moosbichler"), _verdacht(text)
+    assert _weg_oder_gemeldet(text, "Kreszenz"), _verdacht(text)
+
+
+@pytest.mark.parametrize("text, wort", [
+    ("Erfahrene Bergsteiger kennen die Route.", "Bergsteiger"),
+    ("Echter Fachmann gesucht.", "Fachmann"),
+    ("Stabiler Behälter mit Deckel.", "Behälter"),
+    ("Mobile Container werden aufgestellt.", "Container"),
+    ("Neuen Behälter bitte bis Freitag liefern.", "Behälter"),
+    ("Technische Prüfstelle Rosenheim", "Prüfstelle"),
+])
+def test_v6_vorname_familienname_gegenproben(text, wort):
+    assert _lesbar_ohne_meldung(text, wort), (_stellen(_funde(text)), _verdacht(text))
+
+
+# V3: Rolle mit Arbeitgeber ("als Berater bei einer Bank") – gemeldet; als Fahrer bei einem Unfall nicht
+def test_v3_rolle_mit_arbeitgeber():
+    assert _weg_oder_gemeldet("Er ist als Berater bei einer Bank.", "Berater")
+    assert _lesbar_ohne_meldung("Er war als Fahrer bei dem Unfall beteiligt.", "Fahrer")

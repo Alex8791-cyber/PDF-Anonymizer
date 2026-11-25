@@ -633,6 +633,40 @@ def _ner_spannen(nlp, text: str) -> set:
     return spannen
 
 
+# Ausschnitt um ein Wort, in dem die KI dessen Wortart liest (Zeichen zu jeder Seite, innerhalb der Zeile)
+FENSTER_WORTART = 80
+
+
+def _personenwort_bestaetigen(nlp, text: str, spannen: list) -> list:
+    """Die Spannen (Wort hinter Personenwort mit Begleiter, personenkontext.personenwort_namen), die das Sprachmodell
+    im Satz als Eigennamen liest ("beim Nachbarn Grohe war …", "mit dem Zeugen Grohe telefoniert") – nicht als
+    Substantiv ("dem Nachbarn Wasser abgegraben", "dem Vermieter Bescheid gegeben"; Abnahme 2 V7). Gelesen wird die
+    Zeile um das Wort, höchstens FENSTER_WORTART Zeichen zu jeder Seite; gleiche Ausschnitte nur einmal."""
+    if not spannen:
+        return []
+    fenster, texte, nummer = [], [], {}
+    for s, e in spannen:
+        za = text.rfind("\n", max(0, s - FENSTER_WORTART), s) + 1
+        ze = text.find("\n", e, e + FENSTER_WORTART)
+        a = max(za, s - FENSTER_WORTART)
+        b = min(len(text), e + FENSTER_WORTART) if ze < 0 else ze
+        stueck = text[a:b]
+        if stueck not in nummer:
+            nummer[stueck] = len(texte)
+            texte.append(stueck)
+        fenster.append((s, e, nummer[stueck], s - a, e - a))
+    try:
+        docs = list(nlp.pipe(texte, batch_size=64))
+        aus = []
+        for s, e, k, rs, re_ in fenster:
+            woerter = [t for t in docs[k] if t.idx == rs and t.idx + len(t.text) == re_]
+            if woerter and woerter[0].pos_ == "PROPN":
+                aus.append((s, e))
+    except Exception:  # pragma: no cover - Sprachmodell gestört: dann bleibt es bei der Selbstkontrolle
+        return []
+    return aus
+
+
 def _ner_kurzzeilen(nlp, text: str) -> set:
     """Kurze Zeilen (Adressfenster, Tabellenzellen, Unterschriften) einzeln durch die NER —
     dort verschmilzt die Ganztext-Erkennung Namen mit Nachbarzeilen oder übersieht sie."""
@@ -1212,7 +1246,9 @@ def _name_kuerzen(text: str, start: int, ende: int):
     return start, ende
 
 
-def _regel_kandidaten(text: str) -> list:
+def _regel_kandidaten(text: str, unsicher: list | None = None) -> list:
+    """Kandidaten der Regeln; in `unsicher` die Wörter hinter Personenwort mit Begleiter ohne Namensbeleg, über die
+    die Wortart im Satz entscheidet (finde_personen, _personenwort_bestaetigen)."""
     kandidaten = []
     # 1) Rollen-Etikett: "Versicherungsnehmer: Herr Max Mustermann", "Antragsteller: MUSTERMANN, MAX"
     for m in _ROLLE_RE.finditer(text):
@@ -1238,7 +1274,7 @@ def _regel_kandidaten(text: str) -> list:
             {"text": text[s:e], "start": s, "ende": e, "gruppe": None})
     # 1a4) Name hinter einem Personenwort ohne Begleiter: "Laut Nachbar Grohe war …", "Rücksprache mit Nachbar
     #     Grohe" (Abnahme N7) – auch eine Marke, die dort eine Person ist
-    for s, e in personenkontext.personenwort_namen(text, _wissen_modul()):
+    for s, e in personenkontext.personenwort_namen(text, _wissen_modul(), unsicher):
         _kandidat(kandidaten, text, s, e, regel=True) or kandidaten.append(
             {"text": text[s:e], "start": s, "ende": e, "gruppe": None})
     # 1a'') Mundartliche Namensfolge mit Artikel: "die Kölbl Resi" (Nachprüfung LK-14)
@@ -1600,7 +1636,8 @@ def finde_personen(text: str) -> list:
     Liefert Kandidaten {text, start, ende, gruppe}; gruppe ist ein zusammengesetzter Vollname,
     wenn Bestandteile zusammengehören (Tabellenzeile Name/Vorname, Adressfenster über zwei
     Zeilen, Geburtsname "Anna Weber geb. Schulz"), sonst None. Ohne Modell greifen nur die Regeln."""
-    kandidaten = _regel_kandidaten(text)
+    unsicher: list = []
+    kandidaten = _regel_kandidaten(text, unsicher)
     # Werte hinter Sach-Etiketten (Beruf: Polier) sind nirgends ein Name — außer hinter Herr/Frau
     sachwerte = _sachwerte(text)
 
@@ -1612,6 +1649,12 @@ def finde_personen(text: str) -> list:
         kandidaten = [k for k in kandidaten if not sachwert(k)]
     nlp = lade_ner()
     if nlp is not None and text.strip():
+        # hinter Personenwort mit Begleiter: ein Eigenname im Satz ist die Person ("beim Nachbarn Grohe war …"), ein
+        # Substantiv nicht ("dem Nachbarn Wasser abgegraben"; Abnahme 2 V7)
+        for s, e in _personenwort_bestaetigen(nlp, text, unsicher):
+            if not (sachwerte and text[s:e].casefold() in sachwerte):
+                _kandidat(kandidaten, text, s, e, regel=True) or kandidaten.append(
+                    {"text": text[s:e], "start": s, "ende": e, "gruppe": None})
         spannen = _ner_spannen(nlp, text) | _ner_kurzzeilen(nlp, text)
         spannen |= _ner_versalien_zeilen(nlp, text)
         for start, ende in sorted(_an_umbruechen_teilen(text, spannen)):

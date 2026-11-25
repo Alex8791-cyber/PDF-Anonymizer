@@ -422,11 +422,19 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     angekündigte Fortsetzung einer Personentabelle zählt auch mit einer einzigen Reihe auf der Folgeseite.
     Ein Doppelname zählt hinter einem Personenwort als Name, wenn ein Teil ein Name ist und keiner ein Sachwort
     („Nachbarin Fischbacher-Zöttl rief die Feuerwehr.“; nicht „Kunden Service-Center“).
+    Hinter einem Personenwort mit Begleiter entscheidet die Wortart im Satz (Sprachmodell): ein Eigenname wird
+    geschwärzt („beim Nachbarn Grohe war alles trocken“, „mit dem Zeugen Grohe telefoniert“), ein Substantiv bleibt
+    stehen („dem Nachbarn Wasser abgegraben“, „dem Kollegen Geld geliehen“). Ein Zugangscode unter einer Zeile, die nur
+    ein Schloss nennt („Haustür⏎Code 1357“, „Tor zur Tiefgarage⏎Code 4455“), wird geschwärzt.
     Selbstkontrolle: Familienname mit Zwischenwörtern („saß wohl der …“, „Gefahren ist laut Polizei die …“, „saß nach
     Angaben der Polizei der …“, „Gefahren hat das Auto der …“) und am
     Satzanfang („Der Lackner hat den Wagen gefahren.“), Rollen wie Fahrer, Betreuerin, Vertreter als Beruf, wenn der
-    Satz von Arbeit spricht („fährt nachts als Fahrer für einen Paketdienst“), Name in einer Partnerschaft („Waldherr &
-    Partner“).
+    Satz von Arbeit spricht („fährt nachts als Fahrer für einen Paketdienst“, „als Berater bei einer Bank“), Name in
+    einer Partnerschaft („Waldherr & Partner“), ein Code am Anfang eines Satzes oder einer Zeile hinter einem Satz mit
+    einem Schloss (‚Haustür". Code 1357‘, „Der Schlüssel liegt im Tresor. Code 3141.“, „Bitte an der Haustür
+    klingeln⏎Code 1357“), ein mehrdeutiger Name der Wissensbasis hinter „laut“ oder „gemäß“ („laut Vorwerk war der
+    Keller trocken“) und ein unbekannter Vorname vor einem Familiennamen nach seiner Gestalt („Kreszenz Moosbichler aus
+    Inzell hat angerufen“; nicht hinter einem gebeugten Adjektiv: „Erfahrene Bergsteiger“).
   - Über-Schwärzung: Fehler- und Anzeigecodes von Geräten bleiben lesbar („Der Motor meldet den Code P0300“, „Der
     Laptop zeigt den Code 0xC000021A“, „Am Tor blinkt Code 3017“; eine Schaden- oder Strafanzeige im Satz macht aus
     dem Code am Schloss keinen Gerätefehler: „Der Einbruch wurde angezeigt, die Alarmanlage hat den Code 2580.“

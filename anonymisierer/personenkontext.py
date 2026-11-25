@@ -618,14 +618,15 @@ def _namensbeleg_personenwort(w: str, wissen) -> bool:
         return True
 
 
-def personenwort_namen(text: str, wissen=None) -> list:
+def personenwort_namen(text: str, wissen=None, unsicher: list | None = None) -> list:
     """(start, ende) der Namen direkt hinter einem Personenwort ("Laut Nachbar Grohe", "mit Kollegin Zwickl", "Zeuge
     Hinterstoißer"; nicht "dem Nachbarn Wasser", "beim Nachbarn Regen"): ein großgeschriebenes Wort, das kein
     Allerwelts-, Berufs-, Orts-, Etikett- oder Titelwort ist und keine Substantiv-Endung trägt ("Nachbar
     Wasserschaden", "Kunden Service" nicht) – auch eine Marke ("Grohe"), die hier eine Person ist (Erkennung,
     namen.py). Steht vor dem Personenwort keine Präposition (Anfang einer Notiz: "Chef Sekretariat ist besetzt") oder
     ein Begleiter ("beim Nachbarn Zirngibl"), zählt das Wort nur mit eigenem Namensbeleg (_namensbeleg_personenwort;
-    Abnahme 2 A2-04, V7) – ohne ihn meldet die Selbstkontrolle ein unbekanntes Wort hinter dem Personenwort."""
+    Abnahme 2 A2-04, V7). Die Wörter hinter einem Begleiter ohne Namensbeleg ("beim Nachbarn Grohe", "dem Nachbarn
+    Wasser") kommen in `unsicher`: die Erkennung entscheidet dort nach der Wortart im Satz (namen.py, Abnahme 2 V7)."""
     if not text or not _PERSONENWORT_VORAB_RE.search(text):
         return []
     wissen = _wissen_oder_modul(wissen)
@@ -659,6 +660,8 @@ def personenwort_namen(text: str, wissen=None) -> list:
             continue
         if sicher or _namensbeleg_personenwort(w, wissen):
             aus.append((m.start(1), m.end(1)))
+        elif begleiter and unsicher is not None and not text[m.end(1):m.end(1) + 3].lstrip(" \t").startswith(":"):
+            unsicher.append((m.start(1), m.end(1)))
     return aus
 
 

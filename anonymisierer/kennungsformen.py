@@ -3379,11 +3379,19 @@ def _satzteil_vor(text: str, zeilenanfang: int, code_start: int) -> str:
     return stueck[max(stueck.rfind(c) for c in ".!?;") + 1:]
 
 
+# eine Zeile nur aus einem Schloss, auch mit Artikel, Anführung oder einer kurzen Ortsangabe ("Haustür", "„Garage“",
+# "Tor zur Tiefgarage", "Die Kellertür") – darunter "Code" mit Ziffern (Abnahme 2 V1)
+_SCHLOSS_ZEILE_RE = re.compile(
+    r"(?i)(?:(?:die|der|das|unsere?|ihre?)[ \t]+)?[„“”\"'»«‚‘’(\[]{0,2}(" + _SCHLOSS_WORT + r")[„“”\"'»«‚‘’)\]]{0,2}"
+    r"(?:[ \t]+(?:zur|zum|im|in|am|an|der|des|vom|von)(?:[ \t]+[\wäöüß\-]{1,30}){1,2})?")
+
+
 def _gegenstand_vor_code(text: str, zeilenanfang: int, code_start: int):
     """(wort, gegenstand): das Wort direkt vor "Code" (mit Leerzeichen oder Doppelpunkt dazwischen) oder None, und das
     Wort, das dort als Schloss oder Gerät gilt (oder None) – das Wort selbst, bei einem Klammerzusatz direkt vor "Code"
     auch das Wort vor der Klammer ("Tresor (Keller) Code 3141"), bei "Code" am Zeilenanfang das letzte Wort einer
-    kurzen Zeile davor, die mit einem Doppelpunkt endet ("Haustür:⏎Code 1357"; Abnahme 2 V1). Gesucht nur im Fenster
+    kurzen Zeile davor, die mit einem Doppelpunkt endet ("Haustür:⏎Code 1357"; Abnahme 2 V1), oder einer Zeile, die
+    nur aus einem Schloss besteht ("Haustür⏎Code 1357", "Tor zur Tiefgarage⏎Code 4455"). Gesucht nur im Fenster
     vor "Code", nicht über den ganzen Zeilenanfang; ein Wort, das über das Fenster hinausreicht, ist kein Gegenstand."""
     fenster = max(zeilenanfang, code_start - CODE_GEGENSTAND_FENSTER)
     vor = _CODE_GEGENSTAND_VOR_RE.search(text, fenster, code_start)
@@ -3394,6 +3402,9 @@ def _gegenstand_vor_code(text: str, zeilenanfang: int, code_start: int):
             zeile = text[anfang:ende].rstrip(" \t")
             if zeile.endswith(":") and len(zeile) <= 60:
                 return None, _gegenstand_vor_code(text, anfang, anfang + len(zeile))[1]
+            schloss = _SCHLOSS_ZEILE_RE.fullmatch(zeile.strip(" \t"))
+            if schloss is not None and not _CODE_FEHLER_RE.search(zeile) and not _CODE_KEIN_GEHEIMNIS_RE.search(zeile):
+                return None, schloss.group(1)
         return None, None
     if vor.start(1) == fenster > zeilenanfang and not (text[fenster - 1].isspace() or text[fenster - 1] in ":;,.()–—"):
         return None, None
@@ -3622,6 +3633,25 @@ def schloss_feld_folgezeile(vorzeile: str, zeile: str) -> list:
     return aus
 
 
+def _schloss_im_satz_davor(text: str, zeilenanfang: int, code_start: int, satz: str) -> bool:
+    """Steht "Code" am Anfang eines Satzes oder einer Zeile, und nennt der Satz davor – in derselben Zeile oder am Ende
+    der Zeile davor – ein Schloss ohne Meldung, Störung oder Einordnung ('Haustür". Code 1357', "Der Schlüssel liegt
+    im Tresor. Code 3141", "Bitte an der Haustür klingeln" ⏎ "Code 1357"; Abnahme 2 V1)? Für die Selbstkontrolle."""
+    if satz.strip(" \t\"'„“”»«‚‘’()[]"):
+        return False
+    ende = code_start - len(satz)                       # hinter dem Satzende bzw. Zeilenanfang vor "Code"
+    if ende > zeilenanfang:
+        davor = _satzteil_vor(text, zeilenanfang, ende - 1)
+    elif zeilenanfang > 0:
+        vz = text.rfind("\n", max(0, zeilenanfang - 1 - 2 * CODE_GEGENSTAND_FENSTER), zeilenanfang - 1) + 1
+        davor = _satzteil_vor(text, vz, zeilenanfang - 1)
+    else:
+        return False
+    return bool(davor.strip()) and _CODE_SCHLOSS_RE.search(davor) is not None \
+        and not (_CODE_FEHLER_RE.search(davor) or _CODE_KEIN_GEHEIMNIS_RE.search(davor)
+                 or _CODE_EINORDNUNG_RE.search(davor))
+
+
 def zugangscode_verdacht(text: str) -> list:
     """(start, ende) der Ziffernfolgen hinter "Code", die ein Zugangscode sein können (siehe oben), auch mit "ist" oder
     "lautet" dazwischen ("Der Hausmeister öffnet die Tür, Code ist 4711."), und hinter einem Schloss als Feldname
@@ -3649,7 +3679,8 @@ def zugangscode_verdacht(text: str) -> list:
         if _CODE_FEHLER_RE.search(satz) or _CODE_KEIN_GEHEIMNIS_RE.search(satz):
             continue
         doppelpunkt = ":" in text[w.start():w.start(1)]
-        if not (_CODE_SCHLOSS_RE.search(satz) or (doppelpunkt and _CODE_ANFANG_DAVOR_RE.search(satz))):
+        if not (_CODE_SCHLOSS_RE.search(satz) or (doppelpunkt and _CODE_ANFANG_DAVOR_RE.search(satz))
+                or _schloss_im_satz_davor(text, zeilenanfang, m.start(), satz)):
             continue
         hinten = re.search(r"[.!?;]", text[w.end():min(zeilenende, w.end() + 60)] + ".")
         if _CODE_EINORDNUNG_RE.search(satz) or _CODE_EINORDNUNG_RE.search(text, w.end(), w.end() + hinten.start()) \
