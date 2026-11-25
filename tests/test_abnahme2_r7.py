@@ -1000,6 +1000,8 @@ def test_v6_unbekannter_vorname_vor_familienname_nach_gestalt(text):
     ("Mobile Container werden aufgestellt.", "Container"),
     ("Neuen Behälter bitte bis Freitag liefern.", "Behälter"),
     ("Technische Prüfstelle Rosenheim", "Prüfstelle"),
+    ("Typ Mercedes-Benz", "Mercedes-Benz"),                       # Endmessung 8ebeede, s3x 060: Marke hinter "Typ"
+    ("Marke, Typ Mercedes-Benz C 200", "Typ"),
 ])
 def test_v6_vorname_familienname_gegenproben(text, wort):
     assert _lesbar_ohne_meldung(text, wort), (_stellen(_funde(text)), _verdacht(text))

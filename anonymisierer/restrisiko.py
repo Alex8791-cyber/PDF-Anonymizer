@@ -3450,12 +3450,25 @@ class _Seitenpruefung:
             w2 = woerter[j][2]
             vn2, nn2, vnm2, nnm2, aw2, tit2, allow2, part2 = arten[j]
             return (gross(j) and namenswort(j) and not (vn2 or nn2 or aw2 or tit2 or allow2 or part2)
-                    and 3 <= len(w2) <= 14 and w2.isalpha() and not w2.isupper()
+                    and 4 <= len(w2) <= 14 and w2.isalpha() and not w2.isupper()
                     and w2.lower() not in _STOPPWOERTER and w2.lower() not in _ARTIKEL
                     and not kennungsformen.ist_funktionswort(w2)
                     and not re.search(r"(?:e|en|er|es|em)$", w2)
                     and not _NOMEN_ENDUNG.search(w2) and not self.w.frage("ist_beruf", w2)
                     and not self.w.frage("ist_ort", w2) and not self.w.ist_etikett(w2) and not self._kompositum(w2))
+
+        def marke_im_wort(w) -> bool:
+            """Ist das Wort oder ein Teil davon eine Marke ("Mercedes-Benz" hinter "Typ" im Unfallbericht)? Dann ist
+            es kein Familienname nach Gestalt."""
+            for t in [w] + [t for t in w.split("-") if t]:
+                if t.lower() in _MARKEN:
+                    return True
+                try:
+                    if self.w.modul.index("sachnamen").finde(t):
+                        return True
+                except Exception:  # pragma: no cover - Wissensbasis beschädigt
+                    return True
+            return False
 
         def artikel_davor(i) -> bool:
             """Steht direkt davor ein Artikel oder Begleiter ("Die Scheibe", "eine Weber-Grillstation")? Dann ist das
@@ -3668,6 +3681,7 @@ class _Seitenpruefung:
             # Familienname, auch wenn der Vorname nicht in der Wissensbasis steht (Abnahme 2 V6)
             if not (vn or nn or aw or allow) and i > 0 and direkt(i, i - 1) \
                     and personenkontext.namensgestalt(w, self.w.modul) and not _sachwort_er(w) \
+                    and not marke_im_wort(w) \
                     and unbekannter_vorname(i - 1) and not self.w.ist_etikett(w) and not firma_danach(i) \
                     and not text[e:e + 2].lstrip(")").startswith(":"):
                 self.neu(woerter[i - 1][0], woerter[i - 1][1], "Vorname vor einem Familiennamen (nach Gestalt)", "name")
