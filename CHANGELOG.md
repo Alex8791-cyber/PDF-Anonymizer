@@ -267,6 +267,15 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   mit Handschrift darauf und Tabellen gelten nicht als Kammfeld. Gemessen auf neun Kammfeld-Scans der
   Entwicklungskorpora: Kernwerte entfernt 29 → 92 von 106, stille Lecks 0; auf eigenen und neu erzeugten
   Formularen siehe Abschnitt „Für Entwickler“.
+- **Kurze Werte in Kammfeldern der Textebene und Kundenblöcke von EDV-Ausdrucken:** Eine Hausnummer mit ein oder
+  zwei Zeichen allein in ihrem Kammfeld („1 3“ unter „Hausnr.“) blieb lesbar – gesperrte Folgen zählten erst ab drei
+  Zeichen. Jetzt wird ein so kurzer Wert hinter einem Feldnamen geschwärzt, wenn er als Hausnummer (Ziffer, ggf.
+  mit Buchstabe) bzw. als Name aus zwei Buchstaben passt; Zählfelder, Kürzel und Kreuzchen bleiben lesbar. Stehen
+  über einem Kammfeld mehrere Feldnamen derselben Art („Straße, Hausnr.“ über Straßen- und Hausnummernfeld), gilt
+  die Zeile als Feldname (vorher: mehrdeutig, Wert ungeschwärzt). Auf gescannten EDV-Ausdrucken galt die
+  Kundenanschrift als Firmenanschrift, wenn die OCR den Namen hinter „VERSICHERUNGSNEHMER“ in zwei Zellen las
+  („NWOSU, ⇥ TESFAY“) und im Block „BANKVERBINDUNG“ stand; breite Lücken im Namen zählen jetzt wie ein Leerzeichen.
+  Mitarbeiterzeilen („Ansprechpartner“) und Briefköpfe mit Registerangaben behalten ihre Firmenanschrift.
 - **Gegenprüfung der Zusammenführung (Runde 5):** Was die zwei Prüfer am zusammengeführten Stand fanden, ist allgemein
   behoben – je Befund mit Abwandlungen und Gegenproben in `tests/test_gegenpruefung_r7.py`:
   - Verluste der Zusammenführung: der Ort hinter der Person eines Personen-Etiketts („Einweisender Arzt: Dr. …,
@@ -660,6 +669,11 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   `tests/test_kammfelder_scan.py`: Stile, Kästchenbreiten 4–8 mm, 150/200/300 dpi, Schräglage, IBAN-Gruppen, Fax
   (unterbrochene und fehlende Linien), Feldname links/oben; Gegenproben: leere Felder, Felder ohne Personenbezug,
   Tabellen, Ankreuzkästchen, Unterschriftslinie, Fließtext, Schreibmaschinenzeilen, Schrift auf Schreiblinien.
+  Kammfelder der Textebene (`struktur.kammfeld`): kurze Werte (`_kurzer_lauf`, `_kurz_passt`) und mehrere
+  Feldnamen derselben Kategorie darüber (`_etikett_darueber`); Kundenzeilen mit OCR-Zellen
+  (`struktur_adresse.personen_formzeile`). Tests in `tests/test_kammfelder_textebene.py` mit Gegenproben
+  (Zählfelder, Kürzel, Initialen, Ziffern unter Namensfeldern, Feldnamen verschiedener Art, Mitarbeiterzeile,
+  Briefkopf mit Registerangaben).
 - Neuer Aufbau: ein Seitenmodell für Analyse, Schwärzung und Selbstkontrolle (`seitenmodell.py`),
   Erkennungsregeln als Module mit Register und Rückfallliste für die EXE (`anonymisierer/detektoren/`),
   Wissensbasis (`wissen.py`, 23 Wortlisten in `anonymisierer/daten/`), dazu `kundenliste.py`,

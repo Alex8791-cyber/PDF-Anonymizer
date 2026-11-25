@@ -198,7 +198,8 @@ def personen_formzeile(seite, z, mit_anschrift: bool = False) -> bool:
     ("VERSICHERUNGSNEHMER   HAAS, FIETE", "Name: Erika Muster") oder Geburtsdatum-Feldname mit Datum; mit_anschrift:
     auch mit der Anschrift hinter dem Namen ("Versicherungsnehmer: Annelie Stöberl, Kastanienallee 9, …" – nur der Teil
     bis zum ersten Komma muss ein Name sein). Briefkopf und Fußzeile tragen solche Zeilen nie – Mitarbeiter- und
-    Gremienfelder ("Ansprechpartner:", "Vorstand:") zählen nicht."""
+    Gremienfelder ("Ansprechpartner:", "Vorstand:") zählen nicht. Breite Lücken im Namen (OCR-Zellen eines
+    EDV-Ausdrucks: "NWOSU, ⇥⇥ TESFAY") zählen wie ein Leerzeichen."""
     text = seite.text
     roh = text[z.start:z.ende]
     anfang = z.start + len(roh) - len(roh.lstrip())
@@ -209,7 +210,7 @@ def personen_formzeile(seite, z, mit_anschrift: bool = False) -> bool:
     if _KEIN_KUNDENFELD_RE.search(et.eintrag) or _ORG_ROLLEN_RE.match(et.eintrag) or _GREMIUM_RE.match(et.eintrag):
         return False
     ende = ets[1].start if len(ets) > 1 else z.ende
-    wert = text[et.ende:ende].strip(" \t:.")
+    wert = re.sub(r"[ ]*\t+[ ]*", " ", text[et.ende:ende]).strip(" \t:.")
     if not wert:
         return False
     if "datum_geburt" in et.arten:

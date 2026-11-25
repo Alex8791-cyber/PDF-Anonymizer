@@ -74,6 +74,46 @@ def _laeufe(text: str, start: int, ende: int) -> list:
     return aus
 
 
+_KURZ_RE = re.compile(r"(?<!\S)([^\W_])(?: ([^\W_]))?[ \t]*$")
+
+
+def _kurzer_lauf(text: str, start: int, ende: int):
+    """(s, e, wert) eines kurzen Kammfeld-Werts am Zeilenende – ein oder zwei einzelne Zeichen ("1 3", "8") – oder
+    None. Für drei und mehr Zeichen gilt _laeufe; ein so kurzer Wert zählt nur hinter einem Feldnamen (kammfeld)."""
+    m = _KURZ_RE.search(text, start, ende)
+    if m is None:
+        return None
+    e = m.end(2) if m.group(2) else m.end(1)
+    return m.start(1), e, text[m.start(1):e].replace(" ", "")
+
+
+def _kurz_passt(kategorie: str, wert: str) -> bool:
+    """Passt ein kurzer Kammfeld-Wert zur Kategorie seines Feldnamens? Nur Hausnummern ("13", "7A", "8") und Namen
+    aus zwei Buchstaben mit Selbstlaut ("LI") – Zählfelder, Kreuzchen und Kürzel hinter anderen Feldnamen nicht."""
+    if kategorie == "strasse":
+        return bool(re.fullmatch(r"\d[\dA-Za-z]?", wert))
+    if kategorie == "namen":
+        return len(wert) == 2 and _name_moeglich(wert)
+    return False
+
+
+def _etikett_darueber(lg, ets: list, text: str, s: int, wert: str):
+    """Feldname allein in der Zeile direkt über dem Wert. Stehen dort mehrere Feldnamen („Straße, Hausnr.“,
+    „PLZ ⇥⇥ Ort“), zählt die Zeile nur, wenn alle dieselbe Kategorie ergeben – dann der waagerecht nächste."""
+    zelle = lg.zelle_bei(s)
+    if zelle is None:
+        return None
+    for zid in _zeilen_darueber(lg, zelle.zeile, zelle.hoehe)[:1]:
+        kandidaten = [et for et in ets if lg.zelle_bei(et.start) is not None
+                      and lg.zelle_bei(et.start).zeile == zid]
+        if len(kandidaten) == 1:
+            return kandidaten[0]
+        kategorien = {kategorie_fuer(et, text[et.start:et.ende], wert) for et in kandidaten}
+        if len(kandidaten) > 1 and len(kategorien) == 1 and None not in kategorien:
+            return min(kandidaten, key=lambda et: abs(lg.zelle_bei(et.start).x0 - zelle.x0))
+    return None
+
+
 def _nur_zellen(text: str, s: int, e: int) -> bool:
     """Trennt zwischen allen Zeichen-Stücken von text[s:e] ein Spaltentrenner (kein einzelnes Leerzeichen)?"""
     stuecke = [(m.start(), m.end()) for m in _STUECK_RE.finditer(text, s, e)]
@@ -147,16 +187,20 @@ def kammfeld(dok, kontext):
             continue
         laeufe_je_zeile = []
         for z in seite.zeilen:
-            for s, e, wert in _laeufe(text, z.start, z.ende):
+            laeufe = _laeufe(text, z.start, z.ende)
+            for s, e, wert in laeufe:
                 zellen = _nur_zellen(text, s, e)
                 if zellen and not gleiche_teilung(seite, text, s, e):
                     continue                          # Tabellenzeile mit je einem Zeichen in Spalten
-                laeufe_je_zeile.append((z, s, e, wert, zellen))
+                laeufe_je_zeile.append((z, s, e, wert, zellen, False))
+            kurz = None if laeufe else _kurzer_lauf(text, z.start, z.ende)
+            if kurz is not None:                      # "1 3" unter "Hausnr.": nur mit Feldnamen (unten)
+                laeufe_je_zeile.append((z, *kurz, False, True))
         if not laeufe_je_zeile:
             continue
         lg = lage(seite)
         ets = [et for et in etiketten(seite) if et.arten]
-        for z, s, e, wert, zellen in laeufe_je_zeile:
+        for z, s, e, wert, zellen, kurz in laeufe_je_zeile:
             # Feldname: links in derselben Zeile (das nächste davor) oder allein in einer Zeile darüber
             et_wahl = None
             for et in ets:
@@ -167,17 +211,13 @@ def kammfeld(dok, kontext):
                 if any(c.isalnum() for c in zwischen):
                     et_wahl = None                    # zwischen Feldname und Wert steht noch etwas anderes
             if et_wahl is None and not text[z.start:s].strip():
-                zelle = lg.zelle_bei(s)
-                if zelle is not None:
-                    for zid in _zeilen_darueber(lg, zelle.zeile, zelle.hoehe)[:1]:
-                        kandidaten = [et for et in ets if lg.zelle_bei(et.start) is not None
-                                      and lg.zelle_bei(et.start).zeile == zid]
-                        if len(kandidaten) == 1:
-                            et_wahl = kandidaten[0]
+                et_wahl = _etikett_darueber(lg, ets, text, s, wert)
             if et_wahl is not None:
                 kat = kategorie_fuer(et_wahl, text[et_wahl.start:et_wahl.ende], wert)
             else:
-                kat = _ohne_etikett(wert)
+                kat = None if kurz else _ohne_etikett(wert)
+            if kurz and (kat is None or not _kurz_passt(kat, wert)):
+                continue                              # kurzer Wert nur als Hausnummer bzw. Name hinter Feldnamen
             if kat is None or (kontext.aktive and kat not in kontext.aktive):
                 continue
             if zellen and kat == "namen" and not _name_moeglich(wert):
