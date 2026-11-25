@@ -3408,7 +3408,8 @@ class _Seitenpruefung:
                 self.neu(s, e, "Name in einer Organisations-Spalte (Personenhinweis)", "name")
                 continue
             if artikel_davor(i) and woerter[i - 1][2] in ("der", "die") and not (vn or aw or allow) \
-                    and (nn and not nnm or personenkontext.namensgestalt(w, self.w.modul)) \
+                    and (nn and not nnm or personenkontext.namensgestalt(w, self.w.modul)
+                         or (_VERB_ARTIKEL_DAVOR_RE.search(text, max(0, s - 40), s) and self._name_auf_er(w))) \
                     and (_ARTIKEL_NAME_VERB_RE.match(text, e)
                          or _VERB_ARTIKEL_DAVOR_RE.search(text, max(0, s - 40), s)):
                 # "war der Brandstetter am Steuer", "wie die Wimmer sagte": ein Familienname mit Artikel (mundartlich;
@@ -3528,6 +3529,23 @@ class _Seitenpruefung:
                 aus.add(t[1].id)
         self._org["gruss"] = aus
         return aus
+
+    def _name_auf_er(self, w: str) -> bool:
+        """Kann ein unbekanntes Wort direkt hinter "saß der", "lenkte die" … ein Familienname sein, auch ohne die
+        Endungen von namensgestalt ("Hinterstoißer", "Wimmer"; Abnahme N5): großgeschrieben, ab fünf Buchstaben, auf
+        "-er" – kein Allerwelts-, Berufs-, Orts- oder Etikettwort, keine Substantiv-Endung ("Beifahrer", "Fahrer",
+        "Gutachter" bleiben frei). Nur für die Meldung, nicht zum Schwärzen."""
+        if len(w) < 5 or not w[:1].isupper() or w.isupper() or not w.endswith("er") or not w.isalpha():
+            return False
+        if any(self.w.frage(f, w) for f in ("ist_allerweltswort", "ist_beruf", "ist_ort", "ist_vorname",
+                                             "ist_allowlist", "ist_anrede_titel")):
+            return False
+        try:
+            from . import wissen as wissen_modul
+            return not any(wissen_modul.index(f"etiketten_{art}").eintrag_fuer(w) is not None
+                           for art in wissen_modul.ETIKETTEN_ARTEN)
+        except Exception:  # pragma: no cover - Wissensbasis fehlt
+            return False
 
     def _strassenwort(self, i, woerter) -> bool:
         """Wort ist Teil eines Straßennamens ("Theodor-Heuss-Ring", "Goethe Straße")."""
@@ -3952,7 +3970,10 @@ def _schwaerzungsrechtecke(seite) -> list:
 # Scan-Seiten: Tinte in Unterschriftsblöcken und neben Personenangaben
 # ----------------------------------------------------------------------
 _GRUSS_RE = re.compile(r"(?i)\bmit\s+(?:freundlichen|besten|herzlichen|lieben|vielen)\b|\b(?:freundliche|beste|viele|"
-                       r"herzliche|liebe)n?\s+gr[üu](?:ß|ss)e|\bhochachtungsvoll\b|\bmfg\b")
+                       r"herzliche|liebe|schöne|sonnige|kollegiale)n?\s+gr[üu](?:ß|ss)e|\bhochachtungsvoll\b|\bmfg\b")
+# Gruß mit Herkunft als ganze Zeile ("Grüße aus dem Allgäu", "Gruß vom Chiemsee"; Abnahme N6)
+_GRUSS_AUS_ZEILE_RE = re.compile(r"(?i)^\s*(?:gru(?:ß|ss)|gr[üu](?:ß|ss)e)\s+(?:aus|von|vom|nach|in)"
+                                 r"(?:\s+[^\W\d_][\w\-]*){1,4}\s*[,.!]?\s*$")
 # Grußformeln für den unscharfen Vergleich mit OCR-Zeilen ("Mit freundlichen GrüBen", "Mlt freundllchen Grüßen")
 _GRUSS_FORMELN = ("mit freundlichen grüßen", "mit freundlichem gruß", "freundliche grüße", "mit besten grüßen",
                   "beste grüße", "mit herzlichen grüßen", "herzliche grüße", "mit lieben grüßen", "liebe grüße",
@@ -4020,7 +4041,7 @@ def ist_grussformel(zeile: str) -> bool:
     """Ist die Zeile eine Grußformel – auch so, wie die OCR sie liest ("Mit freundlichen GrüBen", "Mlt freundllchen
     Grüßen")? Richtig geschrieben überall in der Zeile (_GRUSS_RE); unscharf nur als eigene, kurze Zeile: ohne
     Satz- und Leerzeichen, Diakritika gefaltet, zu mindestens 82 % gleich einer Formel."""
-    if _GRUSS_RE.search(zeile or ""):
+    if _GRUSS_RE.search(zeile or "") or _GRUSS_AUS_ZEILE_RE.match(zeile or ""):
         return True
     t = _falten_buchstaben(zeile)
     if len(t) < 3:

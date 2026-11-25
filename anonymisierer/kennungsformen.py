@@ -72,6 +72,7 @@ Regel „Etikett + Wert“ (wert_hinter_etikett):
 
 from __future__ import annotations
 
+import bisect
 import re
 from typing import Callable, NamedTuple
 
@@ -2680,6 +2681,12 @@ _QUADRAT_WOHNEN_DAVOR_RE = re.compile(
     r"(?i)(?<![\wäöüß])(?:wohn(?:t|en|te|ten)|leb(?:t|en|te|ten)|gemeldet|(?:um|ver)?zieh(?:t|en)|zog|"
     r"(?:um|ver|zu)gezogen|umzug)(?![\wäöüß])[^\n.;:]{0,50}?(?<![\wäöüß])(?:in|im|nach)[ \t]+"
     r"(?:(?:dem|der|das|den)[ \t]+)?(?:(?:Anwesen|Haus|Gebäude|Quadrat)[ \t]+)?$")
+# … oder das Wohnen dahinter: "nach"/"in" direkt davor und ein Umzugs- oder Wohnwort bis drei Wörter dahinter ("ist im
+# Mai nach S 2, 15 umgezogen", "ist nach S 2, 15 gezogen"; Abnahme N4)
+_QUADRAT_PRAEP_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:in|im|nach)[ \t]+$")
+_QUADRAT_WOHNEN_DAHINTER_RE = re.compile(
+    r"(?:[ \t]+[^\s.,;:!?]+){0,3}?[ \t]+(?:(?:um|zu|hin|weg)?gezogen|verzogen|übergesiedelt|übersiedelt|"
+    r"wohnhaft|wohnt|wohnen|wohnte|gemeldet|lebt|leben|lebte)(?![\wäöüß])")
 # Gegenbeleg: ein Gliederungs-, Platz- oder Feldwort direkt vor dem Quadrat bzw. vor der Aufzählung, in der es steht
 # ("AKB A 1, 2", "Abschnitte A 1, 2 und B 3, 4", "Sitzplatz: Reihe F 12, 14", "Feld B 3, 4", "Raum B 2, 7"), oder ein
 # Bedingungswerk bzw. eine Skizze dahinter ("B 3, 4 der VHB 2022", "B 3, 4 der Skizze")
@@ -2729,9 +2736,11 @@ def quadrat_stellen(text: str, verdacht: bool = False) -> list:
                 continue
             if gegen or _QUADRAT_KEIN_DAVOR_RE.search(davor[-40:]):
                 continue
-            if _QUADRAT_ETIKETT_DAVOR_RE.search(davor[-80:]) or _QUADRAT_WOHNEN_DAVOR_RE.search(davor[-80:]):
+            if _QUADRAT_ETIKETT_DAVOR_RE.search(davor[-80:]) or _QUADRAT_WOHNEN_DAVOR_RE.search(davor[-80:]) \
+                    or (_QUADRAT_PRAEP_DAVOR_RE.search(davor[-12:])
+                        and _QUADRAT_WOHNEN_DAHINTER_RE.match(text, letzter.end(), letzter.end() + 60)):
                 aus.append((m.start(), m.end()))
-            elif verdacht and (re.search(r"(?i)(?<![\wäöüß])(?:in|im|bei)[ \t]+$", davor)
+            elif verdacht and (re.search(r"(?i)(?<![\wäöüß])(?:in|im|bei|nach)[ \t]+$", davor)
                                or re.search(r"[\wäöüß)][ \t]*:", davor[-80:])):
                 aus.append((m.start(), m.end()))
     return aus
@@ -2856,9 +2865,11 @@ def plz4_ausland(text: str, strassen) -> list:
         plz, bekannt = m.group(1), _ort_ab(text, m.start(2))
         if bekannt is None and _ort_nicht(m.group(2).split()[0]):
             continue                                    # "Bad Ischl" ist ein Ort, "1500 Euro" keiner
-        nach_strasse = any(0 <= m.start() - e <= 6 and "\n" not in text[e:m.start()] for e in enden
-                           if m.start() - 8 <= e <= m.start())
-        vor_strasse = any(0 <= s - m.end() <= 3 for s in anfaenge if m.end() <= s <= m.end() + 3)
+        # Straßen-Enden bis sechs Zeichen davor, Straßen-Anfänge bis drei Zeichen dahinter – über die sortierten
+        # Listen statt je PLZ alle Straßen der Seite (Abnahme N11)
+        nahe = enden[bisect.bisect_left(enden, m.start() - 6):bisect.bisect_right(enden, m.start())]
+        nach_strasse = any(m.start() - e <= 6 and "\n" not in text[e:m.start()] for e in nahe)
+        vor_strasse = bisect.bisect_right(anfaenge, m.end() + 3) > bisect.bisect_left(anfaenge, m.end())
         kuerzel = m.group(0)[:1].isalpha() or (bekannt is not None
                                                and bool(_KANTON_DANACH_RE.match(text, m.start(2) + bekannt.ende)))
         land = bool(LAND_RE.search(text, max(0, m.start() - 120), min(len(text), m.end() + 60)))
@@ -3210,6 +3221,31 @@ def _zugang_spalten(text: str) -> list:
     return aus
 
 
+# Trenner hinter einem Etikett, Zelle dahinter, Gegenstand vor "Code" und Wert dahinter – als übersetzte Muster, die mit
+# Anfang und Ende im Text suchen statt auf Ausschnitten bis zum Zeilenende (eine lange Zeile mit Tausenden Treffern
+# wüchse sonst quadratisch; Abnahme N9)
+_ZUGANG_TRENNER_RE = re.compile(r"[ \t]*(?:[:=]|\t\t)[ \t]*")
+_ZUGANG_ZELLE_RE = re.compile(r"[^\t\n]+")
+# Gegenstand direkt vor "Code", auch mit Doppelpunkt dazwischen ("Garagentoröffner Code 1199", "Haustür: Code 1357",
+# "Tor zur Tiefgarage: Code 4455"; Abnahme N1): das letzte Wort im Fenster CODE_GEGENSTAND_FENSTER vor "Code"
+_CODE_GEGENSTAND_VOR_RE = re.compile(r"([^\s:;,.]+)(?:[ \t]*:[ \t]*|[ \t]+)$")
+CODE_GEGENSTAND_FENSTER = 80
+_CODE_WERT_DAHINTER_RE = re.compile(r"(?:[ \t]*:[ \t]*|[ \t]+)([^\s,;\"„“”«»<>|]{3,64})")
+_GEHEIMNIS_WERT_DAHINTER_RE = re.compile(r"[ \t]+([^\s,;\"„“”«»<>|]{3,64})")
+
+
+def _gegenstand_vor_code(text: str, zeilenanfang: int, code_start: int):
+    """Das Wort direkt vor "Code" (mit Leerzeichen oder Doppelpunkt dazwischen) oder None – gesucht nur im Fenster vor
+    "Code", nicht über den ganzen Zeilenanfang; ein Wort, das über das Fenster hinausreicht, ist kein Gegenstand."""
+    fenster = max(zeilenanfang, code_start - CODE_GEGENSTAND_FENSTER)
+    vor = _CODE_GEGENSTAND_VOR_RE.search(text, fenster, code_start)
+    if vor is None:
+        return None
+    if vor.start(1) == fenster > zeilenanfang and not (text[fenster - 1].isspace() or text[fenster - 1] in ":;,."):
+        return None
+    return vor.group(1)
+
+
 def zugangsdaten(text: str) -> list:
     """(start, ende) der Zugangsdaten hinter ihrem Etikett (Benutzer, Benutzerkennung, Login, Kennwort, Passwort, PIN,
     Geheimzahl, Aktivierungs-, Freischalt-, Zugangs-, Registrierungs-, Zahlen- und Entsperrcode, Initialpasswort):
@@ -3224,18 +3260,21 @@ def zugangsdaten(text: str) -> list:
     treffer = [(m, False) for m in _ZUGANG_ETIKETT_RE.finditer(text)]
     if "ode" in text or "ombination" in text:
         treffer += [(m, True) for m in _CODE_ETIKETT_RE.finditer(text)]
+        treffer.sort(key=lambda t: t[0].start())
+    zeilenende = -1
     for m, nur_code in treffer:
         e = m.end()
-        zeilenende = text.find("\n", e)
-        zeilenende = len(text) if zeilenende < 0 else zeilenende
-        t = None if nur_code else re.match(r"[ \t]*(?:[:=]|\t\t)[ \t]*", text[e:zeilenende + 1])
+        if zeilenende < e:                              # Zeilenende einmal je Zeile suchen (Treffer nach Lage geordnet)
+            zeilenende = text.find("\n", e)
+            zeilenende = len(text) if zeilenende < 0 else zeilenende
+        t = None if nur_code else _ZUGANG_TRENNER_RE.match(text, e, zeilenende + 1)
         if t is not None and "\t" in t.group(0) and ":" not in t.group(0):
-            naechste = re.match(r"[^\t\n]+", text[e + t.end():zeilenende])
+            naechste = _ZUGANG_ZELLE_RE.match(text, t.end(), zeilenende)
             if naechste is not None and (etikettwort(naechste.group(0).strip()) or
                                          _ZUGANG_ETIKETT_RE.fullmatch(naechste.group(0).strip())):
                 continue                                # Kopfzeile einer Tabelle: dahinter der nächste Spaltenkopf
         if t is not None:
-            i = e + t.end()
+            i = t.end()
             if i >= zeilenende and text[e:zeilenende].strip().startswith(":"):
                 folge = text.find("\n", zeilenende + 1)
                 sp = _zugang_wert(text, zeilenende + 1, len(text) if folge < 0 else folge)
@@ -3249,21 +3288,22 @@ def zugangsdaten(text: str) -> list:
         geheim = not nur_code and _GEHEIMNIS_RE.fullmatch(m.group(0)) is not None
         if nur_code and m.group(0) == "Code":
             # Gegenstand direkt vor "Code" und der Wert direkt dahinter ("Garagentoröffner Code 1199", "Alarmanlage Code
-            # 8-4-2-6"; Nachprüfung LK-07): wie ein Geheimnis-Etikett ohne Trennzeichen
-            vor = re.search(r"([^\s:;,.]+)[ \t]+$", text[max(0, text.rfind("\n", 0, m.start()) + 1):m.start()])
-            w = re.match(r"(?:[ \t]*:[ \t]*|[ \t]+)([^\s,;\"„“”«»<>|]{3,64})", text[e:zeilenende])
-            if vor is not None and w is not None and _CODE_GEGENSTAND_RE.search(vor.group(1)) \
-                    and not _CODE_KEIN_GEHEIMNIS_RE.search(vor.group(1)) \
-                    and (":" in w.group(0)[:w.start(1)] or _geheimnis_form(w.group(1))):
-                sp = _zugang_wert(text, e + w.start(1), zeilenende)
+            # 8-4-2-6"; Nachprüfung LK-07), auch mit Doppelpunkt hinter dem Gegenstand ("Haustür: Code 1357"; Abnahme
+            # N1): wie ein Geheimnis-Etikett ohne Trennzeichen
+            vor = _gegenstand_vor_code(text, text.rfind("\n", 0, m.start()) + 1, m.start())
+            w = _CODE_WERT_DAHINTER_RE.match(text, e, zeilenende)
+            if vor is not None and w is not None and _CODE_GEGENSTAND_RE.search(vor) \
+                    and not _CODE_KEIN_GEHEIMNIS_RE.search(vor) \
+                    and (":" in text[w.start():w.start(1)] or _geheimnis_form(w.group(1))):
+                sp = _zugang_wert(text, w.start(1), zeilenende)
                 if sp is not None:
                     aus.append(sp)
                     continue
         if geheim:
             # "Router-Kennwort Zirbe-Stube-77", "Ihr Initialkennwort Kx7#mQ2v.", "Zahlencode 2580."
-            w = re.match(r"[ \t]+([^\s,;\"„“”«»<>|]{3,64})", text[e:zeilenende])
+            w = _GEHEIMNIS_WERT_DAHINTER_RE.match(text, e, zeilenende)
             if w is not None and _geheimnis_form(w.group(1)):
-                sp = _zugang_wert(text, e + w.start(1), zeilenende)
+                sp = _zugang_wert(text, w.start(1), zeilenende)
                 if sp is not None:
                     aus.append(sp)
                     continue

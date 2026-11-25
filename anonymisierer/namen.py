@@ -1236,6 +1236,11 @@ def _regel_kandidaten(text: str) -> list:
     for s, e in personenkontext.hofnamen(text, _wissen_modul()):
         _kandidat(kandidaten, text, s, e, regel=True) or kandidaten.append(
             {"text": text[s:e], "start": s, "ende": e, "gruppe": None})
+    # 1a4) Name hinter einem Personenwort ohne Begleiter: "Laut Nachbar Grohe war …", "Rücksprache mit Nachbar
+    #     Grohe" (Abnahme N7) – auch eine Marke, die dort eine Person ist
+    for s, e in personenkontext.personenwort_namen(text, _wissen_modul()):
+        _kandidat(kandidaten, text, s, e, regel=True) or kandidaten.append(
+            {"text": text[s:e], "start": s, "ende": e, "gruppe": None})
     # 1a'') Mundartliche Namensfolge mit Artikel: "die Kölbl Resi" (Nachprüfung LK-14)
     for s, e in personenkontext.artikel_nachname_vorname(text, _wissen_modul()):
         _kandidat(kandidaten, text, s, e, regel=True) or kandidaten.append(

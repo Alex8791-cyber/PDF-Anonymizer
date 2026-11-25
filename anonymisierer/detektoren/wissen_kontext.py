@@ -312,11 +312,20 @@ _BERUF_VOR_RE = re.compile(
     # als Monteur beschäftigt"; Nachprüfung NP-12) – der Beruf dahinter muss in der Wissensbasis stehen
     r"(?<![\wäöüß])(?:arbeitet(?:e)?|arbeiten|jobbt|beschäftigt|angestellt|eingestellt)"
     r"(?:[ \t]+[^\s.,;:!?]+){1,4}?[ \t]+als[ \t]+"
-    r"|(?<![\wäöüß])(?:arbeitet(?:e)?|arbeiten|tätig(?:[ \t]+(?:ist|war|sind))?|beschäftigt|angestellt|eingestellt|"
-    r"selbst(?:st)?ändig|freiberuflich|ausgebildet(?:e[rn]?)?|Ausbildung|Tätigkeit|Arbeit|Anstellung|Beschäftigung|"
-    r"Stelle|Job|Lehre|Umschulung|beruflich|ehemals|früher)[ \t]+(?:als|zum|zur)[ \t]+"
+    r"|(?<![\wäöüß])(?:[Aa]rbeitet(?:e)?|[Aa]rbeiten|[Tt]ätig(?:[ \t]+(?:ist|war|sind))?|[Bb]eschäftigt|[Aa]ngestellt|"
+    r"[Ee]ingestellt|[Ss]elbst(?:st)?ändig|[Ff]reiberuflich|[Aa]usgebildet(?:e[rn]?)?|Ausbildung|Tätigkeit|Arbeit|"
+    r"Anstellung|Beschäftigung|Stelle|Job|Lehre|Umschulung|[Bb]eruflich|[Ee]hemals|[Ff]rüher)"
+    r"[ \t]+(?:als|zum|zur)[ \t]+"
     r"|(?<![\wäöüß])(?:ist|war|bin|sind|wird|wurde|Beruf:?)[ \t]+(?:von[ \t]+Beruf[ \t]+)?"
-    r"|(?<![\wäöüß])von[ \t]+Beruf[ \t]+")
+    r"|(?<![\wäöüß])von[ \t]+Beruf[ \t]+"
+    # Lebensunterhalt ("Sie verdient ihr Geld als Hebamme"; Abnahme N3)
+    r"|(?<![\wäöüß])(?:verdient(?:e)?|verdienen|bestreitet|bestritt)[ \t]+(?:ihr(?:en)?|sein(?:en)?|das|den)[ \t]+"
+    r"(?:Geld|Lebensunterhalt|Unterhalt|Brot)[ \t]+als[ \t]+")
+# "als <Beruf>" mit einem Verb der Erwerbstätigkeit dahinter ("ist als Dachdecker tätig", "war bis 2020 als Schreiner
+# tätig", "hat als Monteur gearbeitet"; Abnahme N3) – ohne dieses Verb ist "als Fahrer" eine Rolle, kein Beruf
+_ALS_RE = re.compile(r"(?<![\wäöüß])als[ \t]+")
+_ERWERB_DANACH_RE = re.compile(r"(?:[ \t]+[^\s.,;:!?]+){0,4}?[ \t]+(?:tätig|beschäftigt|angestellt|eingestellt|"
+                               r"gearbeitet|arbeitet|arbeitete|selbst(?:st)?ändig|verbeamtet)(?![\wäöüß])")
 _BERUF_ADJEKTIV_RE = re.compile(
     r"(?:(?:eine?r?|selbst(?:st)?ändige[rn]?|angestellte[rn]?|freiberufliche[rn]?|leitende[rn]?|"
     r"verbeamtete[rn]?|gelernte[rn]?|ausgebildete[rn]?|staatlich[ \t]+anerkannte[rn]?|examinierte[rn]?|"
@@ -538,6 +547,11 @@ def berufe_stellen(text: str) -> list:
         w = _beruf_wert(text, m.end(), False)
         if w:
             aus.append(w)
+    if "als" in text:
+        for m in _ALS_RE.finditer(text):
+            w = _beruf_wert(text, m.end(), False)
+            if w and _ERWERB_DANACH_RE.match(text, w[1], min(len(text), w[1] + 80)):
+                aus.append(w)
     for m in re.finditer(r"[ \t]+von[ \t]+Beruf(?![\wäöüß])", text):
         a = text.rfind("\n", 0, m.start()) + 1
         vor = [v for v in wissen.index("berufe").finde(text[a:m.start()]) if a + v.ende == m.start()]

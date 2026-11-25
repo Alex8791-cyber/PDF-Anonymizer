@@ -304,9 +304,11 @@ _FORTSETZUNG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:fortsetzung|forts\.|fortg
 
 
 # Ankündigung einer Fortsetzung unter dem Ende einer Tabelle ("Weitere Kinder siehe Folgeseite.", "Fortsetzung auf Seite
-# 2", "siehe Rückseite", "b. w."): die Tabelle setzt sich auf der nächsten Seite ohne Kopf fort (Nachprüfung NP-09)
+# 2", "siehe Rückseite", "Fortsetzung umseitig", "b. w."): die Tabelle setzt sich auf der nächsten Seite ohne Kopf fort
+# (Nachprüfung NP-09, Abnahme N8)
 _FORTSETZUNG_FOLGT_RE = re.compile(
     r"(?i)(?<![\wäöüß])(?:folgeseiten?|folgeblatt|nächsten?[ \t]+seite|naechsten?[ \t]+seite|rückseite|rueckseite|"
+    r"umseitig|umstehend|"
     r"nächste[sn]?[ \t]+blatt|fortsetzung[ \t]+(?:auf|siehe|s\.|folgt)|wird[ \t]+fortgesetzt|"
     r"(?:siehe|s\.|weiter[ \t]+(?:auf|mit))[ \t]+(?:seite|blatt|s\.)[ \t]*\d{1,3}|bitte[ \t]+wenden|b\.[ \t]?w\.)"
     r"(?![\wäöüß])")

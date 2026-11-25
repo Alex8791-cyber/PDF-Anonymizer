@@ -624,6 +624,42 @@ def etiketten(seite) -> list:
     return aus
 
 
+def etiketten_ab(seite, anfang: int, ende: int) -> list:
+    """Die Etiketten der Seite, die in [anfang, ende) beginnen (in Lage-Ordnung) – über die einmal sortierten Anfänge,
+    nicht je Aufruf alle Etiketten der Seite (eine Seite mit Tausenden Zeilen wüchse sonst quadratisch; Abnahme N10)."""
+    alle = etiketten(seite)
+    zw = getattr(seite, "_struktur_etikett_anfaenge", None)
+    if zw is None or zw[0] is not alle:
+        zw = (alle, [et.start for et in alle])
+        try:
+            seite._struktur_etikett_anfaenge = zw
+        except AttributeError:
+            pass
+    anfaenge = zw[1]
+    return alle[bisect_left(anfaenge, anfang):bisect_left(anfaenge, ende)]
+
+
+def _etikett_beginnt(starts, anfang: int, ende: int) -> bool:
+    """Beginnt eines der Etiketten mit den Anfängen starts (Menge) in [anfang, ende)? Kurze Bereiche Zeichen für
+    Zeichen, lange über die einmal sortierten Anfänge (EtikettAnfaenge) – nicht je Aufruf alle Anfänge der Seite."""
+    if ende - anfang <= 8 or not hasattr(starts, "folge"):
+        if ende - anfang <= 8:
+            return any(s in starts for s in range(anfang, ende))
+        return any(anfang <= s < ende for s in starts)
+    folge = starts.folge
+    i = bisect_left(folge, anfang)
+    return i < len(folge) and folge[i] < ende
+
+
+class EtikettAnfaenge(frozenset):
+    """Anfänge der Etiketten einer Seite als Menge, dazu einmal sortiert (folge) für Bereichsfragen."""
+
+    def __new__(cls, werte=()):
+        obj = super().__new__(cls, werte)
+        obj.folge = tuple(sorted(obj))
+        return obj
+
+
 PII_ARTEN = frozenset({"person", "kennung", "datum_geburt", "adresse", "kontakt"})
 
 
@@ -1878,7 +1914,7 @@ def werte_darunter(seite, lg: Lage, et: Etikett, alle_starts: set) -> list:
                 continue
             if abs(z.x0 - zelle.x0) > max(4 * h, 40.0) and z.x0 < zelle.x0 - h:
                 continue
-            if any(z.start <= s < z.ende and s <= z.start + 2 for s in alle_starts):
+            if _etikett_beginnt(alle_starts, z.start, min(z.ende, z.start + 3)):
                 return []                           # darunter steht das nächste Etikett
             if re.search(r"(?:/-?in|\(in\)|:)\s*$", text[z.start:z.ende]):
                 return []                           # Feldbezeichner ("Raucher/in", "Beruf:")
@@ -1905,18 +1941,16 @@ def _erste_zellen(lg: Lage):
     return cache
 
 
-def werte_rechts_daneben(seite, lg: Lage, et: Etikett, alle_starts: set) -> list:
-    """Wert in einer eigenen Zeile rechts auf derselben Höhe: ein Formular, dessen Spalten das Seitenmodell als
-    getrennte Blöcke führt (Texterkennung: Feldcodes, Feldnamen und Werte je ein Block – "Name oder Firmenname" und
-    "Kreidler" stehen in verschiedenen Zeilen). Das Etikett ist die letzte Zelle seiner Zeile; der Wert ist die erste
-    Zelle der nächsten Zeile rechts, deren Höhe sich mit dem Etikett deckt – nicht zu weit entfernt, kein weiteres
-    Etikett und kein Feldbezeichner."""
+def _zelle_rechts_daneben(lg: Lage, et: Etikett):
+    """Die Zelle rechts neben dem Etikett auf derselben Höhe in einer eigenen Zeile (werte_rechts_daneben) oder None:
+    das Etikett ist die letzte Zelle seiner Zeile, gewählt wird die nächste erste Zelle einer anderen Zeile rechts
+    davon, deren Höhe sich mit dem Etikett deckt."""
     zelle = lg.zelle_bei(et.start)
     if zelle is None:
-        return []
+        return None
     eigene = lg.zellen_je_zeile.get(zelle.zeile, ())
     if not eigene or max(c.x1 for c in eigene) > zelle.x1 + 0.5:
-        return []                                   # rechts in derselben Zeile steht noch etwas
+        return None                                 # rechts in derselben Zeile steht noch etwas
     h = max(zelle.hoehe, 4.0)
     weite = max(260.0, 25 * lg.hoehe)
     bester = None
@@ -1935,11 +1969,20 @@ def werte_rechts_daneben(seite, lg: Lage, et: Etikett, alle_starts: set) -> list
             continue
         if bester is None or abstand < bester[0]:
             bester = (abstand, erste)
-    if bester is None:
+    return None if bester is None else bester[1]
+
+
+def werte_rechts_daneben(seite, lg: Lage, et: Etikett, alle_starts: set) -> list:
+    """Wert in einer eigenen Zeile rechts auf derselben Höhe: ein Formular, dessen Spalten das Seitenmodell als
+    getrennte Blöcke führt (Texterkennung: Feldcodes, Feldnamen und Werte je ein Block – "Name oder Firmenname" und
+    "Kreidler" stehen in verschiedenen Zeilen). Das Etikett ist die letzte Zelle seiner Zeile; der Wert ist die erste
+    Zelle der nächsten Zeile rechts, deren Höhe sich mit dem Etikett deckt – nicht zu weit entfernt, kein weiteres
+    Etikett und kein Feldbezeichner."""
+    z = _zelle_rechts_daneben(lg, et)
+    if z is None:
         return []
-    z = bester[1]
     text = seite.text
-    if any(z.start <= s < z.ende and s <= z.start + 2 for s in alle_starts):
+    if _etikett_beginnt(alle_starts, z.start, min(z.ende, z.start + 3)):
         return []                                   # rechts daneben steht das nächste Etikett
     if re.search(r"(?:/-?in|\(in\)|:)\s*$", text[z.start:z.ende]):
         return []                                   # Feldbezeichner ("Raucher/in", "Beruf:")
@@ -2085,6 +2128,19 @@ def _roh_feldwort(wort: str) -> bool:
                                                   etikett_fuer_text(stamm) is not None)
 
 
+def _anfaenge_mit_art(seite, alle: list) -> list:
+    """Sortierte Anfänge der Etiketten mit Art – einmal je Seite statt je Feldname (ocr_rohwert fragt für jeden
+    Feldnamen ohne Wert; ein Formular mit Tausenden Feldnamen wüchse sonst quadratisch, Abnahme N10)."""
+    zw = getattr(seite, "_struktur_anfaenge_art", None)
+    if zw is None or zw[0] is not alle:
+        zw = (alle, sorted(n.start for n in alle if n.arten))
+        try:
+            seite._struktur_anfaenge_art = zw
+        except AttributeError:
+            pass
+    return zw[1]
+
+
 def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
     """Rohwert hinter einem Feldnamen auf einer gescannten Seite. Handschrift, Druckbuchstaben in Kästchen und
     Schreibmaschine liest die OCR oft als Buchstabensalat ("Versicherungsnummer: REN RER ⇥⇥ ERNEST EI") – keine
@@ -2107,7 +2163,7 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
     zeile = seite.zeile_von(et.start)
     if zeile is None:
         return []
-    starts = sorted(n.start for n in alle if n.arten)
+    starts = _anfaenge_mit_art(seite, alle)
     # Der gedruckte Feldname reicht bis zum Doppelpunkt: "Ort der Besichtigung:", "Stelle des Unfalls:" – ein
     # Ereignisort ist keine Anschrift, und deckt das Etikett ("PLZ") den Feldnamen nicht ganz ab ("PLZ des
     # Wohnorts:"), ist der Rest kein Wert: der Wert steht erst hinter dem Doppelpunkt (Anschrift-Kategorien; "Name des
@@ -2117,7 +2173,8 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
     if fm is not None:
         if _ROH_KEIN_FELD_RE.search(text[et.start:fm.end()]):
             return []
-        if kat in ("plzort", "strasse") and not any(fm.start(1) <= s0 < fm.end(1) for s0 in starts):
+        k0 = bisect_left(starts, fm.start(1))
+        if kat in ("plzort", "strasse") and not (k0 < len(starts) and starts[k0] < fm.end(1)):
             anfang = fm.end()
 
     def bereich(s: int, ende: int):
@@ -2166,6 +2223,23 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
         return [Wert(b[0], b[1], kat)]
     if text[anfang:zeile.ende].strip(" \t:.()…_") and not _HINWEIS_KLAMMER_RE.fullmatch(text[anfang:zeile.ende]):
         return []
+
+    def rechts_daneben():
+        """Eine Spalte aus Feldnamen (darunter der nächste Feldname oder nichts): der Eintrag steht rechts daneben auf
+        derselben Höhe in einer eigenen Zeile – so liest die Texterkennung Formulare mit Kästchen um die Werte (s7 037:
+        "Steuer-ID:" ⇥ "Bız11sar066"; Abnahme, widerlegt-1). Nicht, wenn dort ein Feldname beginnt oder die Zelle selbst
+        ein Feldbezeichner ist."""
+        z = _zelle_rechts_daneben(lg, et)
+        if z is None or not lg.zeilen_ocr.get(z.zeile):
+            return []
+        i = bisect_left(starts, z.start)
+        if i < len(starts) and starts[i] <= z.start + 2:
+            return []                                   # rechts daneben steht der nächste Feldname
+        if re.search(r"(?:/-?in|\(in\)|:)\s*$", text[z.start:z.ende]):
+            return []                                   # Feldbezeichner ("Raucher/in", "Beruf:")
+        b = bereich(z.start, z.ende)
+        return [Wert(b[0], b[1], kat)] if b is not None else []
+
     # Feldname allein in seiner Zeile: Eintrag darunter in derselben Spalte
     box = lg.box(et.start, et.ende)
     if box is None:
@@ -2179,11 +2253,11 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
                 continue
             i = bisect_left(starts, z.start)
             if i < len(starts) and starts[i] <= z.start + 2:
-                return []                               # darunter steht der nächste Feldname
+                return rechts_daneben()                 # darunter steht der nächste Feldname
             b = bereich(z.start, z.ende)
             return [Wert(b[0], b[1], kat)] if b is not None else []
-        return []
-    return []
+        return rechts_daneben()
+    return rechts_daneben()
 
 
 def folgezellen_werte(seite, lg: Lage, et: Etikett, werte: list, starts: set) -> list:
@@ -2205,7 +2279,7 @@ def folgezellen_werte(seite, lg: Lage, et: Etikett, werte: list, starts: set) ->
     for z in sorted(lg.zellen_je_zeile.get(zelle0.zeile, ()), key=lambda z: z.start):
         if z.start < ende_bisher or z.start <= et.start:
             continue
-        if any(z.start <= s0 < z.ende for s0 in starts):
+        if _etikett_beginnt(starts, z.start, z.ende):
             break                                     # nächster Feldname: neue Spalte mit eigenem Wert
         inhalt = text[z.start:z.ende].strip()
         if not inhalt:
@@ -2323,7 +2397,7 @@ def gremium_folgezeilen(seite, lg: Lage, et: Etikett, letzte_ende: int, alle_sta
                 break
         if naechste is None:
             break
-        if any(naechste.start <= s < naechste.ende for s in alle_starts) or ":" in text[naechste.start:naechste.ende]:
+        if _etikett_beginnt(alle_starts, naechste.start, naechste.ende) or ":" in text[naechste.start:naechste.ende]:
             break                                    # nächstes Etikett
         werte = _namens_werte(text, naechste.start, naechste.ende,
                               et._replace(eintrag="Vorstand"), True)
@@ -2439,7 +2513,7 @@ def etikett_wert(dok, kontext):
         alle = etiketten(seite)
         if not alle:
             continue
-        starts = {et.start for et in alle if et.arten & (PII_ARTEN | {"vertragsdaten"})}
+        starts = EtikettAnfaenge(et.start for et in alle if et.arten & (PII_ARTEN | {"vertragsdaten"}))
         kennung_starts = frozenset(et.start for et in alle if "kennung" in et.arten)
         koepfe: dict = {}
         for idx, et in enumerate(alle):

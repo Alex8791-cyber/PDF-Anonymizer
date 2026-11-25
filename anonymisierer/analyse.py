@@ -483,7 +483,9 @@ _PERSONENKONTEXT_RE = re.compile(
 _WORT_DAVOR_RE = re.compile(r"([^\W\d_][\w'’\-]*)[\s,]*$")
 _WORT_DANACH_RE = re.compile(r"[\s,]*([^\W\d_][\w'’\-]*)")
 _KLEINWORT_RE = re.compile(r"(?<![\w])[a-zäöüß][a-zäöüß]{2,}(?![\w])")
-_ADRESSE_RE = re.compile(r"[^\s@]+@[^\s@]+|(?:https?://|www\.)\S+", re.IGNORECASE)
+# E-Mail-Adressen und URLs; die Adresse beginnt nur am Wortanfang – ein langes Wort ohne "@" würde sonst von jeder
+# seiner Stellen aus bis zum Ende durchsucht (quadratisch, Abnahme N10)
+_ADRESSE_RE = re.compile(r"(?<![^\s@])[^\s@]+@[^\s@]+|(?:https?://|www\.)\S+", re.IGNORECASE)
 
 
 def _titelwort_ist_name(roh: str, pos: int, anzahl: int) -> bool:

@@ -35,8 +35,9 @@ _ANREDE_RE = re.compile(
 _GRUSS_RE = re.compile(
     r"^[ \t]*(?:mit[ ]+(?:freundlichen|freundlichem|besten|bestem|herzlichen|herzlichem|lieben|liebem|kollegialen|"
     r"kollegialem|vielen|verbindlichen|sonnigen)[ ]+gr(?:ü|ue|u)(?:ß|ss)(?:en|e)?"
-    r"|(?:freundliche|viele|beste|herzliche|liebe|schöne|sonnige|kollegiale|sportliche)[ ]+gr(?:ü|ue)(?:ß|ss)e"
-    r"(?:[ ]+aus[ ]+[^\W\d_][\w\-]*)?"
+    r"|(?:(?:freundliche|viele|beste|herzliche|liebe|schöne|sonnige|kollegiale|sportliche)[ ]+)?gr(?:ü|ue)(?:ß|ss)e"
+    r"(?:[ ]+(?:aus|von|vom|nach|in)(?:[ ]+[^\W\d_][\w\-]*){1,4})?"
+    r"|gru(?:ß|ss)[ ]+(?:aus|von|vom|nach|in)(?:[ ]+[^\W\d_][\w\-]*){1,4}"
     r"|(?:danke|vielen[ ]+dank|besten[ ]+dank)(?:[ ]+und|[ ]*,)[ ]+(?:viele[ ]+|beste[ ]+|liebe[ ]+)?gr(?:ü|ue)(?:ß|ss)e"
     r"|hochachtungsvoll|mfg|lg|vg|gruß|grüße|best[ ]+regards|kind[ ]+regards|regards|cordialement"
     r"|freundlichst|herzlichst|servus|tschüss|tschüs|ciao|bis[ ]+bald|pfiat[ ]+di|baba)[ ]*[,.!]?[ \t]*$",

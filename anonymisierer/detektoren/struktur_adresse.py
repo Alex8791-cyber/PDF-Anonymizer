@@ -31,13 +31,14 @@ der Republik 99 a") –, die Zeilen davor sind Namen.
 
 from __future__ import annotations
 
+import bisect
 import functools
 import re
 
 from ..seitenmodell import SPALTENTRENNER
 from . import REGISTER, Treffer, detektor, registrieren
 from .struktur import (_GREMIUM_RE, _ORG_ROLLEN_RE, HAUSNUMMER_VOR_PLZ_RE, STRASSENNAME_ALLEIN_RE, adresszusatz,
-                       etiketten, lage, namen_spanne, ort_verlaengern, plz_ort_kappen,
+                       etiketten_ab, lage, namen_spanne, ort_verlaengern, plz_ort_kappen,
                        plz_ort_spannen, strasse_spanne, _muster, _wissen)
 
 MM = 72 / 25.4
@@ -116,6 +117,62 @@ def firmen_beleg(zeile: str) -> str | None:
     return None
 
 
+# Ab dieser Länge bestimmt der Firmenkontext die Belege einer Zeile einmal (_LangeZeile) statt je Anschriften-Treffer
+# den Zeilenanfang neu zu durchsuchen
+_LANGE_ZEILE = 300
+_WORTZEICHEN_RE = re.compile(r"[\wäöüß]")
+_ZIFFER_RE = re.compile(r"\d")
+
+
+class _LangeZeile:
+    """Firmenbelege einer langen Zeile, einmal bestimmt, für firmen_beleg auf ihren Anfängen (Abnahme N11): der erste
+    Treffer von Rechtsform und Organisationswort in der ganzen Zeile und die Abschnitte zwischen den Trennern
+    (_SEGMENT_RE, wie _allowlist_in sie bildet) mit ihrem Ergebnis. Ein Anfang hat einen Beleg, wenn ein Treffer der
+    ganzen Zeile vor dem Schnitt endet oder ein ganzer Abschnitt davor eine Organisation ist; nur wo der Schnitt in
+    einem Treffer, mitten in einem Wort oder im letzten Abschnitt liegt, wird der Ausschnitt selbst geprüft – so bleibt
+    das Ergebnis dasselbe wie firmen_beleg auf dem Ausschnitt, die Arbeit je Anfang aber klein."""
+
+    def __init__(self, zt: str):
+        self.zt = zt
+        self.erste = [rx.search(zt) for rx in (_RECHTSFORM_RE, _ORGANISATION_RE)]
+        self.trenner_anfang, self.trenner_ende, self.org_bis, self.ziffer = [], [], [], []
+        pos, org = 0, False
+        for t in list(_SEGMENT_RE.finditer(zt)) + [None]:
+            ende = len(zt) if t is None else t.start()
+            z = _ZIFFER_RE.search(zt, pos, ende)
+            self.ziffer.append(z.start() if z is not None else None)    # erste Ziffer des Abschnitts
+            if t is None:
+                break
+            org = org or _allowlist_in(zt[pos:ende])
+            self.trenner_anfang.append(t.start())
+            self.trenner_ende.append(t.end())
+            self.org_bis.append(org)                    # ein Abschnitt bis zu diesem Trenner ist eine Organisation
+            pos = t.end()
+
+    def beleg_im_anfang(self, laenge: int) -> bool:
+        zt = self.zt
+        if laenge < len(zt) and laenge > 0 and _WORTZEICHEN_RE.match(zt, laenge):
+            return bool(firmen_beleg(zt[:laenge]))      # Schnitt mitten im Wort: der Wortrest zählt nicht
+        for m in self.erste:
+            if m is not None and m.end() <= laenge:
+                return True
+            if m is not None and m.start() < laenge:
+                return bool(firmen_beleg(zt[:laenge]))  # der Schnitt liegt im ersten Treffer
+        # Abschnitte, deren Trenner ganz vor dem Schnitt liegt (drei Zeichen Abstand: ein angeschnittener Trenner wird
+        # mit dem letzten Abschnitt geprüft)
+        k = bisect.bisect_right(self.trenner_ende, laenge - 3) - 1
+        if k >= 0 and self.org_bis[k]:
+            return True
+        a = self.trenner_ende[k] if k >= 0 else 0      # der angeschnittene Abschnitt k + 1 beginnt hier
+        b = self.trenner_anfang[k + 1] if k + 1 < len(self.trenner_anfang) else len(zt)
+        z = self.ziffer[k + 1]
+        if z is not None and z < min(laenge, b):
+            # mit einer Ziffer vor dem Schnitt ist der Abschnitt keine Organisation (_allowlist_in); bleibt nur ein
+            # angeschnittener Trenner mit dem kurzen Rest dahinter
+            return b < laenge and _allowlist_in(zt[b:laenge])
+        return _allowlist_in(zt[a:laenge])
+
+
 def _ist_personenzeile(text: str) -> bool:
     inhalt = text.strip()
     if not inhalt or any(c.isdigit() for c in inhalt):
@@ -145,7 +202,7 @@ def personen_formzeile(seite, z, mit_anschrift: bool = False) -> bool:
     text = seite.text
     roh = text[z.start:z.ende]
     anfang = z.start + len(roh) - len(roh.lstrip())
-    ets = [et for et in etiketten(seite) if z.start <= et.start < z.ende and et.arten]
+    ets = [et for et in etiketten_ab(seite, z.start, z.ende) if et.arten]
     if not ets or ets[0].start != anfang:
         return False
     et = ets[0]
@@ -205,6 +262,7 @@ class _Firmenkontext:
                                for b, ids in je_block.items()}
         self.lg = lage(seite)
         self._firma: dict = {}
+        self._lange_zeile: dict = {}
 
     def firma(self, zid: int, bis: int | None = None) -> bool:
         """bis: Ende der Anschrift in der Zeile (Seitenoffset) – nur der Text davor zählt als Beleg."""
@@ -213,12 +271,24 @@ class _Firmenkontext:
             self._firma[schluessel] = self._berechnen(zid, bis)
         return self._firma[schluessel]
 
+    def _beleg_im_anfang(self, zid: int, laenge: int) -> bool:
+        """firmen_beleg(Zeilentext[:laenge]); auf langen Zeilen über _LangeZeile (dasselbe Ergebnis, linear)."""
+        zt = self.zeilen_text[zid]
+        if laenge >= len(zt):
+            return bool(self.beleg.get(zid))
+        if len(zt) <= _LANGE_ZEILE:
+            return bool(firmen_beleg(zt[:laenge]))
+        info = self._lange_zeile.get(zid)
+        if info is None:
+            info = self._lange_zeile[zid] = _LangeZeile(zt)
+        return info.beleg_im_anfang(laenge)
+
     def _berechnen(self, zid: int, bis: int | None) -> bool:
         z = self.zeilen.get(zid)
         if z is None:
             return False
-        eigen = self.zeilen_text[zid] if bis is None else self.seite.text[z.start:max(z.start, min(bis, z.ende))]
-        if firmen_beleg(eigen):
+        laenge = len(self.zeilen_text[zid]) if bis is None else max(0, min(bis, z.ende) - z.start)
+        if self._beleg_im_anfang(zid, laenge):
             return True
         if self.kundenzeile.get(zid) or personen_formzeile(self.seite, z, mit_anschrift=True):
             return False                              # "Versicherungsnehmer: Annelie Stöberl, Kastanienallee 9, …"

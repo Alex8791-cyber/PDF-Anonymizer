@@ -349,9 +349,37 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     begrenzten Fenstern – linear auch bei 16 000 Zeichen je Zeile. Beim Schwärzen vieler Stellen in einer Zeile prüfen
     ein Gitter aus Höhenstreifen und Spalten (bereits geschwärzte Rechtecke, Nachbarwörter), je Zeile sortierte
     Buchstabenboxen (Freiraum der Platzhalter) und eine Menge statt einer Liste nur noch die Nachbarschaft: eine Zeile
-    mit 800 Fundstellen 8,1 s → 3,6 s, drei Zeilen mit je 1100 Fundstellen 148 s → etwa 90 s. Den Rest kostet das
+    mit 800 Fundstellen 8,1 s → 3,6 s, drei Zeilen mit je 1100 Fundstellen 148 s → etwa 100 s. Den Rest kostet das
     Anlegen der Schwärzungs-Anmerkungen in PyMuPDF (jede neue Anmerkung durchsucht die vorhandenen); Seiten mit weniger
     als einigen hundert Fundstellen merken davon nichts.
+- **Abnahme der Zusammenführung (Runde 5, dritte Nachbesserung):** Was die Abnahme an Abwandlungen der behobenen
+  Befunde fand, ist allgemein behoben – je Befund mit Abwandlungen und Gegenproben in `tests/test_abnahme_r7.py`:
+  - Stille Lecks: Zugangsdaten hinter einem Gegenstand mit Doppelpunkt („Haustür: Code 1357“, „Tor zur Tiefgarage:
+    Code 4455“); Hausnamen bei einem Schadenwort, auch als Zusammensetzung oder Verb („Wasserschaden beim Stögerbauer in
+    Inzell“, „In der Nacht brannte es beim Moarhofer“), und mit einer Ortsangabe direkt dahinter („zum Huberbauer nach
+    Anger“ – nur mit der Endung eines Hausnamens oder als bekannter Familienname: „zum Discounter nach Rosenheim“ bleibt
+    stehen); Berufe im Satz mit „als … tätig“, „beschäftigt“ oder „gearbeitet“, „Tätig als …“ am Satzanfang und
+    „verdient ihr Geld als …“ („als Fahrer am Unfall beteiligt“ bleibt stehen); ein Mannheimer Quadrat hinter „nach“
+    oder „in“ mit dem Umzug dahinter („ist im Mai nach S 2, 15 umgezogen“); Namen unter einer Grußformel mit Herkunft
+    („Grüße aus dem Allgäu“, „Schöne Grüße aus dem Urlaub“, „Gruß vom Chiemsee“ – in Erkennung, Briefstruktur und
+    Selbstkontrolle gleich); ein Name direkt hinter einem Personenwort ohne Begleiter („Laut Nachbar Grohe war …“,
+    „Rücksprache mit Nachbar Grohe“ – nicht über eine Tabellenzelle hinweg: „Mieter ⇥ Objekt“ bleibt Kopfzeile).
+  - Scans: Steht ein Feldname allein in einer Spalte aus Feldnamen, gilt der Eintrag rechts daneben auf derselben Höhe
+    als Rohwert, wenn die Texterkennung ihn nicht als Wert lesen kann („Steuer-ID:“ ⇥ „Bız11sar066“, „Geburtsdatum:“ ⇥
+    „110.11.1984“ mit dem Kästchenrand als „1“, eine E-Mail-Adresse mit Leerzeichen) – mit denselben Ausschlüssen wie
+    der Rohwert darunter (Füllwerte, Hinweise, das nächste Feld). Im Entwicklungskorpus s7 werden so 11 weitere
+    Kernwerte entfernt (Anträge 036 und 037); die Steuer-ID in 037 war in allen Ständen ein Leck.
+  - Selbstkontrolle: ein unbekannter Familienname auf „-er“ direkt hinter „saß der“, „lenkte die“ … („Am Steuer saß der
+    Hinterstoißer“) und ein Quadrat hinter „nach“ werden verortet gemeldet; „Beifahrer“, „Fahrer“, „Gutachter“,
+    „Mieter“ bleiben ohne Meldung. „Fortsetzung umseitig“ und „umstehend“ kündigen die Fortsetzung einer Tabelle an
+    (vorher nur verortet gemeldet).
+  - Laufzeit: Die Regel „Gegenstand vor Code“ sucht nur in einem Fenster vor „Code“ (eine Zeile aus 3 000 „Code der
+    Alarmanlage“ 12,9 s → 1,9 s); der Firmenbeleg einer Anschrift wird je Zeile einmal bestimmt statt je Treffer über
+    den Zeilenanfang (32 000 Zeichen Kennzeichen-Kandidaten 17,3 s → 2,7 s, 16 000 Zeichen Anschriften in einer Zeile
+    6,2 s → 0,5 s); Etiketten einer Zeile und das nächste Etikett unter einem Wert werden über sortierte Anfänge
+    gefunden (32 000 Zeichen „Name“-Zeilen 12,0 s → 4,3 s); eine E-Mail-Adresse beginnt nur am Wortanfang (ein langes
+    Wort ohne „@“ wuchs quadratisch). Neue Wachstumstests (Analyse 2 000 gegen 16 000 Zeichen, einzelne Regeln 4 000
+    gegen 32 000) prüfen diese Formen und die der Nachprüfung B.
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene

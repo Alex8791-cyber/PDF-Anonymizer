@@ -503,9 +503,12 @@ GRUSS_RE = re.compile(r"(?i)(?<![\wäöüß])(?:mit[ \t]+(?:freundlichen|besten|
                       r"(?:danke|vielen[ \t]+dank|besten[ \t]+dank)(?:[ \t]+und|[ \t]*,)[ \t]+"
                       r"(?:viele[ \t]+|beste[ \t]+|liebe[ \t]+)?gr[üu](?:ß|ss)e|"
                       r"hochachtungsvoll|mfg)(?![\wäöüß])")
-# kurze Grußformel als ganze Zeile ("Gruß", "Grüße", "Freundlichst", "Herzlichst", "Servus", "Tschüss", "LG") – nicht
+# kurze Grußformel als ganze Zeile ("Gruß", "Grüße", "Freundlichst", "Herzlichst", "Servus", "Tschüss", "LG"), auch mit
+# einer Herkunft ("Grüße aus dem Allgäu", "Schöne Grüße aus dem Urlaub", "Gruß vom Chiemsee"; Abnahme N6) – nicht
 # mitten im Satz ("Gruß an die Familie"; Nachprüfung NP-03)
-GRUSS_ZEILE_RE = re.compile(r"(?i)^[ \t]*(?:gru(?:ß|ss)|gr[üu](?:ß|ss)e|freundlichst|herzlichst|servus|tsch[üu]ss?|"
+GRUSS_ZEILE_RE = re.compile(r"(?i)^[ \t]*(?:(?:(?:viele|liebe|beste|schöne|sonnige|herzliche|freundliche|kollegiale)"
+                            r"[ \t]+)?(?:gru(?:ß|ss)|gr[üu](?:ß|ss)e)(?:[ \t]+(?:aus|von|vom|nach|in)"
+                            r"(?:[ \t]+[^\W\d_][\w\-]*){1,4})?|freundlichst|herzlichst|servus|tsch[üu]ss?|"
                             r"ciao|bis[ \t]+bald|lg|vg|best[ \t]+regards|kind[ \t]+regards|regards)[ \t]*[,.!]?[ \t]*$")
 
 
@@ -548,12 +551,56 @@ def sachbeleg(text: str, start: int, ende: int, wissen=None, direkt: bool = Fals
 
 # Personenwort direkt vor einem Namen im Satz ("mit Kollege Hengst", "unser Nachbar Wallach", "die Zeugin Grundig"):
 # das Wort dahinter ist eine Person, auch wenn es zugleich Marke, Modell oder Rasse ist (Nachprüfung NP-03)
-PERSONENWORT_DAVOR_RE = re.compile(
-    r"(?<![\wäöüß])(?:Kollegen?|Kollegin|Nachbarn?|Nachbarin|Zeugen?|Zeugin|Mitarbeiter(?:in)?|Chef(?:in)?|Kunden?|"
+_PERSONENWORT = (
+    r"(?:Kollegen?|Kollegin|Nachbarn?|Nachbarin|Zeugen?|Zeugin|Mitarbeiter(?:in)?|Chef(?:in)?|Kunden?|"
     r"Kundin|Mieter(?:in)?|Vermieter(?:in)?|Sachbearbeiter(?:in)?|Monteur(?:in)?|Hausmeister(?:in)?|Schwager|"
     r"Schwägerin|Onkel|Tante|Cousine?|Neffe|Nichte|Ehemann|Ehefrau|Sohn|Tochter|Vater|Mutter|Bruder|Schwester|"
     r"Opa|Oma|Enkel(?:in)?|Patient(?:in)?|Mandant(?:in)?|Vermittler(?:in)?|Makler(?:in)?|Gutachter(?:in)?|"
-    r"Anrufer(?:in)?|Unfallgegner(?:in)?|Geschädigte[rn]?)[ \t]+$")
+    r"Anrufer(?:in)?|Unfallgegner(?:in)?|Geschädigte[rn]?)")
+PERSONENWORT_DAVOR_RE = re.compile(r"(?<![\wäöüß])" + _PERSONENWORT + r"[ \t]+$")
+# Personenwort ohne Begleiter direkt vor einem großgeschriebenen Wort im Satz ("Laut Nachbar Grohe war …", "Rücksprache
+# mit Nachbar Grohe am Montag"; Abnahme N7) – das Wort ist der Name der Person; nur mit Leerzeichen dazwischen, nicht
+# über eine Tabellenzelle ("Mieter ⇥⇥ Objekt" ist ein Tabellenkopf)
+_PERSONENWORT_NAME_RE = re.compile(r"(?<![\wäöüß\-])" + _PERSONENWORT +
+                                   r"[ ]{1,2}([A-ZÄÖÜ][a-zäöüß]{2,}(?:-[A-ZÄÖÜ][a-zäöüß]+)?)(?![\wäöüß\-])")
+
+
+def personenwort_namen(text: str, wissen=None) -> list:
+    """(start, ende) der Namen direkt hinter einem Personenwort, vor dem kein Begleiter steht ("Laut Nachbar Grohe",
+    "mit Kollegin Zwickl", "Zeuge Hinterstoißer"; nicht "dem Nachbarn Wasser", "beim Nachbarn Regen"): ein
+    großgeschriebenes Wort, das kein Allerwelts-, Berufs-, Orts-, Etikett- oder Titelwort ist und keine Substantiv-
+    Endung trägt ("Nachbar Wasserschaden", "Kunden Service" nicht) – auch eine Marke ("Grohe"), die hier eine Person
+    ist (Erkennung, namen.py)."""
+    if not text or not _PERSONENWORT_VORAB_RE.search(text):
+        return []
+    wissen = _wissen_oder_modul(wissen)
+    if wissen is None:
+        return []
+    aus = []
+    for m in _PERSONENWORT_NAME_RE.finditer(text):
+        w = m.group(1)
+        if _SUBSTANTIV_ENDUNG_RE.search(w) or w.casefold() in _KALENDER:
+            continue
+        if _BEGLEITER_DAVOR_RE.search(text, max(0, m.start() - 20), m.start()):
+            continue                                     # "dem Nachbarn Wasser", "beim Nachbarn Regen": ein Satzteil
+                                                         # mit Begleiter, das Wort dahinter ist eine Sache
+        try:
+            if wissen.ist_allerweltswort(w) or wissen.ist_beruf(w) or wissen.ist_ort(w) or wissen.ist_anrede_titel(w) \
+                    or wissen.ist_allowlist(w):
+                continue
+            if any(wissen.index(f"etiketten_{art}").eintrag_fuer(w) is not None for art in wissen.ETIKETTEN_ARTEN):
+                continue
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            continue
+        aus.append((m.start(1), m.end(1)))
+    return aus
+
+
+_PERSONENWORT_VORAB_RE = re.compile(_PERSONENWORT + r"[ ]{1,2}[A-ZÄÖÜ]")
+# Begleiter vor dem Personenwort: dann ist es ein Satzteil ("dem Nachbarn Bescheid gegeben") – die Regel gilt nur ohne
+_BEGLEITER_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:der|die|das|dem|den|des|beim|vom|zum|zur|im|am|ein|eine|einem|"
+                                 r"einen|einer|eines|kein\w*|unser\w*|mein\w*|dein\w*|sein\w*|ihr\w*|eure?\w*|"
+                                 r"dies\w*|jen\w*|jed\w*|welch\w*)[ \t]+$")
 # schwächerer Hinweis im Satz: "laut Wallach ist …" – für die Selbstkontrolle (Verdacht statt Schwärzung)
 PERSON_LAUT_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:laut|lt\.|gemäß|nach[ \t]+angaben[ \t]+von)[ \t]+$")
 
@@ -933,13 +980,50 @@ _KEIN_NAME_IN_ORG_ZELLE_RE = re.compile(
 _HOF_KOPF_RE = re.compile(r"(?<![\wäöüß\-])(?:(Hof|Anwesen|Gehöft|Bauernhof|Hofstelle|Hofgut|Gutshof|Aussiedlerhof)|"
                           r"([Bb]eim|[Vv]om|[Zz]um))[ \t]+(?=[A-ZÄÖÜ])")
 _HOF_NAME_RE = re.compile(r"[A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß]+)?(?![\wäöüß\-])")
-# Ort eines Ereignisses oder Wohnorts in derselben Zeile: ein Orts-Etikett mit Doppelpunkt oder ein Ereignis-/Wohnwort
+# Ort eines Ereignisses oder Wohnorts in derselben Zeile: ein Orts-Etikett mit Doppelpunkt oder ein Ereignis-/Wohnwort,
+# auch als Zusammensetzung ("Wasserschaden", "Sturmschaden", "Brandschaden") und als Verb ("brannte", "eingebrochen";
+# Abnahme N2)
 _HOF_ORTSKONTEXT_RE = re.compile(
     r"(?i)(?<![\wäöüß])(?:(?:unfall|schadens?|ereignis|tat|risiko|versicherungs|wohn|stand|abstell|einsatz)?ort|"
     r"unfallstelle|schadenstelle|lage|anschrift|adresse|belegenheit)[ \t]*:|"
-    r"(?<![\wäöüß])(?:unfall|schaden|brand|sturm|hagel|einbruch|diebstahl|zusammensto(?:ß|ss)|kollision|wildunfall|"
-    r"geschah|passierte|ereignete|wohnt|wohnen|wohnte|lebt|leben|lebte|zufahrt|einfahrt|hofeinfahrt|weide|stall|"
-    r"scheune|tenne)(?![\wäöüß])")
+    r"(?<![\wäöüß])(?:[\wäöüß]*(?:unfall|unfälle|schaden|schäden|brand|brände|einbruch|diebstahl)|sturm|hagel|"
+    r"zusammensto(?:ß|ss)|kollision|geschah|passierte|ereignete|brannte|brennt|gebrannt|abgebrannt|feuer|blitz\w*|"
+    r"überschwemm\w*|hochwasser|rohrbruch|eingebrochen|einbrecher|gestohlen|unwetter|explosion|"
+    r"wohnt|wohnen|wohnte|lebt|leben|lebte|zufahrt|einfahrt|hofeinfahrt|weide|stall|stadel|scheune|tenne)(?![\wäöüß])")
+# Ortsangabe direkt hinter dem Hausnamen: "beim Huberbauer in Anger", "vom Moarhofer aus Teisendorf", "zum Huberbauer
+# nach Anger" – der Ort darf ein kleiner sein, den die Wissensbasis nicht kennt, aber kein Allerweltswort (Abnahme N2)
+_HOF_ORT_DANACH_RE = re.compile(r"[ \t]+(?:in|nach|bei|aus)[ \t]+([A-ZÄÖÜ][a-zäöüß]{2,}(?:-[A-ZÄÖÜ][a-zäöüß]+)?)"
+                                r"(?![\wäöüß])")
+
+
+# Endungen bairischer Haus- und Hofnamen: ohne Ereigniswort zählt die Ortsangabe dahinter nur bei einem Wort mit
+# einer solchen Endung oder einem Familiennamen der Wissensbasis ("zum Huberbauer nach Anger" – nicht "zum Discounter
+# nach Rosenheim")
+_HAUSNAME_ENDUNG_RE = re.compile(r"(?:bauer|hofer|huber|maier|mayr|meier|mair|moser|bichler|lehner|leitner|reiter|"
+                                 r"egger|wieser|bacher|berger|hauser|müller|schuster|wirt)$")
+
+
+def _hausname_gestalt(wort: str, wissen) -> bool:
+    try:
+        if wissen.ist_nachname(wort) and not wissen.ist_mehrdeutig(wort):
+            return True
+    except Exception:  # pragma: no cover - Wissensbasis beschädigt
+        return False
+    return len(wort) >= 7 and bool(_HAUSNAME_ENDUNG_RE.search(wort.casefold()))
+
+
+def _ort_danach(text: str, pos: int, wissen) -> bool:
+    m = _HOF_ORT_DANACH_RE.match(text, pos)
+    if m is None:
+        return False
+    ort = m.group(1)
+    try:
+        if wissen.ist_ort(ort):
+            return True
+        return not (_SUBSTANTIV_ENDUNG_RE.search(ort) or wissen.ist_allerweltswort(ort) or wissen.ist_beruf(ort)
+                    or wissen.ist_anrede_titel(ort))
+    except Exception:  # pragma: no cover - Wissensbasis beschädigt
+        return False
 
 
 def _hofname_wort(wort: str, wissen) -> bool:
@@ -963,7 +1047,8 @@ def hofnamen(text: str, wissen) -> list:
     """(start, ende) der Hof- und Hausnamen: hinter "Hof", "Anwesen", "Gehöft" … ein möglicher Familienname
     (_hofname_wort) mit Namensgestalt oder in einer Zeile mit Orts- bzw. Ereigniskontext ("Unfallort: Zufahrt zum Hof
     Hintermoser"); hinter "beim"/"vom"/"zum" nur ein Wort mit Namensgestalt in einer solchen Zeile ("Der Unfall geschah
-    beim Stögerbauer"). Nicht: "beim Einparken", "zum Hof", "Hof Süd"."""
+    beim Stögerbauer", "Wasserschaden beim Stögerbauer") oder mit einer Ortsangabe direkt dahinter ("zum Huberbauer
+    nach Anger"; Abnahme N2). Nicht: "beim Einparken", "zum Hof", "Hof Süd", "beim Bäcker in Inzell"."""
     if wissen is None:
         return []
     aus = []
@@ -977,7 +1062,9 @@ def hofnamen(text: str, wissen) -> list:
             ze = text.find("\n", m.start())
             kontext_je_zeile[za] = bool(_HOF_ORTSKONTEXT_RE.search(text, za, len(text) if ze < 0 else ze))
         gestalt = namensgestalt(n.group(0), wissen)
-        if (m.group(1) and (gestalt or kontext_je_zeile[za])) or (m.group(2) and gestalt and kontext_je_zeile[za]):
+        kontext = kontext_je_zeile[za] or (_ort_danach(text, n.end(), wissen)
+                                           and _hausname_gestalt(n.group(0), wissen))
+        if (m.group(1) and (gestalt or kontext)) or (m.group(2) and gestalt and kontext):
             aus.append((n.start(), n.end()))
     return aus
 
