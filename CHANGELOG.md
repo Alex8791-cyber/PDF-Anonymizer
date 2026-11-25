@@ -358,16 +358,17 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Code 1357“, „Tor zur Tiefgarage: Code 4455“, „Garage, Code 1199“, „Haustür (Code 1357)“), mit dem Gegenstand im
     Satzteil davor oder dahinter („Die Haustür hat den Code 1357.“, „Code 4455 für die Tiefgarage“, „Code Haustür:
     1357“) und als Zusammensetzung („Tiefgaragen-Code“, „Kellertürcode“) – nicht hinter einem anderen Substantiv
-    („Alarmanlage defekt Fehler Code 4711“) oder einer Einordnung („Der Tarif hat den Code 1357.“); Hausnamen bei einem Schadenwort, auch als Zusammensetzung oder Verb („Wasserschaden beim Stögerbauer in
-    Inzell“, „In der Nacht brannte es beim Moarhofer“), und mit einer Ortsangabe direkt dahinter („zum Huberbauer nach
-    Anger“ – nur mit der Endung eines Hausnamens oder als bekannter Familienname: „zum Discounter nach Rosenheim“ bleibt
-    stehen); Berufe im Satz mit „als … tätig“, „beschäftigt“ oder „gearbeitet“, „Tätig als …“ am Satzanfang und
-    „verdient ihr Geld als …“ („als Fahrer am Unfall beteiligt“ bleibt stehen); ein Mannheimer Quadrat hinter „nach“,
-    „in“, „von“ oder „aus“ mit dem Umzug dahinter („ist im Mai nach S 2, 15 umgezogen“, „ist von S 2, 15 nach T 4, 12
-    umgezogen“); Namen unter einer Grußformel mit Herkunft
-    („Grüße aus dem Allgäu“, „Schöne Grüße aus dem Urlaub“, „Gruß vom Chiemsee“ – in Erkennung, Briefstruktur und
-    Selbstkontrolle gleich); ein Name direkt hinter einem Personenwort ohne Begleiter („Laut Nachbar Grohe war …“,
-    „Rücksprache mit Nachbar Grohe“ – nicht über eine Tabellenzelle hinweg: „Mieter ⇥ Objekt“ bleibt Kopfzeile).
+    („Alarmanlage defekt Fehler Code 4711“) oder einer Einordnung („Der Tarif hat den Code 1357.“); Hausnamen bei
+    einem Schadenwort, auch als Zusammensetzung oder Verb („Wasserschaden beim Stögerbauer in Inzell“, „In der Nacht
+    brannte es beim Moarhofer“), und mit einer Ortsangabe direkt dahinter („zum Huberbauer nach Anger“ – nur mit der
+    Endung eines Hausnamens oder als bekannter Familienname: „zum Discounter nach Rosenheim“ bleibt stehen); Berufe im
+    Satz mit „als … tätig“, „beschäftigt“ oder „gearbeitet“, „Tätig als …“ am Satzanfang und „verdient ihr Geld als …“
+    („als Fahrer am Unfall beteiligt“ bleibt stehen); ein Mannheimer Quadrat hinter „nach“, „in“, „von“ oder „aus“ mit
+    dem Umzug dahinter („ist im Mai nach S 2, 15 umgezogen“, „ist von S 2, 15 nach T 4, 12 umgezogen“); Namen unter
+    einer Grußformel mit Herkunft („Grüße aus dem Allgäu“, „Schöne Grüße aus dem Urlaub“, „Gruß vom Chiemsee“ – in
+    Erkennung, Briefstruktur und Selbstkontrolle gleich); ein Name direkt hinter einem Personenwort ohne Begleiter
+    („Laut Nachbar Grohe war …“, „Rücksprache mit Nachbar Grohe“ – nicht über eine Tabellenzelle hinweg: „Mieter ⇥
+    Objekt“ bleibt Kopfzeile).
   - Scans: Steht ein Feldname allein in einer Spalte aus Feldnamen, gilt der Eintrag rechts daneben auf derselben Höhe
     als Rohwert, wenn die Texterkennung ihn nicht als Wert lesen kann („Steuer-ID:“ ⇥ „Bız11sar066“, „Geburtsdatum:“ ⇥
     „110.11.1984“ mit dem Kästchenrand als „1“, eine E-Mail-Adresse mit Leerzeichen) – mit denselben Ausschlüssen wie
@@ -375,18 +376,19 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     („6. Versicherungsnehmer: Name“ ist eine Überschrift; das Kästchen „☐ parkte“ der Unfallumstände rechts daneben
     bleibt stehen). Ebenso gilt ein Beruf der Wissensbasis rechts neben dem Feldnamen „Beruf“ als Wert („6 ⇥ Beruf“ |
     „Hufschmiedin selbständig“): Wurde ein anderer Wert desselben Formulars geschwärzt, fiel dessen Verdachtsmeldung
-    weg, und der nicht erkannte Beruf blieb still. Im Entwicklungskorpus s7 werden so 11 weitere
-    Kernwerte entfernt (Anträge 036 und 037); die Steuer-ID in 037 war in allen Ständen ein Leck.
+    weg, und der nicht erkannte Beruf blieb still. Im Entwicklungskorpus s7 werden so 11 weitere Kernwerte entfernt
+    (Anträge 036 und 037), in s3x 2 (Antrag 043: BIC, Kindergeldnummer); die Steuer-ID in 037 war in allen Ständen ein
+    Leck.
   - Selbstkontrolle: ein unbekannter Familienname auf „-er“ oder „-erin“ direkt hinter „saß der“, „lenkte die“,
     „gefahren ist der“ … („Am Steuer saß der Hinterstoißer“, „… die Hinterstoißerin“) und ein Quadrat hinter „nach“
     werden verortet gemeldet; „Beifahrer“, „Fahrer“, „Gutachter“, „Mieter“, mehrdeutige Nachnamen („saß der Winter“)
     und Rollen-, Fahrzeug- und Gerätewörter auf „-er“ („rief der Anwohner“, „fuhr der Radler“, „fuhr der Bagger“ –
-    „Anwohner“ und „Mitbewohner“ wurden vorher über die Namensgestalt gemeldet) bleiben ohne Meldung. Ein Beruf der Wissensbasis hinter „als“ in einem Satz über eine Person
-    wird gemeldet, auch ohne Wort der Erwerbstätigkeit („Sie ist als Hebamme bei der Klinik in Traunstein.“, „Er
-    hilft am Wochenende als Kellner aus.“) – nicht Rollen im Vorgang oder in einer Firma („als Fahrer am Unfall
-    beteiligt“, „als Makler für Sie tätig“, „als Inhaber“) und nicht ohne Person im Satz („Als Arzt im Sinne dieser
-    Bedingungen gilt …“). „Fortsetzung umseitig“ und „umstehend“ kündigen die Fortsetzung einer Tabelle an
-    (vorher nur verortet gemeldet).
+    „Anwohner“ und „Mitbewohner“ wurden vorher über die Namensgestalt gemeldet) bleiben ohne Meldung. Ein Beruf der
+    Wissensbasis hinter „als“ in einem Satz über eine Person wird gemeldet, auch ohne Wort der Erwerbstätigkeit („Sie
+    ist als Hebamme bei der Klinik in Traunstein.“, „Er hilft am Wochenende als Kellner aus.“) – nicht Rollen im
+    Vorgang oder in einer Firma („als Fahrer am Unfall beteiligt“, „als Makler für Sie tätig“, „als Inhaber“) und
+    nicht ohne Person im Satz („Als Arzt im Sinne dieser Bedingungen gilt …“). „Fortsetzung umseitig“ und „umstehend“
+    kündigen die Fortsetzung einer Tabelle an (vorher nur verortet gemeldet).
   - Laufzeit: Die Regel „Gegenstand vor Code“ sucht nur in einem Fenster vor „Code“ (eine Zeile aus 3 000 „Code der
     Alarmanlage“ 12,9 s → 1,9 s); der Firmenbeleg einer Anschrift wird je Zeile einmal bestimmt statt je Treffer über
     den Zeilenanfang (32 000 Zeichen Kennzeichen-Kandidaten 17,3 s → 2,7 s, 16 000 Zeichen Anschriften in einer Zeile
@@ -594,7 +596,7 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - Domänen-Probe als Werkzeug im Repository (`werkzeuge/domaenenprobe/`): die 41 Falldateien der
   Domänen-Durchsicht (691 Fälle mit 2261 frei erfundenen geheimen Werten aus Kfz, Personenversicherungen, Sach,
   Finanzen/Digitales und Briefverkehr/Listen/Scans), der Harness `e2e.py` und die Messung `messen.py` (je Wert weg,
-  sichtbar mit `_PRUEFEN` oder STILL; Vergleich mit `referenz.json`, gemessen auf 39af6fe). Die Messlogik ist
+  sichtbar mit `_PRUEFEN` oder STILL; Vergleich mit `referenz.json`, gemessen auf 739f033). Die Messlogik ist
   unverändert übernommen, nur Pfade und Plattform angepasst (relative Pfade, UTF-8, Windows ohne `nice`,
   Tesseract- und Schriftsuche); eine fehlschlagende Tesseract-Kommandozeile bricht ab, statt Werte still als „weg“ zu
   zählen. Eine Regressionsprobe für die Entwicklung, keine Blindprüfung – die Regeln wurden an diesen Fällen
