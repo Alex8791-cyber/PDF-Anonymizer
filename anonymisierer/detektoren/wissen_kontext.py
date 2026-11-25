@@ -658,10 +658,55 @@ def arbeitgeber_stellen(text: str) -> list:
     return _vereinigen(aus)
 
 
+# Scan mit einer Spalte aus Feldnamen: "6 ⇥⇥ Beruf" allein in seiner Zeile, der Wert rechts daneben in einer eigenen
+# Zeile derselben Höhe – so liest die Texterkennung Formulare mit Kästchen um die Werte (Nachprüfung A s01: "6 ⇥⇥ Beruf"
+# | "Hufschmiedin selbständig"); auf der Textebene stehen Etikett und Wert in einer Zeile (berufe_stellen)
+_BERUF_ALLEIN_RE = re.compile(
+    r"(?m)^[ \t]*(?:\d{1,2}(?:\.\d{1,2})*[.)]?[ \t]+)?(?P<etikett>(?i:(?:ausgeübte[rn]?|derzeitige[rn]?|jetzige[rn]?|"
+    r"erlernte[rn]?|aktuelle[rn]?)[ \t]+)?(?:Beruf|Berufsbezeichnung|berufliche[ \t]+Tätigkeit))[ \t]*:?[ \t]*$")
+
+
+class _Stelle:
+    """Anfang eines Feldnamens für struktur._zelle_rechts_daneben (braucht nur .start)."""
+    __slots__ = ("start",)
+
+    def __init__(self, start: int):
+        self.start = start
+
+
+def beruf_rechts_daneben(dok) -> list:
+    """(start, ende) im Dokumenttext: ein Beruf der Wissensbasis am Anfang der Zelle rechts neben einem Beruf-Etikett,
+    das allein in seiner OCR-Zeile steht (höchstens eine Feldnummer davor). Nur auf gescannten Zeilen; auf der
+    Textebene stehen Etikett und Wert in einer Zeile."""
+    from . import struktur
+    aus = []
+    berufe = wissen.index("berufe")
+    for nr, seite in enumerate(dok.seiten):
+        text = seite.text
+        if "eruf" not in text or berufe is None:
+            continue
+        lg = None
+        for m in _BERUF_ALLEIN_RE.finditer(text):
+            lg = lg or struktur.lage(seite)
+            zelle = lg.zelle_bei(m.start("etikett"))
+            if zelle is None or not lg.zeilen_ocr.get(zelle.zeile):
+                continue
+            z = struktur._zelle_rechts_daneben(lg, _Stelle(m.start("etikett")))
+            if z is None or not lg.zeilen_ocr.get(z.zeile):
+                continue
+            inhalt = text[z.start:z.ende]
+            vorn = len(inhalt) - len(inhalt.lstrip())
+            treffer = [v for v in berufe.finde(inhalt) if v.start == vorn]
+            if treffer:
+                v = max(treffer, key=lambda v: v.ende)
+                aus.append((dok.global_(nr, z.start + v.start), dok.global_(nr, z.start + v.ende)))
+    return aus
+
+
 @detektor("wissen.beruf", {"beruf"}, ALLE_PROFILE)
 def beruf(dok, kontext):
-    """Beruf bei Personen (Etikett oder Satz)."""
-    return [Treffer(s, e, "beruf", "wissen.beruf", 0.6) for s, e in berufe_stellen(dok.text)]
+    """Beruf bei Personen (Etikett oder Satz; auf Scans auch rechts neben dem Feldnamen)."""
+    return [Treffer(s, e, "beruf", "wissen.beruf", 0.6) for s, e in berufe_stellen(dok.text) + beruf_rechts_daneben(dok)]
 
 
 @detektor("org.arbeitgeber", {"arbeitgeber"}, ALLE_PROFILE)

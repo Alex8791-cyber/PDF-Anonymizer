@@ -296,6 +296,32 @@ def test_widerlegt1_gegenprobe_unterfeld_einer_ueberschrift():
     assert not any("parkte" in s for s in stellen), stellen
 
 
+@pytest.mark.parametrize("feld, wert, beruf", [
+    ("6 Beruf", "Hufschmiedin selbständig", "Hufschmiedin"),        # Nachprüfung A s01 (Scan)
+    ("Beruf:", "Dachdecker", "Dachdecker"),
+    ("Ausgeübter Beruf", "Hebamme in Teilzeit", "Hebamme"),
+])
+def test_widerlegt1_beruf_rechts_neben_feldname(feld, wert, beruf):
+    """Auch der Beruf steht auf einem Scan mit Feldnamen-Spalte rechts neben seinem Feldnamen in einer eigenen Zeile.
+    Wurde ein anderer Wert des Formulars mit dieser Nachbesserung geschwärzt, fiel die Verdachtsmeldung weg, und der
+    nicht erkannte Beruf blieb still (Nachprüfung A s01: vorher nur über den Dokumentgrund sichtbar)."""
+    paare = [("Vertragsnummer", "7712-449 alt"), ("5 Arbeitgeber", "Schreinerei Gstettner"), (feld, wert),
+             ("Familienstand", "")]
+    stellen = _ocr_formular_stellen(paare)
+    assert any(beruf in s for s in stellen), stellen
+
+
+@pytest.mark.parametrize("feld, wert", [
+    ("6 Beruf", "siehe Anlage"),
+    ("6 Beruf", "entfällt"),
+    ("Berufsunfähigkeit", "Dachdecker"),          # kein Beruf-Feld
+])
+def test_widerlegt1_beruf_rechts_gegenproben(feld, wert):
+    paare = [("Vertragsnummer", "7712-449 alt"), (feld, wert), ("Familienstand", "")]
+    stellen = _ocr_formular_stellen(paare)
+    assert not any(wert.split()[0] in s for s in stellen), stellen
+
+
 def test_widerlegt1_feldnummer_vor_feldname():
     """Eine Feldnummer vor dem Feldnamen ändert nichts: "12. Steuer-ID:" ⇥ "Bız11sar066"."""
     paare = [("11. Arbeitgeber:", "Elektro Schuster eK"), ("12. Steuer-ID:", "Bız11sar066"),

@@ -373,7 +373,9 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     „110.11.1984“ mit dem Kästchenrand als „1“, eine E-Mail-Adresse mit Leerzeichen) – mit denselben Ausschlüssen wie
     der Rohwert darunter (Füllwerte, Hinweise, das nächste Feld) und nur für einen Feldnamen am Anfang seiner Zeile
     („6. Versicherungsnehmer: Name“ ist eine Überschrift; das Kästchen „☐ parkte“ der Unfallumstände rechts daneben
-    bleibt stehen). Im Entwicklungskorpus s7 werden so 11 weitere
+    bleibt stehen). Ebenso gilt ein Beruf der Wissensbasis rechts neben dem Feldnamen „Beruf“ als Wert („6 ⇥ Beruf“ |
+    „Hufschmiedin selbständig“): Wurde ein anderer Wert desselben Formulars geschwärzt, fiel dessen Verdachtsmeldung
+    weg, und der nicht erkannte Beruf blieb still. Im Entwicklungskorpus s7 werden so 11 weitere
     Kernwerte entfernt (Anträge 036 und 037); die Steuer-ID in 037 war in allen Ständen ein Leck.
   - Selbstkontrolle: ein unbekannter Familienname auf „-er“ oder „-erin“ direkt hinter „saß der“, „lenkte die“,
     „gefahren ist der“ … („Am Steuer saß der Hinterstoißer“, „… die Hinterstoißerin“) und ein Quadrat hinter „nach“
