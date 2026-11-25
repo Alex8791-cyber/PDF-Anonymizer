@@ -324,8 +324,9 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Anschrift:“ („Lindenweg 9, Hinterhaus, 83229 …“); ein Straßenname allein auf seiner Zeile oder in seiner
     Tabellenzelle mit der Hausnummer vor der PLZ darunter („Edelweißstraße“ ⏎ „4, 83080 Oberaudorf“, auch auf Scans).
   - Selbstkontrolle: abgewählte Gesundheitsdaten oder Konfession nennen einen eigenen Grund für `_PRUEFEN`; ein Datum in
-    einer Tabellenzeile aus lauter geschwärzten Namen in mindestens zwei Zellen (Folgeseite ohne Kopf – das Briefdatum
-    neben dem geschwärzten Empfänger zählt nicht), ein Familienname mit Artikel vor oder
+    einer Reihe aus lauter geschwärzten Namen (Folgeseite ohne Kopf; mit nur einem Namen, wenn das Datum direkt dahinter
+    steht – „Rieke Moosbichler 22.02.2016“ – oder die Nachbarreihe genauso aussieht; das Briefdatum neben dem
+    geschwärzten Empfänger zählt nicht), ein Familienname mit Artikel vor oder
     hinter einem Personen-Verb („war der Brandstetter am Steuer“, „saß der Haslbeck“), Marken im Personenkontext – auch
     unter einem Tabellenkopf mit nur einem Personen-Etikett („Anrufer ⇥ Anliegen ⇥ Rückruf bis“) –, Personen in
     Organisations-Spalten und dort auch eine Versicherer-Marke mit Vor- und Familienname („Adam Riese“), wenn die Zeile

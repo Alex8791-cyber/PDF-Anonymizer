@@ -314,6 +314,37 @@ def test_np09_selbstkontrolle_personenzeile():
                          platzhalter=ph)
 
 
+@pytest.mark.parametrize("text", [
+    "Folgeseite – Kinder\n[PERSON B] 22.02.2016\n[PERSON C] 04.04.2019",
+    "Fortsetzung\n[PERSON B]\t\t22.02.2016\n[PERSON C]\t\t04.04.2019",
+    "[PERSON B] [PERSON C] 22.02.2016",
+])
+def test_np09_personenreihe_mit_einem_namen(text):
+    """Eine Person je Reihe: das Datum direkt hinter dem geschwärzten Namen (Namensliste) oder in einer Tabelle mit
+    einer Namensspalte, deren Nachbarreihe genauso aussieht (scan08: vorher nur über doppelt gezählte Platzhalter)."""
+    ph = ["[PERSON B]", "[PERSON C]"]
+    assert _gemeldet(text, "22.02.2016", platzhalter=ph), _verdacht(text, platzhalter=ph)
+
+
+@pytest.mark.parametrize("text, datum", [
+    ("[PERSON A]\t\t16.05.2025", "16.05.2025"),                    # eine Reihe, Datum weit rechts (Brief)
+    ("[PERSON A] 12.11.2026", "12.11.2026"),                       # jünger als ein Jahr: Unterschrift, Gespräch
+    ("Gesprächsnotiz [PERSON A] 12.03.2020", "12.03.2020"),        # anderer Text in der Zeile
+    ("[PERSON A] 12.03.2020 Rückruf erbeten", "12.03.2020"),
+])
+def test_np09_personenreihe_mit_einem_namen_gegenproben(text, datum):
+    ph = ["[PERSON A]"]
+    assert not _gemeldet(text, datum, platzhalter=ph), _verdacht(text, platzhalter=ph)
+
+
+def test_np09_namensliste_ohne_kopf_textebene():
+    """Ende zu Ende auf der Textebene: Namen geschwärzt, die Daten dahinter verortet gemeldet (vorher still)."""
+    text = "Folgeseite – Kinder\nRieke Moosbichler 22.02.2016\nJakob Moosbichler 04.04.2019"
+    gemeldet = {t for t, _ in _ausgabe_verdacht(text)}
+    for datum in ("22.02.2016", "04.04.2019"):
+        assert _geschwaerzt(text, datum) or datum in gemeldet, (_stellen(_funde(text)), gemeldet)
+
+
 @pytest.mark.parametrize("empfaenger", [["Frau", "Sabine Krüger"], ["Herrn und Frau", "Josef und Sabine Krüger"]])
 def test_np09_briefdatum_neben_empfaenger_ist_keine_personenreihe(tmp_path, empfaenger):
     """Das Briefdatum rechts in Höhe des geschwärzten Empfängers ist kein Datensatz einer Person (Fehlmeldung der

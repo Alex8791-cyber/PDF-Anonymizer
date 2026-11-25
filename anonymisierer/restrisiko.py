@@ -556,6 +556,9 @@ _PLATZHALTER_RE = re.compile(r"\[[A-ZÄÖÜẞ0-9][A-ZÄÖÜẞ0-9 .,/&+\-]{0,38
 _PERSONEN_PLATZHALTER_RE = re.compile(r"\[(?:PERSON|P|FAMILIE|F|NAME)\b")
 _NUR_PLATZHALTER_RE = re.compile(r"(?:\[[A-ZÄÖÜ0-9][A-ZÄÖÜ0-9 \-]{0,24}\][\s,;.]*)+")
 _PERSON_PLATZHALTER_GANZ_RE = re.compile(r"\[(?:PERSON|P|FAMILIE|F|NAME|NAMEN)\b[^\]\n]{0,12}\]")
+# ein Datum als eigene Zelle bzw. in einer Zeile (Personenreihe der Selbstkontrolle, Nachprüfung NP-09)
+_DATUM_ZELLE_RE = re.compile(r"\d{1,2}[./]\d{1,2}[./](?:\d{4}|\d{2})")
+_DATUM_IN_ZEILE_RE = re.compile(r"(?<![\d.])\d{1,2}[./]\d{1,2}[./](?:\d{4}|\d{2})(?![\d.])")
 _ANSCHRIFT_PLATZHALTER_RE = re.compile(r"\[(?:ADRESSE|PLZ|STRASSE|ORT)\b")
 # Bruchstücke von Platzhaltern, wie die OCR sie liest ("PERS", "ORTI", "[PLZ")
 _PLATZHALTER_WOERTER = ("PERSON", "FAMILIE", "ADRESSE", "STRASSE", "TELEFON", "VERTRAGS", "GEB-DATUM", "DATUM",
@@ -894,14 +897,23 @@ def _platzhalter_bruchstueck(wort: str) -> bool:
     return any(p.startswith(w) or (len(w) >= 4 and w.startswith(p)) for p in _PLATZHALTER_WOERTER)
 
 
-def _personenzeile(zeile: str, ms: int, me: int) -> bool:
-    """Ist die Zeile eine Tabellenzeile (Zellen durch Tabulatoren getrennt) aus mindestens zwei Personen-Platzhaltern und
-    dem Datum zeile[ms:me] als eigener Zelle – sonst nichts?"""
-    if "\t" not in zeile or zeile[:ms].rstrip(" ")[-1:] not in ("\t", "") \
-            or zeile[me:].lstrip(" ")[:1] not in ("\t", ""):
-        return False
-    zellen = [z.strip() for z in re.split(r"\t+", zeile[:ms] + zeile[me:]) if z.strip()]
-    return len(zellen) >= 2 and all(_PERSON_PLATZHALTER_GANZ_RE.fullmatch(z) for z in zellen)
+def _personenzeile(zeile: str, ms: int, me: int) -> tuple:
+    """(Anzahl, direkt): Besteht die Zeile außer dem Datum zeile[ms:me] nur aus Personen-Platzhaltern – als Tabellenzeile
+    mit dem Datum als eigener Zelle ("[PERSON A] ⇥⇥ [PERSON B] ⇥⇥ 16.04.2016": Anzahl der Namenszellen, direkt False)
+    oder als Namensliste mit dem Datum direkt hinter dem Namen ("[PERSON B] 22.02.2016": Anzahl der Platzhalter, direkt
+    True)? Sonst (0, False)."""
+    vor, nach = zeile[:ms], zeile[me:]
+    if "\t" in zeile and vor.rstrip(" ")[-1:] in ("\t", "") and nach.lstrip(" ")[:1] in ("\t", ""):
+        zellen = [z.strip() for z in re.split(r"\t+", vor + nach) if z.strip()]
+        if zellen and all(_PERSON_PLATZHALTER_GANZ_RE.fullmatch(z) for z in zellen):
+            return len(zellen), False
+        return 0, False
+    if nach.strip(" ,.;") or not vor.endswith((" ", ", ")) or "\t" in vor:
+        return 0, False
+    namen = _PERSON_PLATZHALTER_GANZ_RE.findall(vor)
+    if namen and not _PERSON_PLATZHALTER_GANZ_RE.sub("", vor).strip(" ,"):
+        return len(namen), True
+    return 0, False
 
 
 class _Seitenpruefung:
@@ -2636,7 +2648,8 @@ class _Seitenpruefung:
             if etikett is None and 0 <= alter < ALTER_MIN and self._familien_datum(z, ms, me):
                 self.neu(s, e, "Datum an einer Person im Familien-/Versichertenkontext (Geburtsdatum?)", "datum")
                 continue
-            if etikett is None and 0 <= alter <= ALTER_MAX and self._personenreihe(z, zeile, ms, me):
+            if etikett is None and 0 <= alter <= ALTER_MAX \
+                    and self._personenreihe(z, zeile, ms, me, einzeln=alter >= 1):
                 # Tabellenzeile nur aus geschwärzten Namen und dem Datum ("[PERSON A] ⇥⇥ [PERSON B] ⇥⇥ 16.04.2016"):
                 # der Datensatz einer Person, etwa auf der Folgeseite einer Tabelle ohne Kopf (Nachprüfung NP-09)
                 self.neu(s, e, "Datum in einer Zeile aus geschwärzten Namen (Geburtsdatum?)", "datum")
@@ -2711,30 +2724,32 @@ class _Seitenpruefung:
             return False                    # Leistungs- oder Rechnungsliste unter "Kinder:"
         return True
 
-    def _personenreihe(self, z, zeile: str, ms: int, me: int) -> bool:
-        """Steht das Datum (Zeile z, Spanne ms:me) in einer Tabellenreihe, die sonst nur aus mindestens zwei geschwärzten
-        Namen besteht – im Text derselben Zeile ("[PERSON A] ⇥⇥ [PERSON B] ⇥⇥ 16.04.2016") oder auf der Seite (das
-        Datum allein in seiner Zeile, links daneben in derselben Reihe nur Personen-Platzhalter)?"""
-        if _personenzeile(zeile, ms, me):
+    def _personenreihe(self, z, zeile: str, ms: int, me: int, einzeln: bool = False) -> bool:
+        """Steht das Datum (Zeile z, Spanne ms:me) in einer Reihe, die sonst nur aus geschwärzten Namen besteht – im Text
+        derselben Zeile ("[PERSON A] ⇥⇥ [PERSON B] ⇥⇥ 16.04.2016", "[PERSON B] 22.02.2016") oder auf der Seite (das
+        Datum allein in seiner Zeile, links daneben in derselben Reihe nur Personen-Platzhalter)? Mit zwei Namenszellen
+        immer; mit nur einer (einzeln: das Datum liegt mindestens ein Jahr zurück) nur, wenn das Datum direkt hinter dem
+        Namen steht (Namensliste: "Rieke Moosbichler 22.02.2016") oder die Reihe darüber oder darunter genauso aussieht
+        (Tabelle mit einer Namensspalte) – nicht der Empfänger im Anschriftfeld eines Briefs neben dem Briefdatum
+        (Fehlmeldung in 008_beitragsrechnung; jede Platzhalter-Box zählt einmal, Nachbesserung n2)."""
+        n, direkt = _personenzeile(zeile, ms, me)
+        if (n >= 2 and not direkt) or (n and einzeln and (direkt or n >= 2 or self._personendatum_nebenan(z))):
             return True
-        if zeile[:ms].strip(_OCR_RAND) or zeile[me:].strip(_OCR_RAND):
+        if n or zeile[:ms].strip(_OCR_RAND) or zeile[me:].strip(_OCR_RAND):
             return False
         b = self.box(z.start + ms, z.start + me)
         if b is None:
             return False
         hoehe = max(b.y1 - b.y0, 4.0)
-        links = [rand for ps, pe, rand in self.platzhalter_boxen()
-                 if _PERSONEN_PLATZHALTER_RE.match(self.text[ps:pe]) and rand[2] <= b.x0 + 1
-                 and min(b.y1, rand[3]) - max(b.y0, rand[1]) >= 0.5 * min(hoehe, rand[3] - rand[1])]
-        # jede Box einmal (ein Platzhalter steht unter Umständen doppelt in der Liste) und mindestens zwei Zellen mit
-        # einer Spaltenlücke dazwischen: der geschwärzte Empfänger im Anschriftfeld eines Briefs ("Frau [PERSON A]")
-        # neben dem Briefdatum ist kein Datensatz einer Tabelle (Fehlmeldung in 008_beitragsrechnung, Nachbesserung n2)
+        links = self._personen_links(b)
+        if not links:
+            return False
         zellen, bis = 0, None
         for x0, _, x1, _ in sorted({tuple(round(x, 1) for x in r) for r in links}):
             if bis is None or x0 - bis > max(2 * hoehe, 12.0):
                 zellen += 1
             bis = x1 if bis is None else max(bis, x1)
-        if zellen < 2:
+        if zellen < 2 and not (einzeln and (b.x0 - bis <= 4 * hoehe or self._datumsreihe_nebenan(b, hoehe))):
             return False
         x_links = min(r[0] for r in links)
         for y in self.m.zeilen:
@@ -2747,6 +2762,51 @@ class _Seitenpruefung:
             if rest:
                 return False                            # anderer Text in der Reihe: kein reiner Personendatensatz
         return True
+
+    def _personen_links(self, b) -> list:
+        """Rechtecke der Personen-Platzhalter links neben der Box b in derselben Reihe."""
+        hoehe = max(b.y1 - b.y0, 4.0)
+        return [rand for ps, pe, rand in self.platzhalter_boxen()
+                if _PERSONEN_PLATZHALTER_RE.match(self.text[ps:pe]) and rand[2] <= b.x0 + 1
+                and min(b.y1, rand[3]) - max(b.y0, rand[1]) >= 0.5 * min(hoehe, rand[3] - rand[1])]
+
+    def _datumsreihe_nebenan(self, b, hoehe: float) -> bool:
+        """Steht direkt über oder unter dem Datum (Box b) in derselben Spalte ein weiteres Datum allein in seiner Zeile,
+        links daneben ein Personen-Platzhalter – die nächste Reihe einer Tabelle aus Namen und Daten?"""
+        for y in self.m.zeilen:
+            r = y.rect
+            if r is None or abs(r.x0 - b.x0) > max(hoehe, 8.0):
+                continue
+            ueber = min(r.y1, b.y1) - max(r.y0, b.y0)
+            abstand = max(r.y0 - b.y1, b.y0 - r.y1)
+            if ueber > 0.5 * min(r.height, hoehe) or abstand > 1.5 * hoehe:
+                continue                                # dieselbe Reihe oder zu weit weg
+            if _DATUM_ZELLE_RE.fullmatch(self.zeilen_text(y).strip(_OCR_RAND + "\t")) and self._personen_links(r):
+                return True
+        return False
+
+    def _personendatum_nebenan(self, z) -> bool:
+        """Ist die Textzeile direkt über oder unter z ebenfalls ein Personen-Datensatz (Personen-Platzhalter und ein Datum,
+        sonst nichts)?"""
+        for nachbar in (self._zeile_davor(z), self._zeile_danach(z)):
+            if not nachbar:
+                continue
+            m = _DATUM_IN_ZEILE_RE.search(nachbar)
+            if m is not None and _personenzeile(nachbar, m.start(), m.end())[0] >= 1:
+                return True
+        return False
+
+    def _zeile_davor(self, z) -> str:
+        if z.start <= 0:
+            return ""
+        a = self.text.rfind("\n", 0, z.start - 1) + 1
+        return self.text[a:z.start - 1]
+
+    def _zeile_danach(self, z) -> str:
+        if z.ende >= len(self.text):
+            return ""
+        e = self.text.find("\n", z.ende + 1)
+        return self.text[z.ende + 1:len(self.text) if e < 0 else e]
 
     def _woerter_zwischen(self, z, x0: float, x1: float) -> list:
         """Wörter der Zeile z, deren Box zum guten Teil zwischen x0 und x1 liegt."""
