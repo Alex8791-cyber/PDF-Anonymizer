@@ -655,6 +655,37 @@ def test_o12_regel_und_gegenproben():
     assert _geschwaerzt("Der Schwiegervater Adam Riese hat die Bürgschaft übernommen.", "Adam Riese", "namen")
 
 
+# Eigene Nachprobe mit der Über-Schwärzungsprobe der Nachprüfung B (Fall c04, Regel org_spalte): "Privat-" in einer
+# Sparte oder Kundengruppe ("Privathaftpflicht", "Privatrechtsschutz", "Private Haftpflicht", "Privatkunden") ist
+# kein Hinweis auf eine Person – die Marke ist dort der Versicherer, wie "PHV ⇥⇥ Adam Riese ⇥⇥ XXL" (ohne Meldung)
+@pytest.mark.parametrize("text", [
+    "Versicherer\t\tSparte\t\tJahresbeitrag\nAdam Riese\t\tPrivathaftpflicht\t\t49,90 EUR\n"
+    "Roland Rechtsschutz\t\tRechtsschutz\t\t289,40 EUR",
+    "Sparte\t\tVersicherer\t\tTarif\nPrivatrechtsschutz\t\tAdam Riese\t\tKomfort\nHausrat\t\tGothaer\t\tTop",
+    "Versicherer\t\tSparte\t\tBeitrag\nAdam Riese\t\tPrivate Haftpflicht\t\t49,90 EUR",
+    "Kundengruppe\t\tVersicherer\t\tSparte\nPrivatkunden\t\tAdam Riese\t\tHausrat",
+])
+def test_o12_privat_sparte_ist_kein_personenhinweis(text):
+    assert not personenkontext.org_marken_in_personengestalt(text)
+    assert not _ausgabe_verdacht(text), _ausgabe_verdacht(text)
+
+
+# Gegenprobe: "privat" als eigenes Wort und Zusammensetzungen für eine Person (Privatperson, Privatdarlehen) bleiben
+# ein Hinweis – die Marke wird gemeldet (Probe o12)
+@pytest.mark.parametrize("text", [
+    "Art\t\tVersicherer\t\tBemerkung\nKaution\t\tAdam Riese\t\tprivat",
+    "Art\t\tVersicherer\t\tBemerkung\nKaution\t\tAdam Riese\t\tPrivatperson",
+    "Art\t\tVersicherer\t\tBemerkung\nKaution\t\tAdam Riese\t\tPrivatpersonen",
+    "Art\t\tVersicherer\t\tBetrag\nPrivatdarlehen\t\tAdam Riese\t\t5.000 EUR",
+])
+def test_o12_privat_als_personenhinweis_bleibt(text):
+    spannen = personenkontext.org_marken_in_personengestalt(text)
+    assert [text[a:b] for a, b in spannen] == ["Adam Riese"], spannen
+    aus, ph = _ausgabe(text)
+    assert _geschwaerzt(text, "Adam Riese") or _gemeldet(aus, "Adam Riese", platzhalter=ph), (aus,
+                                                                                            _ausgabe_verdacht(text))
+
+
 # ----------------------------------------------------------------------
 # A/NP-15: Kopf- oder Allerweltswort als Familienname hinter dem Etikett und in Datenzeilen der Namensspalte
 # ----------------------------------------------------------------------

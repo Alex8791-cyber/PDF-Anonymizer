@@ -330,8 +330,8 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     hinter einem Personen-Verb („war der Brandstetter am Steuer“, „saß der Haslbeck“), Marken im Personenkontext – auch
     unter einem Tabellenkopf mit nur einem Personen-Etikett („Anrufer ⇥ Anliegen ⇥ Rückruf bis“) –, Personen in
     Organisations-Spalten und dort auch eine Versicherer-Marke mit Vor- und Familienname („Adam Riese“), wenn die Zeile
-    auf eine Person deuten kann („Kautionsbürgschaft“, Darlehen, privat; sie bleibt stehen, in Vergleichslisten ohne
-    Meldung) werden verortet gemeldet; eine Marke in einer Personenspalte bleibt gemeldet, wenn auf der Ausgabeseite die
+    auf eine Person deuten kann („Kautionsbürgschaft“, Darlehen, „privat“ als eigenes Wort oder „Privatperson“; sie
+    bleibt stehen, in Vergleichslisten und neben Sparten wie „Privathaftpflicht“ ohne Meldung) werden verortet gemeldet; eine Marke in einer Personenspalte bleibt gemeldet, wenn auf der Ausgabeseite die
     Platzhalter die Zellen einer Reihe verschieben („VW Caddy ⇥ Miele“ unter „Fahrzeug ⇥ Fahrer“ – die Lage auf der
     Seite entscheidet, nicht die Zellenzahl im Text); ein Platzhalter („[GEB-DATUM]“) gilt nicht mehr als Spaltenkopf,
     „Mitglied der …“ im Satz nicht als Etikett; Maße mit ausgeschriebener Einheit und Leerwörter („Geburtsname:

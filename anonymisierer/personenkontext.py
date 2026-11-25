@@ -1074,8 +1074,12 @@ def personen_in_org_spalten(text: str, wissen=None) -> list:
 
 
 # Hinweis in derselben Tabellenzeile, dass hinter einer Versicherer-Marke mit Personengestalt eine Person stehen kann
-# (Bürgschaft, Darlehen, privat: "Kautionsbürgschaft ⇥⇥ Adam Riese ⇥⇥ 3.600 EUR") – auch in Zusammensetzungen
-_PERSON_ZEILE_RE = re.compile(r"(?i)bürgschaft|bürge|bürgin|darlehen|privat")
+# (Bürgschaft, Darlehen, privat: "Kautionsbürgschaft ⇥⇥ Adam Riese ⇥⇥ 3.600 EUR") – Bürgschaft und Darlehen auch in
+# Zusammensetzungen, "privat" nur als eigenes Wort oder für eine Person ("Privatperson(en)", "Privatkredit"): eine
+# Sparte oder Kundengruppe ("Privathaftpflicht", "Privatrechtsschutz", "Private Haftpflicht", "Privatkunden") nennt
+# den Versicherer, keine Person (eigene Nachprobe mit Fall c04 der Nachprüfung B)
+_PERSON_ZEILE_RE = re.compile(r"(?i)bürgschaft|bürge|bürgin|darlehen|"
+                              r"(?<![\wäöüß])privat(?:person(?:en)?|leute|kredit)?(?![\wäöüß])")
 
 
 def org_marken_in_personengestalt(text: str, wissen=None) -> list:
