@@ -1277,6 +1277,10 @@ def _regel_kandidaten(text: str, unsicher: list | None = None) -> list:
     for s, e in personenkontext.personenwort_namen(text, _wissen_modul(), unsicher):
         _kandidat(kandidaten, text, s, e, regel=True) or kandidaten.append(
             {"text": text[s:e], "start": s, "ende": e, "gruppe": None})
+    # 1a5) Name hinter einem Berufswort am Satzanfang mit Verb einer Person: "Elektriker Miele kam am Montag."
+    for s, e in personenkontext.berufswort_namen(text, _wissen_modul()):
+        _kandidat(kandidaten, text, s, e, regel=True) or kandidaten.append(
+            {"text": text[s:e], "start": s, "ende": e, "gruppe": None})
     # 1a'') Mundartliche Namensfolge mit Artikel: "die Kölbl Resi" (Nachprüfung LK-14)
     for s, e in personenkontext.artikel_nachname_vorname(text, _wissen_modul()):
         _kandidat(kandidaten, text, s, e, regel=True) or kandidaten.append(
@@ -1657,9 +1661,22 @@ def finde_personen(text: str) -> list:
                     {"text": text[s:e], "start": s, "ende": e, "gruppe": None})
         spannen = _ner_spannen(nlp, text) | _ner_kurzzeilen(nlp, text)
         spannen |= _ner_versalien_zeilen(nlp, text)
+        # ein Familienname, der zugleich ein gewöhnliches Wort ist, hinter Personenwort mit Begleiter ("beim Mieter
+        # Frost festgestellt"), und eine bekannte Marke hinter "laut" und dem Personenwort einer Firma ("Laut Monteur
+        # Viessmann ist …"): auch die KI schwärzt sie nicht – die Selbstkontrolle meldet sie (Abnahme 3 AB3-04, A2-04).
+        # Auch dann, wenn die Spanne der KI das Personenwort mitnimmt und erst _kandidat es abtrennt
+        # ("Sachbearbeiterin Dyson" -> "Dyson")
+        nur_meldung = personenkontext.personenwort_nur_meldung(text, _wissen_modul())
         for start, ende in sorted(_an_umbruechen_teilen(text, spannen)):
+            if (start, ende) in nur_meldung:
+                continue
+            vorher = len(kandidaten)
             if not _kandidat(kandidaten, text, start, ende):
                 continue
+            if nur_meldung:
+                kandidaten[vorher:] = [x for x in kandidaten[vorher:] if (x["start"], x["ende"]) not in nur_meldung]
+                if len(kandidaten) == vorher:
+                    continue
             k = kandidaten[-1]
             if sachwerte and sachwert(k):
                 kandidaten.pop()

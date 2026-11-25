@@ -121,7 +121,7 @@ import datetime
 import difflib
 import re
 import unicodedata
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from pathlib import Path
 from typing import NamedTuple
 
@@ -359,19 +359,29 @@ _SERVICE_NUMMER_RE = re.compile(r"^(?:\+49\s?\(?0?\)?\s?|0049\s?|0)(?:800|180\d?
 # sagte", ", nicht die …") – nicht "die Scheibe ist gesprungen"
 _ARTIKEL_NAME_VERB_RE = re.compile(
     r"(?i)[ \t]+(?:am[ \t]+steuer|sagt|sagte|meinte|meint|fuhr|lenkte|steuerte|saß|sass|behauptet|behauptete|erzählt|"
-    r"erzählte|erklärt|erklärte|rief|telefonierte|angerufen)(?![\wäöüß])"
-    # "Der Lackner hat den Wagen gefahren." – Hilfsverb, bis vier Wörter, Partizip (Abnahme 2 V5)
+    r"erzählte|erklärt|erklärte|rief|telefonierte|angerufen|"
+    # Verben eines Schadens oder seiner Meldung ("Den Schaden meldete der …", "Der Gruber meldete den Schaden";
+    # Abnahme 3 AB3-05)
+    r"meldete|verursachte|beschädigte|beschaedigte|rammte|übersah|uebersah|beobachtete|bemerkte|entdeckte)(?![\wäöüß])"
+    # "Der Lackner hat den Wagen gefahren." – Hilfsverb, bis vier Wörter, Partizip (Abnahme 2 V5); auch die Verben eines
+    # Schadens ("Der Gruber hat den Schaden gemeldet.", "Der Lackner hat den Unfall verursacht."; Abnahme 3 AB3-05)
     r"|(?i:[ \t]+(?:hat|hatte|ist|war)(?:[ \t]+[^\s.,;:!?]+){0,4}?[ \t]+(?:gefahren|gelenkt|gesteuert|gesessen|gesagt|"
-    r"erzählt|behauptet|erklärt|bestätigt|telefoniert|angerufen|gerufen))(?![\wäöüß])"
+    r"erzählt|behauptet|erklärt|bestätigt|telefoniert|angerufen|gerufen|gemeldet|verursacht|beschädigt|beschaedigt|"
+    r"gerammt|übersehen|uebersehen|beobachtet|bemerkt|entdeckt|angezeigt|gesehen))(?![\wäöüß])"
     r"|[ \t]*[,.;]?[ \t]*(?:nicht|und|oder)[ \t]+(?:der|die)[ \t]")
 # … oder davor ein Verb, das eine Person verlangt ("Am Steuer saß der Haslbeck", "Dann sagte die Wimmer")
 _VERB_ARTIKEL_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:am[ \t]+steuer|saß|sass|fuhr|lenkte|steuerte|sagte|meinte|rief|"
                                     r"erzählte|"
                                     r"erzaehlte|behauptete|erklärte|erklaerte|bestätigte|bestaetigte|schilderte|"
+                                    # Verben eines Schadens oder seiner Meldung ("Den Unfall verursachte der …", "Den
+                                    # Schaden meldete der …"; Abnahme 3 AB3-05)
+                                    r"meldete|verursachte|beschädigte|beschaedigte|rammte|übersah|uebersah|"
+                                    r"beobachtete|bemerkte|entdeckte|"
                                     # dieselben Verben als Partizip mit Hilfsverb ("Gefahren ist der Huberbauer.")
                                     r"(?:gesessen|gefahren|gelenkt|gesteuert|gesagt|gemeint|gerufen|erzählt|erzaehlt|"
-                                    r"behauptet|erklärt|erklaert|bestätigt|bestaetigt|geschildert)[ \t]+"
-                                    r"(?:ist|war|hat|hatte))"
+                                    r"behauptet|erklärt|erklaert|bestätigt|bestaetigt|geschildert|gemeldet|verursacht|"
+                                    r"beschädigt|beschaedigt|gerammt|übersehen|uebersehen|beobachtet|bemerkt|entdeckt)"
+                                    r"[ \t]+(?:ist|war|hat|hatte|wurde))"
                                     # bis zu drei Zwischenwörter ("saß wohl der …", "Gefahren ist laut Polizei die …",
                                     # "Erzählt hat es die …", "saß zum Unfallzeitpunkt der …"; Abnahme 2 V5)
                                     r"(?:[ \t]+(?:wohl|dann|aber|auch|noch|nur|doch|eben|offenbar|offensichtlich|"
@@ -441,6 +451,7 @@ _PERSON_IM_SATZ_RE = re.compile(r"(?<![\wäöüß])(?:ich|er|sie|Ich|Er|Sie|"
                                 r"Kunde|Kundin|Ehemann|Ehefrau|Sohn|Tochter|Antragsteller(?:in)?)(?![\wäöüß])|"
                                 r"\[(?:PERSON|NAME|NAMEN)\b")
 _SATZENDE_RE = re.compile(r"[.!?;\n]")
+_WORT_RE = re.compile(r"\S+")
 # eine Rolle (_ALS_ROLLE) ist im Satz ein Beruf, wenn er von Arbeit spricht ("Er fährt nachts als Fahrer für einen
 # Paketdienst.", "Sie hilft im Altenheim als Betreuerin aus.", "Er ist als Vertreter für Landmaschinen unterwegs.") und
 # nicht von einem Vorgang oder einer Vertretung ("als Fahrer am Unfall beteiligt", "als Betreuer seiner Mutter",
@@ -448,8 +459,13 @@ _SATZENDE_RE = re.compile(r"[.!?;\n]")
 _ROLLE_ARBEIT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:tätig|beschäftigt|angestellt|arbeitet\w{0,2}|gearbeitet|"
                               r"verdient\w{0,2}|jobbt|aushilf\w{0,4}|nebenjob\w{0,2}|hauptberuflich|nebenberuflich|"
                               r"unterwegs|hilft|half|für[ \t]+(?:einen|eine|ein)[ \t]+[A-ZÄÖÜ]\w+|"
-                              r"bei[ \t]+(?:einer|einem|der|dem)[ \t]+[A-ZÄÖÜ]\w+)(?![\wäöüß])")
+                              r"bei[ \t]+(?:einer|einem|der|dem)[ \t]+[A-ZÄÖÜ]\w+|"
+                              # eine gewohnte Tätigkeit ("Sie macht als Gutachterin Hausbesuche.", "Er betreut als
+                              # Pfleger drei Patienten."; Nachbesserung 4, offener Punkt V3)
+                              r"macht|führt|erstellt|betreut|berät|unterrichtet|besucht|pflegt|"
+                              r"\w*besuche|\w*kunden|\w*patienten|\w*schüler|\w*aufträge)(?![\wäöüß])")
 _ROLLE_VORGANG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:unfall\w{0,6}|beteiligt|schaden\w{0,6}|geladen|termin\w{0,2}|"
+                               r"aussage\w{0,2}|angaben|ortstermin\w{0,2}|besichtigung\w{0,2}|"
                                r"bestellt|bestallung\w{0,8}|eingesetzt|vollmacht\w{0,2}|gericht\w{0,6}|haftet|"
                                r"haftbar|verantwortlich|(?:seine[rsm]?|ihre[rsm]?|des|der)[ \t]+(?:Mutter|Vaters?|Eltern|"
                                r"Tochter|Sohne?s?|Ehefrau|Ehemann\w?|Oma|Opa|Großmutter|Großvaters?|Schwester|"
@@ -1029,9 +1045,13 @@ class _Seitenpruefung:
         self._zeilen_x: dict = {}
         self._org: dict = {}
         self._boxen: dict = {}
+        self._gesperrt_index = None
         self.gesperrt = self._sperren(platzhalter, nie, abgewaehlt)
         self.platzhalter = [(s, e) for s, e, art in self.gesperrt if art == "platzhalter"]
         self._ph_boxen = None
+        self._ph_index = None                  # Platzhalter nach Anfang und Ende sortiert (bisect; Abnahme 3 AB3-08)
+        self._ph_laengste = 0
+        self._ph_box_index = None              # Rechtecke der Platzhalter nach x0 und x1 sortiert
         self._freie_schwaerzungen: list = []
         self._ausrichtung = ausrichtung        # (Winkel, Schräglage) der OCR-Wörter, falls bekannt
         self._ocr_lage = None
@@ -1063,15 +1083,38 @@ class _Seitenpruefung:
         return sorted(gesperrt)
 
     def ist_gesperrt(self, s: int, e: int) -> bool:
-        for gs, ge, _ in self.gesperrt:
-            if gs >= e:
-                break
-            if ge > s:
-                return True
-        return False
+        """Überlappt ein gesperrter Bereich (Platzhalter, NIE-Liste, abgewählt) die Stelle [s, e)? Über die nach Anfang
+        sortierten Bereiche und das laufende Maximum ihrer Enden (bisect; Abnahme 3 AB3-08)."""
+        if self._gesperrt_index is None:
+            maxende, m = [], -1
+            for _, ge, _ in self.gesperrt:
+                m = max(m, ge)
+                maxende.append(m)
+            self._gesperrt_index = ([gs for gs, _, _ in self.gesperrt], maxende)
+        anfaenge, maxende = self._gesperrt_index
+        k = bisect_left(anfaenge, e)
+        return k > 0 and maxende[k - 1] > s
+
+    def _platzhalter_index(self):
+        """(Anfänge, laufendes Maximum der Enden, Enden sortiert, (Ende, Nummer) sortiert) der Platzhalter – für Abfragen
+        mit bisect statt über alle Platzhalter (viele Kästen in einer Zeile wuchsen sonst quadratisch; Abnahme 3
+        AB3-08). self.platzhalter ist nach Anfang sortiert."""
+        if self._ph_index is None:
+            anfaenge = [ps for ps, _ in self.platzhalter]
+            maxende, m = [], -1
+            for _, pe in self.platzhalter:
+                m = max(m, pe)
+                maxende.append(m)
+            nach_ende = sorted((pe, i) for i, (_, pe) in enumerate(self.platzhalter))
+            self._ph_index = (anfaenge, maxende, [pe for pe, _ in nach_ende], nach_ende)
+            self._ph_laengste = max((pe - ps for ps, pe in self.platzhalter), default=0)
+        return self._ph_index
 
     def ist_platzhalter_bei(self, s: int, e: int) -> bool:
-        return any(ps < e and pe > s for ps, pe in self.platzhalter)
+        """Überlappt ein Platzhalter die Stelle [s, e)? Unter den Platzhaltern mit Anfang vor e reicht das größte Ende."""
+        anfaenge, maxende, _, _ = self._platzhalter_index()
+        k = bisect_left(anfaenge, e)
+        return k > 0 and maxende[k - 1] > s
 
     # -- Geometrie ------------------------------------------------------------------------------------
     def box(self, s: int, e: int):
@@ -1122,7 +1165,13 @@ class _Seitenpruefung:
         dazwischen) oder auf der Seite (gleiche Zeilenhöhe, kleine Lücke zum grauen Rechteck des Platzhalters:
         OCR-Wort neben Platzhalter, Formularwert in eigenem Block)."""
         text = self.text
-        for ps, pe in self.platzhalter:
+        # nur die Platzhalter, die 0–2 Zeichen vor s enden oder 0–2 Zeichen hinter e beginnen (bisect), in der
+        # Reihenfolge der Platzhalter – derselbe erste Treffer wie beim Durchlauf über alle (Abnahme 3 AB3-08)
+        anfaenge, _, enden, nach_ende = self._platzhalter_index()
+        kandidaten = {i for _, i in nach_ende[bisect_left(enden, s - 2):bisect_right(enden, s)]}
+        kandidaten.update(range(bisect_left(anfaenge, e), bisect_right(anfaenge, e + 2)))
+        for i in sorted(kandidaten):
+            ps, pe = self.platzhalter[i]
             if nur is not None and not nur.match(text[ps:pe]):
                 continue
             if 0 <= s - pe <= 2 and set(text[pe:s]) <= {" ", "-"}:
@@ -1135,11 +1184,27 @@ class _Seitenpruefung:
         b = self.box(s, e)
         if b is None:
             return None
-        for ps, pe, rand in boxen:
+        for j in self._boxen_waagerecht_nah(b, 0.8):
+            ps, pe, rand = boxen[j]
             if (nur is None or nur.match(text[ps:pe])) and self._benachbart(b, rand, 0.8) \
                     and self._nichts_dazwischen(s, e, b, rand):
                 return ps, pe
         return None
+
+    def _boxen_waagerecht_nah(self, b, faktor: float) -> list:
+        """Nummern der Platzhalter-Rechtecke (platzhalter_boxen), die waagerecht nah genug an der Box b liegen, um
+        _benachbart zu erfüllen (linker Rand bis faktor × Höhe rechts von b oder rechter Rand bis faktor × Höhe links
+        von b), aufsteigend – über die nach x0 und x1 sortierten Rechtecke (bisect; Abnahme 3 AB3-08)."""
+        boxen = self.platzhalter_boxen()
+        if self._ph_box_index is None:
+            nach_x0 = sorted((rand[0], j) for j, (_, _, rand) in enumerate(boxen))
+            nach_x1 = sorted((rand[2], j) for j, (_, _, rand) in enumerate(boxen))
+            self._ph_box_index = ([x for x, _ in nach_x0], nach_x0, [x for x, _ in nach_x1], nach_x1)
+        x0s, nach_x0, x1s, nach_x1 = self._ph_box_index
+        weite = faktor * max(b.y1 - b.y0, 4.0) + 1e-6
+        nah = {j for _, j in nach_x0[bisect_left(x0s, b.x1 - 1.0 - 1e-6):bisect_right(x0s, b.x1 + weite)]}
+        nah.update(j for _, j in nach_x1[bisect_left(x1s, b.x0 - weite):bisect_right(x1s, b.x0 + 1.0 + 1e-6)])
+        return sorted(nah)
 
     def _nichts_dazwischen(self, s: int, e: int, b, rand) -> bool:
         """Steht in der eigenen Zeile kein anderes Wort zwischen der Stelle und dem Rechteck rand?"""
@@ -1837,7 +1902,10 @@ class _Seitenpruefung:
         bester = None
         anfang = max(z.start, s - fenster)
         stueck = self.text[anfang:s]
-        for ps, pe in self.platzhalter:                # "[GEB-DATUM]" ist kein Etikett
+        anfaenge, _, _, _ = self._platzhalter_index()
+        laengste = self._ph_laengste
+        for i in range(bisect_left(anfaenge, anfang - laengste), bisect_left(anfaenge, s)):
+            ps, pe = self.platzhalter[i]                # "[GEB-DATUM]" ist kein Etikett
             if ps < s and pe > anfang:
                 a, b = max(ps, anfang) - anfang, min(pe, s) - anfang
                 stueck = stueck[:a] + " " * (b - a) + stueck[b:]
@@ -1987,7 +2055,8 @@ class _Seitenpruefung:
         rel_s, rel_e = max(0, s - z.start), max(0, e - z.start)
         ende_zelle = eigene.find("\t", rel_e)
         eigene_zelle = eigene[eigene.rfind("\t", 0, rel_s) + 1:ende_zelle if ende_zelle >= 0 else len(eigene)]
-        kurzer_wert = len(eigene_zelle.split()) <= 5
+        # höchstens fünf Wörter – gezählt bis zum sechsten, nicht über die ganze Zeile (lange Zeilen; Abnahme 3 AB3-08)
+        kurzer_wert = sum(1 for _ in zip(range(6), _WORT_RE.finditer(eigene_zelle))) <= 5
         leer = 0
         oben = z.rect.y0
         hoehe = max(z.rect.height, 8.0)
@@ -2057,7 +2126,33 @@ class _Seitenpruefung:
         self._ort_datum()
         self._seitenformen()
         self._beruf_hinter_als()
+        self._personenwort_namen()
         return self.kandidaten
+
+    def _personenwort_namen(self):
+        """Wort direkt hinter einem Personenwort ("Nachbar Zettl hat …", "Monteur Grohe kam …", "beim Mieter
+        Schimmel"), das die Ausgabe noch zeigt – dieselben Kandidaten wie die Erkennung (personenkontext): ohne
+        Begleiter jedes Wort, das ein Name sein kann, hinter einem Begleiter nur mit Namensbeleg (Vor- oder Nachname, auch
+        mehrdeutig, Gestalt eines Familiennamens, Marke). Auf OCR-Seiten wie auf der Textebene, ohne Längengrenze
+        (Abnahme 3 AB3-03, AB3-04)."""
+        if self.w.modul is None:
+            return
+        for s, e, begleiter, beleg in personenkontext.personenwort_kandidaten(self.text, self.w.modul,
+                                                                                beruf_nachname=True):
+            if begleiter and not beleg:
+                continue                                # "dem Nachbarn Wasser": ein Substantiv
+            if self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e):
+                continue
+            if personenkontext.medizinisch(self.text[s:e], self.text, s, self.w.modul):
+                continue                                # "Familienanamnese: Vater Alzheimer" (eigene Kategorie)
+            self.neu(s, e, "möglicher Name hinter einem Personenwort (Nachbar, Monteur, Zeuge …)", "name")
+        # Berufswort am Satzanfang mit Verb einer Person dahinter: "Handwerker Grohe kam am Montag." (die Erkennung
+        # schwärzt dort nur Wörter mit Namensbeleg)
+        for s, e in personenkontext.berufswort_namen(self.text, self.w.modul, alle=True):
+            if self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e) \
+                    or personenkontext.medizinisch(self.text[s:e], self.text, s, self.w.modul):
+                continue
+            self.neu(s, e, "möglicher Name hinter einem Berufswort mit Verb einer Person", "name")
 
     def _beruf_hinter_als(self):
         """Beruf der Wissensbasis hinter "als" in einem Satz mit einer Person (Pronomen, Personen-Etikett oder
@@ -2070,13 +2165,21 @@ class _Seitenpruefung:
         for m in _ALS_BERUF_RE.finditer(text):
             s, e = m.span(1)
             wort = m.group(1)
-            if not self.w.frage("ist_beruf", wort):
-                continue
             if self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e):
                 continue
             satz_anfang = wissen_kontext.satz_anfang(text, m.start(), 160)
             hinten = _SATZENDE_RE.search(text, e, min(len(text), e + 160))
             satz_ende = hinten.start() if hinten else min(len(text), e + 160)
+            if not self.w.frage("ist_beruf", wort):
+                # ein Wort, das die Wissensbasis nicht als Beruf kennt, in einem Satz über Erwerbsarbeit ("Sie arbeitet
+                # als Putzfrau.", "Er jobbt als Erntehelfer."): ein möglicher Beruf (Abnahme 3 AB3-06) – kein
+                # Allerwelts-, Etikett- oder Ortswort, keine Rolle im Vorgang
+                if not _ROLLE_ARBEIT_RE.search(text, satz_anfang, satz_ende) \
+                        or _ROLLE_VORGANG_RE.search(text, satz_anfang, satz_ende) \
+                        or any(self.w.frage(f, wort) for f in ("ist_allerweltswort", "ist_ort", "ist_allowlist",
+                                                                "ist_anrede_titel")) \
+                        or self.w.ist_etikett(wort) or _NOMEN_ENDUNG.search(wort):
+                    continue
             rolle = wort.casefold() in _ALS_ROLLE or wort.casefold().endswith(wissen_kontext._ROLLE_ENDUNGEN)
             if rolle and not (_ROLLE_ARBEIT_RE.search(text, satz_anfang, satz_ende)
                               and not _ROLLE_VORGANG_RE.search(text, satz_anfang, satz_ende)):
@@ -2571,7 +2674,9 @@ class _Seitenpruefung:
             # 4711"), mit Laufnummer ("IMEI 1: …") und in Tausenderpunkt-Form ("Kundennummer: 4.711.208": die
             # Betragsmaske gilt dort nicht, die Regel prüft Währung und Einheit selbst)
             for k, w in self._allgemeine_kennungen():
-                if any(k.ende <= ps < w.start for ps, _ in self.platzhalter):
+                anfaenge = self._platzhalter_index()[0]
+                i = bisect_left(anfaenge, k.ende)
+                if i < len(anfaenge) and anfaenge[i] < w.start:
                     continue                            # der Wert des Etiketts ist schon ersetzt ("Kundennummer:
                                                         # [VERTRAGS-NR] …"): dahinter beginnt etwas anderes
                 zf = self.zeile(w.start)
@@ -3590,7 +3695,10 @@ class _Seitenpruefung:
                 nn and not nnm or personenkontext.namensgestalt(w, self.w.modul) and not _sachwort_er(w))
             # "Der Lackner hat den Wagen gefahren.": am Satzanfang nur ein Familienname der Wissensbasis bzw. mit
             # Namensgestalt und ein Personen-Verb dahinter (Abnahme 2 V5)
-            satzanfang = artikel_davor(i) and woerter[i - 1][2] in ("Der", "Die") and familienname and verb_dahinter
+            # auch die weibliche Form auf "-erin" eines Familiennamens ("Die Wimmerin hat angerufen.", "Die Moserin hat den
+            # Wagen gefahren."; Abnahme 3 AB3-05)
+            satzanfang = artikel_davor(i) and woerter[i - 1][2] in ("Der", "Die") and verb_dahinter \
+                and (familienname or (not (vn or aw or allow) and w.endswith("erin") and self._name_auf_er(w)))
             if artikel_davor(i) and (woerter[i - 1][2] in ("der", "die") or satzanfang) and not (vn or aw or allow) \
                     and (familienname or ((verb_davor or verb_dahinter) and self._name_auf_er(w))) \
                     and (verb_dahinter or verb_davor):

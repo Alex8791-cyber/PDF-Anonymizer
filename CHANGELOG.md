@@ -469,6 +469,57 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     19 s; der Rest ist das Anlegen und Anwenden der Schwärzungen in PyMuPDF). Mit dem genauen
     Abgleich rückt der Kasten auch auf Zeilen mit mehr als 13 Kästen an die verschobene Stelle (bisher blieben die
     Folgewörter dort teilweise unter dem Kasten, mit Hinweis).
+- **Dritte Abnahme der Zusammenführung (Runde 5, fünfte Nachbesserung):** Drei Verengungen der vierten Nachbesserung
+  ließen Werte still durch, die vorher geschwärzt waren, eine schwärzte gewöhnliche Wörter. Grundsatz jetzt: Wo eine
+  Regel eng gefasst ist, um nicht geheimen Text stehen zu lassen, meldet die Selbstkontrolle jeden ausgenommenen Fall,
+  der ein geheimer Wert sein kann, an seiner Stelle – auf der Textebene und auf Scans gleich. Je Befund mit Abwandlungen
+  und Gegenproben in `tests/test_abnahme3_r7.py`:
+  - Zugangscodes hinter Gebäuden und Behältern mit Schloss werden wieder geschwärzt („Gartenhaus: Code 9090“,
+    „Ferienhaus – Code 3141“, „Das Ferienhaus hat den Code 6137.“, „Geräteschuppen – Code 3016“, Gartenhütte, Scheune,
+    Heustadel, Stall, Carport, Wallbox, Paketbox, Spind, Waffenschrank, Fahrradkeller; „Haus“ nur als Grundwort, nicht
+    „Hausratversicherung“), ebenso die Bedienung mit trennbarem Verb („Das Hoftor geht mit 2601 auf.“). Ohne sicheres
+    Schloss meldet die Selbstkontrolle die Ziffern: hinter einem Raum, Gerät oder Feldnamen direkt vor „Code“
+    („Waschküche: Code 6161“, „Serverraum Code 6169“), hinter „Code ist/lautet“ („Code lautet 5656.“, „Der Code ist
+    7878.“), hinter einem Gegenstand im Satz davor und hinter einem Satz mit Schloss in der Zeile davor, auch wenn diese
+    mit einem Punkt endet („Bitte im Keller nachsehen.⏎Code 9595“). Fehler- und Anzeigecodes, Tarif-, Rabatt- und
+    Katalogcodes, Mengen („mit 2500 Euro“, „mit 120 Stellplätzen“) und „Code 128 auf dem Etikett“ bleiben ohne Meldung.
+  - Name hinter einem Personenwort: Am Satz- oder Notizanfang mit einem Verb einer Person dahinter ist das Wort der Name
+    („Monteur Grohe kam am 03.03.“, „Nachbar Zettl hat den Brand gemeldet.“, „Kollegin Pointl ruft zurück“, „Mieter
+    Liebherr hat gekündigt.“), auch eine Marke und ein unbekanntes Wort ohne Namensbeleg; ebenso mitten im Satz ohne
+    Begleiter („Gestern kam Monteur Grohe vorbei.“) und mit einer Kontaktangabe dahinter („Monteur Grohe, Tel. …“). Eine
+    bekannte Marke bleibt nur hinter dem Personenwort einer Firma ohne Verb stehen und wird gemeldet („Laut Monteur
+    Buderus …“) – hinter „laut“/„gemäß“ jetzt auch dann, wenn die KI sie als Person liest („Laut Monteur Viessmann ist
+    der Kessel defekt.“, offener Punkt der vierten Nachbesserung); hinter „mit“ („Rücksprache mit Monteur …“) und hinter
+    Nachbar, Mieter und Co. ist sie der Name („Laut Nachbar Miele …“). Eine Marke, die die Wissensbasis nicht kennt
+    („Laut Monteur Hansgrohe …“), bleibt wie ein unbekannter Name geschwärzt. Wie hinter einem Personenwort auch hinter
+    einem Berufswort am Satzanfang mit einem Verb einer Person oder einer Kontaktangabe: eine bekannte Marke oder ein
+    Name ist der Name („Elektriker Miele kam am Montag.“, „Der Installateur Vaillant hat …“; auf fbd755b und 818990e
+    still), ein anderes Wort wird gemeldet („Handwerker Grohe kam am Montag.“). „ist“ und „war“ zählen nicht als Beleg
+    („Chef Sekretariat ist ab 9 Uhr besetzt“ bleibt stehen, „Monteur Grohe war vor Ort“ wird gemeldet). Die
+    Selbstkontrolle meldet jedes Wort hinter einem Personenwort, das ein Name sein kann und in der Ausgabe noch lesbar
+    ist – auf Scans ohne die bisherige Längengrenze und auch ohne Rollen-Etikett („Nachbar Wudy hat …“ auf Scan 200 dpi
+    war still), auch ein Berufswort, das zugleich ein Familienname ist („Wir waren beim Nachbarn Koch zu Besuch.“ war
+    still); ein Fachwort der Medizin dahinter („Vater Alzheimer-Demenz“) ist eine Diagnose, kein möglicher Name.
+  - Über-Schwärzung: Ein Familienname, der zugleich ein gewöhnliches Wort ist (Wissensbasis „mehrdeutig“: Schimmel,
+    Rauch, Holz, Frost, Hagel, Rost …), hinter einem Personenwort mit Begleiter wird gemeldet statt geschwärzt – auch
+    nicht über die KI („Der Gutachter hat beim Mieter Schimmel festgestellt.“, „Er hat dem Nachbarn Holz gebracht.“);
+    mit einem Verb dahinter am Satzanfang bleibt er ein Name („Der Nachbar Rauch hat angerufen.“). Die Kehrseite: Ein
+    echter Familienname dieser Art ohne ein solches Verb wird ebenfalls nur gemeldet („Er hat mit dem Kollegen Wolf
+    telefoniert.“) – die Wortart des Sprachmodells unterscheidet das nicht sicher. Hinter „beim“/„vom“/„zum“ ohne
+    Ortskontext zählt nur die Endung eines Hausnamens, nicht jeder Nachname der Wissensbasis („Anbei das Foto vom
+    Kratzer.“ bleibt stehen und wird gemeldet).
+  - Selbstkontrolle: Familienname mit Artikel auch mit den Verben eines Schadens oder seiner Meldung („Der Gruber hat den
+    Schaden gemeldet.“, „Den Unfall verursachte der Riedhalter.“, „Den Schaden meldete der Holzwohner.“) und in der
+    weiblichen Form auf „-erin“ am Satzanfang („Die Wimmerin hat angerufen.“); ein unbekanntes Wort hinter „als“ in
+    einem Satz über Erwerbsarbeit und eine Rolle mit gewohnter Tätigkeit („Sie macht als Gutachterin Hausbesuche.“).
+  - Beruf: auch gebeugt („übt den Beruf des Schreiners aus“, „übt seit Jahren den Beruf des Maurers aus“), im
+    Relativsatz („Ihr Mann, der Polizist ist, …“; nicht Rollen wie „der Fahrer war“) und Tätigkeiten nach ihrem
+    Grundwort hinter einem Wort der Erwerbstätigkeit („arbeitet als Putzfrau“, „ist als Putzkraft tätig“, „arbeitet als
+    Paketbote“).
+  - Laufzeit: Die Selbstkontrolle fragt Platzhalter und gesperrte Bereiche über die sortierten Spannen ab (bisect)
+    statt über alle Platzhalter je Wort; eine Zeile mit 600 Platzhaltern (58 600 Zeichen) braucht 3,7 s statt 14,6 s
+    bei gleichem Ergebnis, und ein Wachstumstest (75 gegen 600 Platzhalter) wird rot, wenn die Abfrage wieder über alle
+    läuft.
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene

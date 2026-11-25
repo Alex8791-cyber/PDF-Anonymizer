@@ -321,7 +321,8 @@ _BERUF_VOR_RE = re.compile(
     # weitere Satzstellungen (Abnahme 2 V3): "Von Beruf ist er Schreiner", "übt den Beruf der Floristin aus",
     # "hauptberuflich Zimmerer", "ist nebenberuflich als Kellner tätig"
     r"|(?<![\wäöüß])[Vv]on[ \t]+Beruf[ \t]+(?:ist|war|wird|wurde|bin|sind)[ \t]+(?:er|sie|ich|wir)[ \t]+"
-    r"|(?<![\wäöüß])(?:übt|übte|üben|übten|ausübt|ausübte)[ \t]+(?:den|einen|seinen|ihren)[ \t]+Beruf[ \t]+"
+    r"|(?<![\wäöüß])(?:übt|übte|üben|übten|ausübt|ausübte)(?:[ \t]+[^\s.,;:!?]+){0,3}?[ \t]+(?:den|einen|seinen|ihren)"
+    r"[ \t]+Beruf[ \t]+"
     r"(?:der|des|eines|einer|als)[ \t]+"
     r"|(?<![\wäöüß])(?:(?:[Hh]aupt|[Nn]eben)beruflich|[Nn]ebenbei|[Nn]ebenher)(?:[ \t]+als)?[ \t]+"
     # Lebensunterhalt ("Sie verdient ihr Geld als Hebamme"; Abnahme N3)
@@ -329,6 +330,10 @@ _BERUF_VOR_RE = re.compile(
     r"(?:Geld|Lebensunterhalt|Unterhalt|Brot)[ \t]+als[ \t]+")
 _BERUF_NEBENSATZ_RE = re.compile(r"(?<![\wäöüß])(?:er|sie|ich|Mann|Frau|Ehemann|Ehefrau|Sohn|Tochter|Vater|Mutter|"
                                  r"Partner(?:in)?|Lebensgefährt(?:e|in))[ \t]+(?=[A-ZÄÖÜ])")
+_BERUF_RELATIVSATZ_RE = re.compile(r",[ \t]*(?:der|die)[ \t]+(?=[A-ZÄÖÜ])")
+# Rollen in einem Vorgang, die im Relativsatz keine Berufsangabe sind ("Der Zeuge, der Fahrer war, …")
+_ROLLE_IM_VORGANG = frozenset({"fahrer", "fahrerin", "beifahrer", "beifahrerin", "halter", "halterin", "zeuge",
+                               "zeugin", "eigentümer", "eigentümerin", "mieter", "mieterin", "vermieter", "vermieterin"})
 _NEBENSATZ_VERB_RE = re.compile(r"[ \t]+(?:ist|war|wurde|wird|geworden[ \t]+ist|gewesen[ \t]+ist)[ \t]*(?:[.,;!?)]|$)",
                                 re.MULTILINE)
 # "als <Beruf>" mit einem Verb der Erwerbstätigkeit dahinter ("ist als Dachdecker tätig", "war bis 2020 als Schreiner
@@ -406,14 +411,48 @@ def org_satz(text: str, satz_anfang_: int, bis: int) -> bool:
     return bool(_ORG_SATZANFANG_RE.match(text, max(0, satz_anfang_ - 1), bis))
 
 
-def _beruf_wert(text: str, pos: int, etikett: bool):
+# Grundwort einer Tätigkeit, die in der Wissensbasis fehlen kann ("Putzfrau", "Putzkraft", "Paketbote",
+# "Reinigungsfachkraft") – nur hinter einem Wort der Erwerbstätigkeit ("arbeitet als", "ist als … tätig"; Abnahme 3
+# AB3-06)
+_TAETIGKEIT_GRUNDWORT_RE = re.compile(r"[A-ZÄÖÜ][a-zäöüß]{2,30}(?:frau|mann|kraft|bote|botin|hilfe|helfer|helferin)"
+                                      r"(?![\wäöüß\-])")
+# Erwerbstätigkeit im Satzteil vor "als" ("arbeitet als", "ist als … tätig", "jobbt als")
+_ERWERB_IM_TREFFER_RE = re.compile(r"(?i)arbeit|jobbt|beschäftigt|angestellt|eingestellt|tätig|verdien")
+
+
+def _beruf_gebeugt_stelle(text: str, p: int, ende_zelle: int):
+    """(start, ende) eines gebeugten Berufs der Wissensbasis direkt ab p ("des Schreiners", "des Bäckers", "dem
+    Maurern"; Abnahme 3 AB3-06) oder None."""
+    m = re.match(r"[A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß]+)*", text[p:ende_zelle])
+    if m is None:
+        return None
+    wort = m.group(0)
+    for endung in ("es", "s", "en", "n"):
+        if wort.endswith(endung) and len(wort) - len(endung) >= 4 and wissen.ist_beruf(wort[:-len(endung)]):
+            if wort[:-len(endung)].casefold() in _BERUF_ALLGEMEIN:
+                return None
+            return p, p + len(wort)
+    return None
+
+
+def _beruf_wert(text: str, pos: int, etikett: bool, grundwort: bool = False):
     """(start, ende) eines Berufs ab pos (Adjektive davor erlaubt) oder None. Hinter einem Etikett zählt auch ein
-    unbekannter Beruf (Wert der Zelle), im Satz nur ein Eintrag der Wissensbasis."""
+    unbekannter Beruf (Wert der Zelle), im Satz nur ein Eintrag der Wissensbasis – auch gebeugt ("des Schreiners") –
+    und mit grundwort hinter einem Wort der Erwerbstätigkeit eine Tätigkeit nach ihrem Grundwort ("arbeitet als
+    Putzfrau")."""
     adj = _BERUF_ADJEKTIV_RE.match(text, pos)
     p = adj.end() if adj else pos
     ende_zelle = _zelle_ende(text, p, 80)
     ausschnitt = text[p:ende_zelle]
     treffer = [v for v in wissen.index("berufe").finde(ausschnitt) if v.start <= 25]
+    if not treffer and not etikett:
+        gebeugt = _beruf_gebeugt_stelle(text, p, ende_zelle)
+        if gebeugt is not None:
+            return gebeugt
+        if grundwort:
+            g = _TAETIGKEIT_GRUNDWORT_RE.match(text, p, ende_zelle)
+            if g is not None and not wissen.ist_vorname(g.group(0)) and not wissen.ist_nachname(g.group(0)):
+                return g.span()
     if treffer:
         v = min(treffer, key=lambda v: v.start)
         vor = ausschnitt[:v.start]
@@ -620,20 +659,23 @@ def berufe_stellen(text: str) -> list:
     aus += _beruf_unter_etikett(text)
     aus += _beruf_in_formularzeile(text)
     for m in _BERUF_VOR_RE.finditer(text):
-        w = _beruf_wert(text, m.end(), False)
+        grundwort = "als" in m.group(0) and bool(_ERWERB_IM_TREFFER_RE.search(m.group(0)))
+        w = _beruf_wert(text, m.end(), False, grundwort=grundwort)
         if w and not beruf_satz_ausgenommen(text, w[0], w[1]):
             aus.append(w)
     if "als" in text:
         for m in _ALS_RE.finditer(text):
-            w = _beruf_wert(text, m.end(), False)
+            w = _beruf_wert(text, m.end(), False, grundwort=True)
             if w and _ERWERB_DANACH_RE.match(text, w[1], min(len(text), w[1] + 80)) \
                     and not beruf_satz_ausgenommen(text, w[0], w[1]):
                 aus.append(w)
     # Nebensatz mit dem Beruf vor dem Verb ("seit sie Lehrerin ist", "deren Mann Polizist ist", "weil er Beamter war";
-    # Abnahme 2 V3): Person, Beruf der Wissensbasis, "ist"/"war"/"wurde" am Ende des Satzteils
-    for m in _BERUF_NEBENSATZ_RE.finditer(text):
+    # Abnahme 2 V3), auch als Relativsatz ("Ihr Mann, der Polizist ist, …"; Abnahme 3 AB3-06): Person bzw. Relativ-
+    # pronomen, Beruf der Wissensbasis, "ist"/"war"/"wurde" am Ende des Satzteils
+    for m in list(_BERUF_NEBENSATZ_RE.finditer(text)) + list(_BERUF_RELATIVSATZ_RE.finditer(text)):
         w = _beruf_wert(text, m.end(), False)
-        if w and _NEBENSATZ_VERB_RE.match(text, w[1]) and not beruf_satz_ausgenommen(text, w[0], w[1]):
+        if w and _NEBENSATZ_VERB_RE.match(text, w[1]) and not beruf_satz_ausgenommen(text, w[0], w[1]) \
+                and not (m.group(0).startswith(",") and text[w[0]:w[1]].casefold() in _ROLLE_IM_VORGANG):
             aus.append(w)
     for m in re.finditer(r"[ \t]+von[ \t]+Beruf(?![\wäöüß])", text):
         a = text.rfind("\n", 0, m.start()) + 1

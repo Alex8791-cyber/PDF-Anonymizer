@@ -618,15 +618,66 @@ def _namensbeleg_personenwort(w: str, wissen) -> bool:
         return True
 
 
-def personenwort_namen(text: str, wissen=None, unsicher: list | None = None) -> list:
-    """(start, ende) der Namen direkt hinter einem Personenwort ("Laut Nachbar Grohe", "mit Kollegin Zwickl", "Zeuge
-    Hinterstoißer"; nicht "dem Nachbarn Wasser", "beim Nachbarn Regen"): ein großgeschriebenes Wort, das kein
-    Allerwelts-, Berufs-, Orts-, Etikett- oder Titelwort ist und keine Substantiv-Endung trägt ("Nachbar
-    Wasserschaden", "Kunden Service" nicht) – auch eine Marke ("Grohe"), die hier eine Person ist (Erkennung,
-    namen.py). Steht vor dem Personenwort keine Präposition (Anfang einer Notiz: "Chef Sekretariat ist besetzt") oder
-    ein Begleiter ("beim Nachbarn Zirngibl"), zählt das Wort nur mit eigenem Namensbeleg (_namensbeleg_personenwort;
-    Abnahme 2 A2-04, V7). Die Wörter hinter einem Begleiter ohne Namensbeleg ("beim Nachbarn Grohe", "dem Nachbarn
-    Wasser") kommen in `unsicher`: die Erkennung entscheidet dort nach der Wortart im Satz (namen.py, Abnahme 2 V7)."""
+# Verb einer Person direkt hinter dem Wort ("Monteur Grohe kam am 03.03.", "Nachbar Zettl hat den Brand gemeldet",
+# "Kollegin Zach ruft zurück", "Der Vermieter Kranawetter hat gekündigt"): steht das Personenwort am Satzanfang, ist das
+# Wort der Name des Satzgegenstands (Abnahme 3 AB3-02, AB3-03). Nicht "ist", "war", "wird", "wurde" – so wird auch eine
+# Sache beschrieben ("Chef Sekretariat ist ab 9 Uhr besetzt", "Kunden Service-Center ist geschlossen"; A2-04) – und
+# keine Form, die zugleich ein Partizip ist ("Beim Nachbarn Rauch entdeckt.", "… Schimmel festgestellt.")
+_PERSON_VERB_DAHINTER_RE = re.compile(
+    r"[ \t]+(?:hat|hatte|hätte|haette|kam|kommt|käme|kaeme|rief|ruft|sagte|sagt|meinte|meint|meldete|meldet|fuhr|"
+    r"fährt|faehrt|sah|sieht|schrieb|schreibt|bat|bittet|erklärte|erklaerte|bestätigte|bestaetigte|berichtete|"
+    r"teilte|teilt|gab|gibt|will|wollte|möchte|moechte|kann|konnte|muss|musste|soll|sollte|darf|durfte|wohnt|"
+    r"wohnte|lebt|lebte|arbeitet|arbeitete|schilderte|schildert|behauptete|erschien|erscheint|ging|geht|half|hilft|"
+    r"brachte|bringt|holte|holt|fand|findet|wusste|weiß|weiss|telefonierte|reparierte|tauschte|tauscht|prüfte|"
+    r"prüft|pruefte|prueft|verursachte|unterschrieb|unterschreibt|kündigte|kündigt|kuendigte|kuendigt|zahlte|zahlt|"
+    r"stellte|stellt|kümmert|kümmerte|kuemmert|kuemmerte|fragte|fragt|antwortete|antwortet|fehlte|beauftragte|"
+    r"informierte|bemerkte|entdeckte)(?![\wäöüß])")
+# Personenwörter, hinter denen auch der Name einer Firma stehen kann ("Monteur Buderus", "Mitarbeiterin Vorwerk",
+# "Gutachter Dekra", "Kunde Miele"): dort ist eine bekannte Marke ohne weiteren Beleg kein sicherer Name
+_FIRMEN_PERSONENWORT_RE = re.compile(r"(?:Monteur(?:in)?|Mitarbeiter(?:in)?|Sachbearbeiter(?:in)?|Vermittler(?:in)?|"
+                                     r"Makler(?:in)?|Gutachter(?:in)?|Kunden?|Kundin|Anrufer(?:in)?)[ ]")
+# Kontaktangabe direkt hinter dem Wort ("Monteur Grohe, Tel. 0171 …", "Nachbar Zettl (Handy 0160 …)"): eine Person
+_KONTAKT_DAHINTER_RE = re.compile(r"[ \t]*[,(]?[ \t]*(?:Tel(?:efon)?\.?|Tel\.-Nr\.?|Handy|Mobil(?:nummer)?|Fax|"
+                                  r"E-?Mail|Durchwahl)(?![a-zäöüß])")
+# Satzanfang vor dem Personenwort bzw. seinem Begleiter: Zeilen- oder Zellenanfang, hinter einem Satzzeichen, einem
+# Doppelpunkt ("Notiz: Kollegin Zach ruft zurück"), Strich oder Komma
+_SATZANFANG_DAVOR_RE = re.compile(r"(?:^|[.!?:;,•|–—(\"„“‚\t])[ \t]*$")
+
+
+def _satzanfang(text: str, pos: int) -> bool:
+    """Beginnt an pos ein Satz, eine Notiz oder eine Zelle (nur Leerraum hinter einem Satzzeichen bzw. Zeilenanfang)?"""
+    za = text.rfind("\n", max(0, pos - 200), pos) + 1
+    return bool(_SATZANFANG_DAVOR_RE.search(text[max(za, pos - 40):pos])) or not text[za:pos].strip()
+
+
+def _personenwort_wort(w: str, wissen, beruf_nachname: bool = False) -> bool:
+    """Kann das großgeschriebene Wort hinter einem Personenwort ein Name sein – kein Allerwelts-, Berufs-, Orts-,
+    Etikett-, Titel- oder Kalenderwort, keine Substantiv-Endung, kein leerer Feldwert ("Zeuge Unbekannt", "Ehefrau
+    Mitversichert")? beruf_nachname: ein Berufswort, das zugleich ein Familienname der Wissensbasis ist ("beim Nachbarn
+    Koch", "Kollege Schreiner"), zählt mit – für die Selbstkontrolle, die es meldet, statt es auszunehmen."""
+    if _SUBSTANTIV_ENDUNG_RE.search(w) or w.casefold() in _KALENDER or w.casefold() in KEIN_NAMENSWERT:
+        return False
+    try:
+        beruf = wissen.ist_beruf(w) and not (beruf_nachname and wissen.ist_nachname(w))
+        if wissen.ist_allerweltswort(w) or beruf or wissen.ist_ort(w) or wissen.ist_anrede_titel(w) \
+                or wissen.ist_allowlist(w):
+            return False
+        if any(wissen.index(f"etiketten_{art}").eintrag_fuer(w) is not None for art in wissen.ETIKETTEN_ARTEN):
+            return False
+        if "-" in w and any(wissen.ist_allerweltswort(t) for t in w.split("-") if t):
+            return False                                 # "Kunden Service-Center"
+    except Exception:  # pragma: no cover - Wissensbasis beschädigt
+        return False
+    return True
+
+
+def personenwort_kandidaten(text: str, wissen=None, beruf_nachname: bool = False) -> list:
+    """(start, ende, begleiter, beleg) aller Wörter direkt hinter einem Personenwort, die ein Name sein können
+    (_personenwort_wort) – unabhängig davon, ob die Erkennung sie schwärzt. begleiter: ein Begleiter steht davor ("beim
+    Nachbarn", "dem Zeugen"); beleg: das Wort selbst spricht für einen Namen (Vor- oder Nachname der Wissensbasis, auch
+    mehrdeutig, Gestalt eines Familiennamens, Marke). Für die Selbstkontrolle: was die Erkennung nicht schwärzt, meldet
+    sie an seiner Stelle – auf der Textebene und auf OCR-Seiten (Abnahme 3 AB3-03, AB3-04); mit beruf_nachname auch ein
+    Berufswort, das zugleich ein Familienname ist ("Wir waren beim Nachbarn Koch zu Besuch.")."""
     if not text or not _PERSONENWORT_VORAB_RE.search(text):
         return []
     wissen = _wissen_oder_modul(wissen)
@@ -635,33 +686,149 @@ def personenwort_namen(text: str, wissen=None, unsicher: list | None = None) -> 
     aus = []
     for m in _PERSONENWORT_NAME_RE.finditer(text):
         w = m.group(1)
-        if _SUBSTANTIV_ENDUNG_RE.search(w) or w.casefold() in _KALENDER \
-                or w.casefold() in KEIN_NAMENSWERT:
+        if not _personenwort_wort(w, wissen, beruf_nachname) \
+                or text[m.end(1):m.end(1) + 3].lstrip(" \t").startswith(":"):
+            continue
+        begleiter = bool(_BEGLEITER_DAVOR_RE.search(text[max(0, m.start() - 20):m.start()]))
+        try:
+            beleg = _namensbeleg_personenwort(w, wissen) or _bekannte_marke(w, wissen)
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            beleg = True
+        aus.append((m.start(1), m.end(1), begleiter, beleg))
+    return aus
+
+
+def personenwort_namen(text: str, wissen=None, unsicher: list | None = None) -> list:
+    """(start, ende) der Namen direkt hinter einem Personenwort ("Laut Nachbar Grohe", "mit Kollegin Zwickl", "Zeuge
+    Hinterstoißer"; nicht "dem Nachbarn Wasser", "beim Nachbarn Regen"): ein großgeschriebenes Wort, das kein
+    Allerwelts-, Berufs-, Orts-, Etikett- oder Titelwort ist und keine Substantiv-Endung trägt ("Nachbar
+    Wasserschaden", "Kunden Service" nicht) – auch eine Marke ("Grohe"), die hier eine Person ist (Erkennung,
+    namen.py).
+    - Mitten im Satz ohne Begleiter ("Laut Nachbar Grohe", "Rücksprache mit Nachbar Grohe", "kam Monteur Grohe"): der
+      Name; eine bekannte Marke hinter einer Präposition wird nur gemeldet ("Laut Monteur Buderus …"; A2-04).
+    - Am Satz- oder Notizanfang mit einem Verb einer Person dahinter ("Monteur Grohe kam am 03.03.", "Nachbar Zettl hat
+      den Brand gemeldet", "Der Vermieter Kranawetter hat gekündigt"): der Name, auch eine Marke oder ein mehrdeutiges
+      Wort (Abnahme 3 AB3-02, AB3-03).
+    - Am Satzanfang ohne solches Verb ("Chef Sekretariat ist besetzt") und hinter einem Begleiter ("beim Nachbarn
+      Zirngibl"): nur mit eigenem Namensbeleg (_namensbeleg_personenwort; Abnahme 2 A2-04, V7). Ein Familienname, der
+      zugleich ein gewöhnliches Wort ist, hinter einem Begleiter ("beim Mieter Schimmel", "dem Nachbarn Holz") ist kein
+      sicherer Beleg: die Selbstkontrolle meldet ihn (Abnahme 3 AB3-04).
+    Die Wörter hinter einem Begleiter ohne Namensbeleg ("beim Nachbarn Grohe", "dem Nachbarn Wasser") kommen in
+    `unsicher`: die Erkennung entscheidet dort nach der Wortart im Satz (namen.py, Abnahme 2 V7). Was hier nicht als
+    Name gilt, meldet die Selbstkontrolle (personenwort_kandidaten)."""
+    if not text or not _PERSONENWORT_VORAB_RE.search(text):
+        return []
+    wissen = _wissen_oder_modul(wissen)
+    if wissen is None:
+        return []
+    aus = []
+    for m in _PERSONENWORT_NAME_RE.finditer(text):
+        w = m.group(1)
+        if not _personenwort_wort(w, wissen):
+            continue
+        davor_start = max(0, m.start() - 20)
+        bm = _BEGLEITER_DAVOR_RE.search(text, davor_start, m.start())
+        begleiter = bm is not None
+        anfang = _satzanfang(text, bm.start() if begleiter else m.start())
+        # Satzgegenstand: Personenwort am Satzanfang, dahinter ein Verb einer Person; oder eine Kontaktangabe dahinter
+        if (anfang and _PERSON_VERB_DAHINTER_RE.match(text, m.end(1))) or _KONTAKT_DAHINTER_RE.match(text, m.end(1)):
+            aus.append((m.start(1), m.end(1)))
+            continue
+        # mitten im Satz ohne Begleiter: hinter einer Präposition oder einem Verb ("kam Monteur Grohe") – der Name
+        sicher = not begleiter and (not anfang or bool(_PRAEPOSITION_DAVOR_RE.search(text, davor_start, m.start())))
+        # eine bekannte Marke, die kein Vor- oder Nachname ist, hinter dem Personenwort einer Firma ("Laut Monteur
+        # Buderus …" – der Monteur oder der Hersteller?), bleibt stehen: die Selbstkontrolle meldet sie als "Marke oder
+        # Familienname im Personenkontext" (Abnahme 2, Probe p01 – auf 1b5130a gemeldet). Hinter einem Personenwort
+        # des privaten Umfelds ("Laut Nachbar Miele", "Rücksprache mit Mieter Liebherr") ist sie der Name
+        if _bekannte_marke(w, wissen) and _FIRMEN_PERSONENWORT_RE.match(text, m.start()):
             continue
         try:
-            if wissen.ist_allerweltswort(w) or wissen.ist_beruf(w) or wissen.ist_ort(w) or wissen.ist_anrede_titel(w) \
-                    or wissen.ist_allowlist(w):
-                continue
-            if any(wissen.index(f"etiketten_{art}").eintrag_fuer(w) is not None for art in wissen.ETIKETTEN_ARTEN):
-                continue
-            if "-" in w and any(wissen.ist_allerweltswort(t) for t in w.split("-") if t):
-                continue                                 # "Kunden Service-Center"
+            mehrdeutig = begleiter and wissen.ist_mehrdeutig(w)
         except Exception:  # pragma: no cover - Wissensbasis beschädigt
-            continue
-        davor = text[max(0, m.start() - 20):m.start()]
-        begleiter = bool(_BEGLEITER_DAVOR_RE.search(davor))
-        # "dem Nachbarn Wasser", "beim Nachbarn Regen": ein Satzteil mit Begleiter, das Wort dahinter ist meist eine
-        # Sache; ebenso am Anfang einer Notiz ohne Präposition
-        sicher = not begleiter and bool(_PRAEPOSITION_DAVOR_RE.search(davor))
-        # eine bekannte Marke, die kein Vor- oder Nachname ist ("Laut Monteur Buderus …" – der Monteur oder der
-        # Hersteller?), bleibt stehen: die Selbstkontrolle meldet sie als "Marke oder Familienname im Personenkontext"
-        # (Abnahme 2, Probe p01 – auf 1b5130a gemeldet)
-        if _bekannte_marke(w, wissen):
-            continue
+            mehrdeutig = False
+        if mehrdeutig:
+            continue                                     # "beim Mieter Schimmel": gemeldet, nicht geschwärzt
         if sicher or _namensbeleg_personenwort(w, wissen):
             aus.append((m.start(1), m.end(1)))
         elif begleiter and unsicher is not None and not text[m.end(1):m.end(1) + 3].lstrip(" \t").startswith(":"):
             unsicher.append((m.start(1), m.end(1)))
+    return aus
+
+
+# Berufswort am Satz- oder Notizanfang vor einem großgeschriebenen Wort ("Elektriker Miele kam am Montag.")
+_GROSSWORT_VOR_GROSSWORT_RE = re.compile(r"(?<![\wäöüß\-])[A-ZÄÖÜ][a-zäöüß]{3,}(?=[ ]{1,2}[A-ZÄÖÜ])")
+_NAME_DAHINTER_RE = re.compile(r"[ ]{1,2}([A-ZÄÖÜ][a-zäöüß]{2,}(?:-[A-ZÄÖÜ][a-zäöüß]+)?)(?![\wäöüß\-])")
+
+
+def berufswort_namen(text: str, wissen=None, alle: bool = False) -> list:
+    """(start, ende) der Namen hinter einem Berufswort der Wissensbasis am Satz- oder Notizanfang, wenn dahinter ein
+    Verb einer Person oder eine Kontaktangabe steht ("Elektriker Miele kam am Montag.", "Techniker Neff, Tel. …"): wie
+    hinter einem Personenwort (personenwort_namen) ist das Wort dort der Name (Abnahme 3 AB3-02: "hinter jedem
+    Personenwort, auch hinter Berufen") – wenn es selbst für einen Namen spricht: eine bekannte Marke oder ein Vor- bzw.
+    Familienname, der kein gewöhnliches Wort ist ("Schreiner Holz kam per Lkw." bleibt stehen). Ohne Verb oder
+    Kontaktangabe bleibt es bei den übrigen Regeln. alle: auch die Wörter ohne solchen Beleg ("Handwerker Grohe kam …")
+    – für die Selbstkontrolle, die sie meldet."""
+    if not text:
+        return []
+    wissen = _wissen_oder_modul(wissen)
+    if wissen is None:
+        return []
+    aus = []
+    for m in _GROSSWORT_VOR_GROSSWORT_RE.finditer(text):
+        n = _NAME_DAHINTER_RE.match(text, m.end())
+        if not n or not (_PERSON_VERB_DAHINTER_RE.match(text, n.end(1)) or _KONTAKT_DAHINTER_RE.match(text, n.end(1))):
+            continue
+        bm = _BEGLEITER_DAVOR_RE.search(text, max(0, m.start() - 20), m.start())    # "Der Elektriker Miele kam …"
+        if not _satzanfang(text, bm.start() if bm else m.start()):
+            continue
+        try:
+            if not wissen.ist_beruf(m.group()):
+                continue
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            continue
+        w = n.group(1)
+        if not _personenwort_wort(w, wissen):
+            continue
+        try:
+            beleg = _bekannte_marke(w, wissen) or (_namensbeleg_personenwort(w, wissen) and not wissen.ist_mehrdeutig(w))
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            beleg = False
+        if beleg or alle:
+            aus.append(n.span(1))
+    return aus
+
+
+def personenwort_nur_meldung(text: str, wissen=None) -> set:
+    """(start, ende) der Wörter hinter einem Personenwort, die nach personenwort_namen kein Name sind und die die
+    Erkennung auch nicht über die KI schwärzt – die Selbstkontrolle meldet sie (personenwort_kandidaten):
+    - hinter einem Begleiter ein Familienname, der zugleich ein gewöhnliches Wort ist ("beim Mieter Schimmel", "dem
+      Nachbarn Holz", "beim Nachbarn Hagel"; Abnahme 3 AB3-04);
+    - eine bekannte Marke, die kein Vor- oder Nachname ist, hinter dem Personenwort einer Firma direkt hinter "laut" oder
+      "gemäß" ("Laut Monteur Hansgrohe ist die Kartusche baugleich." – der Monteur oder der Hersteller?; offener Punkt
+      der vierten Nachbesserung, Probe p07). Mit einem Verb einer Person ("Monteur Hansgrohe kam …"), hinter "mit"
+      ("Rücksprache mit Monteur …") und hinter Personenwörtern des privaten Umfelds ("Laut Nachbar Miele") bleibt es
+      bei der Erkennung."""
+    if not text or not _PERSONENWORT_VORAB_RE.search(text):
+        return set()
+    wissen = _wissen_oder_modul(wissen)
+    if wissen is None:
+        return set()
+    namen_ = set(personenwort_namen(text, wissen))
+    aus = set()
+    for s, e, begleiter, _ in personenwort_kandidaten(text, wissen):
+        try:
+            if begleiter and (s, e) not in namen_ and wissen.ist_mehrdeutig(text[s:e]):
+                aus.add((s, e))
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            continue
+    for m in _PERSONENWORT_NAME_RE.finditer(text):
+        s, e = m.span(1)
+        if (s, e) in namen_ or (s, e) in aus or not _FIRMEN_PERSONENWORT_RE.match(text, m.start()):
+            continue
+        davor = max(0, m.start() - 25)
+        if PERSON_LAUT_DAVOR_RE.search(text, davor, m.start()) and _personenwort_wort(m.group(1), wissen) \
+                and _bekannte_marke(m.group(1), wissen):
+            aus.add((s, e))
     return aus
 
 
@@ -1161,8 +1328,12 @@ def hofnamen(text: str, wissen) -> list:
         gestalt = namensgestalt(n.group(0), wissen) or haus
         kontext = kontext_je_zeile[za] or (_ort_danach(text, n.end(), wissen) and haus)
         # hinter "beim"/"vom"/"zum" ein Wort mit der Endung eines Hausnamens auch ohne Ereignis ("Er arbeitet beim
-        # Wastlbauer als Knecht", "Die Kühe vom Lechnerbauer", "zum Zellerbauern hinauf"; Abnahme 2 V2)
-        if (m.group(1) and (gestalt or kontext)) or (m.group(2) and ((gestalt and kontext) or haus)):
+        # Wastlbauer als Knecht", "Die Kühe vom Lechnerbauer", "zum Zellerbauern hinauf"; Abnahme 2 V2) – nur die
+        # Endung, nicht jeder Nachname der Wissensbasis ("Anbei das Foto vom Kratzer/Kleber": ein Sachwort; Abnahme 3
+        # AB3-04 – die Selbstkontrolle meldet den Nachnamen)
+        k = n.group(0).casefold()
+        endung = len(k) >= 7 and bool(_HAUSNAME_ENDUNG_RE.search(k) or _HAUSNAME_BEUGUNG_RE.search(k))
+        if (m.group(1) and (gestalt or kontext)) or (m.group(2) and ((gestalt and kontext) or endung)):
             aus.append((n.start(), n.end()))
     return aus
 

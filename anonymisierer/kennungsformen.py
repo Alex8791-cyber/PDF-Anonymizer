@@ -3166,15 +3166,21 @@ _CODE_ETIKETT_RE = re.compile(r"(?<![\wäöüß./])(?<![\wäöüß]-)(?:Code|Zah
 # Nur Schlösser und ihre Zusammensetzungen mit dem Schloss als Grundwort: "-tür" am Wortende ("Haustür", nicht
 # "natürlich" oder "Türsprechanlage"), "Tor" allein oder mit dem Bestimmungswort eines Tors ("Hoftor", nicht "Motor",
 # "Monitor", "Inspektor", "Sektor"), "Schließfach" statt jedes Worts auf "schließ-" ("abschließend"), die Alarmanlage
-# statt des Fehlalarms (Abnahme 2 A2-01); dazu Schlüsselbox, -kasten, -safe und der Keller (V1)
-_SCHLOSS_WORT = (r"(?:[\wäöüß]{0,25}(?:tresor\w{0,12}|safe|schloss|schlösser|schloesser|t(?:ü|ue)r(?:e|en)?|"
+# statt des Fehlalarms (Abnahme 2 A2-01); dazu Schlüsselbox, -kasten, -safe und der Keller (V1). Gebäude und Behälter
+# mit Schloss als Grundwort zählen ebenso ("Gartenhaus", "Ferienhaus", "Gerätehaus", "Gartenhütte", "Geräteschuppen",
+# "Scheune", "Heustadel", "Pferdestall", "Carport", "Wallbox", "Paketbox", "Spind", "Waffenschrank", "Fahrradkeller";
+# Abnahme 3 AB3-01) – "Haus" nur als Grundwort am Wortende, nicht am Anfang ("Hausrat", "Haushalt")
+_SCHLOSS_GEBAEUDE = (r"[\wäöüß]{1,25}(?:haus|häuschen|haeuschen)|[\wäöüß]{0,25}(?:hütte|huette|schuppen|scheune|"
+                     r"stadel|stadl|stall|carport|box|spind|schrank|keller(?:raum|abteil|räume)?)")
+_SCHLOSS_WORT = (r"(?:" + _SCHLOSS_GEBAEUDE + r"|"
+                 r"[\wäöüß]{0,25}(?:tresor\w{0,12}|safe|schloss|schlösser|schloesser|t(?:ü|ue)r(?:e|en)?|"
                  r"schlie(?:ß|ss)(?:fach|fächer|faecher|anlage|system|zylinder)\w{0,6}|briefkasten\w{0,4}|briefkästen|"
                  r"schl(?:ü|ue)ssel(?:box|boxen|kasten|kästen|safe|tresor|depot))|"
                  r"(?:alarm|einbruchmelde|einbruchsmelde)(?:anlage\w{0,4}|system\w{0,4}|zentrale\w{0,4})?|"
                  r"[\wäöüß]{1,20}alarmanlage\w{0,4}|(?:tief|sammel)?garage(?:n|ntor\w{0,10}|nzufahrt|neinfahrt)?|"
                  r"(?:garagen|hof|einfahrts?|grundstücks|grundstuecks|haus|garten|roll|eingangs|schiebe|hallen|"
                  r"keller|scheunen|werks|fabrik|flügel|fluegel|sektional|kipp|stall|stadl|zufahrts)?"
-                 r"tor(?:öffner\w{0,4}|oeffner\w{0,4}|es|e|en)?|(?:heizungs)?keller(?:raum|abteil|räume)?|"
+                 r"tor(?:öffner\w{0,4}|oeffner\w{0,4}|es|e|en)?|"
                  r"(?:haupt|neben|seiten|hinter|hof|garagen|tiefgaragen|haus)?(?:eingang|einfahrt|zufahrt)(?:s|es)?)")
 _CODE_GEGENSTAND_RE = re.compile(r"(?i)(?<![\wäöüß])(?:" + _SCHLOSS_WORT + r"|haus|wohnung\w{0,12}|handy|smartphone|"
                                  r"tablet|laptop|computer|router|wlan|sim|app|portal|konto|zugang|plakette|stempel)"
@@ -3570,13 +3576,21 @@ _MIT_ZIFFERN_RE = re.compile(r"(?<![\wäöüß])mit[ \t]+(?:(?:dem|der|einem|ein
 _BEDIENVERB_RE = re.compile(r"(?i)(?<![\wäöüß])(?:(?:aus|ein|ab|auf|frei|scharf|unscharf|zu)?schalt\w{0,4}|"
                             r"(?:auf|zu|ab)?(?:schließ|schliess)\w{0,4}|(?:ent|auf|ab|zu)?sperr\w{0,4}|öffn\w{0,4}|"
                             r"oeffn\w{0,4}|entschärf\w{0,4}|entschaerf\w{0,4}|(?:de)?aktivier\w{0,4}|"
-                            r"entriegel\w{0,4}|freischalt\w{0,4})(?![\wäöüß])")
+                            r"entriegel\w{0,4}|freischalt\w{0,4}|(?:auf|zu)(?:geh|mach)\w{0,4})(?![\wäöüß])")
+# trennbare Verben der Bedienung: "geht … auf", "macht man … zu" ("Das Hoftor geht mit 2601 auf."; Abnahme 3 AB3-07)
+_BEDIEN_GEHEN_RE = re.compile(r"(?i)(?<![\wäöüß])(?:geh(?:t|en)|ging(?:en)?|mach(?:t|en)|machte[n]?)(?![\wäöüß])")
+_PARTIKEL_ENDE_RE = re.compile(r"(?i)(?<![\wäöüß])(?:auf|zu)[ \t]*[.!?]?[ \t]*$")
 _MENGE_DAHINTER_RE = re.compile(r"[ \t]*(?:€|euro|eur|cent|%|prozent|m|km|cm|mm|meter\w*|kilo\w*|stück|stueck|"
                                 r"jahre?n?|monate?n?|tage?n?|stunden?|minuten?|sekunden?|kg|g|l|liter\w*|ps|kw|"
-                                r"watt|volt|grad|°)(?![\wäöüß])", re.IGNORECASE)
+                                r"watt|volt|grad|°|m²|m2|qm|quadratmeter\w*)(?![\wäöüß])"
+                                # ein gezähltes Substantiv dahinter ("mit 120 Stellplätzen", "mit 300 Kisten"): eine Menge
+                                r"|[ \t]+(?-i:[A-ZÄÖÜ][a-zäöüß]{2,})", re.IGNORECASE)
 
 
-def _zugang_mit_ziffern(text: str) -> list:
+def _zugang_mit_ziffern(text: str, ohne_verb: list | None = None) -> list:
+    """(start, ende) der Ziffern hinter "mit" in einem Satz mit Schloss und Verb der Bedienung; die Ziffern in einem
+    Satz mit Schloss ohne Verb der Bedienung ("Die Scheune ist mit 2604 gesichert.") kommen in `ohne_verb` – für die
+    Selbstkontrolle (Abnahme 3 AB3-07)."""
     aus = []
     for m in _MIT_ZIFFERN_RE.finditer(text):
         if _MENGE_DAHINTER_RE.match(text, m.end()):
@@ -3589,7 +3603,11 @@ def _zugang_mit_ziffern(text: str) -> list:
         satz = text[satz_anfang:satz_ende]
         if not _CODE_SCHLOSS_RE.search(satz) or _CODE_FEHLER_RE.search(satz) or _CODE_KEIN_GEHEIMNIS_RE.search(satz):
             continue
-        if not _BEDIENVERB_RE.search(text, satz_anfang, m.start()) and not _BEDIENVERB_RE.search(text, m.end(), satz_ende):
+        if not _BEDIENVERB_RE.search(text, satz_anfang, m.start()) and not _BEDIENVERB_RE.search(text, m.end(), satz_ende) \
+                and not (_BEDIEN_GEHEN_RE.search(text, satz_anfang, m.start())
+                         and _PARTIKEL_ENDE_RE.search(text[m.end():satz_ende])):
+            if ohne_verb is not None and not _CODE_EINORDNUNG_RE.search(satz):
+                ohne_verb.append(m.span(1))
             continue
         aus.append(m.span(1))
     return aus
@@ -3644,7 +3662,14 @@ def _schloss_im_satz_davor(text: str, zeilenanfang: int, code_start: int, satz: 
         davor = _satzteil_vor(text, zeilenanfang, ende - 1)
     elif zeilenanfang > 0:
         vz = text.rfind("\n", max(0, zeilenanfang - 1 - 2 * CODE_GEGENSTAND_FENSTER), zeilenanfang - 1) + 1
-        davor = _satzteil_vor(text, vz, zeilenanfang - 1)
+        # der letzte Satz der Zeile davor, auch wenn sie mit einem Satzzeichen schließt ("Bitte im Keller nachsehen."
+        # ⏎ "Code 9595"; Abnahme 3 AB3-07)
+        ende_vz = zeilenanfang - 1
+        while ende_vz > vz and text[ende_vz - 1] in " \t":
+            ende_vz -= 1
+        if ende_vz > vz and text[ende_vz - 1] in ".!?":
+            ende_vz -= 1
+        davor = _satzteil_vor(text, vz, ende_vz)
     else:
         return False
     return bool(davor.strip()) and _CODE_SCHLOSS_RE.search(davor) is not None \
@@ -3652,11 +3677,29 @@ def _schloss_im_satz_davor(text: str, zeilenanfang: int, code_start: int, satz: 
                  or _CODE_EINORDNUNG_RE.search(davor))
 
 
+def _code_wort_davor(satz: str) -> bool:
+    """Steht direkt vor "Code" ein Gegenstand, ein Raum oder ein Feldname – großgeschrieben, kein Artikel oder
+    Funktionswort, auch mit Doppelpunkt, Strich oder Nummer ("Waschküche: Code 6161", "Dachboden – Code 5151",
+    "Serverraum Code 6169", "Tor 2: Code 1593"; Abnahme 3 AB3-01)? Nicht in einer Klammer ("Inspektor (Code 2207)":
+    eine Anmerkung) und nicht hinter Satzzeichen allein."""
+    m = _CODE_WORT_DAVOR_RE.search(satz)
+    return m is not None and not ist_funktionswort(m.group(1)) \
+        and m.group(1).casefold() not in _ZUGANG_FUELLWORT and not _CODE_EINORDNUNG_RE.fullmatch(m.group(1))
+
+
+_CODE_WORT_DAVOR_RE = re.compile(r"(?<![\wäöüß\-])([A-ZÄÖÜ][\wäöüß\-]{1,39})(?:[ \t]+(?:Nr\.[ \t]*)?\d{1,3}[a-z]?)?"
+                                 r"(?:[ \t]*[:/=>\-–—]{1,3}[ \t]*|[ \t]+)$")
+
+
 def zugangscode_verdacht(text: str) -> list:
     """(start, ende) der Ziffernfolgen hinter "Code", die ein Zugangscode sein können (siehe oben), auch mit "ist" oder
     "lautet" dazwischen ("Der Hausmeister öffnet die Tür, Code ist 4711."), und hinter einem Schloss als Feldname
-    (_SCHLOSS_FELD_RE) – ohne die Stellen, die zugangsdaten schon findet."""
-    if "ode" not in text and ":" not in text:
+    (_SCHLOSS_FELD_RE) – ohne die Stellen, die zugangsdaten schon findet. Ohne sicheren Gegenstand gemeldet werden auch
+    "Code ist/lautet <Ziffern>" ("Code lautet 5656.", "Der Code ist 7878."), ein Gegenstand oder Feldname direkt vor
+    "Code" ("Waschküche: Code 6161") und ein Gegenstand (Haus, Wohnung, Konto, App …) im Satz davor, dazu Ziffern hinter
+    "mit" in einem Satz mit Schloss ohne Verb der Bedienung (Abnahme 3 AB3-01, AB3-07) – jeweils ohne Meldung, Störung
+    oder Einordnung im Satz."""
+    if "ode" not in text and ":" not in text and "mit" not in text:
         return []
     sicher = set(zugangsdaten(text))
     aus = []
@@ -3664,13 +3707,18 @@ def zugangscode_verdacht(text: str) -> list:
         sp = (m.start("wert"), m.end("wert"))
         if sp not in sicher and not _CODE_FEHLER_RE.search(text, max(0, m.start() - 60), m.start()):
             aus.append(sp)
+    if "mit" in text:
+        ohne_verb: list = []
+        _zugang_mit_ziffern(text, ohne_verb)
+        aus += [sp for sp in ohne_verb if sp not in sicher and sp not in aus]
     for m in _CODE_ETIKETT_RE.finditer(text):
         if m.group(0) != "Code":
             continue
         zeilenende = text.find("\n", m.end())
         zeilenende = len(text) if zeilenende < 0 else zeilenende
         ankuendigung = _ZUGANG_ANKUENDIGUNG_RE.match(text, m.end(), zeilenende)
-        nach = ankuendigung.end() - 1 if ankuendigung is not None and ankuendigung.end() > m.end() else m.end()
+        angekuendigt = ankuendigung is not None and ankuendigung.end() > m.end()
+        nach = ankuendigung.end() - 1 if angekuendigt else m.end()
         w = _CODE_WERT_DAHINTER_RE.match(text, nach, zeilenende)
         if w is None or not _pin_form(w.group(1)):
             continue
@@ -3680,6 +3728,7 @@ def zugangscode_verdacht(text: str) -> list:
             continue
         doppelpunkt = ":" in text[w.start():w.start(1)]
         if not (_CODE_SCHLOSS_RE.search(satz) or (doppelpunkt and _CODE_ANFANG_DAVOR_RE.search(satz))
+                or angekuendigt or _CODE_GEGENSTAND_RE.search(satz) or _code_wort_davor(satz)
                 or _schloss_im_satz_davor(text, zeilenanfang, m.start(), satz)):
             continue
         hinten = re.search(r"[.!?;]", text[w.end():min(zeilenende, w.end() + 60)] + ".")

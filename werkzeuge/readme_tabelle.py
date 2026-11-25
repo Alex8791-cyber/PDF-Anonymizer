@@ -95,7 +95,11 @@ ERLAEUTERUNG = {
                     "Entsperrcode hinter ihrem Etikett (auch „WPA2-Kennwort“, „Kennwort für das Portal: …“, als "
                     "Spaltenkopf „PIN“); ein Zugangscode aus Ziffern hinter „Code“ mit einem Schloss davor, im Satz "
                     "oder dahinter („Haustür: Code 1357“, „(Haustür) Code 1357“, „Die Garage hat den Code 1199.“, "
-                    "„Code 4455 für die Tiefgarage“, „schaltet man mit 6482 aus“) – nicht „Passwort vergessen?“, "
+                    "„Code 4455 für die Tiefgarage“, „schaltet man mit 6482 aus“, „Das Hoftor geht mit 2601 auf.“) – "
+                    "auch hinter Gebäuden und Behältern mit Schloss („Gartenhaus: Code 9090“, „Geräteschuppen – Code "
+                    "3016“, Scheune, Stall, Carport, Wallbox, Spind); ohne sicheres Schloss meldet die Selbstkontrolle "
+                    "die Ziffern („Waschküche: Code 6161“, „Code lautet 5656.“, „Bitte im Keller nachsehen.⏎Code "
+                    "9595“) – nicht „Passwort vergessen?“, "
                     "„PIN: siehe separates Schreiben“, Fehler- und Anzeigecodes von Geräten („Der Motor meldet den "
                     "Code P0300“, „Das Garagentor zeigte den Code 3017“) oder Tarif- und Rabattcodes",
     "profilname": "@-Namen, Nutzer- und Profilnamen hinter Plattform-Etiketten („eBay-Name:“, „Telegram:“), der "
@@ -108,7 +112,8 @@ ERLAEUTERUNG = {
                      "sechsstellige PLZ mit Länderhinweis und ausländische Kennzeichen im Satz mit Länderhinweis",
     "ort": "Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“",
     "beruf": "hinter „Beruf:“, im Satz („arbeitet als …“, „ist als … tätig“, „verdient ihr Geld als …“, „übt den "
-             "Beruf der … aus“, „seit sie Lehrerin ist“), in der Spalte „Beruf“/„Tätigkeit“ einer Personenliste, im "
+             "Beruf der … aus“, auch gebeugt „des Schreiners“, „seit sie Lehrerin ist“, „Ihr Mann, der Polizist ist, "
+             "…“, Tätigkeiten wie „arbeitet als Putzfrau“), in der Spalte „Beruf“/„Tätigkeit“ einer Personenliste, im "
              "Beruf-Feld eines Kastenformulars (Wert unter dem Feldbezeichner, auch unter „Beruf des Ehepartners“) "
              "und auf Scans rechts neben dem Feldnamen „Beruf“ – nicht die Rolle des Maklers, einer Firma oder eines "
              "Vereins („Wir sind als Versicherungsmakler für Sie tätig“), Vertretungs- und Ehrenämter („als Betreuer "
