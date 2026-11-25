@@ -1301,13 +1301,14 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
     #    (MuPDF verschiebt den Rest einer Zeile, Befund M-31).
     bereiche = _nur_bildbereiche(lauf, nr, seite, m, bereiche)    # „maximal“: Bilder hinter Text ohne den Text
     bereits: list = []
+    bereits_raster = _Raster()  # dieselben Rechtecke nach Höhe (lineare Laufzeit, Ü-NP-15)
     kaesten: list = []          # graue Kästen der Treffer (werden nach dem Anwenden gezeichnet)
     verschiebbar: list = []     # je Kasten: darf er der verschobenen Zeile folgen (sichtbarer Text, kein Bild)?
     platzhalter: list = []      # [Kasten-Index oder None, Rechteck, Text, Schriftgröße, Grundlinie, Ersatz, max_pt]
     einbrennen: list = []       # Rückfall "Seite als Bild": zusätzlich die vollen Glyphenboxen der Treffer
     for hit in hits:
         paare = [(r, b) for r, b in zip(hit["rects"], hit["boxen"])
-                 if not r.is_empty and not any(alt.contains(r) for alt in bereits)]
+                 if not r.is_empty and not bereits_raster.enthaelt(r)]
         if not paare:
             continue
         rects = [r for r, _ in paare]
@@ -1335,6 +1336,7 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
                                     max_pt])
         for r, (_, box) in zip(rects, paare):
             bereits.append(r)
+            bereits_raster.dazu(r)
             kaesten.append(r)
             verschiebbar.append(hit["verschiebbar"] and not any(r.intersects(b) for b in m.bilder))
             einbrennen.append(r | (fitz.Rect(box) + (-0.5, -0.5, 0.5, 0.5)))
@@ -1695,6 +1697,37 @@ def _glyphreste_pruefen(lauf, nr, seite, m, getroffen: set):
                                   f"entfernt ({beispiel!r})")
 
 
+class _Raster:
+    """Rechtecke einer Seite, nach Höhenstreifen einsortiert: Fragen nach einem Rechteck prüfen nur die Rechtecke in
+    seinen Streifen – sonst wüchse die Prüfung je Stelle mit allen Stellen der Seite (quadratisch; eine Seite mit tausend
+    Quadrat- oder Tätigkeitsfunden brauchte Minuten, Nachprüfung Ü-NP-15)."""
+    STREIFEN = 12.0
+
+    def __init__(self, rects=()):
+        self._streifen: dict = {}
+        for r in rects:
+            self.dazu(r)
+
+    def _bereich(self, y0: float, y1: float):
+        return range(int(y0 // self.STREIFEN), int(y1 // self.STREIFEN) + 1)
+
+    def dazu(self, r):
+        for k in self._bereich(r.y0, r.y1):
+            self._streifen.setdefault(k, []).append(r)
+
+    def kandidaten(self, y0: float, y1: float):
+        gesehen = set()
+        for k in self._bereich(y0, y1):
+            for r in self._streifen.get(k, ()):
+                if id(r) not in gesehen:
+                    gesehen.add(id(r))
+                    yield r
+
+    def enthaelt(self, r) -> bool:
+        """Liegt r ganz in einem der Rechtecke?"""
+        return any(alt.contains(r) for alt in self._streifen.get(int(r.y0 // self.STREIFEN), ()))
+
+
 def _kollateral_pruefen(lauf, nr, seite, woerter_vorher, rects):
     """Wörter, die kein Treffer waren, müssen nach der Schwärzung noch da sein (gleicher Text auf
     gleicher Höhe – MuPDF verschiebt Resttext einer Zeile horizontal leicht)."""
@@ -1705,10 +1738,11 @@ def _kollateral_pruefen(lauf, nr, seite, woerter_vorher, rects):
     except Exception:
         return
     beschaedigt = []
+    raster = _Raster(rects)
     for w in woerter_vorher:
         r = fitz.Rect(w[:4])
         bedeckt = 0.0
-        for x in rects:
+        for x in raster.kandidaten(r.y0, r.y1):
             if min(r.y1, x.y1) - max(r.y0, x.y0) > 0.3 * r.height:
                 bedeckt += max(0.0, min(r.x1, x.x1) - max(r.x0, x.x0))
         if bedeckt > 0.5 * (r.width or 1.0):
@@ -2061,6 +2095,7 @@ _GRUND_TEXTE = {"KAUM_LESBAR": "Scan kaum lesbar", "OCR_UNPLAUSIBEL": "Texterken
                 "TEXTEBENE_UNLESBAR": "Textebene unlesbar – nur per Texterkennung geprüft",
                 "TEXT_ABGESCHNITTEN_REST": "abgeschnittener, unsichtbarer Text nicht vollständig entfernt",
                 "VERDACHT": "Restrisiko-Prüfung meldet Verdacht",
+                "ART9_ABGEWAEHLT": "Gesundheitsdaten bzw. Religion (Art. 9 DSGVO) nicht geschwärzt – lesbar",
                 "SEITE_NICHT_SCHWAERZBAR": "Seite ließ sich nicht schwärzen"}
 
 
@@ -2463,7 +2498,7 @@ def _bildreste_nachpruefen(lauf: _Lauf, ausgabe: Path) -> None:
 def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=None, ocr=None,
                   ocr_cache=None, ziel_ordner=None, modell=None, manuelle_bereiche=None,
                   manuelle_stellen=None, freigabe_erforderlich: bool = False, profil: str = "hoch",
-                  nebenkanaele: dict | None = None, zwischen_ordner=None) -> dict:
+                  nebenkanaele: dict | None = None, zwischen_ordner=None, art9_abgewaehlt=None) -> dict:
     """Ersetzt alle übergebenen Funde durch ihre Platzhalter – auch in Scans (Bildpixel werden mit
     entfernt) – und schreibt eine neutral benannte Ausgabedatei.
 
@@ -2477,7 +2512,9 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
     ocr: OcrDienst (sonst eigener); ocr_cache: {Seitenindex: Wortliste} aus der Analyse;
     ziel_ordner: sonst <Ordner der PDF>/anonymisiert; nebenkanaele: „nebenkanaele“ aus dem Analyse-Ergebnis
     (sonst prüft die Schwärzung selbst, wenn auf den Seiten nichts zu schwärzen ist); zwischen_ordner: Ordner für
-    die Zwischenstände bei vielen Scan-Seiten (nur teilweise geschwärzt; sonst der Zielordner).
+    die Zwischenstände bei vielen Scan-Seiten (nur teilweise geschwärzt; sonst der Zielordner); art9_abgewaehlt:
+    Kategorien nach Art. 9 DSGVO (Gesundheit, Religion), deren Funde abgewählt in der Ausgabe lesbar bleiben – ein
+    eigener Prüfgrund, auch neben der Freigabe (Nachprüfung NP-05).
     Jede lesbare PDF bekommt eine Ausgabe – auch ohne angehakten Fund (Runde 3): das Dokument ohne
     Dateieigenschaften, Lesezeichen, Anhänge, Formulardaten und abgeschnittenen Text, mit Selbstkontrolle und
     Restrisiko-Prüfung. Ohne Ausgabe (und mit „fehler“ sowie einer Meldung der Art „fehler“) endet nur eine Datei,
@@ -2506,6 +2543,7 @@ def schwaerze_pdf(pdf_pfad, funde: list, melde=None, fortschritt=None, abbruch=N
     lauf.bildauftrag = bildauftrag
     lauf.analyse_modell = modell
     lauf.nebenkanal_bezug = nebenkanal_bezug
+    lauf.art9_abgewaehlt = sorted(set(art9_abgewaehlt or ()))
 
     def ohne_ausgabe(code: str, text: str):
         """Keine Ausgabe: „fehler“ mit einer Meldung der Art „fehler“ (zentrale Regel: nie „fertig“)."""
@@ -2797,7 +2835,8 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
                       "abbruch": lauf.abbruch}
             verdacht = list(_restrisiko.restrisiko_pruefen(
                 tmp, ocr=lauf.ocr, platzhalter=platzhalter, profil=profil,
-                nie=getattr(lauf.analyse_modell, "nie", None), **zusatz) or [])
+                nie=getattr(lauf.analyse_modell, "nie", None), aktive=getattr(lauf.analyse_modell, "aktive", None),
+                **zusatz) or [])
         except _Abgebrochen:
             raise
         except Exception as e:
@@ -2821,6 +2860,8 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
                 lauf.leckrelevant.append(grund)
     unauffindbar = list(nicht_lokalisiert) + list(nicht_gefunden) + list(lauf.anfangstreffer)
     gruende = _status_gruende(lauf, reste, verdacht, unauffindbar)
+    if getattr(lauf, "art9_abgewaehlt", None):
+        gruende.append(_grund("ART9_ABGEWAEHLT"))
     pruefen = bool(gruende or freigabe_erforderlich)
     seitenverdacht = {_verdacht_feld(v, "seite") for v in verdacht if _verdacht_feld(v, "start", 0) == -1}
     eigene_meldung = {"RESTE", "VERDACHT", "NICHT_LOKALISIERT", "MODELL_ABWEICHUNG"}   # stehen schon in Warnungen

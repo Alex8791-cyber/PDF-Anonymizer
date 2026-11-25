@@ -195,6 +195,8 @@ _MONATE = {"januar": 1, "jan": 1, "jänner": 1, "februar": 2, "feb": 2, "märz":
 # (muster._GEB_STOPP_ZEILE_RE)
 _GEB_STOPP_RE = re.compile(r"(?<![\wäöüß])(?:vom|ab|zum|seit|bis|am Ende)(?![\wäöüß])"
                            r"|(?i:beginn|ablauf|fällig|gültig|kündig|stand(?![\wäöüß])|rechnung|angebot|zahlung)")
+# Wochentage abgekürzt als Spanne ("Mo-Fr", "Mo.–Fr.", "Di-Do"): eine Sprech- oder Öffnungszeit, kein Name
+_WOCHENTAGE_KURZ_RE = re.compile(r"(?i)^(?:mo|di|mi|do|fr|sa|so)\.?[ ]?[-–][ ]?(?:mo|di|mi|do|fr|sa|so)\.?$")
 _KALENDERWOERTER = frozenset({
     "januar", "februar", "märz", "april", "mai", "juni", "juli", "august", "september", "oktober", "november",
     "dezember", "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonnabend", "sonntag",
@@ -351,11 +353,28 @@ _ORG_NUMMER_RE = re.compile(
     r"[\s.:#]*$")
 _SERVICE_NUMMER_RE = re.compile(r"^(?:\+49\s?\(?0?\)?\s?|0049\s?|0)(?:800|180\d?|900|137|700)(?!\d)|^11[56]\d{0,3}$")
 # Einheiten hinter Zahlen (Maße, Mengen, Zeiträume) – keine Kennung
+# Ein Personenwort, dem ohne Doppelpunkt ein Artikel oder eine Präposition folgt, steht im Satz und ist kein Etikett
+# ("Mitglied der Handwerkskammer Berlin", "Vorstand im Sportverein Inzell")
+# Hinter "der/die <Familienname>" ein Satzteil, der eine Person verlangt ("war der Haslbeck am Steuer", "wie die Wimmer
+# sagte", ", nicht die …") – nicht "die Scheibe ist gesprungen"
+_ARTIKEL_NAME_VERB_RE = re.compile(
+    r"(?i)[ \t]+(?:am[ \t]+steuer|sagt|sagte|meinte|meint|fuhr|behauptet|behauptete|erzählt|erzählte|erklärt|"
+    r"erklärte|rief|telefonierte|angerufen)(?![\wäöüß])"
+    r"|[ \t]*[,.;]?[ \t]*(?:nicht|und|oder)[ \t]+(?:der|die)[ \t]")
+# … oder davor ein Verb, das eine Person verlangt ("Am Steuer saß der Haslbeck", "Dann sagte die Wimmer")
+_VERB_ARTIKEL_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:saß|sass|fuhr|lenkte|steuerte|sagte|meinte|rief|erzählte|"
+                                    r"erzaehlte|behauptete|erklärte|erklaerte|bestätigte|bestaetigte|schilderte)"
+                                    r"[ \t]+(?:der|die)[ \t]+$")
+_SATZTEIL_HINTER_ETIKETT_RE = re.compile(r"[ ]+(?:der|des|dem|den|die|das|eines|einer|einem|im|in|bei|beim|zum|zur|"
+                                         r"seit|für|fuer)[ ]")
 _EINHEIT_RE = re.compile(
     r"^\s?(?:%|‰|€|EUR|Euro|USD|CHF|T€|TEUR|Mio\.?|Mrd\.?|km|m²|m2|qm|cm|mm|m\b|kg|g\b|t\b|ccm|cm³|kW|kWh|"
     r"PS|l\b|"
     r"Liter|Stück|Stk\.?|Monate?n?|Jahre?n?|Tage?n?|Wochen?|Stunden?|Std\.?|Minuten?|Min\.?|Punkte?n?|Uhr|"
-    r"Personen|Seiten|Zeichen|dpi|px|Prozent|Promille)(?![\w])", re.IGNORECASE)
+    r"Personen|Seiten|Zeichen|dpi|px|Prozent|Promille|"
+    # ausgeschriebene Längen- und Flächenmaße, Toleranz ("6.0000 Meter", "1.2500 lfm", "0.9000 Fuß", "4.6895 ± 0.5")
+    r"Meter|Metern|Zentimeter|Millimeter|Kilometer|lfm|lfdm|Fuß|Fuss|feet|Zoll|inch|Hektar|±)(?![\w])",
+    re.IGNORECASE)
 _WAEHRUNG_VOR_RE = re.compile(r"(?:€|EUR|Euro|USD|CHF|Betrag|Summe)\s?:?\s?$", re.IGNORECASE)
 _STRASSEN_ENDUNG = (r"(?:straße|strasse|str\.|str\b|weg|platz|allee|gasse|ring|damm|ufer|chaussee|steig|pfad|"
                     r"stieg|graben|markt|wall|kamp|deich|anger|promenade|zeile|berg|hof|feld|garten|park|"
@@ -535,6 +554,8 @@ _PLUS_CC_RE = re.compile(r"(?<![\w+])\+\s?\d{1,3}[\s(/\-]{0,3}\d")
 _NAMENSWORT_RE = re.compile(r"[^\W\d_](?:[^\W\d_]|['’](?=[^\W\d_]))*(?:-[^\W\d_](?:[^\W\d_]|['’](?=[^\W\d_]))*)*")
 _PLATZHALTER_RE = re.compile(r"\[[A-ZÄÖÜẞ0-9][A-ZÄÖÜẞ0-9 .,/&+\-]{0,38}\]")
 _PERSONEN_PLATZHALTER_RE = re.compile(r"\[(?:PERSON|P|FAMILIE|F|NAME)\b")
+_NUR_PLATZHALTER_RE = re.compile(r"(?:\[[A-ZÄÖÜ0-9][A-ZÄÖÜ0-9 \-]{0,24}\][\s,;.]*)+")
+_PERSON_PLATZHALTER_GANZ_RE = re.compile(r"\[(?:PERSON|P|FAMILIE|F|NAME|NAMEN)\b[^\]\n]{0,12}\]")
 _ANSCHRIFT_PLATZHALTER_RE = re.compile(r"\[(?:ADRESSE|PLZ|STRASSE|ORT)\b")
 # Bruchstücke von Platzhaltern, wie die OCR sie liest ("PERS", "ORTI", "[PLZ")
 _PLATZHALTER_WOERTER = ("PERSON", "FAMILIE", "ADRESSE", "STRASSE", "TELEFON", "VERTRAGS", "GEB-DATUM", "DATUM",
@@ -873,12 +894,23 @@ def _platzhalter_bruchstueck(wort: str) -> bool:
     return any(p.startswith(w) or (len(w) >= 4 and w.startswith(p)) for p in _PLATZHALTER_WOERTER)
 
 
+def _personenzeile(zeile: str, ms: int, me: int) -> bool:
+    """Ist die Zeile eine Tabellenzeile (Zellen durch Tabulatoren getrennt) aus mindestens zwei Personen-Platzhaltern und
+    dem Datum zeile[ms:me] als eigener Zelle – sonst nichts?"""
+    if "\t" not in zeile or zeile[:ms].rstrip(" ")[-1:] not in ("\t", "") \
+            or zeile[me:].lstrip(" ")[:1] not in ("\t", ""):
+        return False
+    zellen = [z.strip() for z in re.split(r"\t+", zeile[:ms] + zeile[me:]) if z.strip()]
+    return len(zellen) >= 2 and all(_PERSON_PLATZHALTER_GANZ_RE.fullmatch(z) for z in zellen)
+
+
 class _Seitenpruefung:
     """Alle Regeln für EINE Seite des Seitenmodells der Ausgabe."""
 
     def __init__(self, m, wissen: _Wissen, platzhalter=(), nie=(), abgewaehlt=(), profil: str = "hoch",
-                 schwaerzungen=(), ausrichtung=None):
+                 schwaerzungen=(), ausrichtung=None, aktive=None):
         self.m = m
+        self.aktive = set(aktive) if aktive is not None else None
         self.schwaerzungen = [fitz.Rect(r) for r in schwaerzungen or ()]
         self.text = m.text
         self.w = wissen
@@ -1740,9 +1772,27 @@ class _Seitenpruefung:
                 woerter = zeile.split()          # OCR-Zeilen kennen keine Spaltentrenner
                 zellen = woerter if 3 <= len(woerter) <= 10 else zellen
             zellen = [t for t in zellen if "[" not in t and "]" not in t]
-            treffer = sum(1 for t in zellen if self.w.ist_etikett(t) or self.w.ist_etikett(t.rstrip(".:")))
-            self._org[schluessel] = treffer >= 2 and treffer >= 0.4 * len(zellen)
+            etiketten = [self.w.ist_etikett(t) or self.w.ist_etikett(t.rstrip(".:")) for t in zellen]
+            treffer = sum(etiketten)
+            kopf = treffer >= 2 and treffer >= 0.4 * len(zellen)
+            if not kopf and treffer == 1 and len(zellen) >= 3:
+                # genau ein Personen-Etikett und kurze Kopfwörter daneben ("Anrufer ⇥⇥ Anliegen ⇥⇥ Rückruf bis") –
+                # dieselbe Regel wie die Erkennung (personenkontext.kopf_mit_personen_etikett)
+                arten = [("person" if self._personen_etikett(t) else "andere") if et else None
+                         for t, et in zip(zellen, etiketten)]
+                kopf = personenkontext.kopf_mit_personen_etikett(zellen, arten)
+            self._org[schluessel] = kopf
         return self._org[schluessel]
+
+    def _personen_etikett(self, zelle: str) -> bool:
+        """Ist die ganze Zelle ein Personen-Etikett der Wissensbasis ("Anrufer", "Kunde:")?"""
+        index = self.w.index("person")
+        if index is None:
+            return False
+        try:
+            return index.eintrag_fuer(zelle) is not None or index.eintrag_fuer(zelle.rstrip(".:")) is not None
+        except Exception:
+            return False
 
     def _datenzeile(self, z) -> bool:
         """Datenzeile einer Tabelle: mehrere Zellen, Ziffern oder Platzhalter darin, keine Kopfzeile – ihre Zellen
@@ -1844,6 +1894,9 @@ class _Seitenpruefung:
                 continue
             leer = 0
             oben = min(oben, y.rect.y0)
+            if self.ist_platzhalter_bei(zs, ze) or _NUR_PLATZHALTER_RE.fullmatch(zelle):
+                continue                       # geschwärzter Wert derselben Spalte ("[GEB-DATUM]" ist kein Kopf;
+                #                                Nachprüfung B/NP-17)
             kurz = (not streng and len(zelle.split()) <= 4 and not zelle.endswith(":")
                     and not any(c.isdigit() for c in zelle))
             if not kurz and (zelle.endswith(":") or not self._kopfzeile(y)):
@@ -1904,7 +1957,9 @@ class _Seitenpruefung:
         # Religion wie Gesundheitsdaten (Gegenprüfung V1): in „Ausgewogen“ und „Hoch“ nur angeboten, nicht angehakt –
         # dort bewusst stehen gelassen und im Abschlussdialog gemeldet, also kein Verdacht der Ausgabe; nur in einer
         # Stufe, die sie schwärzt („Maximal“), ist ein lesbarer Wert ein Rest
-        if _religion_geschwaerzt(self.profil):
+        # (und nur, wenn die Kategorie gewählt ist: in „Benutzerdefiniert“ ohne Religion ist sie bewusst lesbar wie
+        # abgewählte Gesundheitsdaten – Gegenprüfung V1)
+        if _religion_geschwaerzt(self.profil) and (self.aktive is None or "religion" in self.aktive):
             for s, e in kennungsformen.religion(text):
                 if not self.ist_platzhalter_bei(s, e):
                     self.neu(s, e, "Religion/Konfession (Art. 9 DSGVO)", "kennung")
@@ -2581,6 +2636,11 @@ class _Seitenpruefung:
             if etikett is None and 0 <= alter < ALTER_MIN and self._familien_datum(z, ms, me):
                 self.neu(s, e, "Datum an einer Person im Familien-/Versichertenkontext (Geburtsdatum?)", "datum")
                 continue
+            if etikett is None and 0 <= alter <= ALTER_MAX and self._personenreihe(z, zeile, ms, me):
+                # Tabellenzeile nur aus geschwärzten Namen und dem Datum ("[PERSON A] ⇥⇥ [PERSON B] ⇥⇥ 16.04.2016"):
+                # der Datensatz einer Person, etwa auf der Folgeseite einer Tabelle ohne Kopf (Nachprüfung NP-09)
+                self.neu(s, e, "Datum in einer Zeile aus geschwärzten Namen (Geburtsdatum?)", "datum")
+                continue
             if etikett is not None or not (ALTER_MIN <= alter <= ALTER_MAX):
                 continue
             if personenkontext.behandlungsdatum(zeile[:ms].rstrip(" \t,(*-–"), zeile, me):
@@ -2613,7 +2673,13 @@ class _Seitenpruefung:
             name_start = m.start()
         else:
             w = re.search(r"([^\W\d_][\w'’\-]*)$", vorn)
-            if w and w.group(1)[:1].isupper():
+            if w and w.group(1)[:1].isupper() and not vorn[:w.start(1)].strip(" \t-–•*·") \
+                    and trenner.group(0).strip() in (",", "(", "*", "") \
+                    and personenkontext.kinderlisten_vorname(w.group(1), self.w.modul) \
+                    and personenkontext.familien_kontext(text, z.start, z.start + w.start(1)) \
+                    and not personenkontext.familien_rolle_in_zeile(text, z.start, z.start + w.start(1)):
+                name_start = w.start(1)                 # Listeneintrag unter "Kinder:" ("- Juni, 30.06.2022")
+            elif w and w.group(1)[:1].isupper():
                 vn, nn, vnm, nnm, aw, tit, allow, part = self.w.art(w.group(1))
                 if (vn or nn) and not (aw or tit or allow) and w.group(1).casefold() not in _KALENDERWOERTER:
                     # ein mehrdeutiger Nachname allein ("Behandlungstag: Montag, 03.06.2024") nur mit Vornamen davor
@@ -2642,6 +2708,35 @@ class _Seitenpruefung:
         if not personenkontext.familien_rolle_in_zeile(text, a, a + name_start) \
                 and personenkontext.BETRAG_IN_ZEILE_RE.search(zeile):
             return False                    # Leistungs- oder Rechnungsliste unter "Kinder:"
+        return True
+
+    def _personenreihe(self, z, zeile: str, ms: int, me: int) -> bool:
+        """Steht das Datum (Zeile z, Spanne ms:me) in einer Tabellenreihe, die sonst nur aus mindestens zwei geschwärzten
+        Namen besteht – im Text derselben Zeile ("[PERSON A] ⇥⇥ [PERSON B] ⇥⇥ 16.04.2016") oder auf der Seite (das
+        Datum allein in seiner Zeile, links daneben in derselben Reihe nur Personen-Platzhalter)?"""
+        if _personenzeile(zeile, ms, me):
+            return True
+        if zeile[:ms].strip(_OCR_RAND) or zeile[me:].strip(_OCR_RAND):
+            return False
+        b = self.box(z.start + ms, z.start + me)
+        if b is None:
+            return False
+        hoehe = max(b.y1 - b.y0, 4.0)
+        links = [rand for ps, pe, rand in self.platzhalter_boxen()
+                 if _PERSONEN_PLATZHALTER_RE.match(self.text[ps:pe]) and rand[2] <= b.x0 + 1
+                 and min(b.y1, rand[3]) - max(b.y0, rand[1]) >= 0.5 * min(hoehe, rand[3] - rand[1])]
+        if len(links) < 2:
+            return False
+        x_links = min(r[0] for r in links)
+        for y in self.m.zeilen:
+            r = y.rect
+            if y.id == z.id or r is None or r.x1 < x_links - 1:
+                continue
+            if min(r.y1, b.y1) - max(r.y0, b.y0) < 0.5 * min(r.height, hoehe):
+                continue
+            rest = _PERSON_PLATZHALTER_GANZ_RE.sub("", self.zeilen_text(y)).strip(_OCR_RAND + "\t")
+            if rest:
+                return False                            # anderer Text in der Reihe: kein reiner Personendatensatz
         return True
 
     def _woerter_zwischen(self, z, x0: float, x1: float) -> list:
@@ -2723,13 +2818,14 @@ class _Seitenpruefung:
                 if klasse is not None and klasse.end() == m.end():
                     continue                                 # "Auf der BAB 9": eine Fahrbahn (Straßenklasse)
                 self.neu(s, o + m.end(), "Anschrift (Straße + Hausnummer)", "anschrift")
-        # Mannheimer Quadrate ("L 14, 16, [PLZ ORT]", "Anschrift: E 3, 1") – dieselbe Form wie die Erkennung; Mannheim
-        # bzw. die PLZ darf in den zwei Zeilen danach stehen
+        # Mannheimer Quadrate ("L 14, 16, [PLZ ORT]", "Anschrift: E 3, 1") – dieselben Belege wie die Erkennung (Mannheim
+        # bzw. die PLZ direkt dahinter, auch in der Folgezeile); dazu als Verdacht die Quadrate ohne Beleg hinter "in"
+        # oder einem Etikett, die kein Verweis, Platz oder Feld sind (Nachprüfung NP-07)
         bis = z.ende
         for _ in range(2):
             n = self.text.find("\n", bis + 1)
             bis = len(self.text) if n < 0 else n
-        for a, b in kennungsformen.quadrat_stellen(self.text[o:bis]):
+        for a, b in kennungsformen.quadrat_stellen(self.text[o:bis], verdacht=True):
             if a < len(zeile) and not self.ist_platzhalter_bei(o + a, o + b):
                 self.neu(o + a, o + b, "Anschrift (Straße + Hausnummer)", "anschrift")
         for m in _POSTFACH_RE.finditer(zeile):
@@ -2985,6 +3081,8 @@ class _Seitenpruefung:
             zwischen = text[ende:s]
             if "(" in zwischen and ")" not in zwischen[zwischen.rfind("("):]:
                 return False                            # in Klammern: "(Vorsitzender)"
+            if ":" not in zwischen and "\t" not in zwischen and _SATZTEIL_HINTER_ETIKETT_RE.match(zwischen):
+                return False                            # "Mitglied der Handwerkskammer Berlin": ein Satzteil
             if _RECHTSFORM_RE.search(zwischen):
                 return False                            # "Vermieter: Sixt GmbH & Co KG, Filiale Rosenheim": eine Firma
             if any(w[:1].islower() and not self.w.art(w)[7] for w in re.findall(r"[^\W\d_][\w\-]*", zwischen)):
@@ -3081,6 +3179,11 @@ class _Seitenpruefung:
             if self.w.modul is not None else set()
 
         sach_zeilen: dict = {}
+        marken_person: set = set()       # Marken an einem Ort für Personen ohne Sachbeleg: Verdacht (NP-03)
+        # Personen in Organisations-Spalten ("beim Vater Rauschenbach", "Brandhuber" als Anbieter) – dieselbe Regel wie
+        # die Erkennung (Nachprüfung NP-04)
+        org_personen = {a for a, _ in personenkontext.personen_in_org_spalten(text, self.w.modul)} \
+            if "\t" in text and self.w.modul is not None else set()
 
         def sachname(i) -> bool:
             """Steht das Wort in einer Marke, einem Modell oder einer Tierrasse der Wissensbasis ("Weber Genesis",
@@ -3102,9 +3205,18 @@ class _Seitenpruefung:
                 genau = all(a == s and e == b for a, b in sach_zeilen[z.id] if a <= s and e <= b)
                 person_ort = genau and (z.id in gruss_zeilen or spalte_person(i)
                                         or personenkontext.personenbeleg(text, s, self.w.modul)
+                                        or personenkontext.person_im_satz(text, s)
                                         or self.etikett_davor(s, e, ("person",)) is not None)
-                if not (person_ort and not personenkontext.sachbeleg(text, s, e, self.w.modul)):
+                # an einem Ort für Personen zählt nur ein Sachwort direkt daneben ("Waschmaschine Miele"; "Krups
+                # (Geschirrspüler)" in der Kundenspalte ist der Kunde) – im Satz hinter "laut" ("Laut Wallach ist der
+                # Schaden …") ohne Sachwort in der Zeile ist die Marke wohl eine Person (Nachprüfung NP-03)
+                laut = genau and not person_ort and personenkontext.PERSON_LAUT_DAVOR_RE.search(
+                    text[max(z.start, s - 30):s]) is not None and not personenkontext.sachbeleg(text, s, e, self.w.modul)
+                if not ((person_ort and not personenkontext.sachbeleg(text, s, e, self.w.modul, direkt=True)
+                         and not personenkontext.sach_spalte(text, s) and not personenkontext.org_zeile(text, s))
+                        or laut):
                     return True
+                marken_person.add(i)
             if personenkontext.modellcode_danach(text, e, self.w.wortgestalt, (woerter[i][2],)):
                 return True                             # nicht vor Datum, Jahr, Betrag, Telefonnummer
             return personenkontext.tierangabe(text, s)
@@ -3203,7 +3315,7 @@ class _Seitenpruefung:
                     (a[0] or a[1]) and not (a[4] or a[5] or a[6]) for a in map(self.w.art, zusammen.groups())):
                 self.neu(s, e, "Namen ohne Leerzeichen gelesen", "name")    # OCR: "LukasKrause"
                 continue
-            if not gross(i) or not namenswort(i) or w.lower() in _STOPPWOERTER:
+            if not gross(i) or not namenswort(i) or w.lower() in _STOPPWOERTER or _WOCHENTAGE_KURZ_RE.match(w):
                 continue
             if self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e) or _platzhalter_bruchstueck(w):
                 continue
@@ -3211,6 +3323,17 @@ class _Seitenpruefung:
                 continue                                # Silbentrennung am Zeilenende ("Versiche-" / "rer")
             vn, nn, vnm, nnm, aw, tit, allow, part = arten[i]
             if tit or part:
+                continue
+            if s in org_personen and not allow:
+                self.neu(s, e, "Name in einer Organisations-Spalte (Personenhinweis)", "name")
+                continue
+            if artikel_davor(i) and woerter[i - 1][2] in ("der", "die") and not (vn or aw or allow) \
+                    and (nn and not nnm or personenkontext.namensgestalt(w, self.w.modul)) \
+                    and (_ARTIKEL_NAME_VERB_RE.match(text, e)
+                         or _VERB_ARTIKEL_DAVOR_RE.search(text, max(0, s - 40), s)):
+                # "war der Brandstetter am Steuer", "wie die Wimmer sagte": ein Familienname mit Artikel (mundartlich;
+                # Nachprüfung LK-14) – nicht "die Scheibe ist gesprungen" (kein Satzteil einer Person dahinter)
+                self.neu(s, e, "Familienname mit Artikel (mundartlich)", "name")
                 continue
             if _ORG_ENDWORT.search(w) or self._strassenwort(i, woerter):
                 continue
@@ -3235,6 +3358,11 @@ class _Seitenpruefung:
                 continue                                # "Abstammung: v. Gribaldi", "Baker-Zyste", "Morbus Scheuermann"
             if sachname(i) and not (titel or etikett):
                 continue                                # "Gasgrill Weber Genesis", "Böckmann TPV", "Jack Russell"
+            if i in marken_person and not (vn or nn) and not allow and len(w) >= 3:
+                # eine Marke, die hier wie ein Familienname steht ("Laut Wallach ist …", Kundenspalte "Krups
+                # (Geschirrspüler)", unter "Gruß"): verortet melden (Nachprüfung NP-03)
+                self.neu(s, e, "Marke oder Familienname im Personenkontext", "name")
+                continue
             if artikel_davor(i) and not titel and self.w.frage("ist_beruf", w):
                 continue                                # "Der Glaser [PERSON C] hat …": Beruf, kein Name
             if not (titel or platzhalter or etikett or rolle) and (vn or nn) and organisation(i):
@@ -3277,8 +3405,9 @@ class _Seitenpruefung:
                     and not _NOMEN_ENDUNG.search(w) and not self.w.ist_etikett(w):
                 self.neu(s, e, "Name direkt hinter einem Vornamen", "name")
                 continue
-            if aw or allow or len(w) < 4 or _NOMEN_ENDUNG.search(w) or self.w.ist_etikett(w) or firma_danach(i):
-                continue
+            if aw or allow or len(w) < 4 or _NOMEN_ENDUNG.search(w) or self.w.ist_etikett(w) or firma_danach(i) \
+                    or w.casefold() in kennungsformen.KEIN_NAMENSWERT:
+                continue                                # "Geburtsname: Entfällt": ein leeres Feld
             if (w.isupper() and len(w) < 5) or text[e:e + 2].lstrip(")").startswith(":") \
                     or self._kompositum(w):
                 continue                                # OCR-Bruchstück, Etikett ("(Selbstständige):"), Kompositum
@@ -3652,11 +3781,12 @@ def _felder_pruefen(pruefung: _Seitenpruefung, felder) -> None:
 
 
 def _seite_pruefen(m, wissen: _Wissen, platzhalter=(), nie=(), abgewaehlt=(), profil="hoch", felder=(),
-                   schwaerzungen=(), scan_seite=None, ausrichtung=None) -> list:
+                   schwaerzungen=(), scan_seite=None, ausrichtung=None, aktive=None) -> list:
     """Alle Regeln einer Seite. scan_seite: die PDF-Seite einer Scan-Seite (OCR der ganzen Seite) – dann zusätzlich
     die Tinte in Unterschriftsblöcken und neben Personenangaben (_unterschrift_pruefen; deren Verdacht steht vorn);
     ausrichtung: (Winkel, Schräglage) der OCR-Wörter, falls bekannt (10-Tupel)."""
-    pruefung = _Seitenpruefung(m, wissen, platzhalter, nie, abgewaehlt, profil, schwaerzungen, ausrichtung=ausrichtung)
+    pruefung = _Seitenpruefung(m, wissen, platzhalter, nie, abgewaehlt, profil, schwaerzungen, ausrichtung=ausrichtung,
+                               aktive=aktive)
     pruefung.pruefen()
     _felder_pruefen(pruefung, felder)
     aus = [Verdacht(m.nr, s, e, m.text[s:e], grund, _rechtecke(m, s, e)) for s, e, grund in _zusammenfassen(pruefung)]
@@ -3666,12 +3796,13 @@ def _seite_pruefen(m, wissen: _Wissen, platzhalter=(), nie=(), abgewaehlt=(), pr
 
 
 def pruefe_text(text: str, platzhalter=None, nie=None, wissen=None, profil: str = "hoch",
-                abgewaehlt=None) -> list:
+                abgewaehlt=None, aktive=None) -> list:
     """Restrisiko-Prüfung eines reinen Texts (eine Seite, Zeilen aus "\\n"; dieselben Zeichenregeln wie für
-    PDF-Seiten: NBSP, weiche Trennstriche, Ligaturen). Für Tests und Werkzeuge."""
+    PDF-Seiten: NBSP, weiche Trennstriche, Ligaturen). aktive: die gewählten Kategorien (None: die der Stufe). Für Tests
+    und Werkzeuge."""
     m = sm.dokument_aus_text(text or "").seiten[0]
     w = _Wissen(wissen if wissen is not None else _wissen_laden())
-    return _seite_pruefen(m, w, platzhalter or (), nie or (), abgewaehlt or (), profil)
+    return _seite_pruefen(m, w, platzhalter or (), nie or (), abgewaehlt or (), profil, aktive=aktive)
 
 
 # ----------------------------------------------------------------------
@@ -4509,7 +4640,7 @@ def _ohne_platzhalter(woerter: list, boxen: list) -> list:
 
 def restrisiko_pruefen(ausgabe_pfad, ocr=None, platzhalter=None, profil: str = "hoch", nie=None, wissen=None, *,
                        ocr_modus=None, winkel=None, bildbereiche=None, ocr_woerter=None, abgewaehlt=None,
-                       felder=None, abbruch=None) -> list:
+                       felder=None, abbruch=None, aktive=None) -> list:
     """Prüft die AUSGABE unabhängig von der Erkennung auf übrig gebliebene personenbezogene Daten.
 
     ausgabe_pfad: geschwärzte PDF; ocr: OcrDienst (oder ein Ersatz mit woerter()); platzhalter: Ersatztexte des
@@ -4519,7 +4650,8 @@ def restrisiko_pruefen(ausgabe_pfad, ocr=None, platzhalter=None, profil: str = "
     bildbereiche {Seite: [Rect]} aus dem Modell des Originals, winkel {Seite: Grad} (Ausrichtung des Originals –
     die Kontroll-OCR der Selbstkontrolle liegt damit schon im Zwischenspeicher), ocr_woerter {Seite: Wörter}
     für unveränderte Seiten (OCR der Analyse, kein zweiter OCR-Lauf), abgewaehlt [(Seite, Text)] (bewusst
-    nicht geschwärzte Stellen), felder [Feld] (Formularfelder des Originals), abbruch (threading.Event).
+    nicht geschwärzte Stellen), felder [Feld] (Formularfelder des Originals), abbruch (threading.Event), aktive
+    (die gewählten Kategorien der Analyse: eine abgewählte Kategorie wie Religion ist kein Rest, Gegenprüfung V1).
     Rückgabe: Liste von Verdacht (seite 0-basiert, Rechtecke in Seitenkoordinaten nach remove_rotation)."""
     pfad = Path(ausgabe_pfad)
     w = _Wissen(wissen if wissen is not None else _wissen_laden())
@@ -4582,7 +4714,8 @@ def restrisiko_pruefen(ausgabe_pfad, ocr=None, platzhalter=None, profil: str = "
             ausrichtung = _ocr.ausrichtung_der_woerter(woerter) if any(len(x) >= 10 for x in woerter or ()) else None
             verdacht += _seite_pruefen(m, w, platzhalter or (), nie or (), abgewaehlt_je_seite.get(nr, ()), profil,
                                        felder_je_seite.get(nr, ()), schwaerzungen,
-                                       scan_seite=seite if modus == "seite" else None, ausrichtung=ausrichtung)
+                                       scan_seite=seite if modus == "seite" else None, ausrichtung=ausrichtung,
+                                       aktive=aktive)
     finally:
         doc.close()
     return verdacht

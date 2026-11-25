@@ -126,6 +126,8 @@ Buchungsnr.
 Buchungsnummer
 Buchungsreferenz
 Buchungszeichen
+Carta verde
+Carte verte
 CAV
 CVC
 CVC2
@@ -231,6 +233,12 @@ Gläubiger-Identifikationsnummer
 Gläubiger-Identnummer
 Gläubigeridentifikationsnummer
 GP-Nr.
+Green Card
+Green Card No.
+Green Card Number
+Grüne Karte
+Grüne Karte Nr.
+Grüne Versicherungskarte
 Gutachten Nr.
 Gutachten-ID
 Gutachten-Nr.
@@ -275,6 +283,8 @@ IMEI1
 IMEI2
 IMSI
 Installations-ID
+International Motor Insurance Card
+Internationale Versicherungskarte
 Karten Nr.
 Karten-Nr.
 Karten-Nummer
@@ -574,6 +584,7 @@ Service-Tag
 Servicetag
 SIM-Karte
 SIM-Kartennummer
+SNR
 Sozialversicherungs Nr.
 Sozialversicherungs-Nr
 Sozialversicherungs-Nr.

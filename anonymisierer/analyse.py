@@ -2532,6 +2532,7 @@ def analysiere_pdf(pdf_pfad: Path, aktive: set[str], whitelist: list[str], immer
         doc.close()
 
     dok.nie = list(whitelist or [])            # für Schwärzung/Restrisiko (eigene Daten der Nutzerin)
+    dok.aktive = sorted(aktive)                # gewählte Kategorien (Restrisiko: Religion nur, wenn gewählt)
     # Meldungen, deren Ursache bis in die Ausgabe wirkt: die Schwärzung übernimmt sie mit dem Modell und legt die
     # Ausgabe dann als _PRUEFEN ab (R-07; ohne Modell stellt sie die Gründe aus Lesbarkeit und Zustand der Datei
     # selbst fest). Vor jeder Rückgabe neu vermerkt – auch Meldungen der Erkennung zählen (_leckrelevant_merken).

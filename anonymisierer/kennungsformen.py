@@ -1312,6 +1312,48 @@ def kopfzeile(text: str, s: int, ist_etikett=wissen_etikett) -> bool:
         return False
 
 
+# Ein Wort statt eines Namens im Namensfeld: das Feld ist leer oder verweist ("Geburtsname: Entfällt", "Nachname:
+# Siehe", "Familienname: Unbekannt")
+KEIN_NAMENSWERT = frozenset({"keine", "keiner", "keins", "entfällt", "entfaellt", "ohne", "unbekannt", "dito",
+                             "siehe", "gleich", "identisch", "nein", "ja", "leer", "fehlt", "offen", "nicht", "wie",
+                             "derselbe", "dieselbe", "ebenso", "unverändert", "unveraendert", "bisher", "bitte",
+                             "angabe", "angaben"})
+_DOPPELPUNKT_DIREKT_RE = re.compile(r"[ ]?:[ ]{0,3}")
+_GROSSWORT_RE = re.compile(r"[A-ZÄÖÜ](?:[a-zäöüß]+|[A-ZÄÖÜ]{2,})")
+
+
+def kopfwort_als_familienname(text: str, etikett_ende: int, s: int, e: int) -> bool:
+    """Steht ein Kopf- oder Allerweltswort als ganzer Wert direkt hinter dem Doppelpunkt eines Familien- oder
+    Geburtsnamen-Etiketts, in derselben Zelle ("Geburtsname: Stand", "Familienname: Summe"; Nachprüfung NP-15)? Dann
+    ist es der Name: ein leeres Feld hat hinter dem Doppelpunkt kein Wort derselben Zelle – der Spaltenkopf daneben
+    ("Geburtsname: ⇥⇥ Status") oder das Wort der nächsten Zeile ("Geburtsname:" ⏎ "Art") steht getrennt. Nicht: ein
+    Funktionswort, ein Leer- oder Verweiswort (KEIN_NAMENSWERT: "Entfällt", "Siehe") oder ein Wort, dem in derselben
+    Zelle noch etwas folgt ("Geburtsname: Status ledig")."""
+    if not _DOPPELPUNKT_DIREKT_RE.fullmatch(text, etikett_ende, s):
+        return False
+    wort = text[s:e]
+    if not _GROSSWORT_RE.fullmatch(wort) or ist_funktionswort(wort) or wort.casefold() in KEIN_NAMENSWERT \
+            or personen_feld_etikett(_titelform(wort)):
+        return False
+    zeilen_ende = text.find("\n", e)
+    zeilen_ende = len(text) if zeilen_ende < 0 else zeilen_ende
+    rest = text[e:zeilen_ende]
+    zelle = rest.split("\t", 1)[0] if "\t" in rest else rest
+    return not zelle.strip(" .,;")
+
+
+def personen_feld_etikett(wort: str) -> bool:
+    """Ist das Wort ein Feld-Etikett für Personendaten der Wissensbasis (Person, Kennung, Geburt, Anschrift, Kontakt:
+    "Vorname", "Ort", "Telefon") – hinter einem leeren Namensfeld das nächste Feld? Etiketten der Vertragsdaten ("Stand",
+    "Termin", "Ende") zählen nicht: sie sind zugleich Familiennamen."""
+    try:
+        from . import wissen
+        return any(wissen.index(f"etiketten_{art}").eintrag_fuer(wort) is not None
+                   for art in wissen.ETIKETTEN_ARTEN if art != "vertragsdaten")
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return False
+
+
 def geburtsname_moeglich(text: str, s: int, e: int, frage=None, ort_erlaubt: bool = False) -> bool:
     """Kann das Wort text[s:e] hinter "geb." oder "Geburtsname" ein (Geburts-)Name sein? Nicht: ein Funktionswort ("geb.
     In Köln", "GEB. IN KÖLN", "geb. Laut Urkunde", "Erste"), eine Abkürzung mit Punkt ("geb. Lt. Ausweis"), ein Wort aus
@@ -1441,6 +1483,8 @@ def geburtsname_hinter_etikett(text: str, m: re.Match, name_re: re.Pattern = NAM
         # Teil des Etiketts statt Name: "GEBURTSNAME, FALLS ABWEICHEND: …", "Geburtsname Mutter: …", "GEBURTSNAME
         # ABWEICHEND: …", "GEBURTSNAME DER VERSICHERTEN PERSON: …" – aber nicht das nächste Feld hinter einem leeren
         # ("Geburtsname: Status: ledig") und nicht "Geburtsname zur Mühlen"
+        if kopfwort_als_familienname(text, m.end(), s, e):
+            return False                                # "Geburtsname: Stand" – der Name (Nachprüfung NP-15)
         if feld_etikett(text, s, e, ist_etikett):
             return not re.search(r"[:\n]|\t\t", text[m.end():s])
         teile = text[s:e].split()
@@ -1457,8 +1501,9 @@ def geburtsname_hinter_etikett(text: str, m: re.Match, name_re: re.Pattern = NAM
         return None
     if t.zelle and kopfzeile(text, m.start(), ist_etikett):
         return None
-    if feld_etikett(text, t.start, t.ende, ist_etikett) \
-            or not geburtsname_moeglich(text, t.start, t.ende, frage, ort_erlaubt=True):
+    if (feld_etikett(text, t.start, t.ende, ist_etikett)
+            or not geburtsname_moeglich(text, t.start, t.ende, frage, ort_erlaubt=True)) \
+            and not kopfwort_als_familienname(text, m.end(), t.start, t.ende):
         return None
     if getrennt:
         frage = frage or _wissen_frage
@@ -2597,40 +2642,97 @@ _STRASSENTYP_VORN_RE = re.compile(
     rf"(?:(?:{_ORT_CAP}|\d{{1,2}}[.]?|de|din|lui|la|cel|na|pod|kod)[ \t]+){{0,3}}{_ORT_CAP},?[ \t]+"
     r"(?:(?i:nr\.?|no\.?|br\.?|broj)[ \t]*)?\d{1,4}[a-zA-Z]?(?:[ \t]?/[ \t]?\d{1,4}[a-zA-Z]?)?(?![\w])")
 # Hausnummer eines Mannheimer Quadrats hinter Buchstabe und Nummer: Komma und eine kleine Zahl ("L 14, 16", "Q 7, 22",
-# "E 3, 1"), keine Dezimalzahl ("BAB 9, km 381,2" ist keine)
-_QUADRAT_HAUSNR = r"[ \t]*,[ \t]*\d{1,3}[a-zA-Z]?(?!\d|[,.]\d)"
+# "E 3, 1"), keine Dezimalzahl ("BAB 9, km 381,2" ist keine) und keine Zahl mit Einheit ("Auf der A 8, 3 km vor der
+# Ausfahrt": eine Entfernung, Nachprüfung Ü-NP-10)
+_QUADRAT_HAUSNR = (r"[ \t]*,[ \t]*\d{1,3}[a-zA-Z]?(?!\d|[,.]\d|[ \t]*(?:km|m|Kilometer|Meter|Min|min|Minuten|Std|"
+                   r"Stunden|Uhr|%|Prozent|Punkte?|EUR|Euro|€|Jahre?n?|Monate?n?|Tage?n?)(?![\wäöüß]))")
 # Straßenklasse mit Nummer – Autobahn, Bundes-, Landes-, Kreis-, Staatsstraße, Europastraße ("Auf der A 8", "B 15",
 # "L 2080", "BAB 9", "St 2089", "E 45"): eine Fahrbahn, keine Anschrift (Domänen-Befund 46; muster.py und restrisiko.py).
 # Nicht mit einer Hausnummer dahinter: "L 14, 16" ist ein Mannheimer Quadrat, eine Anschrift (Gegenprüfung LK-01)
 STRASSENKLASSE = r"(?:A|B|L|K|S|E|St|ST|Kr|KR|BAB|Bab|AB)[ \t]?\d{1,4}(?!\d|" + _QUADRAT_HAUSNR + r")"
 STRASSENKLASSE_RE = re.compile(r"(?<![\wäöüß])" + STRASSENKLASSE + r"(?![\wäöüß])")
-# Mannheimer Quadrat mit Hausnummer ("L 14, 16", "Q 7, 22", "B 2, 9"): Buchstabe A–U, Nummer des Quadrats 1–19, Komma,
-# Hausnummer – eine Anschrift, wenn Mannheim bzw. eine PLZ 681xx–683xx in der Zeile oder den zwei Zeilen danach steht
-# oder ein Anschrift-Etikett davor (quadrat_stellen)
+# Mannheimer Quadrat mit Hausnummer ("L 14, 16", "Q 7, 22", "B 2, 9", "H7,21"): Buchstabe A–U, Nummer des Quadrats
+# 1–19, Komma, Hausnummer. Eine Anschrift nur mit Beleg (quadrat_stellen) – die Form allein ist auch ein Gliederungs-
+# verweis ("AKB A 1, 2"), ein Sitzplatz ("Reihe F 12, 14") oder ein Feld einer Skizze ("Feld B 3, 4")
 QUADRAT_RE = re.compile(r"(?<![\wäöüß.\-/])[A-U][ \t]?(?:1\d|[1-9])" + _QUADRAT_HAUSNR + r"(?![\wäöüß])")
-_MANNHEIM_RE = re.compile(r"(?<!\d)68[1-3]\d\d(?!\d)|(?<![\wäöüß])(?i:mannheim)(?![\wäöüß])"
-                          r"|^[ \t,\n]*\[(?:PLZ|ORT|ADRESSE)\b")    # in der Ausgabe: PLZ und Ort schon ersetzt
-_ANSCHRIFT_DAVOR_RE = re.compile(r"(?i)(?:anschrift|adresse|wohnort|wohnsitz|risikoort|risikoanschrift|"
-                                 r"versicherungsort|halter|halterin|c\.1\.3|straße|strasse|str\.|wohnhaft)"
-                                 r"[^\n]{0,80}$")
+# Beleg 1: Mannheim bzw. eine PLZ 681xx–683xx direkt hinter dem Quadrat im selben Anschriftblock – hinter Trennern, einem
+# Zusatz in Klammern oder einer kurzen Zusatzzeile ("L 14, 16, 68161 Mannheim", "B 2, 9" ⏎ "68159 Mannheim",
+# "H7,21 · Mannheim"); in der Ausgabe sind PLZ und Ort schon ersetzt ("L 14, 16, [PLZ ORT]"). Nicht irgendwo in den
+# Folgezeilen: "Sitzplatz: Reihe F 12, 14" ⏎ "Abflug Mannheim 08:15 Uhr" ist keine Anschrift (Nachprüfung Ü-NP-09)
+_QUADRAT_TRENNER = r"[ \t,;·•|/–\-]*"
+_MANNHEIM_DAHINTER_RE = re.compile(
+    _QUADRAT_TRENNER + r"(?:\([^()\n]{0,40}\)" + _QUADRAT_TRENNER + r")?(?:(?i:in)[ \t]+)?"
+    r"(?:\n[ \t]*(?:[^\n\d]{1,40}\n[ \t]*)?)?"
+    r"(?:(?<!\d)68[1-3]\d\d(?!\d)|(?i:mannheim)(?![\wäöüß])|\[(?:PLZ|ORT|ADRESSE)\b)")
+# … oder direkt davor ("68161 Mannheim, Q 7, 22", "Mannheim-Innenstadt, Q 7, 22")
+_MANNHEIM_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:68[1-3]\d\d[ \t]+)?mannheim(?:[ \t]*-[ \t]*[\wäöüß]+)?"
+                                + _QUADRAT_TRENNER + r"$")
+# Beleg 2: ein Anschrift-Etikett davor in der Zeile ("Anschrift:", "Risikoort:", "Versicherungsort:", "Haupt-/Zweit-
+# wohnsitz:", "Abstellort des Fahrzeugs:", "Bisheriger Halter:", "C.1.3", "Wohnung im Anwesen") oder ein Wohnen in/nach
+# direkt davor ("wohnt seit März 2019 in R 3, 4") – auch ohne Mannheim (Nachprüfung NP-02/NP-07). Ein eigener Name:
+# _ANSCHRIFT_DAVOR_RE weiter unten ist die engere Form "Etikett direkt vor der PLZ" (die gleichnamige Zuweisung
+# überschrieb diese Etiketten, Nachprüfung NP-02)
+_QUADRAT_ETIKETT_DAVOR_RE = re.compile(
+    r"(?i)(?:anschrift|adresse|wohnsitz|wohnhaft|wohnung|anwesen|belegenheit|halter(?:in)?(?![\wäöüß])|c\.1\.3|"
+    r"(?<![\wäöüß])(?:straße|strasse|str\.)|[\wäöüß]*ort(?![\wäöüß])[^\n:]{0,40}:)")
+_QUADRAT_WOHNEN_DAVOR_RE = re.compile(
+    r"(?i)(?<![\wäöüß])(?:wohn(?:t|en|te|ten)|leb(?:t|en|te|ten)|gemeldet|(?:um|ver)?zieh(?:t|en)|zog|"
+    r"(?:um|ver|zu)gezogen|umzug)(?![\wäöüß])[^\n.;:]{0,50}?(?<![\wäöüß])(?:in|im|nach)[ \t]+"
+    r"(?:(?:dem|der|das|den)[ \t]+)?(?:(?:Anwesen|Haus|Gebäude|Quadrat)[ \t]+)?$")
+# Gegenbeleg: ein Gliederungs-, Platz- oder Feldwort direkt vor dem Quadrat bzw. vor der Aufzählung, in der es steht
+# ("AKB A 1, 2", "Abschnitte A 1, 2 und B 3, 4", "Sitzplatz: Reihe F 12, 14", "Feld B 3, 4", "Raum B 2, 7"), oder ein
+# Bedingungswerk bzw. eine Skizze dahinter ("B 3, 4 der VHB 2022", "B 3, 4 der Skizze")
+_QUADRAT_KEIN_DAVOR_RE = re.compile(
+    r"(?i)(?<![\wäöüß])(?:akb|avb|vhb|vgb|arb|aub|abb\.?|bedingung(?:en)?|abschnitt(?:e|en)?|ziff(?:er|ern|\.)?|"
+    r"klausel(?:n)?|feld(?:er|ern)?|raum|räume|reihe|sitz(?:platz)?|platz|stellplatz|parkplatz|halle|gleis|block|"
+    r"tabelle|spalte|zeile|anlage|seite|teil|kapitel|§+|absatz|abs\.|punkt|position|pos\.|bereich|zone|sektor|"
+    r"tor|rampe|regal|fach|lager|gang|ebene|insbesondere|gemäß|gem\.|laut|lt\.|siehe|vgl\.)"
+    r"[ \t.:]*(?:(?:die|der|den|dem|des|in|im|nr\.?)[ \t]+)*$")
+_QUADRAT_KEIN_DAHINTER_RE = re.compile(
+    r"[ \t]*(?:(?:der|des|aus|gemäß|nach)[ \t]+)?(?:AKB|AVB|VHB|VGB|ARB|AUB|Bedingung|Skizze|Zeichnung|Tabelle|"
+    r"Anlage|Gliederung)", re.IGNORECASE)
+_QUADRAT_VERBINDER_RE = re.compile(r"[ \t]*(?:,|und|sowie|oder|bis|u\.|&)[ \t]*$")
 
 
-def quadrat_stellen(text: str) -> list:
-    """(start, ende) von Mannheimer Quadraten mit Hausnummer ("Anschrift: L 14, 16, 68161 Mannheim", "B 2, 9" ⏎ "68159
-    Mannheim", "Bisheriger Halter: Brettschneider, Annemarie, Q 3, 7, 68161 Mannheim") – Erkennung und
-    Selbstkontrolle."""
-    aus = []
+def _quadrat_gruppen(text: str) -> list:
+    """Die Quadrat-Treffer, zu Aufzählungen zusammengefasst ("A 1, 2 und A 2, 5 sowie B 3, 4")."""
+    gruppen = []
     for m in QUADRAT_RE.finditer(text or ""):
-        a = text.rfind("\n", 0, m.start()) + 1
-        b = m.end()
-        for _ in range(3):                                   # die Zeile und die zwei Zeilen danach
-            n = text.find("\n", b)
-            if n < 0:
-                b = len(text)
-                break
-            b = n + 1
-        if _MANNHEIM_RE.search(text[m.end():b]) or _ANSCHRIFT_DAVOR_RE.search(text[a:m.start()]):
-            aus.append((m.start(), m.end()))
+        if gruppen and _QUADRAT_VERBINDER_RE.match(text[gruppen[-1][-1].end():m.start()]) \
+                and "\n" not in text[gruppen[-1][-1].end():m.start()]:
+            gruppen[-1].append(m)
+        else:
+            gruppen.append([m])
+    return gruppen
+
+
+def quadrat_stellen(text: str, verdacht: bool = False) -> list:
+    """(start, ende) von Mannheimer Quadraten mit Hausnummer, die belegt eine Anschrift sind ("Anschrift: L 14, 16",
+    "B 2, 9" ⏎ "68159 Mannheim", "Bisheriger Halter: Brettschneider, Annemarie, Q 3, 7", "Risikoort: E 3, 1", "wohnt
+    seit 2019 in R 3, 4") – Erkennung und Selbstkontrolle. Mit verdacht=True (Selbstkontrolle) auch die Quadrate ohne
+    Beleg, die hinter "in"/"im"/"bei" oder einem Etikett mit Doppelpunkt in der Zeile stehen ("Wohnung im G 7, 14",
+    "Kontakt: T 4, 12"), sofern kein Gegenbeleg sie als Verweis, Platz oder Feld ausweist. Je Treffer nur ein begrenztes
+    Fenster davor und dahinter (lineare Laufzeit auch bei Zeilen mit tausend Quadraten, Nachprüfung Ü-NP-14)."""
+    aus = []
+    for gruppe in _quadrat_gruppen(text or ""):
+        erster, letzter = gruppe[0], gruppe[-1]
+        zeilenanfang = text.rfind("\n", max(0, erster.start() - 120), erster.start()) + 1
+        vorn = text[max(zeilenanfang, erster.start() - 100):erster.start()]
+        gegen = bool(_QUADRAT_KEIN_DAVOR_RE.search(vorn[-40:]) or
+                     _QUADRAT_KEIN_DAHINTER_RE.match(text, letzter.end(), letzter.end() + 40))
+        for m in gruppe:
+            a = text.rfind("\n", max(0, m.start() - 120), m.start()) + 1
+            davor = text[max(a, m.start() - 100):m.start()]
+            if _MANNHEIM_DAHINTER_RE.match(text, m.end(), m.end() + 120) or _MANNHEIM_DAVOR_RE.search(davor[-60:]):
+                aus.append((m.start(), m.end()))
+                continue
+            if gegen or _QUADRAT_KEIN_DAVOR_RE.search(davor[-40:]):
+                continue
+            if _QUADRAT_ETIKETT_DAVOR_RE.search(davor[-80:]) or _QUADRAT_WOHNEN_DAVOR_RE.search(davor[-80:]):
+                aus.append((m.start(), m.end()))
+            elif verdacht and (re.search(r"(?i)(?<![\wäöüß])(?:in|im|bei)[ \t]+$", davor)
+                               or re.search(r"[\wäöüß)][ \t]*:", davor[-80:])):
+                aus.append((m.start(), m.end()))
     return aus
 # sechsstellige PLZ mit Ort (Rumänien, Russland, Weißrussland, Kasachstan …) – nur mit Länderhinweis
 _PLZ6_RE = re.compile(rf"(?<![\w\-/.,])\d{{6}}[ \t]+({_ORT_STADT})(?![\w])")
@@ -2777,17 +2879,27 @@ def plz4_ausland(text: str, strassen) -> list:
 _IPV4_RE = re.compile(r"(?<![\w.:\-/])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\w]|[.:]\d)")
 _IPV6_RE = re.compile(r"(?<![\w:.\-])(?=[0-9A-Fa-f:]*:[0-9A-Fa-f]*:)[0-9A-Fa-f:]{2,39}(?![\w:])")
 _IP_ETIKETT_RE = re.compile(r"(?i)(?<![a-zäöüß])(?:ip(?:v[46])?(?:-?adresse)?|adresse|host|server|router|client|"
-                            r"zugriff|absender|von|aus|via|quelle|source|address|from|received)"
+                            r"zugriff|absender|quelle|source|address|received)"
                             r"[ \t]*[:=]?[ \t]*[(\[]?[ \t]*$")
+# Präposition direkt vor der Zahl ("Zugriff von 84.…", "from host (…)") – eine IP nur mit Rechner- oder Netzbezug in der
+# Zeile; "Firmware updated from 1.2.0.4 to 1.2.0.5" ist eine Version (Nachprüfung Ü-NP-11)
+_IP_PRAEPOSITION_RE = re.compile(r"(?i)(?<![a-zäöüß])(?:von|aus|via|from)[ \t]*[:=]?[ \t]*[(\[]?[ \t]*$")
+_IP_BEZUG_IN_ZEILE_RE = re.compile(r"(?i)(?<![a-zäöüß])(?:zugriff\w*|login\w*|anmeld\w*|eingeloggt|server|host\w*|"
+                                   r"rechner|router|netz\w*|vpn|verbindung|zugegriffen|aufgerufen|gesendet|mail|e-mail|"
+                                   r"smtp|received|client|endgerät|gerät|online|internet|ip)(?![a-zäöüß])")
 # "IP" als eigenes Wort bzw. "IP-Adresse"/"IPv4" – nicht die Schutzart "IP44" und keine Komposita ("IP-Kamera",
 # "IP-basiert"): dort ist eine Viererpunktzahl der Zeile eine Modell- oder Artikelnummer (Gegenprüfung U2); dazu die
 # Kopfzeilen eines E-Mail-Ausdrucks mit dem einliefernden Rechner ("Received: from … [91.12.34.59]", LK-16)
-_IP_IN_ZEILE_RE = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:IPv4|IPv6|IP-Adresse|IP-Adr\.|ip-adresse|IP(?![\w\-])|"
+_IP_IN_ZEILE_RE = re.compile(r"(?<![A-Za-zÄÖÜäöüß])(?:IPv4|IPv6|IP-Adresse|IP-Adr\.|ip-adresse|IP(?![\w\-]|[ \t]?\d)|"
                              r"(?i:received|x-originating-ip|x-sender-ip|x-forwarded-for)[ \t]*:)")
 _VERSION_DAVOR_RE = re.compile(r"(?i)(?:version|vers\.|release|build|firmware|software|update|treiber|patch|"
                                r"stand|revision|rev\.|ver\.|v|modell|typ|artikel|art\.[ \t\-]*nr\.?|"
-                               r"artikelnummer|bestellnummer|best\.-?nr\.?|teilenummer|teile-?nr\.?)"
+                               r"artikelnummer|bestellnummer|best\.-?nr\.?|bestell-?nr\.?|teilenummer|teile-?nr\.?|"
+                               r"position|pos\.|sachnummer|sach-?nr\.?)"
                                r"[ \t\-]*[:.]?[ \t]*$")
+# Versionswort bis zu drei Wörter vor der Zahl ("Firmware updated from 1.2.0.4", "Upgrade von Version 2 auf 2.1.0.3")
+_VERSION_IM_SATZ_RE = re.compile(r"(?i)(?<![a-zäöüß])(?:version|release|build|firmware|software|update\w*|upgrade\w*|"
+                                 r"migration|treiber|patch\w*|revision)(?![a-zäöüß])(?:[ \t]+[^\s]+){0,3}[ \t]+$")
 
 
 def _ipv4_gueltig(m) -> bool:
@@ -2808,12 +2920,14 @@ def ip_adressen(text: str) -> list:
             if not _ipv4_gueltig(m):
                 continue
             davor = text[max(0, m.start() - 30):m.start()].rsplit("\n", 1)[-1]
-            if _VERSION_DAVOR_RE.search(davor):
+            if _VERSION_DAVOR_RE.search(davor) or _VERSION_IM_SATZ_RE.search(
+                    text[max(0, m.start() - 60):m.start()].rsplit("\n", 1)[-1]):
                 continue
             a = text.rfind("\n", 0, m.start()) + 1
             e = text.find("\n", m.end())
             zeile = text[a:len(text) if e < 0 else e]
-            if _IP_ETIKETT_RE.search(davor) or _IP_IN_ZEILE_RE.search(zeile):
+            if _IP_ETIKETT_RE.search(davor) or _IP_IN_ZEILE_RE.search(zeile) or (
+                    _IP_PRAEPOSITION_RE.search(davor) and _IP_BEZUG_IN_ZEILE_RE.search(zeile)):
                 aus.append((m.start(), m.end()))
     if text.count(":") >= 2:
         import ipaddress
@@ -2839,20 +2953,33 @@ _GRAD_EINZELN_RE = re.compile(
     r"[ \t]*(?P<wert>[-+]?\d{1,3}\.(?P<nk>\d{3,8}))(?P<grad>[ \t]*°)?(?P<richtung>[ \t]*[NSEOW](?![\w]))?"
     r"(?![\w]|[.,]\d)")
 # Maßeinheit hinter einem Einzelwert: "Länge 4.689 mm", "Breite 1.829 m" sind Maße mit Tausenderpunkt (Gegenprüfung U1)
-_EINHEIT_DAHINTER_RE = re.compile(r"[ \t]*(?:mm|cm|dm|m|km|kg|g|t|l|m²|m2|qm|m³|m3|ccm|ps|kw|zoll|ft|%|€|eur)"
+_EINHEIT_DAHINTER_RE = re.compile(r"[ \t]*(?:±[ \t]*[\d.,]+[ \t]*)?(?:mm|cm|dm|m|km|kg|g|t|l|m²|m2|qm|m³|m3|ccm|ps|kw|zoll|"
+                                  r"ft|%|€|eur|meter|metern|millimeter|zentimeter|kilometer|lfm|lfd\.?[ \t]*m|fuß|fuss|"
+                                  r"feet|inch|liter|kilogramm|tonnen?|grad[ \t]*celsius|°c)"
                                   r"(?![\wäöüß])", re.IGNORECASE)
 _DMS_RE = re.compile(
     r"(?<![\d.,])(\d{1,3})[ \t]?°[ \t]?(\d{1,2})[ \t]?['′’][ \t]?(\d{1,2}(?:[.,]\d+)?)[ \t]?(?:[\"″”]|'')?[ \t]?"
     r"([NSEOW])(?![\wäöüß])")
 _STANDORT_ETIKETT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:gps|koordinaten|standort|position|geo|lage|unfallort|"
                                   r"fundort|ortung)(?![\wäöüß])")
+# Grad mit Himmelsrichtung davor ("N 47° 51' 22\"", "N 47° 51.367'") oder Grad und Dezimalminuten mit Himmelsrichtung
+# dahinter ("47° 51.367' N") – das Navigationsformat der Geräte und Apps (Nachprüfung LK-18)
+_GRAD_MINUTEN_RE = re.compile(
+    r"(?<![\wäöüß])(?P<vorn>[NSEOW])[ \t]?(?P<g1>\d{1,3})[ \t]?°[ \t]?(?P<m1>\d{1,2}(?:[.,]\d+)?)[ \t]?['′’]"
+    r"(?:[ \t]?\d{1,2}(?:[.,]\d+)?[ \t]?(?:[\"″”]|''))?"
+    r"|(?<![\d.,])(?P<g2>\d{1,3})[ \t]?°[ \t]?(?P<m2>\d{1,2}[.,]\d+)[ \t]?['′’][ \t]?(?P<hinten>[NSEOW])(?![\wäöüß])")
+# Plus Code (Open Location Code): 4, 6 oder 8 Zeichen aus dem Code-Alphabet, "+", zwei bis drei Zeichen ("9F4MG3X8+QR",
+# "G3X8+QR München") – mindestens ein Buchstabe, nicht nur Ziffern
+_PLUS_CODE_RE = re.compile(r"(?<![\w+])(?=[2-9CFGHJMPQRVWX]*[CFGHJMPQRVWX])((?:[2-9CFGHJMPQRVWX]{2}){2,4})\+"
+                           r"[2-9CFGHJMPQRVWX]{2,3}(?![\w+])")
 
 
 def koordinaten(text: str) -> list:
     """(start, ende) der Standortangaben: ein Paar in Dezimalgrad (Breite bis 90, Länge bis 180, mindestens vier
     Nachkommastellen – hinter "GPS", "Koordinaten", "Standort", "Position" … mindestens drei: "47.85612, 12.12857",
     "52.5200 N, 13.4050 O"), Breiten- und Längengrad mit Etikett ("Breitengrad 47.85612") und Grad/Minuten/Sekunden mit
-    Himmelsrichtung ("47°51'22.0\\"N"). Einzelne Messwerte mit Dezimalpunkt, Beträge und Versionen bleiben stehen."""
+    Himmelsrichtung ("47°51'22.0\\"N"), Grad mit Himmelsrichtung davor oder mit Dezimalminuten ("N 47° 51.367'") und
+    Plus Codes ("9F4MG3X8+QR"). Einzelne Messwerte mit Dezimalpunkt, Beträge und Versionen bleiben stehen."""
     aus = []
     if "." in text:
         for m in _GRAD_PAAR_RE.finditer(text):
@@ -2879,6 +3006,15 @@ def koordinaten(text: str) -> list:
             grad = int(m.group(1))
             if grad <= (90 if m.group(4) in "NS" else 180) and int(m.group(2)) < 60:
                 aus.append((m.start(), m.end()))
+        for m in _GRAD_MINUTEN_RE.finditer(text):
+            richtung = m.group("vorn") or m.group("hinten")
+            grad = int(m.group("g1") or m.group("g2"))
+            minuten = float((m.group("m1") or m.group("m2")).replace(",", "."))
+            if grad <= (90 if richtung in "NS" else 180) and minuten < 60 \
+                    and not any(a <= m.start() < b or a < m.end() <= b for a, b in aus):
+                aus.append((m.start(), m.end()))
+    if "+" in text:
+        aus += [(m.start(), m.end()) for m in _PLUS_CODE_RE.finditer(text)]
     return sorted(set(aus))
 
 
@@ -2919,15 +3055,23 @@ _ZUGANG_ETIKETT_RE = re.compile(
     r"account|zugang)|username|user(?:-?id)?|zugangs(?:kennung|name|code|nummer|daten)|kunden-?login)"
     r"|" + _GEHEIMNIS +
     r"|(?i:aktivierungs(?:code|schl(?:ü|ue)ssel|nummer|kennung)|freischalt(?:code|nummer|schl(?:ü|ue)ssel)|"
-    r"registrierungs(?:code|schl(?:ü|ue)ssel|nummer)|zugangsschl(?:ü|ue)ssel|einmalcode|tan)"
+    r"registrierungs(?:code|schl(?:ü|ue)ssel|nummer)|zugangsschl(?:ü|ue)ssel|einmalcode|tan|"
+    # Sperren von Geräten und Netzwerkschlüssel ("Displaysperre des Diensthandys: 2468", "WLAN-Schlüssel der
+    # Ferienwohnung: …"; Nachprüfung NP-13)
+    r"(?:display|bildschirm|handy|geräte|geraete|tastatur)-?sperre|entsperr-?(?:muster|code|pin)|"
+    r"(?:wlan|wifi|w-lan|netzwerk|wpa2?)-?(?:schl(?:ü|ue)ssel|key|passwort|kennwort))"
     r")(?:[ \t]*\([^()\n]{1,20}\))?(?![\wäöüß\-])")
 _GEHEIMNIS_RE = re.compile(r"(?:" + _GEHEIMNIS + r")(?:[ \t]*\([^()\n]{1,20}\))?")
 # "Code" allein ist erst mit einem Gegenstand eines Schlosses oder Geräts in den Zwischenwörtern ein Geheimnis
 # ("Code der Alarmanlage: 1357", "Code für den Schlüsseltresor: 2580") – nicht "Code der Bestellung"
 _CODE_ETIKETT_RE = re.compile(r"(?<![\wäöüß\-./])(?:Code|Zahlenkombination|Kombination)(?![\wäöüß\-])")
-_CODE_GEGENSTAND_RE = re.compile(r"(?i)alarm|tresor|safe|schloss|schließ|schliess|tür|tuer|garage|tor\b|haus|"
-                                 r"wohnung|briefkasten|fahrradschloss|handy|smartphone|tablet|laptop|computer|"
-                                 r"router|wlan|sim|app|portal|konto|zugang|plakette|stempel")
+# Gegenstand eines Schlosses oder Geräts in den Zwischenwörtern hinter "Code" – ganze Wörter und ihre Zusammensetzungen
+# ("Alarmanlage", "Schlüsseltresor", "Haustür", "Garagentor"), nicht als Teil eines Sachworts ("Hausratversicherung",
+# "Haushalt", "App-Version"; Nachprüfung Ü-NP-03)
+_CODE_GEGENSTAND_RE = re.compile(r"(?i)(?<![\wäöüß])[\wäöüß]*(?:alarm\w*|tresor\w*|safe|schloss|schließ\w*|"
+                                 r"schliess\w*|tür\w*|tuer\w*|garage\w*|(?:garagen|hof|einfahrts|grundstücks|haus)?tor"
+                                 r"(?:öffner|oeffner)?|haus|wohnung\w*|briefkasten\w*|handy|smartphone|tablet|laptop|"
+                                 r"computer|router|wlan|sim|app|portal|konto|zugang|plakette|stempel)(?![\wäöüß\-])")
 _ZUGANG_WERT_RE = re.compile(r"[^\s,;\"„“”«»<>|]{3,64}")
 _ZUGANG_FUELLWORT = frozenset("""
 wird werden wurde ist sind siehe s. vgl. folgt folgen separat gesondert per bitte nicht kein keine keinen unbekannt
@@ -2935,7 +3079,22 @@ vergessen ändern aendern zurücksetzen zuruecksetzen ihr ihre ihren ihrem ihres
 wie laut lt. gemäß gemaess noch erhalten erhalten. mitgeteilt mitgeteilt. herr frau firma eingeben eingabe hier unten
 oben vorhanden nein ja leer offen beantragt angefordert neu alt automatisch generiert gültig gueltig
 """.split())
-_ZUGANG_ANKUENDIGUNG_RE = re.compile(r"(?i)[ \t]*(?:lautet|lauten|ist)(?![\wäöüß])[ \t]*:?[ \t]*")
+# "lautet"/"ist", auch mit Zeitangabe dahinter ("Ihr neues Passwort ist ab sofort Hollerbusch2027."; NP-13)
+_ZUGANG_ANKUENDIGUNG_RE = re.compile(r"(?i)[ \t]*(?:lautet|lauten|ist)(?![\wäöüß])"
+                                     r"(?:[ \t]+(?:ab[ \t]+sofort|ab[ \t]+heute|ab[ \t]+jetzt|jetzt|nun|neu|künftig|"
+                                     r"kuenftig|weiterhin|nach[ \t]+wie[ \t]+vor|vorläufig|vorlaeufig))?"
+                                     r"(?![\wäöüß])[ \t]*:?[ \t]*")
+# Mengen-, Längen- und Schutzangaben hinter einem Etikett sind kein Geheimnis ("PIN 3-mal falsch eingegeben", "PIN
+# 4-stellig", "Router-Kennwort WPA2-geschützt"; Nachprüfung Ü-NP-03)
+_KEIN_GEHEIMNIS_WERT_RE = re.compile(r"(?i)^(?:\d{1,3}[ \-]?(?:mal|fach|x|stellig\w*|teilig\w*|zeichen|ziffern?|"
+                                     r"stellen)|[\w\-]*-(?:geschützt|geschuetzt|gesichert|verschlüsselt|"
+                                     r"verschluesselt|fähig|faehig|basiert|kompatibel))[.,;:!?)]*$")
+# Zwischenwörter hinter "Code", die eine Einordnung statt eines Schlosses ankündigen: Tarif, Rabatt, Sparte, Version
+# ("Code der Hausratversicherung: HR-PREMIUM", "Code für Rabatt …: WELCOME10"; Ü-NP-03)
+_CODE_KEIN_GEHEIMNIS_RE = re.compile(r"(?i)(?<![\wäöüß])(?:\w*versicherung\w*|tarif\w*|rabatt\w*|sparte\w*|"
+                                     r"schadenart\w*|\w*version\w*|produkt\w*|sondervereinbarung\w*|aktion\w*|"
+                                     r"gutschein\w*|vorteil\w*|kategorie\w*|klasse\w*|gruppe\w*|bestellung\w*|"
+                                     r"artikel\w*|leistung\w*|diagnose\w*|kampagne\w*|werbe\w*)(?![\wäöüß])")
 
 
 def _zugang_wert(text: str, i: int, grenze: int):
@@ -2954,6 +3113,8 @@ def _zugang_wert(text: str, i: int, grenze: int):
     wert = text[s:e]
     if len(wert) < 3 or not any(c.isalnum() for c in wert) or wert.startswith(("[", "(", "http", "www.")):
         return None
+    if _KEIN_GEHEIMNIS_WERT_RE.match(wert):
+        return None                                     # "Die PIN ist 4-stellig.": eine Länge, kein Geheimnis
     if _feld_etikett(wert):
         return None                                     # "Kennzeichen", "Konto", "IMEI": ein Feld-Etikett, kein Wert
     if wert.casefold() in _ZUGANG_FUELLWORT or wert.casefold().rstrip(".:") in _ZUGANG_FUELLWORT:
@@ -2990,9 +3151,11 @@ def _feld_etikett(wert: str) -> bool:
 
 def _geheimnis_form(wert: str) -> bool:
     """Hat ein Wert ohne Trennzeichen davor die Form eines Geheimnisses: mit Ziffer oder Sonderzeichen ("Kx7#mQ2v",
-    "Zirbe-Stube-77", "2580") – nicht ein Wort des Satzes ("Kennwort ändern", "PIN eingeben")?"""
+    "Zirbe-Stube-77", "2580") – nicht ein Wort des Satzes ("Kennwort ändern", "PIN eingeben") und keine Mengen-,
+    Längen- oder Schutzangabe ("3-mal", "4-stellig", "WPA2-geschützt")?"""
     kern = wert.rstrip(".,;:!?)")
-    return len(kern) >= 4 and (any(c.isdigit() for c in kern) or any(not c.isalnum() for c in kern))
+    return len(kern) >= 4 and (any(c.isdigit() for c in kern) or any(not c.isalnum() for c in kern)) \
+        and not _KEIN_GEHEIMNIS_WERT_RE.match(kern)
 
 
 def zugang_kopf(inhalt: str) -> bool:
@@ -3034,6 +3197,8 @@ def _zugang_spalten(text: str) -> list:
             zellen = [m for m in re.finditer(r"[^\t]+", inhalt) if m.group(0).strip()]
             if len(zellen) != len(kopf):
                 continue
+            if sum(1 for z in zellen if etikettwort(z.group(0).strip()) or zugang_kopf(z.group(0))) >= 2:
+                continue                                # eine weitere Kopfzeile ("Benutzername ⇥⇥ Rolle ⇥⇥ …"; U4)
             for k in spalten:
                 roh = zellen[k].group(0)
                 a = start + zellen[k].start() + (len(roh) - len(roh.lstrip()))
@@ -3063,6 +3228,11 @@ def zugangsdaten(text: str) -> list:
         zeilenende = text.find("\n", e)
         zeilenende = len(text) if zeilenende < 0 else zeilenende
         t = None if nur_code else re.match(r"[ \t]*(?:[:=]|\t\t)[ \t]*", text[e:zeilenende + 1])
+        if t is not None and "\t" in t.group(0) and ":" not in t.group(0):
+            naechste = re.match(r"[^\t\n]+", text[e + t.end():zeilenende])
+            if naechste is not None and (etikettwort(naechste.group(0).strip()) or
+                                         _ZUGANG_ETIKETT_RE.fullmatch(naechste.group(0).strip())):
+                continue                                # Kopfzeile einer Tabelle: dahinter der nächste Spaltenkopf
         if t is not None:
             i = e + t.end()
             if i >= zeilenende and text[e:zeilenende].strip().startswith(":"):
@@ -3076,6 +3246,18 @@ def zugangsdaten(text: str) -> list:
                 aus.append(sp)
             continue
         geheim = not nur_code and _GEHEIMNIS_RE.fullmatch(m.group(0)) is not None
+        if nur_code and m.group(0) == "Code":
+            # Gegenstand direkt vor "Code" und der Wert direkt dahinter ("Garagentoröffner Code 1199", "Alarmanlage Code
+            # 8-4-2-6"; Nachprüfung LK-07): wie ein Geheimnis-Etikett ohne Trennzeichen
+            vor = re.search(r"([^\s:;,.]+)[ \t]+$", text[max(0, text.rfind("\n", 0, m.start()) + 1):m.start()])
+            w = re.match(r"(?:[ \t]*:[ \t]*|[ \t]+)([^\s,;\"„“”«»<>|]{3,64})", text[e:zeilenende])
+            if vor is not None and w is not None and _CODE_GEGENSTAND_RE.search(vor.group(1)) \
+                    and not _CODE_KEIN_GEHEIMNIS_RE.search(vor.group(1)) \
+                    and (":" in w.group(0)[:w.start(1)] or _geheimnis_form(w.group(1))):
+                sp = _zugang_wert(text, e + w.start(1), zeilenende)
+                if sp is not None:
+                    aus.append(sp)
+                    continue
         if geheim:
             # "Router-Kennwort Zirbe-Stube-77", "Ihr Initialkennwort Kx7#mQ2v.", "Zahlencode 2580."
             w = re.match(r"[ \t]+([^\s,;\"„“”«»<>|]{3,64})", text[e:zeilenende])
@@ -3095,7 +3277,8 @@ def zugangsdaten(text: str) -> list:
             a = _ZUGANG_ANKUENDIGUNG_RE.match(satz, wort.start())
             doppelpunkt = wort.group(0).endswith(":") and k > 0 or (wort.group(0) == ":" and k > 0)
             if (a is not None and a.end() > wort.start()) or doppelpunkt:
-                if nur_code and not _CODE_GEGENSTAND_RE.search(satz[:wort.end()]):
+                if nur_code and (not _CODE_GEGENSTAND_RE.search(satz[:wort.end()])
+                                 or _CODE_KEIN_GEHEIMNIS_RE.search(satz[:wort.end()])):
                     break
                 start = e + (a.end() if a is not None and a.end() > wort.start() else wort.end())
                 sp = _zugang_wert(text, start, zeilenende)
@@ -3149,7 +3332,13 @@ gelöscht geloescht gesperrt offen folgt
 """.split())
 
 
-_PLATTFORM_IN_ZEILE_RE = re.compile(r"(?<![\wäöüß])(?:" + _PLATTFORM + r"|X|Profil|Account|Konto|Kanal|Handle|"
+# Profilname im Satz hinter Plattform und "unter"/"als"/"mit dem Namen"/"namens" ("auf Instagram unter resi_wimmerl_88
+# zu finden", "bei TikTok als korbi.zeitl84 unterwegs"; Nachprüfung NP-11): nur ein Wert mit "_", "." oder Ziffer
+_PROFIL_IM_SATZ_RE = re.compile(
+    r"(?<![\wäöüß])(?:" + _PLATTFORM + r")(?![\wäöüß])[^\n.;:!?]{0,30}?(?<![\wäöüß])(?:unter|als|namens|heißt|"
+    r"mit[ \t]+dem[ \t]+(?:Namen|Nutzernamen|Benutzernamen|Profil(?:namen)?|Nickname))[ \t]+@?"
+    r"(?P<wert>(?=[\w.\-]*[_.\d])[A-Za-z0-9][A-Za-z0-9_.\-]{1,38}[A-Za-z0-9])(?![\w@])")
+_PLATTFORM_IN_ZEILE_RE = re.compile(r"(?<![\wäöüß])(?:" + _PLATTFORM + r"|X|Profil|Account|Kanal|Handle|"
                                     r"Nutzername|Benutzername|Nickname|Follower|gepostet|Post|Story|Direktnachricht|DM)"
                                     r"(?![\wäöüß])")
 
@@ -3182,13 +3371,15 @@ def profilnamen(text: str) -> list:
     if "@" in text:
         # "@"-Name: personenartig ("@lena.wiesengrund", "@korbi_zeitl84", ein Name der Wissensbasis) – oder eine
         # Plattform bzw. ein Profilwort in derselben Zeile ("als @schattenwolf auf Instagram"); ein Tarif "@home"
-        # allein ist kein Profil (Gegenprüfung U3)
+        # allein ist kein Profil (Gegenprüfung U3). Die Plattform je Zeile einmal (lineare Laufzeit, Ü-NP-14)
+        plattform_je_zeile: dict = {}
         for m in _HANDLE_RE.finditer(text):
             if not _personenartig(m.group(1)):
                 a = text.rfind("\n", 0, m.start()) + 1
-                b = text.find("\n", m.end())
-                zeile = text[a:len(text) if b < 0 else b]
-                if not _PLATTFORM_IN_ZEILE_RE.search(zeile):
+                if a not in plattform_je_zeile:
+                    b = text.find("\n", m.end())
+                    plattform_je_zeile[a] = bool(_PLATTFORM_IN_ZEILE_RE.search(text, a, len(text) if b < 0 else b))
+                if not plattform_je_zeile[a]:
                     continue
             aus.append((m.start(), m.end()))
     for m in _PROFIL_ETIKETT_RE.finditer(text):
@@ -3197,9 +3388,14 @@ def profilnamen(text: str) -> list:
             i = m.end() + t.end()
         else:
             # Zwischenwörter desselben Satzes bis zu einem Doppelpunkt ("Instagram-Konto der Betroffenen: …",
-            # "Discord-Name des Mitschülers: …"; Gegenprüfung LK-11) – höchstens vier Wörter, kein Satzende
-            z = re.match(r"((?:[ \t]+[^\s:.!?;]+){1,4}?)[ \t]*:[ \t]*", text[m.end():m.end() + 80])
+            # "Discord-Name des Mitschülers: …"; Gegenprüfung LK-11) – höchstens vier Wörter, kein Satzende, kein Komma
+            # und kein großgeschriebenes Wort direkt hinter dem Plattformwort: "Signal Iduna, Tarif: KomfortPlus" ist
+            # ein Versicherer, kein Profil (Nachprüfung Ü-NP-04)
+            z = re.match(r"((?:[ \t]+[^\s:.!?;,]+){1,4}?)[ \t]*:[ \t]*", text[m.end():m.end() + 80])
             if z is None or "\n" in z.group(0):
+                continue
+            erstes = z.group(1).split()[0]
+            if erstes[:1].isupper() and not text[m.start():m.end()].endswith(("-", "name", "Name", "konto", "Konto")):
                 continue
             i = m.end() + z.end()
         u = _PROFIL_URL_RE.match(text, i)
@@ -3217,6 +3413,8 @@ def profilnamen(text: str) -> list:
         if wert[:1].isupper() and wert.isalpha() and wert[1:].islower():
             continue                                    # "Name: Weber" liest die Namensregel; "Profil: Privat"
         aus.append((w.start(), w.end()))
+    for m in _PROFIL_IM_SATZ_RE.finditer(text):
+        aus.append((m.start("wert"), m.end("wert")))
     if "/" in text:
         for m in _PROFIL_URL_RE.finditer(text):
             if _personenartig(m.group(1)):

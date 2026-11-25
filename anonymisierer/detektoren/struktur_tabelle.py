@@ -40,7 +40,7 @@ from .. import kennungsformen
 from .. import personenkontext
 from . import Treffer, detektor
 from .struktur import (_ANREDEN, _ORG_ROLLEN_RE, _ROH_FUNKTIONSWORT, _ROH_KEIN_WOHNORT, _ROH_ORTSZUSATZ,
-                       ABKUERZUNG_RE, ALLE_KATEGORIEN, PARTIKEL, PII_ARTEN, SICHERHEIT_SPALTE, Lage,
+                       ABKUERZUNG_RE, ALLE_KATEGORIEN, DATUMSWOERTER, PARTIKEL, PII_ARTEN, SICHERHEIT_SPALTE, Lage,
                        _wissen, NR_VORSATZ_RE, allgemein_hinter, allgemeiner_wert_passt, datums_spannen,
                        eigene_wertform, eigener_wert, etikett_fuer_text, etiketten, geburtsdatum_plausibel,
                        ist_kennungsform, kennung_spanne, lage, muster_spannen, namen_spanne, ort_spanne,
@@ -303,6 +303,23 @@ _FORTSETZUNG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:fortsetzung|forts\.|fortg
                              r"(?:seite|blatt|page)[ \t]+\d{1,3}(?:[ \t]*(?:von|/|of)[ \t]*\d{1,3})?)(?![\wäöüß])")
 
 
+# Ankündigung einer Fortsetzung unter dem Ende einer Tabelle ("Weitere Kinder siehe Folgeseite.", "Fortsetzung auf Seite
+# 2", "siehe Rückseite", "b. w."): die Tabelle setzt sich auf der nächsten Seite ohne Kopf fort (Nachprüfung NP-09)
+_FORTSETZUNG_FOLGT_RE = re.compile(
+    r"(?i)(?<![\wäöüß])(?:folgeseiten?|folgeblatt|nächsten?[ \t]+seite|naechsten?[ \t]+seite|rückseite|rueckseite|"
+    r"nächste[sn]?[ \t]+blatt|fortsetzung[ \t]+(?:auf|siehe|s\.|folgt)|wird[ \t]+fortgesetzt|"
+    r"(?:siehe|s\.|weiter[ \t]+(?:auf|mit))[ \t]+(?:seite|blatt|s\.)[ \t]*\d{1,3}|bitte[ \t]+wenden|b\.[ \t]?w\.)"
+    r"(?![\wäöüß])")
+
+
+def _fortsetzung_folgt(text: str, reihen: list, ende: int, erste: int) -> bool:
+    """Kündigt eine Reihe am Ende der Tabelle (die letzten zwei Reihen ab erste, die Tabelle endet vor reihen[ende]) oder
+    eine der drei Reihen darunter eine Fortsetzung auf der nächsten Seite an? Die Ankündigung kann als letzte Reihe in
+    die Tabelle geraten sein ("Weitere Kinder siehe Folgeseite." unter der Spalte "Name")."""
+    return any(_FORTSETZUNG_FOLGT_RE.search(text, z.start, z.ende)
+               for r in reihen[max(erste, ende - 2):ende + 3] for z in r.zellen)
+
+
 def _datenreihen(text: str, reihen: list, i_kopf: int, tab: _Tabelle, h: float, nr: int, ist_kopf,
                  hat_etikett=None) -> int:
     """Liest Datenreihen ab reihen[i_kopf + 1]; liefert den Index der ersten Reihe nach der Tabelle.
@@ -328,7 +345,9 @@ def _datenreihen(text: str, reihen: list, i_kopf: int, tab: _Tabelle, h: float, 
         zellen = [z for z in r.zellen if z.x1 > links and z.x0 < rechts]
         if not zellen:
             break
-        if tab.reihen and len(zellen) == 1 and len(text[zellen[0].start:zellen[0].ende].strip(" .,;:|-_")) <= 2:
+        kurz = text[zellen[0].start:zellen[0].ende].strip(" .,;:|-_")
+        rest = bool(tab.reihen) and len(zellen) == 1 and len(kurz) <= 2
+        if rest and not any(c.isdigit() for c in kurz):
             i += 1                                   # Rest der Texterkennung ("i", "|") zwischen zwei Datenreihen
             continue                                 # eines Scans: beendet die Tabelle nicht (s7 066)
         if any(_ist_fliesstext(text, z, spalten) for z in zellen):
@@ -350,13 +369,17 @@ def _datenreihen(text: str, reihen: list, i_kopf: int, tab: _Tabelle, h: float, 
         belegte = {idx for idx, _, _ in teile}
         luecke = r.y0 - vorige_y1 if vorige_y1 is not None else None
         if tab.reihen and _folgezeile(text, teile, belegte, tab, h, luecke, abstand, hat_etikett):
-            # Zellumbruch: die Zeile setzt die Zellen des letzten Datensatzes fort (Befund 84)
+            # Zellumbruch: die Zeile setzt die Zellen des letzten Datensatzes fort (Befund 84) – auch eine kurze Ziffer
+            # (die Hausnummer: "Zollhäuslweg" ⏎ "7"; Nachprüfung NP-16)
             for idx, s, e in teile:
                 tab.werte[idx].append((nr, s, e, tab.reihen - 1))
                 tab.umbrochen.add((idx, tab.reihen - 1))
             vorige_y1 = r.y1
             i += 1
             continue
+        if rest:
+            i += 1                                   # kurze Ziffer, die keine Zelle fortsetzt: Rest der Texterkennung
+            continue                                 # ("|" als "1" gelesen)
         if len(belegte) == 1:
             idx = next(iter(belegte))
             sp = spalten[idx]
@@ -574,7 +597,9 @@ def _namen(text: str, s: int, e: int, nur_bekannt: bool = False) -> list:
         s = m.end()
     aus = []
     pos = s
-    sp = namen_spanne(text, pos, e)
+    # Personenspalte: ein Wochentag oder Monat ist hier ein Name ("Freitag ⇥⇥ Peter ⇥⇥ 12.03.1975", Kind "Mai ⇥⇥
+    # 24.05.2020"; Nachprüfung NP-06)
+    sp = namen_spanne(text, pos, e, kalender=True)
     if sp is None and not _EINRICHTUNG_RE.search(text[s:e]):
         # Betriebswort vor dem Namen ("Physiotherapie Tran", "Praxis Dr. Haidari"): ein bis zwei Wörter überspringen;
         # Einrichtungen ("Krankenhaus St. Ansgar", "Apotheke am Markt") sind keine Personen. Hinter einer
@@ -588,7 +613,7 @@ def _namen(text: str, s: int, e: int, nur_bekannt: bool = False) -> list:
                 break
     while pos < e:
         if sp is None:
-            sp = namen_spanne(text, pos, e)
+            sp = namen_spanne(text, pos, e, kalender=True)
         if sp is None or (nur_bekannt and not sp.bekannt and not sp.komma):
             break
         aus.append((sp.start, sp.ende, "namen", text[sp.start:sp.ende] if sp.woerter >= 2 else None))
@@ -849,9 +874,27 @@ def _werte_der_tabelle(dok, tab: _Tabelle, im_etikett=None) -> list:
         nicht_leer = sum(1 for nr, s, e, _ in tab.werte[idx] if dok.seiten[nr].text[s:e].strip())
         if belegt_je_spalte.get(idx, 0) >= 3 and belegt_je_spalte[idx] >= 0.5 * max(1, nicht_leer):
             sichere_spalten.add(idx)
+    # ein Wochentag oder Monat in einer Spalte "Name"/"Vorname" ist ein Name ("Mai ⇥⇥ 24.05.2020" unter "Vorname"),
+    # auch ohne bekannten Namen in der Zeile (Nachprüfung NP-06)
+    namens_kopf = {i for i, sp in enumerate(tab.spalten) if _NAMEN_KOPF_RE.match(_vergleichsform(sp.eintrag))}
+
+    def kalendername(t) -> bool:
+        return t[6] in namens_kopf and dok.seiten[t[0]].text[t[1]:t[2]].strip().casefold() in DATUMSWOERTER
+    # Eine Reihe mit Geburtsdatum ist der Datensatz einer Person: ihre Namensspalten tragen Namen, auch unbekannte
+    # ("Status ⇥⇥ Kreszentia ⇥⇥ 04.04.1944"; Nachprüfung NP-15)
+    geburt_reihen = {t[5] for t in treffer if t[3] == "geburt"}
     treffer = [t for k, t in enumerate(treffer)
-               if t[3] != "namen" or k in belegt or t[7] or partner_belegt(t) or t[6] in sichere_spalten]
-    treffer += [t for t in ganze_zellen if t[6] in sichere_spalten]
+               if t[3] != "namen" or k in belegt or t[7] or partner_belegt(t) or t[6] in sichere_spalten
+               or kalendername(t) or (t[6] in namensspalte and t[5] in geburt_reihen)]
+    # Eine ganze Zelle der Namensspalte ohne Namensform ("Stand", "Summe", "Termin": Kopf- oder Allerweltswort) ist in
+    # einer Datenzeile einer Person der Name: neben einem belegten Namen derselben Reihe ("Stand ⇥⇥ Ludmilla") oder
+    # mit einem Geburtsdatum in der Reihe (Nachprüfung NP-15) – nicht als Leer- oder Verweiswort ("Keine Angabe")
+
+    def ganze_zelle_belegt(t) -> bool:
+        wort = dok.seiten[t[0]].text[t[1]:t[2]].split()[0].casefold()
+        return wort not in kennungsformen.KEIN_NAMENSWERT and (partner_belegt(t) or t[5] in geburt_reihen)
+    zeilen_beleg = {t[:3] for t in ganze_zellen if t[6] not in sichere_spalten and ganze_zelle_belegt(t)}
+    treffer += [t for t in ganze_zellen if t[6] in sichere_spalten or t[:3] in zeilen_beleg]
     # Personen über Spalten "Name" + "Vorname" derselben Reihe gruppieren
     if vorname_idx:
         je_reihe: dict = {}
@@ -873,8 +916,10 @@ def _werte_der_tabelle(dok, tab: _Tabelle, im_etikett=None) -> list:
     aus = []
     gesehen = {}
     for nr, a, b, kat, gruppe, *_ in treffer:
-        if kat == "namen" and im_etikett is not None and im_etikett(nr, a, b):
-            continue
+        if kat == "namen" and im_etikett is not None and im_etikett(nr, a, b) \
+                and not ((nr, a, b) in zeilen_beleg
+                         and not kennungsformen.personen_feld_etikett(dok.seiten[nr].text[a:b])):
+            continue                                 # ein Feld-Etikett – außer als belegter Name einer Datenzeile
         # dieselbe Stelle aus der Zeile und aus der ganzen umbrochenen Zelle: einmal, mit der Gruppe des ganzen Werts
         schl = (nr, a, b, kat)
         if schl in gesehen:
@@ -970,7 +1015,7 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
                     tab, i = kandidat, j
                     break
         if tab is not None:
-            tab.bis_ende = _bis_seitenende(lg, tab)
+            tab.bis_ende = _bis_seitenende(lg, tab) or _fortsetzung_folgt(text, reihen, i, 0)
         offen = tab
     while i < len(reihen):
         spalten = _kopf_spalten(text, reihen[i], ets, starts, breite)
@@ -1008,7 +1053,7 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
         j = _datenreihen(text, reihen, kopf_ende, tab, h, nr, ist_kopf, hat_etikett)
         if tab.reihen:
             treffer += _werte_der_tabelle(dok, tab, im_etikett)
-            tab.bis_ende = _bis_seitenende(lg, tab)
+            tab.bis_ende = _bis_seitenende(lg, tab) or _fortsetzung_folgt(text, reihen, j, kopf_ende + 1)
             offen = tab                               # die letzte Tabelle der Seite kann sich fortsetzen
         i = max(j, i + 1)
     return treffer, offen

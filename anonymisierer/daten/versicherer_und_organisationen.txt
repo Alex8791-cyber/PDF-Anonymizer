@@ -129,6 +129,7 @@ AXA Lebensversicherung AG
 AXA Schweiz
 AXA Versicherung AG
 Ayvens
+B. Metzler seel. Sohn & Co.
 Baader Bank
 Badenia
 Badische Rechtsschutzversicherung
@@ -146,7 +147,10 @@ Bank für Kirche und Caritas
 Bank für Sozialwirtschaft
 Bank Julius Bär
 Bank11
+Bankhaus Ellwanger & Geiger
+Bankhaus Lampe
 Bankhaus Metzler
+Bankhaus von der Heydt
 Barmenia
 Barmenia Allgemeine Versicherungs-AG
 Barmenia Gothaer
@@ -210,6 +214,7 @@ Berufsrechtsschutz
 Berufsunfähigkeits-Zusatzversicherung
 Berufsunfähigkeitsversicherung
 Bestattungsvorsorge
+Bethmann Bank
 BetrAVG
 Betreuungsgericht
 Betreuungsgesetz
@@ -561,6 +566,7 @@ Freiwillige Feuerwehr
 Friday Versicherung
 Führerscheinstelle
 Funk Gruppe
+Fürst Fugger Privatbank
 Fürstlich Castell'sche Bank
 FZV
 GAP-Versicherung
@@ -737,6 +743,7 @@ IV
 Janitos
 JDC Group
 Jobcenter
+Joh. Berenberg, Gossler & Co.
 Jugendamt
 Jung DMS
 Jung DMS & Cie.
@@ -840,6 +847,7 @@ Markel
 Marsh & McLennan
 Maschinenversicherung
 Mastercard
+Max Heinr. Sutor
 maxpool
 MB/KK
 MB/KT
@@ -916,6 +924,7 @@ Oberbank
 Oberlandesgericht
 Oberösterreichische Versicherung
 Oberverwaltungsgericht
+Oddo BHF
 Öffentliche Versicherung Braunschweig
 Öffentliche Versicherungen Oldenburg
 ÖGK
@@ -1171,6 +1180,7 @@ StVZO
 Süddeutsche Krankenversicherung
 Südzucker BKK
 Sumiswalder
+Sutor Bank
 Suva
 SV Gebäudeversicherung
 SV Sparkassen-Versicherung

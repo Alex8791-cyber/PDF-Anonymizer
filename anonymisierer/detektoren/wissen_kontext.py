@@ -308,7 +308,11 @@ _BERUF_ETIKETT_RE = re.compile(
     r"Occupation|Profession)(?P<ag>[ \t]*/[ \t]*(?:Tätigkeit|Arbeitgeber|Stellung|Branche))?(?![\wäöüß])"
     r"(?:[ \t]*\([^)\n]{1,20}\))?(?:[ \t]*:[ \t]*|\t+[ \t]*)")
 _BERUF_VOR_RE = re.compile(
-    r"(?<![\wäöüß])(?:arbeitet(?:e)?|arbeiten|tätig(?:[ \t]+(?:ist|war|sind))?|beschäftigt|angestellt|eingestellt|"
+    # Verb und "als" mit bis zu vier Wörtern dazwischen ("arbeitet in Teilzeit als Hufschmiedin", "ist seit 2019 bei uns
+    # als Monteur beschäftigt"; Nachprüfung NP-12) – der Beruf dahinter muss in der Wissensbasis stehen
+    r"(?<![\wäöüß])(?:arbeitet(?:e)?|arbeiten|jobbt|beschäftigt|angestellt|eingestellt)"
+    r"(?:[ \t]+[^\s.,;:!?]+){1,4}?[ \t]+als[ \t]+"
+    r"|(?<![\wäöüß])(?:arbeitet(?:e)?|arbeiten|tätig(?:[ \t]+(?:ist|war|sind))?|beschäftigt|angestellt|eingestellt|"
     r"selbst(?:st)?ändig|freiberuflich|ausgebildet(?:e[rn]?)?|Ausbildung|Tätigkeit|Arbeit|Anstellung|Beschäftigung|"
     r"Stelle|Job|Lehre|Umschulung|beruflich|ehemals|früher)[ \t]+(?:als|zum|zur)[ \t]+"
     r"|(?<![\wäöüß])(?:ist|war|bin|sind|wird|wurde|Beruf:?)[ \t]+(?:von[ \t]+Beruf[ \t]+)?"
@@ -399,6 +403,13 @@ def _kein_beruf(wert: str) -> bool:
 
 
 _KOPF_NACHBAR_RE = re.compile(r"(?i)^(?:arbeitgeber(?:in)?|tätigkeit|beruf|branche|stellung|firma|betrieb)\b")
+# Nachbarkopf eines Betriebs und Kennzahlen eines Betriebs in der Kopfzeile: eine Betriebstabelle ("Tätigkeit ⇥⇥ Firma
+# ⇥⇥ Umsatz") – die Tätigkeit beschreibt dort den Betrieb, nicht den Beruf einer Person (Nachprüfung B/NP-12)
+_KOPF_BETRIEB_RE = re.compile(r"(?i)^(?:branche|firma|betrieb|unternehmen)\b")
+_BETRIEBS_KENNZAHL_RE = re.compile(
+    r"(?i)(?<![\wäöüß])(?:(?:jahres|gesamt|honorar|netto|brutto)?umsatz\w*|umsätze|lohnsumme\w*|gehaltssumme\w*|"
+    r"(?:anzahl[ \t]+)?(?:mitarbeiter|beschäftigte)(?:zahl|anzahl)?|betriebsart|betriebsgröße|rechtsform|"
+    r"gründungsjahr|filialen|standorte)(?![\wäöüß])")
 
 
 def _bekannter_beruf(wert: str) -> bool:
@@ -414,7 +425,8 @@ def _beruf_spalte(text: str, m):
     ⇥⇥ Geb.-Datum ⇥⇥ Beruf ⇥⇥ Eintritt") jede Zelle dieser Spalte in den Zeilen darunter (Befund 87 der Domänen-
     Durchsicht); in einer anderen Kopfzeile – die Nachbarzelle ist selbst ein Feldbezeichner ("Angaben zur Tätigkeit ⇥⇥
     Tätigkeit ⇥⇥ Arbeitgeber") – die Berufe der Wissensbasis darunter (Gegenprüfung LK-15); sonst None. Die
-    Nachbarzelle der Kopfzeile ist kein Beruf."""
+    Nachbarzelle der Kopfzeile ist kein Beruf. In einer Betriebstabelle (Nachbarkopf Firma/Betrieb/Branche und eine
+    Kennzahl des Betriebs wie Umsatz in der Kopfzeile) beschreibt die Tätigkeit den Betrieb: keine Stelle."""
     if ":" in text[m.start():m.end()] or "\t" not in text[m.start():m.end()]:
         return None
     za = text.rfind("\n", 0, m.start()) + 1
@@ -427,6 +439,10 @@ def _beruf_spalte(text: str, m):
     personen = len(kopf) >= 3 and any(_PERSONEN_KOPF_RE.search(t) for _, _, t in kopf)
     if not personen:
         nachbar = kopf[nr + 1][2] if nr + 1 < len(kopf) else ""
+        if nachbar and (_KOPF_BETRIEB_RE.match(nachbar) or _BETRIEBS_KENNZAHL_RE.match(nachbar)) \
+                and any(_BETRIEBS_KENNZAHL_RE.search(t) for _, _, t in kopf):
+            return []                              # Betriebstabelle: "Tätigkeit ⇥⇥ Firma ⇥⇥ Umsatz" – Kopfzeile,
+                                                   # aber kein Beruf darunter (und die Nachbarzelle kein Wert)
         if not nachbar or not (_feldbezeichner(nachbar) or _KOPF_NACHBAR_RE.match(nachbar)):
             return None                            # "Beruf ⇥⇥ Schreiner": Etikett und Wert in einer Zeile
     aus = []
@@ -867,6 +883,10 @@ def _familien_name(name: str, listeneintrag: bool = False) -> bool:
     woerter = [w for w in re.split(r"[ \t,]+", name) if w and w[0].isupper()]
     if not woerter or len(woerter) > 3:
         return False
+    if listeneintrag and len(woerter) == 1 and len(name.split()) == 1:
+        # Listeneintrag unter "Kinder:": auch ein Vorname, der ein Monat, ein Ort oder unbekannt ist ("- Juni,
+        # 30.06.2022", "Paris, 02.02.2011", "Dakota, 2019"; Nachprüfung NP-06, Ü-NP-17)
+        return personenkontext.kinderlisten_vorname(woerter[0], wissen)
     for w in woerter:
         if wissen.ist_allerweltswort(w) or personenkontext.FAMILIE_RE.fullmatch(w) or wissen.ist_anrede_titel(w) \
                 or wissen.ist_allowlist(w) or wissen.index("etiketten_person").eintrag_fuer(w) is not None:
@@ -902,11 +922,12 @@ def _jahre_her(datum: str):
     return (datetime.date.today() - d).days / 365.25
 
 
-def geburt_ohne_stichwort(text: str, alle: bool = False) -> list:
+def geburt_ohne_stichwort(text: str, alle: bool = False, namen: list | None = None) -> list:
     """[(start, ende, sicherheit)]: Datum direkt hinter einem Namen ("Max Mustermann, 02.09.61") mit plausiblem
     Geburtsjahr (mindestens 10 Jahre her – ein Unterschriftsdatum ist jünger), Alter hinter einem Namen
     ("Anna Berg (54)"); mit alle=True (Schutzstufe „maximal“) jedes Datum, das mindestens 14 Jahre zurückliegt
-    und nicht hinter Vertragsvokabular steht."""
+    und nicht hinter Vertragsvokabular steht. In `namen` (falls übergeben) die Namen der Listeneinträge unter
+    "Kinder:" (start, ende) – auch ein Vorname, den sonst keine Regel kennt ("- Juni, 30.06.2022")."""
     if not text:
         return []
     aus = []
@@ -938,6 +959,8 @@ def geburt_ohne_stichwort(text: str, alle: bool = False) -> list:
             zeile = text[a:len(text) if zeile_ende < 0 else zeile_ende]
             if gleiche_zeile or not personenkontext.BETRAG_IN_ZEILE_RE.search(zeile):
                 aus.append((m.start(), m.end(), 0.6))
+                if namen is not None and listeneintrag:
+                    namen.append((a + f.start("name"), a + f.start("name") + len(f.group("name").rstrip(" ,\t"))))
                 continue
         if alle and jahre >= 14:
             fenster = text[max(a, m.start() - 40):m.start()]
@@ -954,11 +977,14 @@ def geburt_ohne_stichwort(text: str, alle: bool = False) -> list:
     return aus
 
 
-@detektor("wissen.geburt", {"geburt"}, ALLE_PROFILE)
+@detektor("wissen.geburt", {"geburt", "namen"}, ALLE_PROFILE)
 def geburt(dok, kontext):
-    """Geburtsdaten ohne Stichwort in Personenkontext; in „maximal“ alle plausiblen Geburtsdaten."""
+    """Geburtsdaten ohne Stichwort in Personenkontext; in „maximal“ alle plausiblen Geburtsdaten. Dazu die Vornamen
+    der Listeneinträge unter "Kinder:" ("- Juni, 30.06.2022")."""
     alle = muster.option(kontext.profil, "alle_geburtsdaten")
-    return [Treffer(s, e, "geburt", "wissen.geburt", si) for s, e, si in geburt_ohne_stichwort(dok.text, alle)]
+    namen: list = []
+    aus = [Treffer(s, e, "geburt", "wissen.geburt", si) for s, e, si in geburt_ohne_stichwort(dok.text, alle, namen)]
+    return aus + [Treffer(s, e, "namen", "wissen.geburt", 0.6) for s, e in namen]
 
 
 # ----------------------------------------------------------------------

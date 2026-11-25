@@ -25,6 +25,11 @@ Angaben zur Person
 Angaben zur versicherten Person
 Angehörige
 Angehöriger
+Anrufer
+Anrufer(in)
+Anrufer/-in
+Anrufer/in
+Anruferin
 Ansprechpartner
 Ansprechpartner vor Ort
 Ansprechpartner(in)
@@ -54,6 +59,8 @@ Antragsteller/in
 Antragstellerin
 Anwalt der Gegenseite
 Anwältin der Gegenseite
+Anwesende
+Anwesender
 Anzeigeerstatter
 Anzeigeerstatter(in)
 Anzeigeerstatter/-in
@@ -306,6 +313,11 @@ Gesellschafterin
 gesetzliche Vertreter
 gesetzliche Vertreterin
 gesetzlicher Vertreter
+Gesprächspartner
+Gesprächspartner(in)
+Gesprächspartner/-in
+Gesprächspartner/in
+Gesprächspartnerin
 Given name
 Given name(s)
 Given names
@@ -522,6 +534,7 @@ Mitfahrer(in)
 Mitfahrer/-in
 Mitfahrer/in
 Mitfahrerin
+Mitglied
 Mitreisende
 mitreisende Person
 mitreisende Personen
@@ -835,6 +848,7 @@ Unterzeichner/-in
 Unterzeichner/in
 Unterzeichnerin
 Vater
+Vereinsmitglied
 Verfahrensgegner
 Verfahrensgegner(in)
 Verfahrensgegner/-in

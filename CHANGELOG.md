@@ -288,12 +288,51 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     ein Adresszusatz zwischen Straße und PLZ derselben Zeile („Kaiserstraße 17, 3. OG links, 83022 Rosenheim“); ein
     Rest der Texterkennung („i“) zwischen zwei Reihen einer Scan-Tabelle beendet die Tabelle nicht mehr.
   - Weniger Über-Schwärzung: Spartenkürzel mit SF-Klasse bzw. Selbstbeteiligung („HP SF 12“, „RS SB 150“) sind keine
-    Kennzeichen; Einzelwerte hinter „Breite“/„Länge“ mit Maßeinheit, Viererpunktzahlen hinter Artikel- und
-    Bestellnummern, „@“-Tarife ohne Plattform und Kalenderwörter im Familienkontext bleiben stehen; Konfession nur in
-    „Maximal“ als Verdacht.
+    Kennzeichen; Einzelwerte hinter „Breite“/„Länge“ mit Maßeinheit (auch ausgeschrieben: „Meter“, „lfm“, „Fuß“, „±“),
+    „@“-Tarife ohne Plattform und Kalenderwörter im Familienkontext bleiben stehen; Viererpunktzahlen hinter Artikel-,
+    Bestell- und Positionsnummern gelten nicht als IP-Adresse (eine Bestellnummer bleibt als Kennung geschwärzt);
+    Konfession nur in „Maximal“ als Verdacht und nur, wenn die Kategorie gewählt ist.
   - Laufzeit: Unterschriftslinien aus Unterstrichen und lange Zeilen ohne Leerzeichen oder mit riesigen Lücken
     wachsen wieder linear (16 000 Zeichen „Ab-…“ 15,5 s → 0,6 s, „:“ 27,9 s → 0,3 s, Leerzeichen 5,9 s → 0,7 s,
     Tabulatoren 4,3 s → 0,7 s).
+- **Nachprüfung der Zusammenführung (Runde 5, zweite Nachbesserung):** Was zwei frische Prüfer (Lecks; Über-Schwärzung,
+  Laufzeit, Robustheit, Windows) und die Prüfung der Entwicklungskorpora fanden, ist allgemein behoben – je Befund mit
+  Abwandlungen und Gegenproben in `tests/test_nachpruefung_r7.py`:
+  - Stille Lecks: Mannheimer Quadrate hinter „Risikoort“, „Versicherungsort“, „Hauptwohnsitz“, „Halter“, „Abstellort“,
+    im Feld C.1.3 und hinter „wohnt … in“ (ein doppelt belegtes Muster hatte die Etikett-Regel abgeschaltet; ein Test
+    verbietet doppelte Muster je Modul); ein Wochentag oder Monat als Name hinter Personen-Etiketten, in Grußblock,
+    Personenspalte und Kinderaufzählung, wenn kein Datumswort davor steht („Gesprächspartner: Freitag, 14.11.2026“, „Die
+    Kinder August (9) und Juni (6)“); Familiennamen, die zugleich Marke sind, unter weiteren Grußformeln
+    („Freundlichst“, „Servus“, „Danke und Grüße“), unter Personen-Spaltenköpfen („Anrufer“, „Mitglied“,
+    „Gesprächspartner“) und im Satz („Kollege Hengst“); Personen in Organisations-Spalten („beim Vater Rauschenbach“,
+    „Gruber Sepp“, „GbR Seidlmayr“, ein einzelner Familienname); Profilnamen im Satz („auf Instagram unter …“); Berufe
+    im Satz („arbeitet in Teilzeit als …“); Zugangsdaten mit „ist ab sofort“, hinter „Displaysperre“, „WLAN-Schlüssel“
+    und hinter einem Gegenstand („Garagentoröffner Code 1199“); Hof- und Hausnamen („Hof Hintermoser“, „beim
+    Stögerbauer“ im Orts- oder Ereigniskontext) und die mundartliche Folge „die Kölbl Resi“; Kopf- oder Allerweltswörter
+    als Familienname hinter „Familienname:“/„Geburtsname:“ und in Datenzeilen einer Namensspalte mit Vornamen oder
+    Geburtsdatum („Stand“, „Summe“, „Termin“); Geburtsdaten mit Komma und zweistelligem Jahr hinter einem
+    Geburts-Etikett („geb. 05.09,16“); Kinderlisten mit Orts- oder Monatsnamen („Paris, 02.02.2011“); die Fortsetzung
+    einer Tabelle, die die Vorseite ankündigt („Weitere Kinder siehe Folgeseite.“); die Hausnummer in der Folgezeile
+    einer Scan-Zelle (eine Ziffer ist kein Rest der Texterkennung); Grad und Dezimalminuten, Plus Codes, „Green Card“
+    und „SNR“ (Seriennummer); ein Adresszusatz, der selbst ein Anschrift-Etikett ist, hinter „Neue Anschrift:“
+    („Lindenweg 9, Hinterhaus, 83229 …“).
+  - Selbstkontrolle: abgewählte Gesundheitsdaten oder Konfession nennen einen eigenen Grund für `_PRUEFEN`; ein Datum in
+    einer Tabellenzeile aus lauter geschwärzten Namen (Folgeseite ohne Kopf), ein Familienname mit Artikel vor oder
+    hinter einem Personen-Verb („war der Brandstetter am Steuer“, „saß der Haslbeck“), Marken im Personenkontext – auch
+    unter einem Tabellenkopf mit nur einem Personen-Etikett („Anrufer ⇥ Anliegen ⇥ Rückruf bis“) – und Personen in
+    Organisations-Spalten werden verortet gemeldet; ein Platzhalter („[GEB-DATUM]“) gilt nicht mehr als Spaltenkopf,
+    „Mitglied der …“ im Satz nicht als Etikett; Maße mit ausgeschriebener Einheit und Leerwörter („Geburtsname:
+    Entfällt“) werden nicht gemeldet.
+  - Weniger Über-Schwärzung: Ort hinter einer Person nur mit Ortsbeleg (Fachrichtungen wie „Orthopädie“ bleiben stehen);
+    Adresszusatz nur mit Merkmal (OG, Whg., Hinterhaus, c/o …; „Augenzeugin“, „Privatkunde“ bleiben stehen); Quadrate
+    nur mit Etikett, Wohnwort oder Mannheim direkt dahinter (AKB-Gliederung, Sitzplatz, Skizzenfeld, „A 8, 3 km“ bleiben
+    stehen); Zugangsdaten ohne Mengen- und Längenangaben („3-mal“, „4-stellig“) und ohne Tarif- oder Rabattcodes;
+    „Signal Iduna“ ist kein Profil-Etikett; Versionen hinter „from“/„von“ ohne Zugriffs- oder Host-Wort sind keine
+    IP-Adresse; die Tätigkeit in einer Betriebstabelle (Firma, Umsatz) ist kein Beruf; Organisationssignaturen („Neff
+    Kundendienst Süd“, „Ihr Miele Team“) und Privatbanken in der Spalte „Anbieter“ bleiben stehen.
+  - Laufzeit: Quadrat-, Profil-, Beruf- und Ortsregeln, die Spaltensuche rechts neben Etiketten und die Prüfung auf
+    bereits geschwärzte Rechtecke arbeiten in begrenzten Fenstern bzw. über ein Höhenraster – linear auch bei 16 000
+    Zeichen je Zeile und vielen Stellen je Seite.
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene

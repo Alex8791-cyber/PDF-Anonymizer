@@ -145,7 +145,12 @@ def auftrag_bauen(ergebnis: dict, zustaende: list, einzelstellen: bool, bereiche
     bereiche = bereiche if bereiche is not None else {}
     stellen = stellen if stellen is not None else {}
     nebenkanaele = ergebnis.get("nebenkanaele")
+    # besondere Kategorien nach Art. 9 DSGVO, die (ganz oder teilweise) abgewählt in der Ausgabe lesbar bleiben – z. B.
+    # die in „Hoch“ nur angebotenen Gesundheits- und Religionsangaben: ein Prüfgrund der Ausgabe (Nachprüfung NP-05)
+    art9 = sorted({str(f.get("kategorie")) for f, z in zip(ergebnis["funde"], zustaende, strict=True)
+                   if f.get("kategorie") in _muster.ART9 and z != "an"})
     return {"funde": angehakt + abgewaehlte_bilder,      # abgewählte Bilder gehen mit, zählen aber nicht als Haken
+            "art9_abgewaehlt": art9,
             "ocr_cache": ergebnis.get("ocr_cache"),
             "modell": ergebnis.get("modell") if einzelstellen else None,
             "bereiche": bereiche, "stellen": stellen,
@@ -185,6 +190,8 @@ def schwaerz_parameter(auftrag: dict, freigabe: bool, profil: str, schwaerze_pdf
         kwargs["freigabe_erforderlich"] = freigabe_noetig(auftrag, freigabe)
     if kann(schwaerze_pdf, "profil"):
         kwargs["profil"] = profil
+    if auftrag.get("art9_abgewaehlt") and kann(schwaerze_pdf, "art9_abgewaehlt"):
+        kwargs["art9_abgewaehlt"] = list(auftrag["art9_abgewaehlt"])
     return kwargs
 
 

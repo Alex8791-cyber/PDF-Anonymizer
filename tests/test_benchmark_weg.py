@@ -395,8 +395,12 @@ def test_echte_engine_weg_engine_unveraendert_weg_oberflaeche_wie_die_oberflaech
                 ids = [f["id"] for f in s["args"][1]]
                 bilder = [f["id"] for f in angeboten if any("bereich" in st for st in f["stellen"])]
                 assert ids == [f["id"] for f in funde if f not in angeboten] + bilder   # angebotene Texte fehlen
+                # die nur angebotenen Gesundheitsdaten gehen als "art9_abgewaehlt" mit: die Ausgabe nennt sie als Grund
+                # für _PRUEFEN (Nachprüfung A/NP-05: Art.-9-Daten lesbar)
                 assert set(s["kwargs"]) == {"ocr", "ziel_ordner", "ocr_cache", "modell", "nebenkanaele",
-                                            "freigabe_erforderlich", "profil"}
+                                            "freigabe_erforderlich", "profil", "art9_abgewaehlt"}
+                assert s["kwargs"]["art9_abgewaehlt"] == sorted({f["kategorie"] for f in angeboten
+                                                                 if f["kategorie"] in muster.ART9})
                 assert s["kwargs"]["modell"] is a["ergebnis"]["modell"]
                 assert s["kwargs"]["freigabe_erforderlich"] is True and s["kwargs"]["profil"] == "hoch"
                 assert s["ergebnis"]["ausgabe"].name.endswith("_PRUEFEN.pdf")

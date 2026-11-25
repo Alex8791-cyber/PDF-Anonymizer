@@ -36,7 +36,8 @@ import re
 
 from ..seitenmodell import SPALTENTRENNER
 from . import REGISTER, Treffer, detektor, registrieren
-from .struktur import (_GREMIUM_RE, _ORG_ROLLEN_RE, etiketten, lage, namen_spanne, ort_verlaengern, plz_ort_kappen,
+from .struktur import (_GREMIUM_RE, _ORG_ROLLEN_RE, adresszusatz, etiketten, lage, namen_spanne, ort_verlaengern,
+                       plz_ort_kappen,
                        plz_ort_spannen, strasse_spanne, _muster, _wissen)
 
 MM = 72 / 25.4
@@ -429,15 +430,7 @@ def _zeilen_text(seite, z) -> str:
     return seite.text[z.start:z.ende]
 
 
-# Adresszusatz zwischen Straße und PLZ + Ort derselben Zeile ("Kaiserstraße 17, 3. OG links, 83022 Rosenheim",
-# "…, Hinterhaus, …"): ein kurzes Segment ohne Kontaktangabe gehört zur Anschrift (Gegenprüfung LK-05/LK-12)
-_ADRESSZUSATZ_RE = re.compile(r"[^\W_][\w.\-/ ]{0,29}")
-_KEIN_ZUSATZ_RE = re.compile(r"(?i)tel|fax|mobil|handy|e-?mail|@|www\.|https?:|iban|ust|steuer")
-
-
-def _adresszusatz(text: str) -> bool:
-    t = text.strip()
-    return bool(_ADRESSZUSATZ_RE.fullmatch(t)) and len(t.split()) <= 4 and not _KEIN_ZUSATZ_RE.search(t)
+_adresszusatz = adresszusatz
 
 
 def _segment_werte(seite, start: int, ende: int, fk: _Firmenkontext, zid: int) -> list:
@@ -464,13 +457,20 @@ def _segment_werte(seite, start: int, ende: int, fk: _Firmenkontext, zid: int) -
             j = k - 1
             s2, e2 = segmente[j]
             st = strasse_spanne(text, s2, e2)
-            if not (st and st[1] >= e2 - 1) and j >= 1 and _adresszusatz(text[s2:e2]):
-                sv, ev = segmente[j - 1]
-                st_vor = strasse_spanne(text, sv, ev)
-                if st_vor and st_vor[1] >= ev - 1:
-                    zs = s2 + len(text[s2:e2]) - len(text[s2:e2].lstrip())
-                    aus.append((zs, zs + len(text[s2:e2].strip()), "strasse", None))
-                    j, st, s2, e2 = j - 1, st_vor, sv, ev
+            # ein oder mehrere Zusätze zwischen Straße und PLZ ("…, Hinterhaus, 3. OG links, 83022 …"; NP-08)
+            zusaetze = []
+            while not (st and st[1] >= e2 - 1) and j >= 1 and len(zusaetze) < 3 and _adresszusatz(text[s2:e2]):
+                zusaetze.append((s2, e2))
+                j -= 1
+                s2, e2 = segmente[j]
+                st = strasse_spanne(text, s2, e2)
+            if zusaetze and st and st[1] >= e2 - 1:
+                for zs0, ze0 in zusaetze:
+                    zs = zs0 + len(text[zs0:ze0]) - len(text[zs0:ze0].lstrip())
+                    aus.append((zs, zs + len(text[zs0:ze0].strip()), "strasse", None))
+            elif zusaetze:
+                j, (s2, e2) = k - 1, segmente[k - 1]
+                st = strasse_spanne(text, s2, e2)
             if st and st[1] >= e2 - 1:
                 aus.append((st[0], st[1], "strasse", None))
                 if j >= 1:
@@ -515,6 +515,16 @@ def _block_werte(seite, lg, z_plz, plz_spanne, fk: _Firmenkontext, im_fenster: b
         return aus
     st = strasse_spanne(text, z_str.start, z_str.ende)
     rest = 1
+    # Zusatz als eigene Zeile zwischen Straße und PLZ ("Schusterweg 12" ⏎ "Rückgebäude, 1. OG" ⏎ "83229 Aschau …";
+    # Nachprüfung NP-08): die Zeile gehört zur Anschrift, die Straße steht eine Zeile höher
+    if not (st and st[1] >= z_str.ende - 1) and len(oben) >= 2 and zt.strip() \
+            and all(adresszusatz(t) for t in re.split(r"[,;]", zt) if t.strip()):
+        z2 = zeilen_nach_id[oben[1]]
+        st2 = strasse_spanne(text, z2.start, z2.ende)
+        if st2 and st2[1] >= z2.ende - 1 and not fk.firma(z2.id, z2.ende):
+            zs = z_str.start + len(zt) - len(zt.lstrip())
+            aus.append((zs, zs + len(zt.strip()), "strasse", None))
+            z_str, zt, st, rest = z2, _zeilen_text(seite, z2), st2, 2
     if st and st[1] >= z_str.ende - 1 and len(zt.strip()) <= 60:
         aus.append((st[0], st[1], "strasse", None))
     elif re.match(r"(?i)c/o|z\.[ ]?hd", zt.strip()):

@@ -735,8 +735,10 @@ _DATUM_RE = re.compile(
     r"|(\d{1,2})/(\d{1,2})/((?:19|20)\d{2})"
     r"|(\d{1,2})[ ]+(?-i:(" + _MONAT_PASS_ALT + r"))(?:[ ]?/[ ]?(?-i:" + _MONAT_PASS_ALT + r"))?\.?[ ]+"
     r"((?:19|20)\d{2}|\d{2})"
-    # ein Trenner als Komma verlesen oder vertippt ("17,03.1968", "17.03,1968") – nur mit vierstelligem Jahr
-    r"|(\d{1,2})(?:,[ ]?(\d{1,2})\.|\.[ ]?(\d{1,2}),)[ ]?((?:19|20)\d{2}))(?![\d])", re.IGNORECASE)
+    # ein Trenner als Komma verlesen oder vertippt ("17,03.1968", "17.03,1968", "05.09,16") – die Regel liest Daten nur
+    # hinter Geburts-Etiketten und in Geburtsspalten (datums_spannen), dort auch mit zweistelligem Jahr (Nachprüfung
+    # NP-10); ein Betrag ("5.09,16 EUR") hat keinen Tag/Monat-Punkt vorn
+    r"|(\d{1,2})(?:,[ ]?(\d{1,2})\.|\.[ ]?(\d{1,2}),)[ ]?((?:19|20)\d{2}|\d{2})(?![.,]\d))(?![\d])", re.IGNORECASE)
 
 
 def _heute() -> datetime.date:
@@ -931,11 +933,15 @@ def _nachname_hinten(text: str, hinten: list) -> bool:
         and not _wissen_frage("ist_vorname", letzter.split("-")[0])
 
 
-def namen_spanne(text: str, pos: int, grenze: int, komma: bool = True, max_woerter: int = 6):
+def namen_spanne(text: str, pos: int, grenze: int, komma: bool = True, max_woerter: int = 6,
+                 kalender: bool = False):
     """Name ab pos: Anreden/Titel vorn werden übersprungen (gehören nicht zur Spanne), dann groß
     geschriebene Wörter, Initialen, Partikel (von, van der …), höchstens ein Komma ("Nachname, Vorname"
     mit höchstens drei Wörtern dahinter). Endet an Ziffern, Satzzeichen, kleingeschriebenen Wörtern,
-    Feldbezeichnern, Funktions- und Allerweltswörtern. Liefert NamensSpanne oder None."""
+    Feldbezeichnern, Funktions- und Allerweltswörtern. Ein Wochentag oder Monat beginnt einen Namen nur mit Namen
+    dahinter ("Freitag, Jonas") oder mit kalender=True – an einem Ort für Personen (Personen-Etikett,
+    Unterschriftszeile, Personenspalte: "Gesprächspartner: Freitag, 14.11.2026", "Mit freundlichen Grüßen" ⏎ "Juni"),
+    wenn er dort nicht als Datum steht ("Montag bis Freitag", Nachprüfung NP-06). Liefert NamensSpanne oder None."""
     i = pos
     while i < grenze and text[i] in " \t":
         i += 1
@@ -972,12 +978,16 @@ def namen_spanne(text: str, pos: int, grenze: int, komma: bool = True, max_woert
             j = te
         elif tok[0].isupper():
             wort = tok[:-1] if tok.endswith(".") else tok
-            if wort.casefold() in FUNKTIONSWOERTER or not wort_namensartig(wort):
+            # Wochentag oder Monat als Name: hinter einem Vornamen ("Benedikt Oktober"), vor ", Vorname" oder an einem
+            # Ort für Personen (kalender) – nie als Datum ("Anna Mai 2025", "Montag bis Freitag")
+            kalendername = wort.casefold() in DATUMSWOERTER and (vor_komma or echte or (kalender and not woerter)) \
+                and not personenkontext.kalenderwort_als_datum(text, ts, ts + len(wort))
+            if wort.casefold() in FUNKTIONSWOERTER or not (wort_namensartig(wort) or kalendername):
                 break
             if woerter and len(wort) <= 4 and wort.isalpha() and wort.isupper() and not wort_bekannter_name(wort) \
                     and not text[woerter[-1][0]:woerter[-1][1]].isupper():
                 break                                # "Mooslechner, Anton PHV": ein Kürzel, kein weiterer Name
-            if wort.casefold() in DATUMSWOERTER and not (vor_komma or echte):
+            if wort.casefold() in DATUMSWOERTER and not (vor_komma or echte or kalendername):
                 break
             woerter.append((ts, ts + len(wort), "name"))
             j = ts + len(wort)
@@ -1103,6 +1113,31 @@ def ort_spanne(text: str, pos: int, grenze: int):
     return s, e
 
 
+# Adresszusatz zwischen Straße und PLZ + Ort ("Kaiserstraße 17, 3. OG links, 83022 Rosenheim", "…, Hinterhaus, …",
+# "Rückgebäude, 1. OG" als eigene Zeile, "Lindenstraße 4 (Gartenhaus)"): ein kurzes Segment mit einem Merkmal der Lage im
+# Haus (Geschoss, Wohnung, Gebäudeteil, Eingang, c/o) gehört zur Anschrift (Gegenprüfung LK-05/LK-12, Nachprüfung
+# NP-08). Ohne Merkmal bleibt es stehen: "Augenzeugin", "Privatkunde", "Mo-Fr 9-12 Uhr" sind Rolle, Kundenklasse und
+# Sprechzeit (Nachprüfung Ü-NP-02)
+ADRESSZUSATZ_RE = re.compile(r"[^\W_][\w.\-/() ]{0,39}")
+_KEIN_ZUSATZ_RE = re.compile(r"(?i)tel|fax|mobil|handy|e-?mail|@|www\.|https?:|iban|ust|steuer")
+ZUSATZ_MERKMAL_RE = re.compile(
+    r"(?<![\wäöüß])(?:\d{1,2}\.?[ \t]*(?i:OG|Obergeschoss|Etage|Stock(?:werk)?|Geschoss|UG|DG|Ebene)|"
+    r"OG|EG|DG|UG|KG|(?i:hochparterre|parterre|souterrain|erdgeschoss|obergeschoss|untergeschoss|dachgeschoss|"
+    r"kellergeschoss|etage|stockwerk|stock|geschoss|whg\.?|wohnung(?:s-?nr\.?)?|einliegerwohnung|dachwohnung|"
+    r"app\.?|appartement|apartment|zimmer|zi\.|hinterhaus|vorderhaus|seitenflügel|seitenhaus|rückgebäude|"
+    r"hintergebäude|nebengebäude|gartenhaus|gebäude|bauteil|aufgang|eingang|stiege|treppenhaus|penthouse|anbau|"
+    r"wohnheim|links|rechts|mitte|c/o|z\.[ \t]?hd\.?|zu[ \t]+händen)|Haus[ \t]+[A-Z0-9]|Block[ \t]+[A-Z0-9]|"
+    r"Top[ \t]+\d|Tür[ \t]+\d)(?![\wäöüß])")
+
+
+def adresszusatz(text: str) -> bool:
+    """Ist der Text ein Adresszusatz (ADRESSZUSATZ_RE, höchstens fünf Wörter, ein Merkmal der Lage im Haus, keine
+    Kontaktangabe)? Eine Regel für Segmente, eigene Zeilen und Werte hinter Anschrift-Etiketten."""
+    t = text.strip().strip("()").strip()
+    return (bool(ADRESSZUSATZ_RE.fullmatch(t)) and len(t.split()) <= 5 and not _KEIN_ZUSATZ_RE.search(t)
+            and bool(ZUSATZ_MERKMAL_RE.search(t)))
+
+
 def strasse_spanne(text: str, pos: int, grenze: int):
     """Straße mit Hausnummer am Anfang des Bereichs, auch ohne Straßenwort ("Alt-Moabit 63",
     "Platz der Republik 99 a", "ZUM STEINBRUCH 66") oder Postfach. (start, ende) oder None."""
@@ -1112,6 +1147,9 @@ def strasse_spanne(text: str, pos: int, grenze: int):
     m = _POSTFACH_RE.match(text, i, grenze)
     if m:
         return m.start(), m.end()
+    m = kennungsformen.QUADRAT_RE.match(text, i, grenze)
+    if m:
+        return m.start(), m.end()                       # Mannheimer Quadrat ("Wohnung ⇥ T 4, 12"): mit Hausnummer
     m = _STRASSE_FREI_RE.match(text, i, grenze)
     if not m:
         return None
@@ -1507,6 +1545,20 @@ def _adress_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
     if sp and (mit_trenner or _muster is not None and _muster.finde_strasse(text[sp[0]:sp[1]])):
         if not any(a <= sp[0] < b for a, b, _, _ in aus):
             aus.append(Wert(sp[0], sp[1], "strasse"))
+        # Adresszusätze zwischen Straße und PLZ bzw. in Klammern dahinter ("Anschrift: Kaiserstraße 17, 3. OG links,
+        # 83022 Rosenheim", "Lindenstraße 4 (Gartenhaus)"; Nachprüfung NP-08) – dieselbe Regel wie im Adressblock
+        # bis zur PLZ derselben Zelle – auch über das Wertende hinaus, wenn der Zusatz selbst ein Etikett ist und den
+        # Wert begrenzt ("Neue Anschrift: Lindenweg 9, Hinterhaus, 83229 Aschau")
+        zelle_ende = min([x for x in (text.find("\n", sp[1]), text.find("\t", sp[1])) if x >= 0] or [len(text)])
+        plz_dahinter = [a for a, _ in plz_ort_spannen(text, sp[1], zelle_ende)] if zelle_ende > e else []
+        bis = min([a for a, _, k, _ in aus if k == "plzort" and a > sp[1]] + plz_dahinter or [e])
+        for z in re.finditer(r"[^,;]+", text[sp[1]:bis]):
+            teil = z.group(0)
+            if teil.strip() and adresszusatz(teil):
+                k0 = sp[1] + z.start() + len(teil) - len(teil.lstrip())
+                aus.append(Wert(k0, k0 + len(teil.strip()), "strasse"))
+            elif teil.strip():
+                break
     if aus:
         return aus
     if not mit_trenner:
@@ -1568,7 +1620,8 @@ _ORTSNAMEN_ENDUNG_RE = re.compile(r"(?i)(?:stadt|statt|dorf|feld|felden|hausen|h
                                   r"brücken|brück|furt|au|see|moos|ried|wald|tal|thal|brunn|born|hagen|rode|weiler|"
                                   r"zell|münster|hafen|kreuz|markt|mühle|mühlen|wies|wiesen|ofen|stetten|ing|ingen|"
                                   r"garten|stein|haus|bruck|kofen|reuth|grün|lohe|loh|ach|beuren|beuern|leben|"
-                                  r"städt|wang|wangen|weil|wil|wyl|dingen|lingen|kamp|horst|holz|siel|winkel|rath)$")
+                                  r"städt|wang|wangen|weil|wil|wyl|dingen|lingen|kamp|horst|holz|siel|winkel|rath|"
+                                  r"moor|mor|walde|stedt|sted|dorp|torf|grund|gau|leiten|reit|kirch|zell)$")
 
 
 def _kompositum_allerwelt(wort: str) -> bool:
@@ -1576,7 +1629,9 @@ def _kompositum_allerwelt(wort: str) -> bool:
     eine typische Endung von Ortsnamen ("Pfaffenhofen", "Denkendorf")?"""
     if _wissen is None or _ORTSNAMEN_ENDUNG_RE.search(wort):
         return False
-    for i in range(3, len(wort) - 3):
+    # nur Endungen bis 30 Zeichen: je Trennstelle ein neuer Teilstring – über das ganze Wort wüchse die Prüfung eines
+    # sehr langen Worts quadratisch (Nachprüfung Ü-NP-14)
+    for i in range(max(3, len(wort) - 30), len(wort) - 3):
         rest = wort[i].upper() + wort[i + 1:]
         if wort[i].isupper() or len(rest) < 4:
             continue
@@ -1616,13 +1671,23 @@ def ort_hinter_person(text: str, ende: int, grenze: int):
             return None
         if not ist_ort and (_kompositum_allerwelt(erstes) or personenkontext.medizinisch(erstes, text, a, _wissen)):
             return None
+        # nur mit Beleg für einen Ort: ein Ort der Wissensbasis oder die typische Endung eines Ortsnamens
+        # ("Gaimersheim", "Kolbermoor" bekannt) – ein unbekanntes Wort ist eine Fachrichtung, Rolle oder Sache
+        # ("Orthopädie", "Allgemeinmedizin", "Linienbus", "Passant"; Nachprüfung Ü-NP-01)
+        if not ist_ort and not any(_ORTSNAMEN_ENDUNG_RE.search(w.strip(".,()")) for w in ort.split()) \
+                and not re.match(r"(?:Bad|Sankt|St\.|Neu|Alt|Groß|Klein|Ober|Unter|Nieder|Hohen)[ \t]+[A-ZÄÖÜ]", ort):
+            return None
     return a, b
 
 
 # Familienname-Felder: ein Wochentag oder Monat allein ist dort der Name ("Nachname: Freitag", "Familienname: Mai") –
 # namen_spanne liest ihn sonst nur mit Namenskontext ("Freitag, Jonas")
 _FAMILIENNAME_FELD_RE = re.compile(r"^(?:name|nachname|familienname|zuname|geburtsname|ehename)$")
-_KALENDERNAME_RE = re.compile(r"[ \t]*([A-ZÄÖÜ][a-zäöüß]+)[ \t.,;]*$")
+_KALENDERNAME_RE = re.compile(r"[ \t]*([A-ZÄÖÜ](?:[a-zäöüß]+|[A-ZÄÖÜ]{2,}))[ \t.,;]*$")
+# Etikett nur für den Familiennamen (nicht das allgemeine "Name") – dahinter ist auch ein Kopf- oder Allerweltswort
+# als ganzer Wert ein Name ("Familienname: Summe", "Geburtsname: Stand"; Nachprüfung NP-15)
+_NACHNAME_FELD_RE = re.compile(r"^(?:nachname|familienname|familien name|zuname|geburtsname|geb name|ehename)$")
+
 
 
 def _namens_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> list:
@@ -1630,21 +1695,35 @@ def _namens_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
     Tiers ("Abstammung: Vater: Sandro Hit") steht kein Mensch."""
     if personenkontext.tierangabe(text, i):
         return []
-    if mit_trenner and _FAMILIENNAME_FELD_RE.match(_vergleichsform(et.eintrag)):
+    feld = _vergleichsform(et.eintrag)
+    if mit_trenner and _FAMILIENNAME_FELD_RE.match(feld):
         m = _KALENDERNAME_RE.match(text, i, e)
         if m and m.group(1).casefold() in personenkontext.KALENDERWOERTER:
+            return [Wert(m.start(1), m.end(1), "namen")]
+    if mit_trenner and (_FAMILIENNAME_FELD_RE.match(feld) or _NACHNAME_FELD_RE.match(feld)):
+        m = _KALENDERNAME_RE.match(text, i, e)
+        if m and m.group(1).casefold() in kennungsformen.KEIN_NAMENSWERT \
+                and not _wissen_frage("ist_nachname", m.group(1)):
+            return []                                # "Geburtsname: Entfällt": das Feld ist leer
+        # Kopf- oder Allerweltswort als ganzer Wert hinter "Familienname:"/"Geburtsname:" in derselben Zelle
+        # ("Familienname: Summe", "Geburtsname: Stand"; Nachprüfung NP-15)
+        if m and _NACHNAME_FELD_RE.match(feld) and not wort_namensartig(m.group(1)) \
+                and kennungsformen.kopfwort_als_familienname(text, et.ende, m.start(1), m.end(1)):
             return [Wert(m.start(1), m.end(1), "namen")]
     liste = bool(_GREMIUM_RE.search(et.eintrag)) or et.eintrag.casefold() in ("kinder", "erben", "zeugen",
                                                                             "mitversicherte personen")
     org = bool(_ORG_ROLLEN_RE.match(et.eintrag))
     aus = []
     pos = i
-    # "Unterschrift: Nürnberg, 14.06.2025, Giovanni Esposito": Ort und Datum vor dem Namen überspringen
+    # "Unterschrift: Nürnberg, 14.06.2025, Giovanni Esposito": Ort und Datum vor dem Namen überspringen – ein Wochentag
+    # vorn ist nur hinter einem Unterschriftsfeld ein Datum; hinter "Gesprächspartner:" ist "Freitag, 14.11.2026" ein
+    # Name mit Datum (Nachprüfung NP-06)
     m = _ORT_DATUM_VORN_RE.match(text, pos, e)
-    if m:
+    if m and (_BESCHRIFTUNG_RE.search(et.eintrag) or text[pos:m.end()].split()[0].rstrip(",").casefold()
+              not in personenkontext.KALENDERWOERTER):
         pos = m.end()
     while pos < e:
-        sp = namen_spanne(text, pos, e, komma=not (liste or org))
+        sp = namen_spanne(text, pos, e, komma=not (liste or org), kalender=mit_trenner and not org)
         if sp is None:
             if not liste:
                 break
@@ -1798,6 +1877,23 @@ def werte_darunter(seite, lg: Lage, et: Etikett, alle_starts: set) -> list:
     return []
 
 
+def _erste_zellen(lg: Lage):
+    """([(y0, Zeilen-ID, erste Zelle)] nach y0 sortiert, die y0-Werte, größte Zellhöhe) – einmal je Seite."""
+    cache = getattr(lg, "_erste_zellen_cache", None)
+    if cache is None:
+        eintraege = []
+        hoechste = 0.0
+        for zid, zellen in lg.zellen_je_zeile.items():
+            if zellen:
+                erste = min(zellen, key=lambda c: c.x0)
+                eintraege.append((erste.y0, zid, erste))
+                hoechste = max(hoechste, erste.y1 - erste.y0)
+        eintraege.sort(key=lambda t: t[0])
+        cache = (eintraege, [t[0] for t in eintraege], hoechste)
+        lg._erste_zellen_cache = cache
+    return cache
+
+
 def werte_rechts_daneben(seite, lg: Lage, et: Etikett, alle_starts: set) -> list:
     """Wert in einer eigenen Zeile rechts auf derselben Höhe: ein Formular, dessen Spalten das Seitenmodell als
     getrennte Blöcke führt (Texterkennung: Feldcodes, Feldnamen und Werte je ein Block – "Name oder Firmenname" und
@@ -1813,10 +1909,13 @@ def werte_rechts_daneben(seite, lg: Lage, et: Etikett, alle_starts: set) -> list
     h = max(zelle.hoehe, 4.0)
     weite = max(260.0, 25 * lg.hoehe)
     bester = None
-    for zid, zellen in lg.zellen_je_zeile.items():
-        if zid == zelle.zeile or not zellen:
+    # nur Zeilen, die sich in der Höhe mit dem Etikett decken können (nach y sortiert, je Seite einmal gebildet –
+    # jede Zeile der Seite je Etikett wüchse mit Etiketten x Zeilen, Nachprüfung Ü-NP-16)
+    erste_zellen, oben, hoechste = _erste_zellen(lg)
+    for k in range(bisect_left(oben, zelle.y0 - hoechste), bisect_right(oben, zelle.y1)):
+        _, zid, erste = erste_zellen[k]
+        if zid == zelle.zeile:
             continue
-        erste = min(zellen, key=lambda c: c.x0)
         abstand = erste.x0 - zelle.x1
         if abstand < -0.5 or abstand > weite:
             continue

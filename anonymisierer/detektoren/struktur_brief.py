@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 
 from . import Treffer, detektor
-from .struktur import (etiketten, ist_kennungsform, kennung_spanne, lage, namen_spanne,
+from .struktur import (DATUMSWOERTER, etiketten, ist_kennungsform, kennung_spanne, lage, namen_spanne,
                        ort_spanne, plz_ort_spannen, ueberlappung)
 from .struktur_adresse import firmen_beleg, firmenkontext
 
@@ -33,24 +33,33 @@ _ANREDE_RE = re.compile(
     r"(?i:sehr[ ]+geehrte[rs]?|hochverehrte[r]?|liebe[rs]?|hallo|guten[ ]+(?:tag|morgen|abend)|moin|servus|"
     r"grüß[ ]+gott|dear|hi)[ ,]+(?:(?:Frau|Herrn?|Fr\.|Hr\.)[ ]+)?")
 _GRUSS_RE = re.compile(
-    r"^[ \t]*(?:mit[ ]+(?:freundlichen|freundlichem|besten|herzlichen|lieben|kollegialen|vielen)[ ]+"
-    r"gr(?:ü|ue)(?:ß|ss)(?:en|e)?"
-    r"|(?:freundliche|viele|beste|herzliche|liebe|schöne|sonnige|kollegiale)[ ]+gr(?:ü|ue)(?:ß|ss)e"
+    r"^[ \t]*(?:mit[ ]+(?:freundlichen|freundlichem|besten|bestem|herzlichen|herzlichem|lieben|liebem|kollegialen|"
+    r"kollegialem|vielen|verbindlichen|sonnigen)[ ]+gr(?:ü|ue|u)(?:ß|ss)(?:en|e)?"
+    r"|(?:freundliche|viele|beste|herzliche|liebe|schöne|sonnige|kollegiale|sportliche)[ ]+gr(?:ü|ue)(?:ß|ss)e"
+    r"(?:[ ]+aus[ ]+[^\W\d_][\w\-]*)?"
+    r"|(?:danke|vielen[ ]+dank|besten[ ]+dank)(?:[ ]+und|[ ]*,)[ ]+(?:viele[ ]+|beste[ ]+|liebe[ ]+)?gr(?:ü|ue)(?:ß|ss)e"
     r"|hochachtungsvoll|mfg|lg|vg|gruß|grüße|best[ ]+regards|kind[ ]+regards|regards|cordialement"
-    r"|mit[ ]+freundlichem[ ]+gruß|freundlichst)[ ]*[,.!]?[ \t]*$", re.IGNORECASE)
+    r"|freundlichst|herzlichst|servus|tschüss|tschüs|ciao|bis[ ]+bald|pfiat[ ]+di|baba)[ ]*[,.!]?[ \t]*$",
+    re.IGNORECASE)
+# Ort und Datum als ganze Zeile über einer Unterschrift ("Prien, 14.11.2026", "München, den 3.2.2025")
+_ORT_DATUM_ZEILE_RE = re.compile(r"^[ \t]*[A-ZÄÖÜ][\wäöüß.\- ]{1,40},[ \t]*(?:den[ \t]+)?\d{1,2}\.[ \t]?\d{1,2}\.[ \t]?"
+                                 r"(?:\d{4}|\d{2})[ \t]*$")
 _HERR_FRAU_RE = re.compile(r"(?<![\wäöüß])(?:Herrn?|Frau|Hr\.|Fr\.)[ ]+(?=[^\W\d_])")
 _UNTERZEICHNER_RE = re.compile(r"(?:i\.[ ]?A\.|i\.[ ]?V\.|gez\.|ppa\.|p\.[ ]?p\.|per[ ]+Prokura|im[ ]+Auftrag|"
                                r"in[ ]+Vertretung)[ ]+")
 QUELLE_ANREDE = "struktur.anrede_gruss"
 
 
-def _name_nach(text: str, pos: int, ende: int, streng: bool, komma: bool = False):
+def _name_nach(text: str, pos: int, ende: int, streng: bool, komma: bool = False, kalender: bool = False):
     """Name ab pos. Hinter Anrede, Gruß und "i. A." gilt die Form "Nachname, Vorname" nicht – in "Sehr
-    geehrter Herr Müller, Max Müller ist versichert" ist "Müller, Max" keine Person (Gutachten EQ-10)."""
-    sp = namen_spanne(text, pos, ende, komma=komma)
+    geehrter Herr Müller, Max Müller ist versichert" ist "Müller, Max" keine Person (Gutachten EQ-10). Mit
+    kalender=True (Unterschriftszeile) ist ein Wochentag oder Monat allein ein Name ("Mit freundlichen Grüßen" ⏎
+    "Juni", Nachprüfung NP-06)."""
+    sp = namen_spanne(text, pos, ende, komma=komma, kalender=kalender)
     if sp is None:
         return None
-    if streng and not (sp.bekannt or sp.woerter >= 2):
+    if streng and not (sp.bekannt or sp.woerter >= 2) and not (
+            kalender and text[sp.start:sp.ende].casefold() in DATUMSWOERTER):
         return None
     return sp
 
@@ -71,7 +80,7 @@ def _zeile_ist_name(text: str, z) -> list:
         anfang = s + (len(text[s:e]) - len(text[s:e].lstrip()))
         if m:
             anfang += m.end()
-        sp = _name_nach(text, anfang, e, streng=not m, komma=not m)
+        sp = _name_nach(text, anfang, e, streng=not m, komma=not m, kalender=True)
         if sp is None:
             continue
         if sp.ende - sp.start < 0.6 * len(text[anfang:e].strip()):
@@ -117,8 +126,10 @@ def anrede_gruss(dok, kontext):
                 sp = _name_nach(text, m.end(), z.ende, streng=False)
                 if sp is not None:
                     werte.append((sp.start, sp.ende, "namen", text[sp.start:sp.ende] if sp.woerter > 1 else None))
-            # Grußformel -> folgende kurze Zeilen
-            if _GRUSS_RE.match(zt):
+            # Grußformel -> folgende kurze Zeilen; unter einer Ort-Datum-Zeile ("Prien, 14.11.2026" ⏎ "Sonntag") nur ein
+            # Wochentag oder Monat allein (den die KI nie liest; Nachprüfung NP-06)
+            ort_datum = not _GRUSS_RE.match(zt) and bool(_ORT_DATUM_ZEILE_RE.match(zt))
+            if _GRUSS_RE.match(zt) or ort_datum:
                 h = max(lg.hoehe, 4.0)
                 box = lg.zeilen_box.get(z.id)
                 gezaehlt = 0
@@ -133,7 +144,10 @@ def anrede_gruss(dok, kontext):
                     gezaehlt += 1
                     if gezaehlt > 4 or len(inhalt.split()) > 12 or (inhalt.endswith(".") and len(inhalt.split()) > 4):
                         break
-                    werte += _zeile_ist_name(text, z2)
+                    namen = _zeile_ist_name(text, z2)
+                    if ort_datum:
+                        namen = [w for w in namen if text[w[0]:w[1]].casefold() in DATUMSWOERTER]
+                    werte += namen
         # Unterschriftszeilen: Namen über Rollen-Etiketten
         werte += _namen_ueber_rollen(seite, lg)
         for a, b, kat, gruppe in werte:

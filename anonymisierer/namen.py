@@ -420,9 +420,15 @@ def _ner_sachtreffer(text: str, start: int, ende: int, teile: list) -> bool:
     for a, b in _sachname_stellen(zeile):
         if a <= s and e <= b and (not paar or b - a > e - s):
             ort = _ortstext(text)
-            if b - a == e - s and personenkontext.personenbeleg(ort, start, _wissen_modul()) \
-                    and not personenkontext.sachbeleg(ort, start, ende, _wissen_modul()):
-                continue                                  # "Mit freundlichen Grüßen" ⏎ "Neff", Spalte "Fahrer": "Miele"
+            if b - a == e - s:
+                wissen = _wissen_modul()
+                if personenkontext.personenbeleg(ort, start, wissen) or personenkontext.person_im_satz(ort, start):
+                    # Unterschriftsblock, Personenspalte, Feld C.1.1, Personenwort davor ("mit Kollege Hengst"): eine
+                    # Person – außer ein Sachwort steht direkt daneben ("Waschmaschine Miele"); "Krups
+                    # (Geschirrspüler)" in der Kundenspalte ist der Kunde mit seinem Vorgang (Nachprüfung NP-03)
+                    if not personenkontext.sachbeleg(ort, start, ende, wissen, direkt=True) \
+                            and not personenkontext.sach_spalte(ort, start) and not personenkontext.org_zeile(ort, start):
+                        continue
             return True                                   # ganz in einer Marke, einem Modell, einer Rasse
         if a < e and s < b and not paar:
             rest = [t for t in teile if not (a <= zeile.find(t, s) < b)]
@@ -904,6 +910,12 @@ _NAMENSETIKETT_DAVOR_RE = re.compile(
     r"(?<![\wäöüß])(?:Herrn?|Frau|Hr\.|Fr\.)[ \t]+)(?:[A-ZÄÖÜ][a-zäöü]{0,4}\.[ \t-]*)*$")
 
 
+# Wochentag oder Monat direkt hinter einem Vornamen (dieselbe Zeile, ein Leerzeichen): "Benedikt Oktober"
+_KALENDER_NACHNAME_RE = re.compile(r"[ ]((?i:januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|"
+                                   r"dezember|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag))"
+                                   r"(?![\wäöüß\-])")
+
+
 def _kalendername(text: str, start: int, wort: str) -> bool:
     """Monats-/Wochentagsname an `start` als Nachname: direkt hinter Herr/Frau (auch mit Titel) oder einem
     Namens-Etikett ("Frau Mai", "Herrn Dr. Freitag", "Nachname: Freitag")."""
@@ -1001,7 +1013,8 @@ def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
         return _wissen_art(angehaengt.group(1))[0]
     if re.search(r"-(?:ID|Nr|No|Id)\.?$", name, re.IGNORECASE) or _KFZ_RE.match(name):
         return False
-    if _KENNUNGS_ETIKETT_NAME_RE.search(name) or kennungsformen.GEBURTSNAME_ETIKETT_RE.fullmatch(name.strip()):
+    if _KENNUNGS_ETIKETT_NAME_RE.search(name) or kennungsformen.GEBURTSNAME_ETIKETT_RE.fullmatch(name.strip()) \
+            or kennungsformen.zugang_kopf(name):
         return False                          # "Prüfnr.", "Kartenprüfnr.", "Geburtsnamc" (OCR): ein Etikett, kein Name
     woerter = name.split()
     if woerter and kennungsformen.nummern_wort(woerter[0].rstrip(".:")) and not any(
@@ -1010,6 +1023,8 @@ def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
     norm = re.sub(r"\s+", " ", name.lower()).strip()
     if regel and _kalendername(text, start, norm):
         return True                           # "Frau Mai", "Nachname: Freitag"
+    if not mit_anrede and personenkontext.GRUSS_ZEILE_RE.match(name):
+        return False                          # "Freundlichst", "Servus", "Gruß": eine Grußformel, kein Name
     if norm in NAMEN_STOPPLISTE or (norm in VERSICHERER_NAMEN and not mit_anrede):
         return False
     if not mit_anrede and personenkontext.organisations_spalte(text, start):
@@ -1085,6 +1100,11 @@ _ROLLE_RE = re.compile(
     r"(?<![\wäöüß])" + _ROLLEN + r"(?:[ \t]*/[ \t]*\w+)?[ \t]*:[ \t]*"
     r"(?:(?:Herrn?|Frau|Hr\.|Fr\.)[ \t]+)?" + _TITEL_RE + r"*"
     r"(" + _NAME_WORT + r"(?:,?[ \t]+" + _TITEL_RE + r"*" + _NAME_WORT + r"){0,3})")
+# Kinder mit Alter: "die Kinder August (9) und Juni (6)", "Sohn Jonas (7)"; je Kind Name und Alter in Klammern
+_KINDER_ALTER_RE = re.compile(r"(?<![\wäöüß])(?:Kinder|Kind|Sohn|Söhne|Tochter|Töchter|Enkel|Enkelin|Enkelkinder|"
+                              r"Zwillinge)[ \t]*:?(?=[ \t]+[A-ZÄÖÜ])")
+_KIND_MIT_ALTER_RE = re.compile(r"[ \t]*(?:,|und|sowie|&)?[ \t]*([A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß]+)?)[ \t]*"
+                                r"\([ \t]*\d{1,2}(?:[ \t]*(?:J\.|Jahre|Jahren|jährig))?[ \t]*\)")
 _ANREDE_RE = re.compile(
     r"(?<![\wäöüß])(?:Herrn?|Frau|Fräulein|Hr\.|Fr\.)[ \t]+" + _TITEL_RE + r"*"
     r"(" + _NAME_WORT + r"(?:[ \t]+" + _TITEL_RE + r"*" + _NAME_WORT + r"){0,2})")
@@ -1208,6 +1228,27 @@ def _regel_kandidaten(text: str) -> list:
             if len(_namensteile(links)) != 1 or len(_namensteile(rechts)) > 2:
                 e = s + len(links)                   # "Katarzyna Nowak, Kennzeichen" -> nur der Name
         _kandidat(kandidaten, text, s, e, regel=True)
+    # 1a) Personen in Organisations-Spalten ("Krankenkasse ⇥ beim Vater Rauschenbach", "Anbieter ⇥ Brandhuber", "GbR
+    #     Seidlmayr"; Nachprüfung NP-04)
+    for s, e in personenkontext.personen_in_org_spalten(text, _wissen_modul()):
+        _kandidat(kandidaten, text, s, e, regel=True)
+    # 1a') Hof- und Hausnamen: "Hof Hintermoser", "Anwesen Gschwandtner", "beim Stögerbauer" (Nachprüfung NP-14)
+    for s, e in personenkontext.hofnamen(text, _wissen_modul()):
+        _kandidat(kandidaten, text, s, e, regel=True) or kandidaten.append(
+            {"text": text[s:e], "start": s, "ende": e, "gruppe": None})
+    # 1a'') Mundartliche Namensfolge mit Artikel: "die Kölbl Resi" (Nachprüfung LK-14)
+    for s, e in personenkontext.artikel_nachname_vorname(text, _wissen_modul()):
+        _kandidat(kandidaten, text, s, e, regel=True) or kandidaten.append(
+            {"text": text[s:e], "start": s, "ende": e, "gruppe": None})
+    # 1b) Kinder mit Alter in Klammern: "die Kinder August (9) und Juni (6)" – auch Wochentage und Monate
+    for m in _KINDER_ALTER_RE.finditer(text):
+        for n in _KIND_MIT_ALTER_RE.finditer(text, m.end(), m.end() + 160):
+            if n.start() != m.end() and not re.fullmatch(r"[ \t]*(?:,|und|sowie|&)[ \t]*", text[m.end():n.start()]):
+                break
+            _kandidat(kandidaten, text, n.start(1), n.end(1), regel=True) or \
+                (n.group(1).casefold() in _KALENDERWOERTER and kandidaten.append(
+                    {"text": n.group(1), "start": n.start(1), "ende": n.end(1), "gruppe": None}))
+            m = n
     # 2) Anrede im Satz: "Frau Schulze aus der Nachbarschaft", "Herrn Dr. Hans Weber"
     for m in _ANREDE_RE.finditer(text):
         s, e = _name_kuerzen(text, m.start(1), m.end(1))
@@ -1576,6 +1617,16 @@ def finde_personen(text: str) -> list:
                 kandidaten.pop()
                 continue
             if " " in k["text"]:
+                continue
+            m = _KALENDER_NACHNAME_RE.match(text, k["ende"])
+            if (m and _wissen_wort("ist_vorname", k["text"]) and k["text"].casefold() not in _KALENDERWOERTER
+                    and not personenkontext.kalenderwort_als_datum(text, m.start(1), m.end(1))):
+                # Vorname und dahinter ein Wochentag oder Monat ("Von: Benedikt Oktober <…>", "Konrad Freitag"): der
+                # Familienname – die KI liest nur den Vornamen (Nachprüfung NP-06)
+                voll = text[k["start"]:m.end(1)]
+                kandidaten.append({"text": voll, "start": k["start"], "ende": m.end(1), "gruppe": voll})
+                kandidaten.append({"text": m.group(1), "start": m.start(1), "ende": m.end(1), "gruppe": voll})
+                k["gruppe"] = voll
                 continue
             m = _KOMMA_VORNAME_RE.match(text, k["ende"])
             if (m and _plausibel(text, m.start(1), m.end(1)) and m.group(1).lower() not in _NAMENSENDE
