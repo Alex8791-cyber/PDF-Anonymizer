@@ -85,6 +85,34 @@ def familien_kontext(text: str, zeilenanfang: int, name_start: int) -> bool:
     return False
 
 
+# Eintrag einer Personenliste: Name und dahinter ein Datum, ein Jahr oder ein Alter in Klammern ("Max, 05.09.2016",
+# "- Juni (6)", "Dakota, 2019"), höchstens 60 Zeichen bis dorthin
+_LISTENEINTRAG_RE = re.compile(r"[ \t]*(?:[-–•*·][ \t]*)?[^\W\d_][^\n]{0,60}?(?:\d{1,2}\.[ ]?\d{1,2}\.[ ]?\d{2,4}|"
+                               r"(?<!\d)(?:19|20)\d{2}(?!\d)|\([ \t]*\d{1,2}[ \t]*\))")
+
+
+def kinderliste_direkt(text: str, zeilenanfang: int, zeilen: int = 12) -> bool:
+    """Steht die Zeile in einer Liste direkt unter einer Familien-Überschrift ("Kinder:", "Mitversicherte Personen:")
+    – darüber nur weitere Einträge (Name mit Datum, Jahr oder Alter), keine Leerzeile, kein anderer Text? Nur dort ist
+    ein Orts-, Monats- oder unbekanntes Wort am Zeilenanfang ein Vorname (kinderlisten_vorname); "Aschaffenburg,
+    10.07.2025" über der Unterschrift eines Antrags mit "Kind: Geburtsdatum:" weiter oben ist Ort und Datum."""
+    ende = zeilenanfang - 1
+    for _ in range(zeilen):
+        if ende <= 0:
+            return False
+        anfang = text.rfind("\n", 0, ende) + 1
+        zeile = text[anfang:ende]
+        if not zeile.strip():
+            return False
+        kopf = FAMILIE_KOPF_RE.match(zeile)
+        if kopf and not zeile[kopf.end():].strip():
+            return True
+        if not _LISTENEINTRAG_RE.match(zeile):
+            return False
+        ende = anfang - 1
+    return False
+
+
 def kinderlisten_vorname(wort: str, wissen) -> bool:
     """Kann ein einzelnes Wort am Anfang eines Listeneintrags unter "Kinder:" ein Vorname sein ("- Juni, 30.06.2022",
     "Paris, 02.02.2011", "Dakota (7)")? Ein Vorname der Wissensbasis, ein Monat oder Wochentag, ein Ort oder ein

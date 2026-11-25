@@ -311,21 +311,24 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Stögerbauer“ im Orts- oder Ereigniskontext) und die mundartliche Folge „die Kölbl Resi“; Kopf- oder Allerweltswörter
     als Familienname hinter „Familienname:“/„Geburtsname:“ und in Datenzeilen einer Namensspalte mit Vornamen oder
     Geburtsdatum („Stand“, „Summe“, „Termin“); Geburtsdaten mit Komma und zweistelligem Jahr hinter einem
-    Geburts-Etikett („geb. 05.09,16“); Kinderlisten mit Orts- oder Monatsnamen („Paris, 02.02.2011“); die Fortsetzung
-    einer Tabelle, die die Vorseite ankündigt („Weitere Kinder siehe Folgeseite.“); die Hausnummer in der Folgezeile
-    einer Scan-Zelle (eine Ziffer ist kein Rest der Texterkennung); Grad und Dezimalminuten, Plus Codes, „Green Card“
-    und „SNR“ (Seriennummer); ein Adresszusatz, der selbst ein Anschrift-Etikett ist, hinter „Neue Anschrift:“
-    („Lindenweg 9, Hinterhaus, 83229 …“); ein Straßenname allein auf seiner Zeile oder in seiner Tabellenzelle mit der
-    Hausnummer vor der PLZ darunter („Edelweißstraße“ ⏎ „4, 83080 Oberaudorf“, auch auf Scans).
+    Geburts-Etikett („geb. 05.09,16“); Kinderlisten mit Orts- oder Monatsnamen („Paris, 02.02.2011“; nur Einträge direkt
+    unter der Überschrift – „Aschaffenburg, 10.07.2025“ über der Unterschrift eines Antrags bleibt Ort und Datum); die
+    Fortsetzung einer Tabelle, die die Vorseite ankündigt („Weitere Kinder siehe Folgeseite.“); die Hausnummer in der
+    Folgezeile einer Scan-Zelle (eine Ziffer ist kein Rest der Texterkennung); Grad und Dezimalminuten, Plus Codes,
+    „Green Card“ und „SNR“ (Seriennummer); ein Adresszusatz, der selbst ein Anschrift-Etikett ist, hinter „Neue
+    Anschrift:“ („Lindenweg 9, Hinterhaus, 83229 …“); ein Straßenname allein auf seiner Zeile oder in seiner
+    Tabellenzelle mit der Hausnummer vor der PLZ darunter („Edelweißstraße“ ⏎ „4, 83080 Oberaudorf“, auch auf Scans).
   - Selbstkontrolle: abgewählte Gesundheitsdaten oder Konfession nennen einen eigenen Grund für `_PRUEFEN`; ein Datum in
     einer Tabellenzeile aus lauter geschwärzten Namen (Folgeseite ohne Kopf), ein Familienname mit Artikel vor oder
     hinter einem Personen-Verb („war der Brandstetter am Steuer“, „saß der Haslbeck“), Marken im Personenkontext – auch
     unter einem Tabellenkopf mit nur einem Personen-Etikett („Anrufer ⇥ Anliegen ⇥ Rückruf bis“) –, Personen in
     Organisations-Spalten und dort auch eine Versicherer-Marke mit Vor- und Familienname („Adam Riese“), wenn die Zeile
     auf eine Person deuten kann („Kautionsbürgschaft“, Darlehen, privat; sie bleibt stehen, in Vergleichslisten ohne
-    Meldung) werden verortet gemeldet; ein Platzhalter („[GEB-DATUM]“) gilt nicht mehr als Spaltenkopf, „Mitglied der …“
-    im Satz nicht als Etikett; Maße mit ausgeschriebener Einheit und Leerwörter („Geburtsname: Entfällt“) werden nicht
-    gemeldet.
+    Meldung) werden verortet gemeldet; eine Marke in einer Personenspalte bleibt gemeldet, wenn auf der Ausgabeseite die
+    Platzhalter die Zellen einer Reihe verschieben („VW Caddy ⇥ Miele“ unter „Fahrzeug ⇥ Fahrer“ – die Lage auf der
+    Seite entscheidet, nicht die Zellenzahl im Text); ein Platzhalter („[GEB-DATUM]“) gilt nicht mehr als Spaltenkopf,
+    „Mitglied der …“ im Satz nicht als Etikett; Maße mit ausgeschriebener Einheit und Leerwörter („Geburtsname:
+    Entfällt“) werden nicht gemeldet.
   - Weniger Über-Schwärzung: Ort hinter einer Person nur mit Ortsbeleg (Fachrichtungen wie „Orthopädie“ bleiben stehen);
     Adresszusatz nur mit Merkmal (OG, Whg., Hinterhaus, c/o …; „Augenzeugin“, „Privatkunde“ bleiben stehen); Quadrate
     nur mit Etikett, Wohnwort oder Mannheim direkt dahinter (AKB-Gliederung, Sitzplatz, Skizzenfeld, „A 8, 3 km“ bleiben
@@ -333,9 +336,13 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     „Signal Iduna“ ist kein Profil-Etikett; Versionen hinter „from“/„von“ ohne Zugriffs- oder Host-Wort sind keine
     IP-Adresse; die Tätigkeit in einer Betriebstabelle (Firma, Umsatz) ist kein Beruf; Organisationssignaturen („Neff
     Kundendienst Süd“, „Ihr Miele Team“) und Privatbanken in der Spalte „Anbieter“ bleiben stehen.
-  - Laufzeit: Quadrat-, Profil-, Beruf- und Ortsregeln, die Spaltensuche rechts neben Etiketten und die Prüfung auf
-    bereits geschwärzte Rechtecke arbeiten in begrenzten Fenstern bzw. über ein Höhenraster – linear auch bei 16 000
-    Zeichen je Zeile und vielen Stellen je Seite.
+  - Laufzeit: Quadrat-, Profil-, Beruf- und Ortsregeln und die Spaltensuche rechts neben Etiketten arbeiten in
+    begrenzten Fenstern – linear auch bei 16 000 Zeichen je Zeile. Beim Schwärzen vieler Stellen in einer Zeile prüfen
+    ein Gitter aus Höhenstreifen und Spalten (bereits geschwärzte Rechtecke, Nachbarwörter), je Zeile sortierte
+    Buchstabenboxen (Freiraum der Platzhalter) und eine Menge statt einer Liste nur noch die Nachbarschaft: eine Zeile
+    mit 800 Fundstellen 8,1 s → 3,6 s, drei Zeilen mit je 1100 Fundstellen 148 s → etwa 90 s. Den Rest kostet das
+    Anlegen der Schwärzungs-Anmerkungen in PyMuPDF (jede neue Anmerkung durchsucht die vorhandenen); Seiten mit weniger
+    als einigen hundert Fundstellen merken davon nichts.
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene

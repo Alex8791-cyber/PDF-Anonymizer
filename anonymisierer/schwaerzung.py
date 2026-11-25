@@ -1498,7 +1498,8 @@ def _seite_bearbeiten(lauf: _Lauf, nr: int, m, plan: _Plan, bereiche: list, vers
         seite, als_bild = _abgeschnittenen_text_entfernen(lauf, nr, seite, m)
         if als_bild:
             lauf.scan_seiten_seit_speichern += 1
-    lauf.rects_je_seite[nr] = bereits + [k for k in kaesten if k not in bereits]
+    schon = {tuple(r) for r in bereits}       # Menge statt Liste: sonst quadratisch in der Zahl der Stellen (Ü-NP-15)
+    lauf.rects_je_seite[nr] = bereits + [k for k in kaesten if tuple(k) not in schon]
 
     # 5) Hinweise zu Grafiken/Bildern (Unterschriften, Stempel, Fotos werden nicht geprüft)
     if m.bilder and modus == "bilder":
@@ -1698,34 +1699,56 @@ def _glyphreste_pruefen(lauf, nr, seite, m, getroffen: set):
 
 
 class _Raster:
-    """Rechtecke einer Seite, nach Höhenstreifen einsortiert: Fragen nach einem Rechteck prüfen nur die Rechtecke in
-    seinen Streifen – sonst wüchse die Prüfung je Stelle mit allen Stellen der Seite (quadratisch; eine Seite mit tausend
-    Quadrat- oder Tätigkeitsfunden brauchte Minuten, Nachprüfung Ü-NP-15)."""
+    """Rechtecke einer Seite in einem Gitter aus Höhenstreifen und Spalten: Fragen nach einem Rechteck prüfen nur die
+    Rechtecke seiner Zellen – sonst wüchse die Prüfung je Stelle mit allen Stellen der Seite bzw. der Zeile
+    (quadratisch; eine Seite oder eine einzige Zeile mit tausend Quadrat- oder Tätigkeitsfunden brauchte Minuten,
+    Nachprüfung Ü-NP-15). Sehr breite Rechtecke (über SPALTEN_MAX Spalten) stehen je Streifen in einer eigenen Liste."""
     STREIFEN = 12.0
+    SPALTE = 48.0
+    SPALTEN_MAX = 64
 
     def __init__(self, rects=()):
-        self._streifen: dict = {}
+        self._zellen: dict = {}
+        self._breit: dict = {}
         for r in rects:
             self.dazu(r)
 
-    def _bereich(self, y0: float, y1: float):
+    def _ys(self, y0: float, y1: float):
         return range(int(y0 // self.STREIFEN), int(y1 // self.STREIFEN) + 1)
 
-    def dazu(self, r):
-        for k in self._bereich(r.y0, r.y1):
-            self._streifen.setdefault(k, []).append(r)
+    def _xs(self, x0: float, x1: float):
+        return range(int(x0 // self.SPALTE), int(x1 // self.SPALTE) + 1)
 
-    def kandidaten(self, y0: float, y1: float):
+    def dazu(self, r):
+        xs = self._xs(r.x0, r.x1)
+        for ky in self._ys(r.y0, r.y1):
+            if len(xs) > self.SPALTEN_MAX:
+                self._breit.setdefault(ky, []).append(r)
+            else:
+                for kx in xs:
+                    self._zellen.setdefault((ky, kx), []).append(r)
+
+    def kandidaten(self, y0: float, y1: float, x0: float, x1: float):
+        """Rechtecke, die den Bereich (x0, y0, x1, y1) berühren können (jedes höchstens einmal)."""
         gesehen = set()
-        for k in self._bereich(y0, y1):
-            for r in self._streifen.get(k, ()):
+        xs = self._xs(x0, x1)
+        for ky in self._ys(y0, y1):
+            for r in self._breit.get(ky, ()):
                 if id(r) not in gesehen:
                     gesehen.add(id(r))
                     yield r
+            for kx in xs:
+                for r in self._zellen.get((ky, kx), ()):
+                    if id(r) not in gesehen:
+                        gesehen.add(id(r))
+                        yield r
 
     def enthaelt(self, r) -> bool:
-        """Liegt r ganz in einem der Rechtecke?"""
-        return any(alt.contains(r) for alt in self._streifen.get(int(r.y0 // self.STREIFEN), ()))
+        """Liegt r ganz in einem der Rechtecke? (Ein solches Rechteck enthält die Ecke (x0, y0) und steht in ihrer
+        Zelle oder in der Liste der breiten Rechtecke ihres Streifens.)"""
+        ky, kx = int(r.y0 // self.STREIFEN), int(r.x0 // self.SPALTE)
+        return any(alt.contains(r) for alt in self._zellen.get((ky, kx), ())) \
+            or any(alt.contains(r) for alt in self._breit.get(ky, ()))
 
 
 def _kollateral_pruefen(lauf, nr, seite, woerter_vorher, rects):
@@ -1742,7 +1765,7 @@ def _kollateral_pruefen(lauf, nr, seite, woerter_vorher, rects):
     for w in woerter_vorher:
         r = fitz.Rect(w[:4])
         bedeckt = 0.0
-        for x in raster.kandidaten(r.y0, r.y1):
+        for x in raster.kandidaten(r.y0, r.y1, r.x0, r.x1):
             if min(r.y1, x.y1) - max(r.y0, x.y0) > 0.3 * r.height:
                 bedeckt += max(0.0, min(r.x1, x.x1) - max(r.x0, x.x0))
         if bedeckt > 0.5 * (r.width or 1.0):

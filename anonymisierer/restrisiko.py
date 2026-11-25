@@ -2676,6 +2676,7 @@ class _Seitenpruefung:
             if w and w.group(1)[:1].isupper() and not vorn[:w.start(1)].strip(" \t-–•*·") \
                     and trenner.group(0).strip() in (",", "(", "*", "") \
                     and personenkontext.kinderlisten_vorname(w.group(1), self.w.modul) \
+                    and personenkontext.kinderliste_direkt(text, z.start) \
                     and personenkontext.familien_kontext(text, z.start, z.start + w.start(1)) \
                     and not personenkontext.familien_rolle_in_zeile(text, z.start, z.start + w.start(1)):
                 name_start = w.start(1)                 # Listeneintrag unter "Kinder:" ("- Juni, 30.06.2022")
@@ -3219,8 +3220,12 @@ class _Seitenpruefung:
                 # Schaden …") ohne Sachwort in der Zeile ist die Marke wohl eine Person (Nachprüfung NP-03)
                 laut = genau and not person_ort and personenkontext.PERSON_LAUT_DAVOR_RE.search(
                     text[max(z.start, s - 30):s]) is not None and not personenkontext.sachbeleg(text, s, e, self.w.modul)
+                # die Sachspalte nach dem Text nur ohne Personenspalte nach der Lage: auf der Ausgabeseite stehen die
+                # Platzhalter als eigene Zeilen, die Zellen einer Reihe rücken nach links ("VW Caddy ⇥⇥ Miele" unter
+                # "Kennzeichen ⇥⇥ Fahrzeug ⇥⇥ Fahrer" läse "Miele" in der Spalte "Fahrzeug"; Probe kfz06)
+                sach_spalte = personenkontext.sach_spalte(text, s) and not spalte_person(i)
                 if not ((person_ort and not personenkontext.sachbeleg(text, s, e, self.w.modul, direkt=True)
-                         and not personenkontext.sach_spalte(text, s) and not personenkontext.org_zeile(text, s))
+                         and not sach_spalte and not personenkontext.org_zeile(text, s))
                         or laut):
                     return True
                 marken_person.add(i)

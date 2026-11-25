@@ -589,6 +589,7 @@ class Seite:
         self._zeilen_start = [z.start for z in zeilen]
         self._fingerabdruck = None
         self._wort_glyphen = None             # OCR-Wort -> Glyphen (für _ocr_stufen, bei Bedarf aufgebaut)
+        self._freiraum_index: dict = {}       # Zeile -> Buchstaben/Ziffern nach x sortiert (freiraum)
 
     @property
     def fingerabdruck(self) -> str:
@@ -785,29 +786,49 @@ class Seite:
                 lauf.append(g)
         return aus
 
+    def _freiraum_zeile(self, zid: int) -> tuple:
+        """Buchstaben und Ziffern einer Zeile (Box: OCR-Wort oder Glyphe), einmal nach x0 und einmal nach x1
+        sortiert: (x0-Liste, [(x0, x1, g)], x1-Liste, [(x0, x1, g)]) – je Zeile einmal berechnet."""
+        schluessel = (zid, len(self.zeichen))
+        idx = self._freiraum_index.get(schluessel)
+        if idx is None:
+            zeile = self.zeilen[zid]
+            boxen = []
+            for g in self.glyphen(zeile.start, zeile.ende):
+                z = self.zeichen[g]
+                if not z.c.isalnum():
+                    continue
+                r = self.ocr_boxen[self.wort_ids[g]] if self.wort_ids[g] >= 0 else z.rect
+                boxen.append((r.x0, r.x1, g))
+            nach_x0 = sorted(boxen, key=lambda t: t[0])
+            nach_x1 = sorted(boxen, key=lambda t: t[1])
+            idx = ([t[0] for t in nach_x0], nach_x0, [t[1] for t in nach_x1], nach_x1)
+            self._freiraum_index[schluessel] = idx
+        return idx
+
     def freiraum(self, start: int, ende: int, rect) -> tuple:
         """(x1 des vorigen, x0 des nächsten Buchstabens/Ziffer bzw. OCR-Worts) in der Zeile der Stelle –
-        so weit darf ein Platzhalter wachsen; Satzzeichen dazwischen entfallen. None = frei."""
+        so weit darf ein Platzhalter wachsen; Satzzeichen dazwischen entfallen. None = frei. Über die je Zeile
+        sortierten Boxen (bisect): viele Stellen in einer langen Zeile bleiben linear (Nachprüfung Ü-NP-15)."""
         eigene = set(self.glyphen(start, ende))
         if not eigene:
             return None, None
         zeilen_ids = {self.zeichen[g].zeile for g in eigene}
         links, rechts = [], []
         for zid in zeilen_ids:
-            zeile = self.zeilen[zid] if zid < len(self.zeilen) else None
-            if zeile is None:
+            if not 0 <= zid < len(self.zeilen):
                 continue
-            for g in self.glyphen(zeile.start, zeile.ende):
-                if g in eigene:
-                    continue
-                z = self.zeichen[g]
-                if not z.c.isalnum():
-                    continue
-                r = self.ocr_boxen[self.wort_ids[g]] if self.wort_ids[g] >= 0 else z.rect
-                if r.x0 >= rect.x1 - 0.5:
-                    rechts.append(r.x0)
-                elif r.x1 <= rect.x0 + 0.5:
-                    links.append(r.x1)
+            x0s, nach_x0, x1s, nach_x1 = self._freiraum_zeile(zid)
+            i = bisect_left(x0s, rect.x1 - 0.5)
+            while i < len(nach_x0) and nach_x0[i][2] in eigene:
+                i += 1
+            if i < len(nach_x0):
+                rechts.append(nach_x0[i][0])
+            j = bisect_right(x1s, rect.x0 + 0.5) - 1
+            while j >= 0 and (nach_x1[j][2] in eigene or nach_x1[j][0] >= rect.x1 - 0.5):
+                j -= 1
+            if j >= 0:
+                links.append(nach_x1[j][1])
         return (max(links) if links else None), (min(rechts) if rechts else None)
 
     # -- Struktur ---------------------------------------------------------

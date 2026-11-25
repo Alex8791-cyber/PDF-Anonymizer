@@ -876,16 +876,17 @@ _FAMILIE_NAME_RE = re.compile(
     r"{0,2})(?:[ \t]*(?:,|\(|\*)[ \t]*|[ \t]*\t[ \t]*|[ \t]+[-–][ \t]+)$")
 
 
-def _familien_name(name: str, listeneintrag: bool = False) -> bool:
+def _familien_name(name: str, listeneintrag: bool = False, kinderliste: bool = False) -> bool:
     """Kann `name` ("Liv Ostermeier", "Brenner, Lina", "Ben") eine Person sein: keine Allerwelts-, Etikett- oder
     Rollenwörter, mindestens ein Vor- oder Nachname der Wissensbasis (ein einzelnes Wort: ein eindeutiger Vorname –
     am Anfang eines Listeneintrags unter "Kinder:" auch ein mehrdeutiger: "Max, 05.09.2016", Gegenprüfung LK-13)?"""
     woerter = [w for w in re.split(r"[ \t,]+", name) if w and w[0].isupper()]
     if not woerter or len(woerter) > 3:
         return False
-    if listeneintrag and len(woerter) == 1 and len(name.split()) == 1:
-        # Listeneintrag unter "Kinder:": auch ein Vorname, der ein Monat, ein Ort oder unbekannt ist ("- Juni,
-        # 30.06.2022", "Paris, 02.02.2011", "Dakota, 2019"; Nachprüfung NP-06, Ü-NP-17)
+    if kinderliste and len(woerter) == 1 and len(name.split()) == 1:
+        # Listeneintrag direkt unter "Kinder:": auch ein Vorname, der ein Monat, ein Ort oder unbekannt ist ("- Juni,
+        # 30.06.2022", "Paris, 02.02.2011", "Dakota, 2019"; Nachprüfung NP-06, Ü-NP-17) – nicht "Aschaffenburg,
+        # 10.07.2025" über der Unterschrift (personenkontext.kinderliste_direkt)
         return personenkontext.kinderlisten_vorname(woerter[0], wissen)
     for w in woerter:
         if wissen.ist_allerweltswort(w) or personenkontext.FAMILIE_RE.fullmatch(w) or wissen.ist_anrede_titel(w) \
@@ -952,14 +953,15 @@ def geburt_ohne_stichwort(text: str, alle: bool = False, namen: list | None = No
         # Bastian Leutgeb, 30.06.2018", "Kinder: Ben (02.05.2019)", "Brenner, Lina, 05.05.2019", Kinderliste mit
         # Tabstopps unter "Kinder:") – in einer Liste unter einer Überschrift nur ohne Betrag in der Zeile
         listeneintrag = f is not None and not davor[:f.start("name")].strip(" \t-–•*·")
-        if f and _familien_name(f.group("name"), listeneintrag) \
+        kinderliste = listeneintrag and personenkontext.kinderliste_direkt(text, a)
+        if f and _familien_name(f.group("name"), listeneintrag, kinderliste) \
                 and personenkontext.familien_kontext(text, a, a + f.start("name")):
             gleiche_zeile = personenkontext.familien_rolle_in_zeile(text, a, a + f.start("name"))
             zeile_ende = text.find("\n", m.end())
             zeile = text[a:len(text) if zeile_ende < 0 else zeile_ende]
             if gleiche_zeile or not personenkontext.BETRAG_IN_ZEILE_RE.search(zeile):
                 aus.append((m.start(), m.end(), 0.6))
-                if namen is not None and listeneintrag:
+                if namen is not None and kinderliste:
                     namen.append((a + f.start("name"), a + f.start("name") + len(f.group("name").rstrip(" ,\t"))))
                 continue
         if alle and jahre >= 14:

@@ -479,6 +479,24 @@ def test_m02_kopfregel():
     assert not personenkontext.kopf_mit_personen_etikett(["Hersteller", "Gerät", "Standort"], [None, None, "adresse"])
 
 
+def test_kfz06_marke_in_fahrerspalte_auf_der_ausgabeseite(tmp_path):
+    """Auf der Ausgabeseite stehen die Platzhalter als eigene Zeilen; die Zellen einer Reihe rücken im Text nach links
+    ("VW Caddy ⇥⇥ Miele" unter "Kennzeichen ⇥⇥ Fahrzeug ⇥⇥ Fahrer"). Die Sachspalte nach dem Text darf die
+    Personenspalte nach der Lage nicht überstimmen (Probe kfz06 der ersten Gegenprüfung: auf 65774ce gemeldet)."""
+    pdf = _pdf(tmp_path / "fuhrpark.pdf", [[
+        "Fuhrparkliste Schreinerei Kranzbichler GmbH", "Kennzeichen\t\tFahrzeug\t\tFahrer",
+        "RO-AB 1207\t\tVW Crafter Kasten\t\tStihl", "RO-AB 1208\t\tVW Caddy\t\tMiele",
+        "RO-AB 1209\t\tMercedes C 220d\t\tHengstberger"]], xs=(40, 200, 430))
+    erg = analysiere_pdf(pdf, ALLE, [], [], profil="hoch")
+    a, _ = auftrag.standard_auftrag(erg, schwaerze_pdf)
+    p = auftrag.schwaerz_parameter(a, True, "hoch", schwaerze_pdf)
+    s = schwaerze_pdf(pdf, a["funde"], ziel_ordner=tmp_path / "aus", **p)
+    with fitz.open(s["ausgabe"]) as aus:
+        lesbar = aus[0].get_text()
+    for name in ("Stihl", "Miele", "Hengstberger"):
+        assert name not in lesbar or name in {v.text for v in s["verdacht"]}, (name, s["verdacht"])
+
+
 @pytest.mark.parametrize("text", [
     "Übergabeprotokoll\nBearbeiter\t\tVorgang\t\tStatus\nZentrale\t\tNeuanlage\t\terledigt 01.12.2026\n"
     "Außendienst\t\tKündigung\t\toffen 02.12.2026",
@@ -612,6 +630,26 @@ def test_b_np17_kinderliste_daten():
     assert {"05.09.2016", "02.02.2011", "11.11.2020"} <= _stellen(_funde(text), "geburt")
 
 
+@pytest.mark.parametrize("text", [
+    # Antrag: Kind-Etiketten weiter oben, darunter "Ort, Datum" über der Unterschrift (s1/s7 antrag_formular)
+    "Kind: Vorname:\nKind: Geburtsdatum:\nKindergeldnummer:\nBehandlungen (5 Jahre):\nBehandelnder Arzt:\nRaucher/in\n"
+    "Gefährliche Hobbys\nVorversicherung vorhanden\nAschaffenburg, 10.07.2025\nUnterschrift Antragsteller/in",
+    "Kinder:\nMax, 05.09.2016\n\nRosenheim, 12.03.2025\nUnterschrift",
+])
+def test_b_np17_ort_datum_ist_kein_kindereintrag(text):
+    """Die Ausnahme für Orts-, Monats- und unbekannte Vornamen gilt nur für Einträge direkt unter der Überschrift
+    (personenkontext.kinderliste_direkt) – "Ort, Datum" über der Unterschrift bleibt ein Datum."""
+    datum = "10.07.2025" if "10.07.2025" in text else "12.03.2025"
+    assert datum not in _stellen(_funde(text), "geburt"), _stellen(_funde(text))
+
+
+def test_b_np17_kinderliste_direkt():
+    t = "Kinder:\nMax, 05.09.2016\nParis, 02.02.2011"
+    assert personenkontext.kinderliste_direkt(t, t.index("Paris"))
+    t2 = "Kind: Geburtsdatum:\nVorversicherung vorhanden\nAschaffenburg, 10.07.2025"
+    assert not personenkontext.kinderliste_direkt(t2, t2.index("Aschaffenburg"))
+
+
 def test_b_np17_platzhalter_ist_kein_spaltenkopf():
     gruende = _verdacht("Kinder:\n[PERSON A], [GEB-DATUM]\nParis, 02.02.2011",
                         platzhalter=["[PERSON A]", "[GEB-DATUM]"])
@@ -723,6 +761,52 @@ def test_laufzeit_linear(zeile):
 # ----------------------------------------------------------------------
 # B/NP-06: Wochentage als Familiennamen in der Spalte "Name"; B/NP-03, B/NP-04: Gegenproben der neuen Regeln
 # ----------------------------------------------------------------------
+def test_b_np15_raster_gitter_wie_paarvergleich():
+    """Das Gitter der Schwärzung (Streifen und Spalten) liefert dieselben Antworten wie der Vergleich mit allen
+    Rechtecken – auch für viele Rechtecke in einer einzigen Zeile und für sehr breite Rechtecke (Ü-NP-15)."""
+    from anonymisierer.schwaerzung import _Raster
+    rects = [fitz.Rect(10 + 30 * i, 100, 35 + 30 * i, 110) for i in range(300)]      # eine lange Zeile
+    rects += [fitz.Rect(0, 200, 9000, 230), fitz.Rect(500, 95, 520, 140)]            # sehr breit, hoch
+    raster = _Raster(rects)
+    proben = [fitz.Rect(12 + 30 * i, 101, 30 + 30 * i, 109) for i in range(0, 300, 7)]
+    proben += [fitz.Rect(4000, 205, 4100, 225), fitz.Rect(501, 100, 519, 130), fitz.Rect(5, 300, 20, 310)]
+    for p in proben:
+        assert raster.enthaelt(p) == any(r.contains(p) for r in rects), p
+        erwartet = {id(r) for r in rects if r.intersects(p)}
+        gefunden = {id(r) for r in raster.kandidaten(p.y0, p.y1, p.x0, p.x1)}
+        assert erwartet <= gefunden, p
+
+
+def test_b_np15_freiraum_wie_vollstaendige_suche(tmp_path):
+    """freiraum (sortierte Boxen je Zeile) liefert für jede Stelle einer langen Zeile dasselbe wie die vollständige
+    Suche über alle Buchstaben der Zeile."""
+    from anonymisierer import seitenmodell as sm
+    pdf = _pdf(tmp_path / "zeile.pdf", [[" ".join(f"A {i % 9 + 1}, {i % 7 + 1}" for i in range(60))]], xs=(10, 0, 0))
+    with fitz.open(pdf) as doc:
+        modell = sm.dokument_aufbauen(doc, str(pdf))
+    seite = modell.seiten[0]
+
+    def voll(start, ende, rect):
+        eigene = set(seite.glyphen(start, ende))
+        links, rechts = [], []
+        for zid in {seite.zeichen[g].zeile for g in eigene}:
+            zeile = seite.zeilen[zid]
+            for g in seite.glyphen(zeile.start, zeile.ende):
+                z = seite.zeichen[g]
+                if g in eigene or not z.c.isalnum():
+                    continue
+                if z.rect.x0 >= rect.x1 - 0.5:
+                    rechts.append(z.rect.x0)
+                elif z.rect.x1 <= rect.x0 + 0.5:
+                    links.append(z.rect.x1)
+        return (max(links) if links else None), (min(rechts) if rechts else None)
+
+    import re as _re
+    for m in list(_re.finditer(r"A \d, \d", seite.text))[::5]:
+        rect = seite.rechtecke(m.start(), m.end())[0][1]
+        assert seite.freiraum(m.start(), m.end(), rect) == voll(m.start(), m.end(), rect), m.group(0)
+
+
 def test_b_np06_wochentage_in_namensspalte():
     text = ("Name\t\tVorname\t\tGeburtsdatum\nMontag\t\tPeter\t\t12.03.1975\nSonntag\t\tAnna\t\t01.02.1980\n"
             "Freitag\t\tJosef\t\t03.04.1965")
