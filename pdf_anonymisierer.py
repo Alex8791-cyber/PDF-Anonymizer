@@ -41,7 +41,7 @@ dass das Programm schon läuft)
 
 Dieses Skript ist nur der Startpunkt; die eigentliche Logik liegt im
 Paket "anonymisierer": Erkennung (muster, kennungsformen, personenkontext, namen,
-wissen, detektoren, kundenliste, analyse), Lesen der Seiten (seitenmodell, ocr), Schwärzen
+wissen, detektoren, kundenliste, analyse), Lesen der Seiten (seitenmodell, ocr, kammraster), Schwärzen
 und Prüfen der Ausgabe (schwaerzung, bilder, fotos, nebenkanaele,
 restrisiko) sowie Oberfläche und Dateien (gui, gui_attrappen, auftrag,
 vorschau_fenster, vorschau, dateien).

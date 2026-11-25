@@ -253,6 +253,20 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   entpacken“ statt `Installieren.bat`.
 
 ### Behoben
+- **Ausgefüllte Kammfelder auf Scans** (Kästchen „je Kästchen ein Zeichen“, Block- und Handschrift): Die
+  Texterkennung las sie meist nicht – die Kästchen galten ihr als Grafik, Werte und oft auch die Feldnamen daneben
+  fehlten, die Werte blieben unbemerkt lesbar. Jetzt sucht die OCR Kästchenreihen im Bild (geschlossen, als Kamm mit
+  kurzen Wänden, unten offen; auch schräg, mit Gruppenlücken wie bei der IBAN und als Fax mit unterbrochenen oder
+  fehlenden Linien), übermalt nur deren Linien und liest die Felder ein zweites Mal für sich. In der Stufe „Hoch“
+  wird der Inhalt eines Felds hinter einem Feldnamen für Personenangaben geschwärzt (Name, Anschrift, Telefon,
+  Geburtsdatum, Kennungen – auch verlesene Feldnamen). Felder mit einem Feldnamen ohne Personenbezug und einem Wert
+  in dessen Form (Antragsdatum der letzten 30 Jahre, Anzahl, Betrag, Kilometerstand, Tarifgruppe) und leere Felder
+  bleiben lesbar und ohne Verdacht. Was in der Ausgabe in einem gefüllten Kästchen noch zu sehen ist – hinter einem
+  Personen-Feldnamen, ohne erkennbaren Feldnamen oder unlesbar –, meldet die Restrisiko-Prüfung an dieser Stelle
+  (Ausgabe `_PRUEFEN`); dafür bekommt sie Lage und Füllung der Felder aus dem Original. Textzeilen, Schreiblinien
+  mit Handschrift darauf und Tabellen gelten nicht als Kammfeld. Gemessen auf neun Kammfeld-Scans der
+  Entwicklungskorpora: Kernwerte entfernt 29 → 92 von 106, stille Lecks 0; auf eigenen und neu erzeugten
+  Formularen siehe Abschnitt „Für Entwickler“.
 - **Gegenprüfung der Zusammenführung (Runde 5):** Was die zwei Prüfer am zusammengeführten Stand fanden, ist allgemein
   behoben – je Befund mit Abwandlungen und Gegenproben in `tests/test_gegenpruefung_r7.py`:
   - Verluste der Zusammenführung: der Ort hinter der Person eines Personen-Etiketts („Einweisender Arzt: Dr. …,
@@ -638,6 +652,14 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   vollständig darin, und Dateinamen enthalten oft Kundennamen – `fehler.log` vor dem Weiterleiten ansehen.
 
 ### Für Entwickler (Tests, CI, Messwerkzeuge)
+- **Kammfelder:** neues Modul `anonymisierer/kammraster.py` (Kästchenreihen im Bild finden, Linien entfernen,
+  Füllung je Kästchen, `wert_ohne_personenbezug`), `ocr.py` (Linien vor der Erkennung entfernen, zweiter Lauf nur
+  über die Felder, `ergebnis()["kammfelder"]`, `OcrDienst.kammfelder_falls_bekannt`), `Seite.kammfelder` im
+  Seitenmodell, Erkennungsregel `struktur.kammfeld_scan` (`detektoren/kammfelder.py`), Restrisiko
+  `_kammfelder_pruefen` (Parameter `kammfelder` von `restrisiko_pruefen`). Tests in
+  `tests/test_kammfelder_scan.py`: Stile, Kästchenbreiten 4–8 mm, 150/200/300 dpi, Schräglage, IBAN-Gruppen, Fax
+  (unterbrochene und fehlende Linien), Feldname links/oben; Gegenproben: leere Felder, Felder ohne Personenbezug,
+  Tabellen, Ankreuzkästchen, Unterschriftslinie, Fließtext, Schreibmaschinenzeilen, Schrift auf Schreiblinien.
 - Neuer Aufbau: ein Seitenmodell für Analyse, Schwärzung und Selbstkontrolle (`seitenmodell.py`),
   Erkennungsregeln als Module mit Register und Rückfallliste für die EXE (`anonymisierer/detektoren/`),
   Wissensbasis (`wissen.py`, 23 Wortlisten in `anonymisierer/daten/`), dazu `kundenliste.py`,

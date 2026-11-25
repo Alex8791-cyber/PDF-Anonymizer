@@ -94,6 +94,14 @@ Was gemeldet wird (jede Regel liefert Stelle + Grund):
     Personen-Platzhalter oder ihn kreuzend) ist kein Verdacht: ein Zug ist keine lesbare Angabe, und der Name, zu dem
     er gehört, ist schon ersetzt; ohne geschwärzten Namen daneben bleibt Tinte im Unterschriftsfeld Verdacht (dort kann
     ein ungelesener Name stehen).
+  * Scan-Seiten: gefüllte Kammfelder (Kästchen „je Kästchen ein Zeichen“, kammraster.py), deren Kästchen in der
+    Ausgabe noch Tinte zeigen (nicht zur Hälfte unter einem Schwärzungsrechteck): hinter einem Feldnamen für
+    Personenangaben (Person, Anschrift, Kontakt, Kennung, Geburtsdatum – auch verlesen), ohne erkennbaren Feldnamen
+    und mit einem Inhalt, den die OCR nicht liest. Ohne Verdacht bleiben leere Felder und Felder mit einem Feldnamen
+    ohne Personenbezug, deren Wert dessen Form hat (kammraster.wert_ohne_personenbezug: "Antragsdatum" mit einem
+    Datum der letzten 30 Jahre, "Anzahl", "Betrag", "Kilometerstand", "Tarifgruppe") – dort melden auch die
+    Textregeln keine Ziffernfolge. Lage und Füllung der Felder kommen aus der OCR des Originals (von der Schwärzung
+    übergeben; in der Ausgabe verdecken Schwärzungen die Linien), dazu die Felder, die die Prüfung selbst findet.
 Seitenverdacht (ohne Rechteck, „Seite selbst durchsehen“): eine Scan-Seite, auf der die OCR (fast) nichts gelesen
 hat und die nicht nachweislich leer ist (analyse.seite_nachweislich_leer – sieht auch hell gedruckten Text und
 Bleistift: ein hellgrauer Scan ohne OCR-Wörter ist kein leeres Blatt), eine kaum lesbare Scan-Seite (mehr als 20 %
@@ -130,6 +138,7 @@ try:
 except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
     import fitz
 
+from . import kammraster
 from . import kennungsformen
 from . import personenkontext
 from . import ocr as _ocr
@@ -4094,9 +4103,10 @@ def _felder_pruefen(pruefung: _Seitenpruefung, felder) -> None:
 
 
 def _seite_pruefen(m, wissen: _Wissen, platzhalter=(), nie=(), abgewaehlt=(), profil="hoch", felder=(),
-                   schwaerzungen=(), scan_seite=None, ausrichtung=None, aktive=None) -> list:
+                   schwaerzungen=(), scan_seite=None, ausrichtung=None, aktive=None, kammfelder=()) -> list:
     """Alle Regeln einer Seite. scan_seite: die PDF-Seite einer Scan-Seite (OCR der ganzen Seite) – dann zusätzlich
-    die Tinte in Unterschriftsblöcken und neben Personenangaben (_unterschrift_pruefen; deren Verdacht steht vorn);
+    die Tinte in Unterschriftsblöcken und neben Personenangaben (_unterschrift_pruefen; deren Verdacht steht vorn)
+    und gefüllte Kammfelder (_kammfelder_pruefen; kammfelder: die des Originals, falls bekannt);
     ausrichtung: (Winkel, Schräglage) der OCR-Wörter, falls bekannt (10-Tupel)."""
     pruefung = _Seitenpruefung(m, wissen, platzhalter, nie, abgewaehlt, profil, schwaerzungen, ausrichtung=ausrichtung,
                                aktive=aktive)
@@ -4105,7 +4115,27 @@ def _seite_pruefen(m, wissen: _Wissen, platzhalter=(), nie=(), abgewaehlt=(), pr
     aus = [Verdacht(m.nr, s, e, m.text[s:e], grund, _rechtecke(m, s, e)) for s, e, grund in _zusammenfassen(pruefung)]
     if scan_seite is not None:
         aus = _unterschrift_pruefen(scan_seite, m, schwaerzungen, pruefung, aus, ausrichtung) + aus
+        frei: list = []
+        kamm = _kammfelder_pruefen(scan_seite, m, schwaerzungen, pruefung, aus, kammfelder, frei)
+        if frei:
+            # Inhalt eines Kammfelds mit Feldnamen ohne Personenbezug und Wert in dessen Form ("Antragsdatum" mit
+            # einem Datum der letzten 30 Jahre, "Kilometerstand" mit einer Zahl): sicheres Gegenindiz – die
+            # Textregeln melden dort keine "Ziffernfolge"
+            aus = [v for v in aus if not _im_freien_kammfeld(v, frei)]
+        aus = kamm + aus
     return aus
+
+
+def _im_freien_kammfeld(v, frei: list) -> bool:
+    """Liegt ein Verdacht der Textregeln (start >= 0) ganz in den Kästchen eines freien Kammfelds?"""
+    if v.start < 0 or not v.rechtecke:
+        return False
+    for r in v.rechtecke:
+        r = fitz.Rect(r)
+        mx, my = (r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0
+        if not any(kammraster.im_feld(f, mx, my) for f in frei):
+            return False
+    return True
 
 
 def pruefe_text(text: str, platzhalter=None, nie=None, wissen=None, profil: str = "hoch",
@@ -4890,6 +4920,220 @@ def _unterschrift_pruefen(seite, m, schwaerzungen, pruefung=None, gemeldet=(), a
     return verdacht
 
 
+# ----------------------------------------------------------------------
+# Scan-Seiten: gefüllte Kammfelder (Kästchen „je Kästchen ein Zeichen“), deren Inhalt noch zu sehen ist
+# ----------------------------------------------------------------------
+GRUND_KAMMFELD = "Kammfeld hinter einem Feldnamen für Personenangaben nicht geschwärzt – bitte ansehen"
+GRUND_KAMMFELD_UNBEKANNT = "Ausgefülltes Kammfeld (Kästchen) ohne erkennbaren Feldnamen – Inhalt bitte ansehen"
+GRUND_KAMMFELD_UNGELESEN = "Ausgefülltes Kammfeld (Kästchen), Inhalt nicht lesbar – bitte ansehen"
+KAMM_DPI = 150                 # Auflösung der Kammfeld-Prüfung (Linien: kammraster.ERKENNUNG_DPI)
+KAMM_GESCHWAERZT = 0.5         # ein Kästchen, das zu diesem Anteil unter einem Schwärzungsrechteck liegt, ist geschwärzt
+KAMM_ETIKETT_LINKS_PT = 250.0  # Feldname links in derselben Zeile: höchstens so weit vor dem Feld
+KAMM_ETIKETT_OBEN = 1.2        # Feldname darüber: Unterkante höchstens so viele Kästchenhöhen über dem Feld
+KAMM_AEHNLICH = 0.8            # verlesener Feldname ("Vornamein)", "Hausar."): Ähnlichkeit zu einem Listen-Etikett
+# Feldnamen ohne Personenbezug (geschlossener Wortschatz neben den Etiketten der Vertragsdaten): der Inhalt eines solchen
+# Felds bleibt lesbar, ohne Verdacht
+_KAMM_OHNE_PERSONENBEZUG = frozenset("""
+datum antragsdatum anzahl betrag summe gesamt gesamtbetrag kilometerstand km kmstand stand tarif tarifgruppe gruppe
+stück stueck menge preis beitrag beiträge beitrage beginn ablauf laufzeit jahr monat tag baujahr leistung kw ps hubraum
+klasse sf schadenfreiheitsklasse selbstbeteiligung sb versicherungssumme deckungssumme prozent anteil quote stunden
+uhrzeit uhr zahl zahlweise zahlungsweise anzahl der personen kinder
+""".split())
+_KAMM_ARTEN_PERSON = ("person", "adresse", "kontakt", "kennung", "datum_geburt")
+
+
+def _kamm_etikett_text(text: str) -> str:
+    """Feldname ohne Zusätze in Klammern ("Geburtsdatum (TTMMJJJJ)", "Steuernummer (13-stellig)") und Satzzeichen."""
+    t = re.sub(r"[(\[{][^()\[\]{}]{0,40}[)\]}]?", " ", text)
+    return " ".join(t.replace(":", " ").split()).strip(" .,;-")
+
+
+def _kamm_etikett_art(w: _Wissen, text: str):
+    """"person" (Feldname für Personenangaben: Person, Anschrift, Kontakt, Kennung, Geburtsdatum – auch verlesen),
+    "neutral" (Vertragsdaten, Mengen, Beträge, Tarif) oder None (kein bekannter Feldname)."""
+    t = _kamm_etikett_text(text)
+    if not t:
+        return None
+    for art in _KAMM_ARTEN_PERSON:
+        index = w.index(art)
+        try:
+            if index is not None and (index.eintrag_fuer(t) is not None or index.finde(t)):
+                return "person"
+        except Exception:
+            continue
+    woerter = [x.casefold() for x in re.findall(r"[^\W\d_]+", t)]
+    if woerter and (woerter[0] in _KAMM_OHNE_PERSONENBEZUG or all(x in _KAMM_OHNE_PERSONENBEZUG for x in woerter)):
+        return "neutral"                          # "Anzahl der Fahrzeuge", "Betrag in EUR"
+    index = w.index("vertragsdaten")
+    try:
+        if index is not None and index.eintrag_fuer(t) is not None:
+            return "neutral"
+    except Exception:
+        pass
+    # verlesen ("Vornamein)", "Hausar.", "Amitl, Kennzeichen"): Ähnlichkeit zu einem Listen-Etikett
+    klein = t.casefold()
+    for art in _KAMM_ARTEN_PERSON + ("vertragsdaten",):
+        for eintrag in _kamm_etikett_liste(w, art):
+            if abs(len(eintrag) - len(klein)) > max(3, len(klein) // 4):
+                continue
+            vergleich = difflib.SequenceMatcher(None, klein, eintrag)
+            if vergleich.real_quick_ratio() >= KAMM_AEHNLICH and vergleich.quick_ratio() >= KAMM_AEHNLICH \
+                    and vergleich.ratio() >= KAMM_AEHNLICH:
+                return "neutral" if art == "vertragsdaten" else "person"
+    return None
+
+
+_KAMM_LISTEN: dict = {}
+
+
+def _kamm_etikett_liste(w: _Wissen, art: str) -> tuple:
+    """Einträge einer Etikettenliste, klein und ohne Zusätze in Klammern (zwischengespeichert)."""
+    if art not in _KAMM_LISTEN:
+        eintraege = ()
+        try:
+            if w.modul is not None:
+                eintraege = tuple(dict.fromkeys(_kamm_etikett_text(e).casefold()
+                                                for e in w.modul.liste(f"etiketten_{art}") if len(e) >= 3))
+        except Exception:
+            eintraege = ()
+        _KAMM_LISTEN[art] = tuple(e for e in eintraege if len(e) >= 3)
+    return _KAMM_LISTEN[art]
+
+
+def _kamm_woerter(m) -> list:
+    """[(x0, y0, x1, y1, text)] der Wörter des Seitenmodells (Zeichenboxen)."""
+    aus = []
+    for z in m.zeilen:
+        for t in re.finditer(r"\S+", m.text[z.start:z.ende]):
+            rs = []
+            for i in range(z.start + t.start(), z.start + t.end()):
+                g = m.abbildung[i] if i < len(m.abbildung) else -1
+                if g >= 0:
+                    rs.append(m.zeichen[g].rect)
+            if rs:
+                aus.append((min(r.x0 for r in rs), min(r.y0 for r in rs), max(r.x1 for r in rs), max(r.y1 for r in rs),
+                            t.group(0)))
+    return aus
+
+
+def _kamm_etikett(woerter: list, feld: dict, felder: list) -> str:
+    """Text des Feldnamens: die Wörter links in derselben Zeile wie das erste Kästchen bis zur nächsten großen Lücke,
+    sonst die Zeile darüber über dem Anfang des Felds. "" ohne Feldnamen. Wörter in einem Feld zählen nicht (Kästchen,
+    nicht der Rahmen: ein schräges Feld reicht mit seinem Rahmen in die Zeile darüber)."""
+    x0, y0, _, y1 = kammraster.kopfkasten(feld)
+    x1 = feld["rahmen"][2]
+    hoehe = max(y1 - y0, 4.0)
+    frei = [w for w in woerter if not any(kammraster.im_feld(f, (w[0] + w[2]) / 2, (w[1] + w[3]) / 2) for f in felder)]
+    links = sorted((w for w in frei if y0 - 0.2 * hoehe <= (w[1] + w[3]) / 2 <= y1 + 0.2 * hoehe
+                    and w[2] <= x0 + 1.5 and x0 - w[2] <= KAMM_ETIKETT_LINKS_PT), key=lambda w: w[0])
+    if links:
+        gruppe = [links[-1]]
+        for w in reversed(links[:-1]):
+            h = max(w[3] - w[1], gruppe[0][3] - gruppe[0][1], 4.0)
+            if gruppe[0][0] - w[2] > 2.5 * h:
+                break
+            gruppe.insert(0, w)
+        return " ".join(w[4] for w in gruppe)
+    oben = [w for w in frei if w[3] <= y0 + 1.5 and y0 - w[3] <= KAMM_ETIKETT_OBEN * hoehe
+            and x0 - 10.0 <= w[0] <= x0 + 0.5 * (x1 - x0)]
+    if not oben:
+        return ""
+    unterkante = max(w[3] for w in oben)
+    zeile = sorted((w for w in frei if abs(w[3] - unterkante) <= 0.5 * max(w[3] - w[1], 4.0)
+                    and x0 - 10.0 <= w[0] <= x1), key=lambda w: w[0])
+    return " ".join(w[4] for w in zeile)
+
+
+def _kammfelder_pruefen(seite, m, schwaerzungen, pruefung, gemeldet=(), original=(), frei=None) -> list:
+    """Gefüllte Kammfelder der Ausgabe, deren Inhalt nicht geschwärzt ist (kammraster.py, eigenes Rendering mit
+    KAMM_DPI): Verdacht, wenn der Feldname nach Personenangaben aussieht (Person, Anschrift, Kontakt, Kennung,
+    Geburtsdatum – auch verlesen), wenn kein Feldname zu erkennen ist oder wenn die OCR den Inhalt nicht liest. Ohne
+    Verdacht bleiben leere Felder, geschwärzte Kästchen und Felder mit einem Feldnamen ohne Personenbezug (Datum,
+    Anzahl, Betrag, Tarif …). original: Kammfelder des Originals (OCR der Analyse, Seitenkoordinaten) – sie gelten
+    mit ihrer Füllung vor einem Feld, das die Prüfung an derselben Stelle selbst findet; nur so bleibt ein Feld
+    geprüft, dessen Linien die Schwärzungen in der Ausgabe größtenteils verdecken. frei: Liste, in die die Felder
+    mit Feldnamen ohne Personenbezug und Wert in dessen Form kommen (Seitenkoordinaten). Ohne numpy: [] (die übrigen
+    Regeln gelten weiter)."""
+    if not kammraster.verfuegbar():
+        return []
+    try:
+        matrix = fitz.Matrix(KAMM_DPI / 72.0, KAMM_DPI / 72.0)
+        pix = seite.get_pixmap(matrix=matrix, colorspace=fitz.csGRAY, alpha=False)
+        grau = _ocr._grauwerte(pix)
+        felder = kammraster.kammfelder_finden(grau, KAMM_DPI)
+        if not felder and not original:
+            return []
+        kammraster.linien_entfernen(grau, felder)
+        felder = kammraster.fuellung_bestimmen(grau, felder, KAMM_DPI)
+    except Exception:
+        return []
+    rueck = ~matrix
+
+    def seitenrect(r):
+        q = fitz.Rect(r[0] + pix.x, r[1] + pix.y, r[2] + pix.x, r[3] + pix.y) * rueck
+        q.normalize()
+        return q
+
+    woerter = _kamm_woerter(m)
+    platzhalter = [fitz.Rect(r) for r in schwaerzungen or ()]
+    seiten_felder = [{"rahmen": tuple(seitenrect(kammraster.feld_bereich(f))),
+                      "kaesten": [tuple(seitenrect(k)) for k in f.kaesten], "gefuellt": list(f.gefuellt)}
+                     for f in felder]
+    for f in original or ():
+        try:
+            feld = {"rahmen": tuple(float(v) for v in f["rahmen"]),
+                    "kaesten": [tuple(float(v) for v in k) for k in f["kaesten"]],
+                    "gefuellt": [bool(g) for g in f["gefuellt"]]}
+        except Exception:
+            continue
+        if len(feld["kaesten"]) != len(feld["gefuellt"]) or not feld["kaesten"]:
+            continue
+        r = fitz.Rect(feld["rahmen"])
+        seiten_felder = [g for g in seiten_felder
+                         if abs(fitz.Rect(g["rahmen"]) & r) < 0.5 * min(abs(fitz.Rect(g["rahmen"])), abs(r))]
+        seiten_felder.append(feld)
+    bekannt = [fitz.Rect(r) for v in gemeldet or () for r in (v.rechtecke or ())]
+    aus = []
+    for feld in seiten_felder:
+        sichtbar = []
+        for k, gefuellt in zip(feld["kaesten"], feld["gefuellt"]):
+            if not gefuellt:
+                continue
+            r = fitz.Rect(k)
+            flaeche = max(abs(r), 0.01)
+            if any(abs(r & s) >= KAMM_GESCHWAERZT * flaeche for s in platzhalter):
+                continue                              # geschwärzt
+            sichtbar.append(r)
+        if not sichtbar:
+            continue
+        etikett = _kamm_etikett(woerter, feld, seiten_felder)
+        art = _kamm_etikett_art(pruefung.w, etikett)
+        gelesen = all(any(min(r.x1, w[2]) - max(r.x0, w[0]) >= 0.4 * r.width
+                          and min(r.y1, w[3]) - max(r.y0, w[1]) >= 0.3 * r.height for w in woerter) for r in sichtbar)
+        wert = "".join(w[4] for w in woerter
+                       if kammraster.im_feld(feld, (w[0] + w[2]) / 2, (w[1] + w[3]) / 2))
+        if art == "person":
+            grund = GRUND_KAMMFELD
+        elif kammraster.wert_ohne_personenbezug(etikett, wert):
+            if frei is not None:
+                frei.append(feld)
+            continue                                  # Feldname ohne Personenbezug, Wert in dessen Form
+        elif not gelesen:
+            grund = GRUND_KAMMFELD_UNGELESEN
+        elif art == "neutral":
+            continue                                  # gelesen: die Regeln für den Text prüfen den Wert
+        else:
+            grund = GRUND_KAMMFELD_UNBEKANNT
+        umriss = fitz.Rect(sichtbar[0])
+        for r in sichtbar[1:]:
+            umriss |= r
+        if any(abs(umriss & b) >= 0.5 * max(abs(umriss), 0.01) for b in bekannt):
+            continue                                  # dort meldet schon eine andere Regel
+        bekannt.append(umriss)
+        aus.append(Verdacht(m.nr, -1, -1, "Kammfeld", grund, [umriss]))
+    return aus
+
+
 def _seite_nachweislich_leer(seite) -> bool:
     """Steht auf der Scan-Seite nachweislich nichts (leere Rückseite)? Nur dann ist „die OCR hat (fast) nichts
     gelesen“ kein Seitenverdacht. Dasselbe Maß wie beim Status der Schwärzung (analyse.seite_nachweislich_leer: jedes
@@ -4956,7 +5200,7 @@ def _ohne_platzhalter(woerter: list, boxen: list) -> list:
 
 def restrisiko_pruefen(ausgabe_pfad, ocr=None, platzhalter=None, profil: str = "hoch", nie=None, wissen=None, *,
                        ocr_modus=None, winkel=None, bildbereiche=None, ocr_woerter=None, abgewaehlt=None,
-                       felder=None, abbruch=None, aktive=None) -> list:
+                       felder=None, abbruch=None, aktive=None, kammfelder=None) -> list:
     """Prüft die AUSGABE unabhängig von der Erkennung auf übrig gebliebene personenbezogene Daten.
 
     ausgabe_pfad: geschwärzte PDF; ocr: OcrDienst (oder ein Ersatz mit woerter()); platzhalter: Ersatztexte des
@@ -4967,7 +5211,9 @@ def restrisiko_pruefen(ausgabe_pfad, ocr=None, platzhalter=None, profil: str = "
     die Kontroll-OCR der Selbstkontrolle liegt damit schon im Zwischenspeicher), ocr_woerter {Seite: Wörter}
     für unveränderte Seiten (OCR der Analyse, kein zweiter OCR-Lauf), abgewaehlt [(Seite, Text)] (bewusst
     nicht geschwärzte Stellen), felder [Feld] (Formularfelder des Originals), abbruch (threading.Event), aktive
-    (die gewählten Kategorien der Analyse: eine abgewählte Kategorie wie Religion ist kein Rest, Gegenprüfung V1).
+    (die gewählten Kategorien der Analyse: eine abgewählte Kategorie wie Religion ist kein Rest, Gegenprüfung V1),
+    kammfelder {Seite: [{"rahmen", "kaesten", "gefuellt"}]} (Kammfelder der Scan-Seiten des Originals aus der OCR,
+    Seitenkoordinaten: Lage und Füllung der Kästchen – in der Ausgabe verdecken Schwärzungen die Linien).
     Rückgabe: Liste von Verdacht (seite 0-basiert, Rechtecke in Seitenkoordinaten nach remove_rotation)."""
     pfad = Path(ausgabe_pfad)
     w = _Wissen(wissen if wissen is not None else _wissen_laden())
@@ -5031,7 +5277,7 @@ def restrisiko_pruefen(ausgabe_pfad, ocr=None, platzhalter=None, profil: str = "
             verdacht += _seite_pruefen(m, w, platzhalter or (), nie or (), abgewaehlt_je_seite.get(nr, ()), profil,
                                        felder_je_seite.get(nr, ()), schwaerzungen,
                                        scan_seite=seite if modus == "seite" else None, ausrichtung=ausrichtung,
-                                       aktive=aktive)
+                                       aktive=aktive, kammfelder=(kammfelder or {}).get(nr) or ())
     finally:
         doc.close()
     return verdacht

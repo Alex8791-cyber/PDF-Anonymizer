@@ -15,6 +15,12 @@ kommt vom Feldnamen
 Straße/Hausnummer -> strasse, PLZ/Ort -> plzort, Telefon/E-Mail, Kennungen nach ihrer Art); ohne Feldnamen zählt
 nur, was sich selbst ausweist (IBAN mit stimmender Prüfsumme, Steuer-ID mit Prüfziffer). Geschwärzt wird die
 ganze Zeichenfolge in der Zeile.
+
+»struktur.kammfeld_scan« (Scans): Die OCR findet Kammfelder im Bild (anonymisierer/kammraster.py), entfernt ihre Linien
+vor dem Lesen und gibt ihre Lage mit (Seite.kammfelder). Was die OCR in einem gefüllten Feld liest, ist dessen Wert – wie
+gut es gelesen ist, spielt keine Rolle („R1ZZO“, „0 9 ı 9 8“): hinter einem Feldnamen für personenbezogene Angaben (links
+in derselben Zeile oder darüber, auch verlesen) wird alles im Feld geschwärzt; ohne Feldnamen zählt nur, was sich
+selbst ausweist. Was die OCR in einem gefüllten Feld gar nicht liest, meldet die Selbstkontrolle (restrisiko).
 """
 
 from __future__ import annotations
@@ -22,6 +28,7 @@ from __future__ import annotations
 import re
 
 from . import ALLE_PROFILE, Treffer, detektor
+from .. import kammraster
 from .struktur import ALLE_KATEGORIEN, etiketten, lage
 
 QUELLE = "struktur.kammfeld"
@@ -194,3 +201,268 @@ def _zeilen_darueber(lg, zid: int, hoehe: float) -> list:
         if -0.3 * h <= abstand <= 2.2 * h and min(box[2], b2[2]) - max(box[0], b2[0]) > -2 * h:
             kandidaten.append((abstand, z2))
     return [z2 for _, z2 in sorted(kandidaten)]
+
+
+# ----------------------------------------------------------------------
+# Kammfelder auf Scans (Lage aus dem Bild, ocr.py/kammraster.py)
+# ----------------------------------------------------------------------
+QUELLE_SCAN = "struktur.kammfeld_scan"
+FELD_RAND_PT = 1.5            # Zeichen mit der Mitte bis so weit außerhalb eines Felds gehören zu ihm
+ETIKETT_LINKS_MAX_PT = 250.0  # Feldname links in derselben Zeile: höchstens so weit vor dem Feld
+ETIKETT_OBEN_HOEHEN = 1.2     # Feldname darüber: Unterkante höchstens so viele Kästchenhöhen über dem Feld
+
+
+def _woerter(seite) -> list:
+    """[(start, ende, x0, y0, x1, y1)] der Wörter der Seite (Zeichenboxen; zwischengespeichert)."""
+    zw = getattr(seite, "_kamm_woerter", None)
+    if zw is not None and zw[0] is seite.text:
+        return zw[1]
+    aus = []
+    abb, zeichen, text = seite.abbildung, seite.zeichen, seite.text
+    for z in seite.zeilen:
+        for m in _STUECK_RE.finditer(text, z.start, z.ende):
+            rs = [zeichen[abb[i]].rect for i in range(m.start(), m.end()) if i < len(abb) and abb[i] >= 0]
+            if rs:
+                aus.append((m.start(), m.end(), min(r.x0 for r in rs), min(r.y0 for r in rs), max(r.x1 for r in rs),
+                            max(r.y1 for r in rs)))
+    try:
+        seite._kamm_woerter = (seite.text, aus)
+    except AttributeError:
+        pass
+    return aus
+
+
+def _im_feld(w, feld) -> bool:
+    """Mitte des Worts in einem Kästchen des Felds (kammraster.im_feld – nicht im Rahmen: ein schräg gelesenes Feld
+    reicht mit seinem Rahmen in die Zeile darüber)."""
+    return kammraster.im_feld(feld, (w[2] + w[4]) / 2.0, (w[3] + w[5]) / 2.0, rand_x=FELD_RAND_PT + 0.5,
+                              rand_y=FELD_RAND_PT)
+
+
+def spannen_im_feld(seite, feld) -> list:
+    """[(start, ende)] der Textstücke (je Zeile zusammenhängend) aus Wörtern, deren Mitte im Feld liegt – ganze
+    Wörter: ragt ein gelesenes Wort über den Rahmen (erster Buchstabe vor der ersten erkannten Wand), gehört es ganz
+    dazu."""
+    text = seite.text
+    spannen: list = []
+    for w in _woerter(seite):
+        if not _im_feld(w, feld):
+            continue
+        if spannen and all(c in " \t" for c in text[spannen[-1][1]:w[0]]):
+            spannen[-1][1] = w[1]
+        else:
+            spannen.append([w[0], w[1]])
+    return [(a, b) for a, b in spannen]
+
+
+def _box(seite, start: int, ende: int):
+    rs = [seite.zeichen[seite.abbildung[i]].rect for i in range(start, ende)
+          if i < len(seite.abbildung) and seite.abbildung[i] >= 0]
+    if not rs:
+        return None
+    return (min(r.x0 for r in rs), min(r.y0 for r in rs), max(r.x1 for r in rs), max(r.y1 for r in rs))
+
+
+def etikett_zum_feld(seite, feld, ets: list, felder: list = ()):
+    """(Etikett, Text) des Feldnamens eines Kammfelds: ein Etikett der Seite im nächsten Text links in derselben Zeile
+    bzw. in der nächsten Zeile darüber (etikett_text_zum_feld), sonst der verlesene Feldname dort (feldname_unscharf);
+    (None, "") ohne Feldnamen."""
+    s, e, lage_ = etikett_text_zum_feld(seite, feld, list(felder) or [feld])
+    if s < 0:
+        return None, ""
+    drin = [et for et in ets if et.start >= s and et.ende <= e]
+    if drin:
+        if lage_ == "links":
+            et = drin[-1]                         # das Etikett direkt vor dem Feld
+        else:
+            x0 = kammraster.kopfkasten(feld)[0]
+            et = min(drin, key=lambda x: abs(((_box(seite, x.start, x.ende) or (x0,))[0]) - x0))
+        return et, seite.text[et.start:et.ende]
+    return _etikett_unscharf(seite, s, e)
+
+
+def etikett_text_zum_feld(seite, feld, felder: list) -> tuple:
+    """(start, ende, lage) des Texts, der als Feldname vor dem Feld steht: die Wörter links in derselben Zeile bis zur
+    nächsten großen Lücke (lage "links"), sonst die nächste Zeile darüber über dem Anfang des Felds ("oben");
+    (-1, -1, "") ohne solchen Text. Wörter in einem Feld zählen nicht. Es zählt der NÄCHSTE Text: ein verlesener
+    Feldname wird nicht übersprungen (sonst bekäme das Feld den Namen des Felds darüber)."""
+    x0, y0, _, y1 = kammraster.kopfkasten(feld)
+    x1 = feld["rahmen"][2]
+    hoehe = max(y1 - y0, 4.0)
+    woerter = [w for w in _woerter(seite) if not any(_im_feld(w, f) for f in felder)]
+    links = sorted((w for w in woerter if y0 - 0.2 * hoehe <= (w[3] + w[5]) / 2.0 <= y1 + 0.2 * hoehe
+                    and w[4] <= x0 + FELD_RAND_PT and x0 - w[4] <= ETIKETT_LINKS_MAX_PT), key=lambda w: w[2])
+    if links:
+        gruppe = [links[-1]]
+        for w in reversed(links[:-1]):
+            if gruppe[0][2] - w[4] > 2.5 * max(w[5] - w[3], gruppe[0][5] - gruppe[0][3], 4.0):
+                break
+            gruppe.insert(0, w)
+        return gruppe[0][0], gruppe[-1][1], "links"
+    oben = [w for w in woerter if w[5] <= y0 + FELD_RAND_PT and y0 - w[5] <= ETIKETT_OBEN_HOEHEN * hoehe
+            and x0 - 10.0 <= w[2] <= x0 + 0.5 * (x1 - x0)]
+    if not oben:
+        return -1, -1, ""
+    naechstes = max(oben, key=lambda w: w[5])
+    zeile = sorted((w for w in woerter if abs(w[5] - naechstes[5]) <= 0.5 * max(w[5] - w[3], 4.0)
+                    and x0 - 10.0 <= w[2] <= x1), key=lambda w: w[2])
+    return zeile[0][0], zeile[-1][1], "oben"
+
+
+# Verlesene Feldnamen neben einem Kammfeld ("Vornameln)", "Versicherunesschein-Nr."): die Lage am Feld belegt, dass dort
+# ein Feldname steht – er zählt deshalb schon mit größerer Abweichung als im Fließtext (etiketten_unscharf: nur typische
+# Lesefehler) als das ähnlichste Listen-Etikett; kurze Feldnamen ("Ort", "PLZ") nur exakt
+UNSCHARF_AEHNLICH = 0.8
+UNSCHARF_MIN = 5
+_FELD_ARTEN = ("person", "kennung", "datum_geburt", "adresse", "kontakt", "vertragsdaten")
+
+
+def _feldname_text(text: str) -> str:
+    t = re.sub(r"[(\[{][^()\[\]{}]{0,40}[)\]}]?", " ", text)
+    return " ".join(t.replace(":", " ").split()).strip(" .,;-").casefold()
+
+
+_LISTEN: dict = {}
+
+
+def _feldnamen(art: str) -> tuple:
+    if art not in _LISTEN:
+        eintraege = ()
+        try:
+            from .. import wissen as _w
+            eintraege = tuple(dict.fromkeys((_feldname_text(e), e) for e in _w.liste(f"etiketten_{art}")))
+        except Exception:
+            eintraege = ()
+        _LISTEN[art] = tuple((k, e) for k, e in eintraege if len(k) >= UNSCHARF_MIN)
+    return _LISTEN[art]
+
+
+def feldname_unscharf(text: str):
+    """(Art, Listen-Etikett) des ähnlichsten Feldnamens der Wissensbasis (Ähnlichkeit ab UNSCHARF_AEHNLICH) oder None."""
+    import difflib
+    t = _feldname_text(text)
+    if len(t) < UNSCHARF_MIN:
+        return None
+    beste = None
+    for art in _FELD_ARTEN:
+        for klein, eintrag in _feldnamen(art):
+            if abs(len(klein) - len(t)) > max(3, len(t) // 4):
+                continue
+            v = difflib.SequenceMatcher(None, t, klein)
+            if v.real_quick_ratio() < UNSCHARF_AEHNLICH or v.quick_ratio() < UNSCHARF_AEHNLICH:
+                continue
+            r = v.ratio()
+            if r >= UNSCHARF_AEHNLICH and (beste is None or r > beste[0]):
+                beste = (r, art, eintrag)
+    return (beste[1], beste[2]) if beste else None
+
+
+def _etikett_unscharf(seite, s: int, e: int):
+    """(Etikett, Listen-Etikett) aus einem verlesenen Feldnamen im Text [s, e) oder (None, "")."""
+    from .struktur import Etikett, kennung_kategorie, kontakt_kategorie
+    gefunden = feldname_unscharf(seite.text[s:e])
+    if gefunden is None:
+        return None, ""
+    art, eintrag = gefunden
+    kategorie = None
+    if art == "kennung":
+        kategorie = kennung_kategorie(eintrag)
+        if kategorie is None:
+            return None, ""
+    elif art == "kontakt":
+        kategorie = kontakt_kategorie(eintrag)
+    return Etikett(s, e, frozenset({art}), kategorie, eintrag, True), eintrag
+
+
+@detektor(QUELLE_SCAN, ALLE_KATEGORIEN, ALLE_PROFILE)
+def kammfeld_scan(dok, kontext):
+    """Inhalt gefüllter Kammfelder auf Scans (Lage aus dem Bild) mit der Kategorie ihres Feldnamens."""
+    treffer = []
+    for nr, seite in enumerate(dok.seiten):
+        felder = [f for f in (getattr(seite, "kammfelder", None) or []) if any(f.get("gefuellt") or ())]
+        if not felder:
+            continue
+        ets = [et for et in etiketten(seite) if et.arten]
+        for feld in felder:
+            spannen = spannen_im_feld(seite, feld)
+            if not spannen:
+                continue
+            wert = " ".join(seite.text[a:b] for a, b in spannen)
+            et, etikett_text = etikett_zum_feld(seite, feld, ets, felder)
+            if et is not None:
+                kat = kategorie_fuer(et, etikett_text, wert)
+            else:
+                kat = _ohne_etikett(wert)
+            if kat is None or (kontext.aktive and kat not in kontext.aktive):
+                continue
+            for a, b in spannen:
+                treffer.append(Treffer(dok.global_(nr, a), dok.global_(nr, b), kat, QUELLE_SCAN,
+                                       0.8 if et is not None else 0.9))
+    return treffer
+
+
+def freie_werte(dok) -> list:
+    """[(start, ende)] (global) der Werte gefüllter Kammfelder ohne Personenbezug: Feldname und Wertform passen
+    (kammraster.wert_ohne_personenbezug – „Antragsdatum“ mit einem Datum, „Anzahl“ mit einer kleinen Zahl)."""
+    aus = []
+    for nr, seite in enumerate(dok.seiten):
+        felder = [f for f in (getattr(seite, "kammfelder", None) or []) if any(f.get("gefuellt") or ())]
+        for feld in felder:
+            spannen = spannen_im_feld(seite, feld)
+            if not spannen:
+                continue
+            s, e, _ = etikett_text_zum_feld(seite, feld, felder)
+            if s < 0:
+                continue
+            wert = "".join(seite.text[a:b] for a, b in spannen)
+            if kammraster.wert_ohne_personenbezug(seite.text[s:e], wert):
+                aus += [(dok.global_(nr, a), dok.global_(nr, b)) for a, b in spannen]
+    return aus
+
+
+def _feldname_spannen(dok) -> list:
+    """[(start, ende)] (global) der Feldnamen (Etiketten der Seite) außerhalb der Kammfelder auf Seiten mit Kammfeldern."""
+    aus = []
+    for nr, seite in enumerate(dok.seiten):
+        felder = getattr(seite, "kammfelder", None) or []
+        if not felder:
+            continue
+        woerter = [w for w in _woerter(seite) if any(_im_feld(w, f) for f in felder)]
+        for et in etiketten(seite):
+            if et.arten and not any(w[0] < et.ende and et.start < w[1] for w in woerter):
+                aus.append((dok.global_(nr, et.start), dok.global_(nr, et.ende)))
+    return aus
+
+
+def ohne_personenbezug(dok, treffer: list) -> list:
+    """Treffer an Kammfeldern bereinigen (Scans; IMMER-Begriffe der Nutzerin bleiben unberührt):
+      * ganz im Wert eines Kammfelds ohne Personenbezug (freie_werte): entfällt – eine achtstellige Zahl unter
+        „Antragsdatum (TTMMJJJJ)“ ist keine Telefonnummer;
+      * ein Treffer, der aus einem Feldwert über den Zeilenwechsel in den Feldnamen des nächsten Felds läuft
+        ("37073⏎Wohnort": PLZ + vermeintlicher Ort), endet vor dem Feldnamen – Feldnamen sind keine Werte;
+      * ein Namens-Treffer, der nur aus einem Feldnamen besteht ("Vorname", "Geburtsdatum" zwischen den Werten eines
+        Kammfeld-Formulars, von der Namenserkennung für Namen gehalten), entfällt."""
+    if not any(getattr(s, "kammfelder", None) for s in dok.seiten):
+        return treffer
+    frei = freie_werte(dok)
+    namen = _feldname_spannen(dok)
+    aus = []
+    text = dok.text
+    for t in treffer:
+        if t.kategorie == "begriff":
+            aus.append(t)
+            continue
+        if any(a <= t.start and t.ende <= b for a, b in frei):
+            continue
+        if t.kategorie == "namen" and any(a <= t.start and t.ende <= b for a, b in namen):
+            continue
+        for a, b in namen:
+            if t.start < a < t.ende <= b and text[t.start:a].strip() and "\n" in text[t.start:a]:
+                ende = a
+                while ende > t.start and text[ende - 1].isspace():
+                    ende -= 1
+                t = t._replace(ende=ende)
+                break
+        aus.append(t)
+    return aus
+
