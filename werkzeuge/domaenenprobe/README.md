@@ -134,7 +134,7 @@ Helvetica), `font`, `groesse` und `zeige_ocr` (OCR-Text ins Protokoll).
 
 Die Lesbarkeitsprüfung arbeitet auf dem ganzen Seitentext ohne Leerraum und Satzzeichen und ist absichtlich
 großzügig: Sie zählt einen Wert eher als lesbar als dass sie ein Leck übersieht. Deshalb steht in den Zahlen
-etwas mehr „sichtbar“ und „STILL“, als wirklich stehen bleibt. In der Referenz (ef90382) sind von 49 Einträgen, die
+etwas mehr „sichtbar“ und „STILL“, als wirklich stehen bleibt. In der Referenz (c2edbc9) sind von 38 Einträgen, die
 nicht „weg“ sind, vier solche Artefakte – der Wert selbst ist geschwärzt, gezählt wird ein anderer Text:
 
 | Eintrag | Zustand | Woher der Treffer stammt |

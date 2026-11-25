@@ -671,7 +671,7 @@
  },
  "kfz/faelle_kfz_1.py|telematik_geraet|text|PZ7QHK": {
   "bereich": "kfz",
-  "zustand": "sichtbar",
+  "zustand": "weg",
   "status": "pruefen"
  },
  "kfz/faelle_kfz_1.py|diebstahl_zb2|text|Wimmersberger": {
@@ -1311,7 +1311,7 @@
  },
  "kfz_gegen/gegen_a.py|a27_laie_gedankenstrich|text|ROKL2207": {
   "bereich": "kfz",
-  "zustand": "still",
+  "zustand": "weg",
   "status": "pruefen"
  },
  "kfz_gegen/gegen_a.py|a28_laie_klein|text|ROXT913": {
@@ -1976,7 +1976,7 @@
  },
  "person/faelle_person1.py|klinik_entlassbrief|text|Gaimersheim": {
   "bereich": "person",
-  "zustand": "still",
+  "zustand": "weg",
   "status": "pruefen"
  },
  "person/faelle_person1.py|leistungsabrechnung_pkv|text|Grünewald": {
@@ -3936,7 +3936,7 @@
  },
  "sach/faelle_sach1.py|phv_fliesstext_nachbar|text|Eibl": {
   "bereich": "sach",
-  "zustand": "still",
+  "zustand": "weg",
   "status": "pruefen"
  },
  "sach/faelle_sach1.py|lw_handwerker_regiebericht|text|Rauchenberger": {
@@ -9196,17 +9196,17 @@
  },
  "kritik/faelle_k2.py|k2_fortsetzung|text|LV2291881703": {
   "bereich": "kritik",
-  "zustand": "sichtbar",
+  "zustand": "weg",
   "status": "pruefen"
  },
  "kritik/faelle_k2.py|k2_fortsetzung|text|WG4471081522": {
   "bereich": "kritik",
-  "zustand": "sichtbar",
+  "zustand": "weg",
   "status": "pruefen"
  },
  "kritik/faelle_k2.py|k2_fortsetzung|text|U20265512": {
   "bereich": "kritik",
-  "zustand": "sichtbar",
+  "zustand": "weg",
   "status": "pruefen"
  },
  "kritik/faelle_k2.py|k2_bestand|text|Gstettner": {
@@ -9811,7 +9811,7 @@
  },
  "kritik/faelle_k4.py|k4_forts_ohne_kopf|text|PHV447118": {
   "bereich": "kritik",
-  "zustand": "sichtbar",
+  "zustand": "weg",
   "status": "pruefen"
  },
  "kritik/faelle_k4.py|k4_forts_ohne_kopf|text|Wiesenhofer": {
@@ -9826,7 +9826,7 @@
  },
  "kritik/faelle_k4.py|k4_forts_ohne_kopf|text|44710815": {
   "bereich": "kritik",
-  "zustand": "sichtbar",
+  "zustand": "weg",
   "status": "pruefen"
  },
  "kritik/faelle_k4.py|k4_forts_ohne_kopf|text|Pichlmeier": {
@@ -9836,7 +9836,7 @@
  },
  "kritik/faelle_k4.py|k4_forts_ohne_kopf|text|RS0815": {
   "bereich": "kritik",
-  "zustand": "sichtbar",
+  "zustand": "weg",
   "status": "pruefen"
  },
  "kritik/faelle_k4.py|k4_forts_ohne_kopf|text|Ruhstorfer": {
@@ -9846,7 +9846,7 @@
  },
  "kritik/faelle_k4.py|k4_forts_ohne_kopf|text|7712345": {
   "bereich": "kritik",
-  "zustand": "sichtbar",
+  "zustand": "weg",
   "status": "pruefen"
  },
  "kritik/faelle_k4.py|k4_forts_ohne_kopf|text|Oberprieler": {
