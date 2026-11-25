@@ -2,7 +2,7 @@
 
 Erzeugt mit `python werkzeuge/domaenenprobe/messen.py <ausgabeordner> --als-referenz` am 25.11.2026; Einträge: 2261 (`referenz.json`).
 
-- Stand: 739f03330bd0232e91fc8c5bcc19c4f2c37d26f0
+- Stand: 4803d52c52358701530d8c07f28644b45cc00930
 - Umgebung: Linux 6.18.44-fc-v880, Python 3.12.3, PyMuPDF 2.1, spaCy 3.8.18, de_core_news_md 3.8.0
 - OCR-Prüfung der Ausgabe: Tesseract-Kommandozeile (tesseract 5.3.4, PSM 3)
 - Schriften der Fälle: DejaVuSans.ttf, DejaVuSansMono.ttf
