@@ -269,6 +269,40 @@ def test_widerlegt1_gegenproben_kein_rohwert(wert):
     assert not any(wert.split()[0] in s for s in _ocr_formular_stellen(paare)), _ocr_formular_stellen(paare)
 
 
+def _ocr_woerter_stellen(zeilen) -> set:
+    """Stellen eines gescannten Formulars aus Zellen [(x0, y, block, text)] (jede Zelle eigene Wörter, 5,5 pt hoch)."""
+    from anonymisierer import analyse, seitenmodell
+    doc = fitz.open()
+    seite = doc.new_page(width=595, height=842)
+    woerter = []
+    for zi, (x0, y, block, inhalt) in enumerate(zeilen):
+        x = x0
+        for wi, w in enumerate(inhalt.split()):
+            woerter.append((x, y, x + 3.4 * len(w), y + 5.5, w, block, zi, wi))
+            x += 3.4 * len(w) + 2
+    s = seitenmodell.seite_aufbauen(seite, 0, ocr_woerter=woerter, ocr_quelle="ocr")
+    doc.close()
+    funde = analyse._analysiere_dokument(seitenmodell.Dokument(None, [s]), ALLE, [], [])
+    return {st["text"] for f in funde for st in f["stellen"] if st.get("an", True)}
+
+
+def test_widerlegt1_gegenprobe_unterfeld_einer_ueberschrift():
+    """Ein Feldname am Ende einer Überschrift ("6. Versicherungsnehmer:" ⇥ "Name") steht nicht in einer Spalte aus
+    Feldnamen: rechts daneben beginnt eine andere Spalte des Formulars (s9x 007: das Kästchen "☐ parkte" der
+    Unfallumstände, gelesen als "Do parkte"); der Name selbst steht unter der Überschrift."""
+    zellen = [(34, 180, 0, "6. Versicherungsnehmer:"), (118, 180, 0, "Name"), (257, 178, 1, "Do parkte"),
+              (34, 189, 0, "Saizew"), (257, 189, 1, "Do fuhr rückwärts"), (34, 200, 0, "Vorname")]
+    stellen = _ocr_woerter_stellen(zellen)
+    assert not any("parkte" in s for s in stellen), stellen
+
+
+def test_widerlegt1_feldnummer_vor_feldname():
+    """Eine Feldnummer vor dem Feldnamen ändert nichts: "12. Steuer-ID:" ⇥ "Bız11sar066"."""
+    paare = [("11. Arbeitgeber:", "Elektro Schuster eK"), ("12. Steuer-ID:", "Bız11sar066"),
+             ("13. Ausweisnummer:", "")]
+    assert any("Bız11sar066" in s for s in _ocr_formular_stellen(paare)), _ocr_formular_stellen(paare)
+
+
 # ----------------------------------------------------------------------
 # N1 (A/NP-13): Zugangsdaten hinter "<Gegenstand>: Code"
 # ----------------------------------------------------------------------
@@ -299,6 +333,77 @@ def test_n1_gegenproben_kein_zugangscode(text, wert):
 def test_n1_selbstkontrolle_meldet_code_hinter_gegenstand():
     """Die Selbstkontrolle nutzt dieselbe Regel: steht der Code in einer Ausgabe noch da, wird er gemeldet."""
     assert any("1357" in t for t, _ in _verdacht("Haustür: Code 1357")), _verdacht("Haustür: Code 1357")
+
+
+# Abwandlungen: Gedankenstrich, Klammer, Komma, Gegenstand im Satzteil davor, direkt hinter "Code" oder hinter dem
+# Wert, Zusammensetzungen mit beliebigem Vorsatz
+@pytest.mark.parametrize("text, wert", [
+    ("Haustür – Code 1357", "1357"),
+    ("Haustür - Code 1357", "1357"),
+    ("Haustür (Code 1357)", "1357"),
+    ("Garage, Code 1199", "1199"),
+    ("Die Haustür hat den Code 1357.", "1357"),
+    ("Die Haustür hat den neuen Code 1357.", "1357"),
+    ("Für die Garage gilt der Code 1199.", "1199"),
+    ("Das Garagentor öffnet mit dem Code 4455.", "4455"),
+    ("Die Alarmanlage wird mit Code 2580 entschärft.", "2580"),
+    ("Code Haustür: 1357", "1357"),
+    ("Code Haustür 1357", "1357"),
+    ("Code für die Haustür 1357", "1357"),
+    ("Code 4455 für die Tiefgarage", "4455"),
+    ("Code 1357 (Haustür)", "1357"),
+    ("Bitte den Code 0815 der Alarmanlage nennen.", "0815"),
+    ("Tiefgaragen-Code 4455", "4455"),
+    ("Tiefgaragencode 4455", "4455"),
+    ("Kellertürcode: 7788", "7788"),
+    ("Hoftor-Code 3141", "3141"),
+])
+def test_n1_abwandlungen_gegenstand_und_code(text, wert):
+    assert _geschwaerzt(text, wert, "zugangsdaten"), _stellen(_funde(text))
+    assert any(wert in t for t, _ in _verdacht(text)), _verdacht(text)
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Alarmanlage defekt Fehler Code 4711", "4711"),          # ein anderes Substantiv direkt vor "Code"
+    ("Die Haustür hat den Code geändert.", "geändert"),
+    ("Rabatt Code 1357 für das Handy", "1357"),
+    ("Der Tarif hat den Code 1357.", "1357"),
+    ("Die Hausratversicherung hat den Code 4711.", "4711"),
+    ("Produkt-Code 1234 für die Garage", "1234"),
+    ("Schaden an der Garage, Code 4711 laut Schadenkatalog", "4711"),   # kein Gegenstand am Anfang des Abschnitts
+    ("Faktor-Code 1234", "1234"),
+    ("Sektorcode 6420", "6420"),
+    ("Code 4711 der Leistung", "4711"),
+    ("Die Garage hat den Code A1.", "A1"),
+])
+def test_n1_abwandlungen_gegenproben(text, wert):
+    assert not _geschwaerzt(text, wert, "zugangsdaten"), _stellen(_funde(text))
+
+
+def _scan_pdf(pfad, zeilen, dpi=200):
+    """Gedruckte Zeilen (Helvetica 12 pt) als Bild-Seite: ein Scan für die Texterkennung."""
+    vorlage = fitz.open()
+    s = vorlage.new_page()
+    for i, z in enumerate(zeilen):
+        s.insert_text((60, 90 + 24 * i), z, fontsize=12, fontname="helv")
+    pix = s.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY)
+    doc = fitz.open()
+    p = doc.new_page(width=s.rect.width, height=s.rect.height)
+    p.insert_image(p.rect, stream=pix.tobytes("png"))
+    doc.save(pfad)
+    doc.close()
+    vorlage.close()
+    return pfad
+
+
+def test_n1_zugangscodes_auf_scan(tmp_path):
+    """Dieselben Regeln auf dem Text der Texterkennung (Scan 200 dpi)."""
+    pdf = _scan_pdf(tmp_path / "hinweise.pdf", ["Hinweise für den Handwerker", "Haustür: Code 1357",
+                                                "Tor zur Tiefgarage: Code 4455", "Die Garage hat den Code 2468.",
+                                                "Code Briefkasten: 9753"])
+    stellen = _pdf_stellen(pdf, "zugangsdaten")
+    for wert in ("1357", "4455", "2468", "9753"):
+        assert any(wert in s for s in stellen), (wert, stellen)
 
 
 # ----------------------------------------------------------------------
@@ -356,6 +461,34 @@ def test_n3_gegenproben(text, wort):
     assert not _geschwaerzt(text, wort, "beruf"), _stellen(_funde(text))
 
 
+# Selbstkontrolle: ein Beruf der Wissensbasis hinter "als" in einem Satz über eine Person wird gemeldet, auch ohne
+# Wort der Erwerbstätigkeit (die Erkennung schwärzt dann nicht)
+@pytest.mark.parametrize("text, beruf", [
+    ("Sie ist als Hebamme bei der Klinik in Traunstein.", "Hebamme"),
+    ("Er ist als Dachdecker in einem Familienbetrieb.", "Dachdecker"),
+    ("Seit 2015 ist er als Schreiner im eigenen Betrieb.", "Schreiner"),
+    ("Er hilft am Wochenende als Kellner aus.", "Kellner"),
+    ("Sie jobbt als Kellnerin in Prien.", "Kellnerin"),
+    ("Er wurde als Elektriker ausgebildet.", "Elektriker"),
+])
+def test_n3_selbstkontrolle_beruf_hinter_als(text, beruf):
+    assert _weg_oder_gemeldet(text, beruf), (_stellen(_funde(text)), _verdacht(text))
+
+
+@pytest.mark.parametrize("text, wort", [
+    ("Wir sind als Makler für Sie tätig.", "Makler"),
+    ("Herr X war als Fahrer am Unfall beteiligt.", "Fahrer"),
+    ("Sie kam als Zeugin zur Verhandlung.", "Zeugin"),
+    ("Er wurde als Betreuer bestellt.", "Betreuer"),
+    ("Sie war als Beifahrerin im Auto.", "Beifahrerin"),
+    ("Er fungiert als Inhaber der Firma.", "Inhaber"),
+    ("Als Arzt im Sinne dieser Bedingungen gilt jeder approbierte Mediziner.", "Arzt"),   # keine Person im Satz
+    ("Sie nutzt den Raum als Büro.", "Büro"),
+])
+def test_n3_selbstkontrolle_gegenproben(text, wort):
+    assert not any(wort in t for t, _ in _verdacht(text)), _verdacht(text)
+
+
 # ----------------------------------------------------------------------
 # N4 (A/NP-07): Mannheimer Quadrat hinter "nach"/"in" mit dem Umzug dahinter
 # ----------------------------------------------------------------------
@@ -375,6 +508,23 @@ def test_n4_quadrat_mit_umzug_dahinter(text, wert):
     ("Wir sind nach B 2, 4 der Bedingungen verpflichtet.", "B 2, 4"),
 ])
 def test_n4_gegenproben(text, wert):
+    assert not _beruehrt(text, wert), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text, werte", [
+    ("Sie ist im Mai von S 2, 15 nach T 4, 12 umgezogen.", ("S 2, 15", "T 4, 12")),
+    ("Sie ist aus S 2, 15 weggezogen.", ("S 2, 15",)),
+])
+def test_n4_abwandlung_umzug_von_nach(text, werte):
+    for wert in werte:
+        assert _geschwaerzt(text, wert), (wert, _stellen(_funde(text)))
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Der Zug fuhr von S 2, 15 ab.", "S 2, 15"),
+    ("Abschnitt B 3, 4 gilt von A 1, 2 bis zum Ende.", "A 1, 2"),
+])
+def test_n4_abwandlung_gegenproben(text, wert):
     assert not _beruehrt(text, wert), _stellen(_funde(text))
 
 
@@ -406,6 +556,33 @@ def test_n5_familienname_hinter_personenverb_gemeldet(text, name):
     ("Am Steuer saß der Halter.", "Halter"),
 ])
 def test_n5_gegenproben_keine_meldung(text, wort):
+    assert not any(wort in t for t, _ in _verdacht(text)), _verdacht(text)
+
+
+@pytest.mark.parametrize("text, name", [
+    ("Am Steuer saß die Hinterstoißerin.", "Hinterstoißerin"),          # mundartliche weibliche Form
+    ("Am Steuer saß die Huberin und telefonierte.", "Huberin"),
+    ("Gefahren ist der Huberbauer.", "Huberbauer"),                      # Partizip mit Hilfsverb
+    ("Gefahren ist die Hinterstoißerin.", "Hinterstoißerin"),
+])
+def test_n5_abwandlungen_gemeldet(text, name):
+    assert _weg_oder_gemeldet(text, name), _verdacht(text)
+
+
+@pytest.mark.parametrize("text, wort", [
+    ("Am Steuer saß die Fahrerin.", "Fahrerin"),
+    ("Am Steuer saß die Beifahrerin.", "Beifahrerin"),
+    ("Am Steuer saß die Anwohnerin.", "Anwohnerin"),
+    ("Am Steuer saß der Winter.", "Winter"),                             # mehrdeutiger Nachname
+    ("Laut Zeugen fuhr der Radler bei Rot.", "Radler"),
+    ("Dann rief der Anwohner die Polizei.", "Anwohner"),                 # vorher über die Namensgestalt gemeldet
+    ("Es lenkte der Mitbewohner.", "Mitbewohner"),
+    ("Am Steuer saß der Schwager.", "Schwager"),
+    ("Dann fuhr der Bagger zurück.", "Bagger"),
+    ("Laut Polizei fuhr der Laster zu schnell.", "Laster"),
+    ("Gefahren ist der Unfallfahrer.", "Unfallfahrer"),
+])
+def test_n5_abwandlungen_gegenproben(text, wort):
     assert not any(wort in t for t, _ in _verdacht(text)), _verdacht(text)
 
 

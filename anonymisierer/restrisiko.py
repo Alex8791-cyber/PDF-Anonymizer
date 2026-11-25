@@ -363,8 +363,42 @@ _ARTIKEL_NAME_VERB_RE = re.compile(
     r"|[ \t]*[,.;]?[ \t]*(?:nicht|und|oder)[ \t]+(?:der|die)[ \t]")
 # … oder davor ein Verb, das eine Person verlangt ("Am Steuer saß der Haslbeck", "Dann sagte die Wimmer")
 _VERB_ARTIKEL_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:saß|sass|fuhr|lenkte|steuerte|sagte|meinte|rief|erzählte|"
-                                    r"erzaehlte|behauptete|erklärte|erklaerte|bestätigte|bestaetigte|schilderte)"
+                                    r"erzaehlte|behauptete|erklärte|erklaerte|bestätigte|bestaetigte|schilderte|"
+                                    # dieselben Verben als Partizip mit Hilfsverb ("Gefahren ist der Huberbauer.")
+                                    r"(?:gesessen|gefahren|gelenkt|gesteuert|gesagt|gemeint|gerufen|erzählt|erzaehlt|"
+                                    r"behauptet|erklärt|erklaert|bestätigt|bestaetigt|geschildert)[ \t]+"
+                                    r"(?:ist|war|hat|hatte))"
                                     r"[ \t]+(?:der|die)[ \t]+$")
+# Endungen von Rollen-, Fahrzeug- und Gerätewörtern auf "-er", die in den Wortlisten fehlen können ("Anwohner",
+# "Radfahrer", "Täter", "Schwager", "Bagger", "Laster", "Hubschrauber"): hinter "fuhr der", "rief der" kein
+# Familienname mit Artikel, auch nicht mit Namensgestalt ("Anwohner", "Mitbewohner" auf "-ner")
+_ER_SACHWORT_ENDUNGEN = (
+    "fahrer", "wohner", "nehmer", "geber", "halter", "besitzer", "mieter", "pächter", "paechter", "arbeiter", "führer",
+    "fuehrer", "sucher", "schauer", "läufer", "laeufer", "steiger", "händler", "haendler", "lenker", "retter", "täter",
+    "taeter", "helfer", "kläger", "klaeger", "schwager", "wanderer", "jogger", "spieler", "wehrler", "radler", "wärter",
+    "waerter", "camper", "bagger", "laster", "trecker", "schlepper", "sprinter", "kipper", "lader", "container",
+    "bulldozer", "scooter", "dampfer", "flieger", "schrauber", "transporter", "anhänger", "anhaenger", "roller",
+    "wecker", "schalter", "becher", "teller", "messer", "zähler", "zaehler", "ordner", "rechner", "router", "server",
+    "leser", "hörer", "hoerer", "drucker", "computer", "monitor", "tresor")
+# Beruf hinter "als" in einem Satz über eine Person ("Sie ist als Hebamme bei der Klinik in Traunstein.", "Er hilft am
+# Wochenende als Kellner aus."; Abnahme N3): die Erkennung schwärzt ihn nur mit einem Wort der Erwerbstätigkeit
+# ("tätig", "beschäftigt", "arbeitet"), die Selbstkontrolle meldet jeden Beruf der Wissensbasis – außer Rollen im
+# Vorgang oder in einer Firma ("als Fahrer am Unfall beteiligt", "als Makler für Sie tätig", "als Geschäftsführer")
+_ALS_BERUF_RE = re.compile(r"(?<![\wäöüß])[Aa]ls[ \t]+(?:(?:gelernte[rn]?|selbst(?:st)?ändige[rn]?|freiberufliche[rn]?|"
+                           r"angestellte[rn]?|ausgebildete[rn]?)[ \t]+)?([A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ]?[a-zäöüß]+)*)"
+                           r"(?![\wäöüß\-])")
+_ALS_ROLLE = frozenset("""
+makler maklerin vermittler vermittlerin fahrer fahrerin beifahrer beifahrerin gutachter gutachterin sachverständiger
+sachverständige vertreter vertreterin berater beraterin betreuer betreuerin inhaber inhaberin geschäftsführer
+geschäftsführerin vorstand leiter leiterin prokurist prokuristin bevollmächtigter bevollmächtigte zeuge zeugin
+""".split())
+# eine Person im Satz: Personalpronomen, Personen-Etikett oder Platzhalter eines Namens (keine Possessivpronomen:
+# "Als Arzt gilt, wer in seinem Land approbiert ist" spricht über niemanden)
+_PERSON_IM_SATZ_RE = re.compile(r"(?<![\wäöüß])(?:ich|er|sie|Ich|Er|Sie|"
+                                r"Herr|Herrn|Frau|Versicherte[rn]?|versicherte[ \t]+Person|Versicherungsnehmer(?:in)?|"
+                                r"Kunde|Kundin|Ehemann|Ehefrau|Sohn|Tochter|Antragsteller(?:in)?)(?![\wäöüß])|"
+                                r"\[(?:PERSON|NAME|NAMEN)\b")
+_SATZENDE_RE = re.compile(r"[.!?;\n]")
 _SATZTEIL_HINTER_ETIKETT_RE = re.compile(r"[ ]+(?:der|des|dem|den|die|das|eines|einer|einem|im|in|bei|beim|zum|zur|"
                                          r"seit|für|fuer)[ ]")
 _EINHEIT_RE = re.compile(
@@ -1959,7 +1993,31 @@ class _Seitenpruefung:
         self._reste_neben_platzhaltern()
         self._ort_datum()
         self._seitenformen()
+        self._beruf_hinter_als()
         return self.kandidaten
+
+    def _beruf_hinter_als(self):
+        """Beruf der Wissensbasis hinter "als" in einem Satz mit einer Person (Pronomen, Personen-Etikett oder
+        Namens-Platzhalter) – verortet gemeldet, nicht geschwärzt (Abnahme N3). Satzgrenzen nur in einem Fenster um
+        den Treffer gesucht."""
+        text = self.text
+        if "als" not in text and "Als" not in text:
+            return
+        for m in _ALS_BERUF_RE.finditer(text):
+            s, e = m.span(1)
+            wort = m.group(1)
+            if wort.casefold() in _ALS_ROLLE or not self.w.frage("ist_beruf", wort):
+                continue
+            if self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e):
+                continue
+            anfang = max(0, m.start() - 160)
+            vorn = [x.end() for x in _SATZENDE_RE.finditer(text, anfang, m.start())]
+            satz_anfang = vorn[-1] if vorn else anfang
+            hinten = _SATZENDE_RE.search(text, e, min(len(text), e + 160))
+            satz_ende = hinten.start() if hinten else min(len(text), e + 160)
+            if _PERSON_IM_SATZ_RE.search(text, satz_anfang, m.start()) or \
+                    _PERSON_IM_SATZ_RE.search(text, e, satz_ende):
+                self.neu(s, e, "Beruf hinter „als“ im Satz über eine Person", "form")
 
     def _seitenformen(self):
         """Formen über Zeilen- und Zellgrenzen der Seite: Religion/Konfession hinter ihrem Etikett oder unter ihrem
@@ -3408,8 +3466,10 @@ class _Seitenpruefung:
                 self.neu(s, e, "Name in einer Organisations-Spalte (Personenhinweis)", "name")
                 continue
             if artikel_davor(i) and woerter[i - 1][2] in ("der", "die") and not (vn or aw or allow) \
-                    and (nn and not nnm or personenkontext.namensgestalt(w, self.w.modul)
-                         or (_VERB_ARTIKEL_DAVOR_RE.search(text, max(0, s - 40), s) and self._name_auf_er(w))) \
+                    and (nn and not nnm
+                         or not w.lower().endswith(_ER_SACHWORT_ENDUNGEN)
+                         and (personenkontext.namensgestalt(w, self.w.modul)
+                              or (_VERB_ARTIKEL_DAVOR_RE.search(text, max(0, s - 40), s) and self._name_auf_er(w)))) \
                     and (_ARTIKEL_NAME_VERB_RE.match(text, e)
                          or _VERB_ARTIKEL_DAVOR_RE.search(text, max(0, s - 40), s)):
                 # "war der Brandstetter am Steuer", "wie die Wimmer sagte": ein Familienname mit Artikel (mundartlich;
@@ -3534,12 +3594,20 @@ class _Seitenpruefung:
         """Kann ein unbekanntes Wort direkt hinter "saß der", "lenkte die" … ein Familienname sein, auch ohne die
         Endungen von namensgestalt ("Hinterstoißer", "Wimmer"; Abnahme N5): großgeschrieben, ab fünf Buchstaben, auf
         "-er" – kein Allerwelts-, Berufs-, Orts- oder Etikettwort, keine Substantiv-Endung ("Beifahrer", "Fahrer",
-        "Gutachter" bleiben frei). Nur für die Meldung, nicht zum Schwärzen."""
+        "Gutachter" bleiben frei). Auch die mundartliche weibliche Form auf "-erin" ("die Hinterstoißerin"), wenn
+        weder sie noch die Grundform ein bekanntes Wort ist ("Fahrerin", "Beifahrerin" bleiben frei). Nur für die
+        Meldung, nicht zum Schwärzen."""
+        if len(w) >= 7 and w.endswith("erin") and w[:1].isupper() and w.isalpha() and not w.isupper():
+            return self._name_auf_er(w[:-2]) and not any(
+                self.w.frage(f, w) for f in ("ist_allerweltswort", "ist_beruf", "ist_ort", "ist_vorname",
+                                             "ist_allowlist", "ist_anrede_titel"))
         if len(w) < 5 or not w[:1].isupper() or w.isupper() or not w.endswith("er") or not w.isalpha():
             return False
+        if w.lower().endswith(_ER_SACHWORT_ENDUNGEN):
+            return False                                # "fuhr der Radfahrer", "rief der Anwohner", "fuhr der Bagger"
         if any(self.w.frage(f, w) for f in ("ist_allerweltswort", "ist_beruf", "ist_ort", "ist_vorname",
-                                             "ist_allowlist", "ist_anrede_titel")):
-            return False
+                                             "ist_allowlist", "ist_anrede_titel", "ist_mehrdeutig")):
+            return False                                # auch ein mehrdeutiger Nachname ("saß der Winter")
         try:
             from . import wissen as wissen_modul
             return not any(wissen_modul.index(f"etiketten_{art}").eintrag_fuer(w) is not None

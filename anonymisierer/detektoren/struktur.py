@@ -2141,6 +2141,10 @@ def _anfaenge_mit_art(seite, alle: list) -> list:
     return zw[1]
 
 
+# vor einem Feldnamen am Zeilenanfang höchstens eine Feldnummer ("6.", "6.1", "12)")
+_NUR_FELDNUMMER_RE = re.compile(r"[ \t]*(?:\d{1,2}(?:\.\d{1,2})*[.)]?[ \t]+)?")
+
+
 def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
     """Rohwert hinter einem Feldnamen auf einer gescannten Seite. Handschrift, Druckbuchstaben in Kästchen und
     Schreibmaschine liest die OCR oft als Buchstabensalat ("Versicherungsnummer: REN RER ⇥⇥ ERNEST EI") – keine
@@ -2228,7 +2232,11 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
         """Eine Spalte aus Feldnamen (darunter der nächste Feldname oder nichts): der Eintrag steht rechts daneben auf
         derselben Höhe in einer eigenen Zeile – so liest die Texterkennung Formulare mit Kästchen um die Werte (s7 037:
         "Steuer-ID:" ⇥ "Bız11sar066"; Abnahme, widerlegt-1). Nicht, wenn dort ein Feldname beginnt oder die Zelle selbst
-        ein Feldbezeichner ist."""
+        ein Feldbezeichner ist, und nur für einen Feldnamen am Anfang seiner Zeile (höchstens eine Feldnummer davor):
+        "6. Versicherungsnehmer: Name" ist eine Überschrift mit Unterfeld, rechts daneben beginnt eine andere Spalte
+        des Formulars (s9x 007: "☐ parkte" der Unfallumstände)."""
+        if not _NUR_FELDNUMMER_RE.fullmatch(text, zeile.start, et.start):
+            return []
         z = _zelle_rechts_daneben(lg, et)
         if z is None or not lg.zeilen_ocr.get(z.zeile):
             return []

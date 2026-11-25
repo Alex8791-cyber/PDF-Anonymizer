@@ -2681,10 +2681,12 @@ _QUADRAT_WOHNEN_DAVOR_RE = re.compile(
     r"(?i)(?<![\wäöüß])(?:wohn(?:t|en|te|ten)|leb(?:t|en|te|ten)|gemeldet|(?:um|ver)?zieh(?:t|en)|zog|"
     r"(?:um|ver|zu)gezogen|umzug)(?![\wäöüß])[^\n.;:]{0,50}?(?<![\wäöüß])(?:in|im|nach)[ \t]+"
     r"(?:(?:dem|der|das|den)[ \t]+)?(?:(?:Anwesen|Haus|Gebäude|Quadrat)[ \t]+)?$")
-# … oder das Wohnen dahinter: "nach"/"in" direkt davor und ein Umzugs- oder Wohnwort bis drei Wörter dahinter ("ist im
-# Mai nach S 2, 15 umgezogen", "ist nach S 2, 15 gezogen"; Abnahme N4)
-_QUADRAT_PRAEP_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:in|im|nach)[ \t]+$")
+# … oder das Wohnen dahinter: "nach"/"in"/"von"/"aus" direkt davor und ein Umzugs- oder Wohnwort bis drei Wörter
+# dahinter, auch hinter dem Ziel des Umzugs ("ist im Mai nach S 2, 15 umgezogen", "ist nach S 2, 15 gezogen", "ist von
+# S 2, 15 nach T 4, 12 umgezogen"; Abnahme N4)
+_QUADRAT_PRAEP_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:in|im|nach|von|vom|aus)[ \t]+$")
 _QUADRAT_WOHNEN_DAHINTER_RE = re.compile(
+    r"(?:[ \t]+(?:nach|in|ins)[ \t]+[A-U][ \t]?(?:1\d|[1-9])" + _QUADRAT_HAUSNR + r")?"
     r"(?:[ \t]+[^\s.,;:!?]+){0,3}?[ \t]+(?:(?:um|zu|hin|weg)?gezogen|verzogen|übergesiedelt|übersiedelt|"
     r"wohnhaft|wohnt|wohnen|wohnte|gemeldet|lebt|leben|lebte)(?![\wäöüß])")
 # Gegenbeleg: ein Gliederungs-, Platz- oder Feldwort direkt vor dem Quadrat bzw. vor der Aufzählung, in der es steht
@@ -3057,8 +3059,9 @@ def email_verschleiert(text: str) -> list:
 _GEHEIMNIS = (r"(?i:(?:[a-zäöüß0-9]{1,20}-)?[a-zäöüß0-9]{0,20}?(?:kennwort|passwort|password|passwd|geheimzahl|"
               r"geheimnummer|geheimcode))"
               r"|(?:[A-Za-zÄÖÜäöüß0-9]{1,20}-)?(?:PIN|Pin|PUK)(?:-?(?:Nr\.?|Nummer|Code))?"
-              r"|(?i:(?:[a-zäöüß0-9]{1,20}-)?(?:zahlen|entsperr|tresor|alarm|alarmanlagen|tür|tuer|haustür|haustuer|"
-              r"tor|garagen|garagentor|schließ|schliess|schloss|schlüsseltresor|schluesseltresor|safe|plaketten|"
+              r"|(?i:(?:[a-zäöüß0-9]{1,20}-)?(?:[a-zäöüß]{0,15}?(?:tresor|alarm|alarmanlagen|tür|tuer|garagen|garage|"
+              r"schloss|safe|briefkasten)|(?:hof|einfahrts|grundstücks|grundstuecks|haus|garten|garagen|hallen|"
+              r"roll|eingangs|schiebe)?tor|zahlen|entsperr|schließ|schliess|plaketten|"
               r"sperr|geräte|geraete|handy|sim|router|wlan|wifi|wpa2?|netzwerk)-?code)")
 _ZUGANG_ETIKETT_RE = re.compile(
     r"(?<![\wäöüß\-./])(?:"
@@ -3226,9 +3229,26 @@ def _zugang_spalten(text: str) -> list:
 # wüchse sonst quadratisch; Abnahme N9)
 _ZUGANG_TRENNER_RE = re.compile(r"[ \t]*(?:[:=]|\t\t)[ \t]*")
 _ZUGANG_ZELLE_RE = re.compile(r"[^\t\n]+")
-# Gegenstand direkt vor "Code", auch mit Doppelpunkt dazwischen ("Garagentoröffner Code 1199", "Haustür: Code 1357",
-# "Tor zur Tiefgarage: Code 4455"; Abnahme N1): das letzte Wort im Fenster CODE_GEGENSTAND_FENSTER vor "Code"
-_CODE_GEGENSTAND_VOR_RE = re.compile(r"([^\s:;,.]+)(?:[ \t]*:[ \t]*|[ \t]+)$")
+# Gegenstand direkt vor "Code", auch mit Doppelpunkt, Komma, Gedankenstrich oder Klammer dazwischen
+# ("Garagentoröffner Code 1199", "Haustür: Code 1357", "Tor zur Tiefgarage: Code 4455", "Garage, Code 1199",
+# "Haustür – Code 1357", "Haustür (Code 1357)"; Abnahme N1): das letzte Wort im Fenster CODE_GEGENSTAND_FENSTER vor
+# "Code"
+_CODE_GEGENSTAND_VOR_RE = re.compile(r"([^\s:;,.()–—]+)(?:[ \t]*[:,(–—][ \t]*|[ \t]+-[ \t]+|[ \t]+)$")
+# Schloss oder Gerät im Satzteil vor "Code" ("Die Haustür hat den Code 1357.", "Für die Garage gilt der Code 1199.",
+# "Das Tor öffnet mit dem Code 4455."): ohne Satzende, Doppelpunkt, Komma oder Zeilenumbruch dazwischen, höchstens
+# sechs Wörter davor; direkt vor "Code" ein kleingeschriebenes Wort (Artikel, Verb) – nicht ein anderes Substantiv
+# ("Alarmanlage defekt Fehler Code 4711"). Nur Gegenstände eines Schlosses oder Geräts, nicht Konto, Portal, App
+_CODE_SCHLOSS_RE = re.compile(r"(?i)(?<![\wäöüß])[\wäöüß]*(?:alarm\w*|tresor\w*|safe|schloss|schließ\w*|"
+                              r"schliess\w*|tür\w*|tuer\w*|garage\w*|(?:garagen|hof|einfahrts|grundstücks|haus)?"
+                              r"tor(?:öffner|oeffner|es)?|briefkasten\w*|handy|smartphone|tablet|laptop|computer|"
+                              r"router)(?![\wäöüß\-])")
+# Gegenstand direkt hinter "Code" ("Code Haustür: 1357", "Code Garage 1199", "Code für die Haustür 1357") bzw. hinter
+# dem Wert ("Code 4455 für die Tiefgarage", "Code 1357 (Haustür)")
+_CODE_GEGENSTAND_DAHINTER_RE = re.compile(r"[ \t]+(?:(?:für|fuer|der|des|vom|am|an|zur|zum)[ \t]+"
+                                          r"(?:(?:die|den|das|dem|der)[ \t]+)?)?([^\s:;,.()]+)[ \t]*(:?)")
+_CODE_GEGENSTAND_HINTER_WERT_RE = re.compile(r"[ \t]*(?:\([ \t]*|[ \t]+(?:für|fuer|der|des|vom|am|an|zur|zum|"
+                                             r"beim|bei|im|in)[ \t]+(?:(?:die|den|das|dem|der)[ \t]+)?)"
+                                             r"([^\s:;,.()]+)")
 CODE_GEGENSTAND_FENSTER = 80
 _CODE_WERT_DAHINTER_RE = re.compile(r"(?:[ \t]*:[ \t]*|[ \t]+)([^\s,;\"„“”«»<>|]{3,64})")
 _GEHEIMNIS_WERT_DAHINTER_RE = re.compile(r"[ \t]+([^\s,;\"„“”«»<>|]{3,64})")
@@ -3241,9 +3261,49 @@ def _gegenstand_vor_code(text: str, zeilenanfang: int, code_start: int):
     vor = _CODE_GEGENSTAND_VOR_RE.search(text, fenster, code_start)
     if vor is None:
         return None
-    if vor.start(1) == fenster > zeilenanfang and not (text[fenster - 1].isspace() or text[fenster - 1] in ":;,."):
+    if vor.start(1) == fenster > zeilenanfang and not (text[fenster - 1].isspace() or text[fenster - 1] in ":;,.()–—"):
         return None
+    davor = text[max(zeilenanfang, vor.start(1) - 40):vor.start(1)].rstrip(" \t")
+    if "," in text[vor.end(1):code_start] and davor[-1:] not in ("", ":", ";", ",", "–", "—", "(", "•", "|"):
+        return None                                     # "Schaden an der Garage, Code 4711": kein Gegenstand vorn
     return vor.group(1)
+
+
+def _code_mit_gegenstand(text: str, zeilenanfang: int, code_start: int, e: int, zeilenende: int, vor, w):
+    """(start, ende) des Werts hinter "Code", wenn ein Schloss oder Gerät im selben Satzteil steht, aber nicht direkt
+    davor (_gegenstand_vor_code): im Satzteil davor ("Die Haustür hat den Code 1357."), direkt dahinter ("Code Haustür:
+    1357", "Code für die Garage 1199") oder hinter dem Wert ("Code 4455 für die Tiefgarage", "Code 1357 (Haustür)").
+    Ohne Doppelpunkt nur ein Wert mit Geheimnis-Form (Ziffer oder Sonderzeichen); keine Einordnung (Tarif, Rabatt,
+    Version) im Satzteil davor."""
+    fenster = max(zeilenanfang, code_start - CODE_GEGENSTAND_FENSTER)
+    stueck = text[fenster:code_start]
+    schnitt = max(stueck.rfind(c) for c in ".!?;:,")
+    woerter = stueck[schnitt + 1:].split()
+    if schnitt < 0 and fenster > zeilenanfang and woerter and not text[fenster - 1].isspace():
+        woerter = woerter[1:]                           # vom Fenster abgeschnittenes Wort
+    davor = " ".join(woerter[-6:])
+    if _CODE_KEIN_GEHEIMNIS_RE.search(davor):
+        return None
+    # 1. Schloss oder Gerät im Satzteil davor, direkt vor "Code" ein kleingeschriebenes Wort
+    if w is not None and vor is not None and vor[:1].islower() and ":" not in text[w.start():w.start(1)] \
+            and _geheimnis_form(w.group(1)) and _CODE_SCHLOSS_RE.search(davor):
+        return _zugang_wert(text, w.start(1), zeilenende)
+    # 2. Gegenstand direkt hinter "Code", dann der Wert (mit Doppelpunkt in jeder Form)
+    g = _CODE_GEGENSTAND_DAHINTER_RE.match(text, e, zeilenende)
+    if g is not None and _CODE_SCHLOSS_RE.fullmatch(g.group(1)) and not _CODE_KEIN_GEHEIMNIS_RE.search(g.group(0)):
+        if g.group(2):
+            return _zugang_wert(text, g.end(), zeilenende)
+        w2 = _ZUGANG_WERT_RE.match(text, g.end(), zeilenende) if g.end() > g.end(1) else None
+        if w2 is not None and _geheimnis_form(w2.group(0)):
+            return _zugang_wert(text, w2.start(), zeilenende)
+    # 3. Wert direkt hinter "Code", dahinter der Gegenstand
+    if w is not None and ":" not in text[w.start():w.start(1)] and _geheimnis_form(w.group(1)):
+        sp = _zugang_wert(text, w.start(1), zeilenende)
+        if sp is not None:
+            h = _CODE_GEGENSTAND_HINTER_WERT_RE.match(text, sp[1], zeilenende)
+            if h is not None and _CODE_SCHLOSS_RE.fullmatch(h.group(1).rstrip(")")):
+                return sp
+    return None
 
 
 def zugangsdaten(text: str) -> list:
@@ -3290,7 +3350,9 @@ def zugangsdaten(text: str) -> list:
             # Gegenstand direkt vor "Code" und der Wert direkt dahinter ("Garagentoröffner Code 1199", "Alarmanlage Code
             # 8-4-2-6"; Nachprüfung LK-07), auch mit Doppelpunkt hinter dem Gegenstand ("Haustür: Code 1357"; Abnahme
             # N1): wie ein Geheimnis-Etikett ohne Trennzeichen
-            vor = _gegenstand_vor_code(text, text.rfind("\n", 0, m.start()) + 1, m.start())
+            # Zeilenanfang nur im Umkreis des Fensters (weiter zurück zählt er für die Regeln nicht)
+            zeilenanfang = text.rfind("\n", max(0, m.start() - 4 * CODE_GEGENSTAND_FENSTER), m.start()) + 1
+            vor = _gegenstand_vor_code(text, zeilenanfang, m.start())
             w = _CODE_WERT_DAHINTER_RE.match(text, e, zeilenende)
             if vor is not None and w is not None and _CODE_GEGENSTAND_RE.search(vor) \
                     and not _CODE_KEIN_GEHEIMNIS_RE.search(vor) \
@@ -3299,6 +3361,10 @@ def zugangsdaten(text: str) -> list:
                 if sp is not None:
                     aus.append(sp)
                     continue
+            sp = _code_mit_gegenstand(text, zeilenanfang, m.start(), e, zeilenende, vor, w)
+            if sp is not None:
+                aus.append(sp)
+                continue
         if geheim:
             # "Router-Kennwort Zirbe-Stube-77", "Ihr Initialkennwort Kx7#mQ2v.", "Zahlencode 2580."
             w = _GEHEIMNIS_WERT_DAHINTER_RE.match(text, e, zeilenende)
