@@ -64,6 +64,7 @@ Arbeitsweise:
 
 from __future__ import annotations
 
+import bisect
 import codecs
 import datetime
 import os
@@ -1011,6 +1012,96 @@ def _platzhalter_zeilen_vorher(m, rects: list) -> dict:
     return aus
 
 
+# Abgleich der Zeichen einer Zeile vor/nach dem Schwärzen. difflib vergleicht jeden Block mit jedem: auf langen,
+# gleichförmigen Zeilen mit vielen Kästen quadratisch (8 000 Zeichen, 810 Kästen: 207 s; Abnahme 2 A2-11) und auf
+# sich wiederholendem Text mit verrutschten Blöcken. Bis zu ABGLEICH_GANZ Zeichenpaaren (vorher x nachher) bleibt es
+# beim ganzen Vergleich, darüber abschnittsweise; zwei fast gleiche Folgen laufen der Reihe nach und setzen an einer
+# Abweichung mit den wenigsten übersprungenen Zeichen wieder auf (ABGLEICH_ANKER gleiche Zeichen).
+ABGLEICH_GANZ = 250_000
+ABGLEICH_ABSCHNITT = 400
+ABGLEICH_RAND = 120
+ABGLEICH_SUCHE = 16
+ABGLEICH_ANKER = 3
+
+
+def _teilfolge(a: list, b: list) -> list:
+    """Paare (i, j) mit a[i] == b[j], in Reihenfolge: die gemeinsamen Blöcke von difflib – bei langen Folgen
+    abschnittsweise (je ABGLEICH_ABSCHNITT Zeichen von a gegen das Stück von b ab dem letzten sicheren Paar), so
+    dass die Laufzeit linear wächst."""
+    import difflib
+    if len(a) * len(b) <= ABGLEICH_GANZ:
+        abgleich = difflib.SequenceMatcher(None, a, b, autojunk=False)
+        return [(x + k, y + k) for x, y, n in abgleich.get_matching_blocks() for k in range(n)]
+    paare: list = []
+    i0 = j0 = 0
+    while i0 < len(a) and j0 < len(b):
+        i1 = min(len(a), i0 + ABGLEICH_ABSCHNITT)
+        j1 = min(len(b), j0 + (i1 - i0) + ABGLEICH_RAND)
+        abgleich = difflib.SequenceMatcher(None, a[i0:i1], b[j0:j1], autojunk=False)
+        neu = [(i0 + x + k, j0 + y + k) for x, y, n in abgleich.get_matching_blocks() for k in range(n)]
+        if i1 < len(a):
+            # am Abschnittsende kann ein Block in den nächsten Abschnitt greifen: nur bis vor den Rand übernehmen,
+            # der nächste Abschnitt beginnt hinter dem letzten übernommenen Paar
+            neu = [pq for pq in neu if pq[0] < i1 - ABGLEICH_RAND // 2] or neu[:1]
+        if not neu:
+            i0 = i1
+            continue
+        paare += neu
+        i0, j0 = neu[-1][0] + 1, neu[-1][1] + 1
+    return paare
+
+
+def _fast_gleich(a: list, b: list):
+    """Paare (i, j) zweier fast gleicher Folgen der Reihe nach; an einer Abweichung das Wiederaufsetzen mit den
+    wenigsten übersprungenen Zeichen (bis ABGLEICH_SUCHE), an dem ABGLEICH_ANKER Zeichen übereinstimmen. None, wenn
+    eine Abweichung so nicht zu überbrücken ist."""
+    paare: list = []
+    i = j = 0
+    na, nb = len(a), len(b)
+    while i < na and j < nb:
+        if a[i] == b[j]:
+            paare.append((i, j))
+            i += 1
+            j += 1
+            continue
+        weiter = None
+        for d in range(1, ABGLEICH_SUCHE + 1):
+            for di in range(d + 1):
+                ii, jj = i + di, j + d - di
+                k = min(ABGLEICH_ANKER, na - ii, nb - jj)
+                if k > 0 and a[ii:ii + k] == b[jj:jj + k] and (k == ABGLEICH_ANKER or ii + k == na or jj + k == nb):
+                    weiter = ii, jj
+                    break
+            if weiter:
+                break
+        if weiter is None:
+            if na - i > ABGLEICH_SUCHE and nb - j > ABGLEICH_SUCHE:
+                return None
+            break                                       # nur noch ein kurzer Rest ohne Gegenstück
+        i, j = weiter
+    return paare
+
+
+def _zeichen_abgleich(vorher: list, nachher: list, weg: list) -> list:
+    """Paare (i, j) mit vorher[i] == nachher[j], in Reihenfolge: vorher die Zeichen der Zeile vor dem Schwärzen,
+    nachher die gefundenen danach, weg[i] = das Zeichen vorher liegt in einem Kasten der Zeile. Fehlen genau die
+    Zeichen in Kästen (der Regelfall), ist der Abgleich die Zuordnung der übrigen der Reihe nach; sonst werden die
+    erwartet verbliebenen Zeichen mit den gefundenen abgeglichen (beide Folgen fast gleich: ein Zeichen am Rand eines
+    Kastens mehr oder weniger) – und nur wenn das nicht aufgeht (die Kästen passen nicht zu den entfernten Zeichen),
+    die ganze Zeile vorher mit der danach. Rückgabe (paare, genau): genau = der Abgleich folgt den Kästen (es fehlen
+    die Zeichen in Kästen, bis auf einzelne an ihrem Rand)."""
+    bleiben = [i for i, w in enumerate(weg) if not w]
+    rest = [vorher[i] for i in bleiben]
+    nachher = list(nachher)
+    if rest == nachher:
+        return list(zip(bleiben, range(len(nachher)))), True
+    paare = _fast_gleich(rest, nachher)
+    kuerzer = min(len(rest), len(nachher))
+    if paare is not None and len(paare) >= kuerzer - max(2, kuerzer // 50):
+        return [(bleiben[a], b) for a, b in paare], True
+    return _teilfolge(vorher, nachher), False
+
+
 def _platzhalter_verschiebung(seite, zeilen_vorher: dict, rects: list) -> list:
     """Nach apply_redactions: MuPDF 1.28.5/1.28.6 (PyMuPDF 2.0/2.1) lässt beim Entfernen von Glyphen mitten in
     einem TJ-Feld die Breite der ersten entfernten Glyphe weg – der Rest der Zeile rutscht nach links unter den
@@ -1022,7 +1113,6 @@ def _platzhalter_verschiebung(seite, zeilen_vorher: dict, rects: list) -> list:
     aus = [(0.0, 0.0, None, None)] * len(rects)
     if not zeilen_vorher:
         return aus
-    import difflib
     try:
         rd = seite.get_text("rawdict", flags=sm.TEXT_FLAGS)
     except Exception:
@@ -1035,20 +1125,35 @@ def _platzhalter_verschiebung(seite, zeilen_vorher: dict, rects: list) -> list:
                     if not ch["c"].isspace():
                         b = ch["bbox"]
                         nachher.append((b[0], b[2], ch["c"], ch["origin"][1]))
-    verschiebung: dict = {}           # zid -> [(x0_vorher, x1_vorher, dx)] der wiedergefundenen Glyphen
+    verschiebung: dict = {}           # zid -> ([(x0_vorher, x1_vorher, dx, x0, x1)], linke Kanten, größte Breite)
+    genau: dict = {}                  # zid -> der Abgleich ist genau (es fehlen genau die Zeichen in Kästen)
     for zid, info in zeilen_vorher.items():
         vorher = info["glyphen"]
         box, grund, groesse = info["box"], info["grundlinie"], info["groesse"]
         kandidaten = sorted((c for c in nachher if abs(c[3] - grund) <= 0.3 * groesse
                              and c[1] > box.x0 - 2 and c[0] < box.x1 + 2), key=lambda c: c[0])
-        abgleich = difflib.SequenceMatcher(None, [g[2] for g in vorher], [c[2] for c in kandidaten],
-                                           autojunk=False)
+        # Zeichen, deren Mitte in einem Kasten der Zeile liegt, entfernt apply_redactions
+        kaesten_zeile = sorted((r.x0, r.x1) for r in rects
+                               if min(r.y1, box.y1) - max(r.y0, box.y0) > 0.3 * min(r.height, box.height))
+        anfaenge = [k[0] for k in kaesten_zeile]
+        breite = max((k[1] - k[0] for k in kaesten_zeile), default=0.0)
+        weg = []
+        for g in vorher:
+            mitte, drin = (g[0] + g[1]) / 2, False
+            q = bisect.bisect_right(anfaenge, mitte) - 1
+            while q >= 0 and kaesten_zeile[q][0] >= mitte - breite:
+                if kaesten_zeile[q][1] >= mitte:
+                    drin = True
+                    break
+                q -= 1
+            weg.append(drin)
         paare = []
-        for a, b, n in abgleich.get_matching_blocks():
-            for k in range(n):
-                v, c = vorher[a + k], kandidaten[b + k]
-                paare.append((v[0], v[1], c[0] - v[0], c[0], c[1]))
-        verschiebung[zid] = paare
+        abgleich, genau[zid] = _zeichen_abgleich([g[2] for g in vorher], [c[2] for c in kandidaten], weg)
+        for a, b in abgleich:
+            v, c = vorher[a], kandidaten[b]
+            paare.append((v[0], v[1], c[0] - v[0], c[0], c[1]))
+        # Paare nach linker Kante vorher (die Glyphen vorher sind danach sortiert): Nachbarn per Halbierung
+        verschiebung[zid] = (paare, [p[0] for p in paare], max((p[1] - p[0] for p in paare), default=0.0))
     for i, r in enumerate(rects):
         beste, ueberlappung = None, 0.0
         for zid, info in zeilen_vorher.items():
@@ -1056,16 +1161,27 @@ def _platzhalter_verschiebung(seite, zeilen_vorher: dict, rects: list) -> list:
             u = min(r.y1, box.y1) - max(r.y0, box.y0)
             if u > ueberlappung and r.x1 > box.x0 - 1 and r.x0 < box.x1 + 1:
                 beste, ueberlappung = zid, u
-        if beste is None:
+        if beste is None or beste not in verschiebung:
             continue
-        paare = verschiebung.get(beste) or []
-        links = [p for p in paare if p[1] <= r.x0 + 0.5]
-        rechts = [p for p in paare if p[0] >= r.x1 - 0.5]
-        nachbar_l = max(links, key=lambda p: p[1]) if links else None
-        nachbar_r = min(rechts, key=lambda p: p[0]) if rechts else None
+        paare, anfaenge, breite = verschiebung[beste]
+        # rechter Nachbar: das erste Paar mit linker Kante ab r.x1 - 0,5; linker: das (erste) mit der größten
+        # rechten Kante bis r.x0 + 0,5 – nur Paare mit linker Kante davor kommen in Frage, rückwärts gesucht
+        k = bisect.bisect_left(anfaenge, r.x1 - 0.5)
+        nachbar_r = paare[k] if k < len(paare) else None
+        grenze, nachbar_l = r.x0 + 0.5, None
+        q = bisect.bisect_left(anfaenge, grenze) - 1
+        while q >= 0 and (nachbar_l is None or anfaenge[q] + breite >= nachbar_l[1]):
+            if paare[q][1] <= grenze and (nachbar_l is None or paare[q][1] >= nachbar_l[1]):
+                nachbar_l = paare[q]
+            q -= 1
         dl = nachbar_l[2] if nachbar_l else 0.0
         dr = nachbar_r[2] if nachbar_r else dl
-        if abs(dl) > r.width + 50 or abs(dr) > r.width + 50:      # Abgleich unplausibel: nicht verschieben
+        if genau.get(beste):
+            # genauer Abgleich: die Verschiebung wächst mit jedem Kasten der Zeile (lange Zeilen mit vielen
+            # Kästen, Abnahme 2 A2-11) – über den Kasten hinweg aber höchstens um die Breite einer Glyphe
+            if abs(dr - dl) > r.width + 5:
+                continue
+        elif abs(dl) > r.width + 50 or abs(dr) > r.width + 50:    # Abgleich unplausibel: nicht verschieben
             continue
         aus[i] = (dl, dr, nachbar_l[4] if nachbar_l else None, nachbar_r[3] if nachbar_r else None)
     return aus
@@ -1121,14 +1237,19 @@ def _platzhalter_verdeckung_pruefen(lauf, nr, seite, kaesten: list) -> None:
     except Exception:
         return
     verdeckt = []
+    # nur die Kästen, die das Wort waagerecht erreichen können (nach linker Kante sortiert; viele Kästen auf einer
+    # Seite: 810 Kästen x 8 000 Wörter 6,6 s; Abnahme 2 A2-11)
+    ks = sorted((k.x0, k.y0, k.x1, k.y1) for k in kaesten)
+    anfaenge = [k[0] for k in ks]
+    breite = max(k[2] - k[0] for k in ks)
     for w in woerter:
-        r = fitz.Rect(w[:4])
-        if r.width <= 0:
+        x0, y0, x1, y1 = w[:4]
+        if x1 - x0 <= 0:
             continue
-        for k in kaesten:
-            if min(r.y1, k.y1) - max(r.y0, k.y0) <= 0.4 * r.height:
+        for kx0, ky0, kx1, ky1 in ks[bisect.bisect_left(anfaenge, x0 - breite):bisect.bisect_left(anfaenge, x1)]:
+            if min(y1, ky1) - max(y0, ky0) <= 0.4 * (y1 - y0):
                 continue
-            anteil = max(0.0, min(r.x1, k.x1) - max(r.x0, k.x0)) / r.width
+            anteil = max(0.0, min(x1, kx1) - max(x0, kx0)) / (x1 - x0)
             if 0.15 < anteil < 0.9:
                 verdeckt.append(w[4])
                 break
@@ -1757,9 +1878,12 @@ def _kollateral_pruefen(lauf, nr, seite, woerter_vorher, rects):
     try:
         nachher: dict = {}
         for w in seite.get_text("words", flags=sm.TEXT_FLAGS):
-            nachher.setdefault(w[4], []).append(fitz.Rect(w[:4]))
+            nachher.setdefault(w[4], []).append((w[1], w[3]))
     except Exception:
         return
+    # je Wortlaut die Lagen nach oberer Kante sortiert: gesucht wird nur in der Höhe des Worts (ein Wort, das
+    # tausendfach auf der Seite steht, nicht gegen jedes Vorkommen; Abnahme 2 A2-11)
+    lagen = {t: (sorted(v), max(y1 - y0 for y0, y1 in v)) for t, v in nachher.items()}
     beschaedigt = []
     raster = _Raster(rects)
     for w in woerter_vorher:
@@ -1770,7 +1894,10 @@ def _kollateral_pruefen(lauf, nr, seite, woerter_vorher, rects):
                 bedeckt += max(0.0, min(r.x1, x.x1) - max(r.x0, x.x0))
         if bedeckt > 0.5 * (r.width or 1.0):
             continue   # gehört zum Treffer (oder ist dessen Satzzeichen)
-        if not any(min(r.y1, n.y1) - max(r.y0, n.y0) > 0.5 * r.height for n in nachher.get(w[4], ())):
+        liste, hoehe = lagen.get(w[4], ((), 0.0))
+        von = bisect.bisect_left(liste, (r.y0 - hoehe,))
+        bis = bisect.bisect_left(liste, (r.y1,))
+        if not any(min(r.y1, ny1) - max(r.y0, ny0) > 0.5 * r.height for ny0, ny1 in liste[von:bis]):
             beschaedigt.append(w[4])
     if beschaedigt:
         beispiel = ", ".join(repr(b) for b in beschaedigt[:3])

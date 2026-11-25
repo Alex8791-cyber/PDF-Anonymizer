@@ -33,7 +33,7 @@ OCR-Zeilen haben keine Tabulatoren, schräge Scans verschieben die Zeilen):
 from __future__ import annotations
 
 import re
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from typing import NamedTuple
 
 from .. import kennungsformen
@@ -116,12 +116,17 @@ def _kopfteile(text: str, reihe: Reihe, ets: list, starts: list) -> list | None:
         inhalt = text[zelle.start:zelle.ende]
         if _WERTARTIG_RE.search(inhalt):
             return None
-        labels = [et for et in _etiketten_in(ets, starts, zelle.start, zelle.ende)]
-        # Etiketten in Klammern teilen nicht ("Kunde (Name, Vorname)"), Einheiten auch nicht
+        labels = sorted(_etiketten_in(ets, starts, zelle.start, zelle.ende), key=lambda et: et.start)
+        # Etiketten in Klammern teilen nicht ("Kunde (Name, Vorname)"), Einheiten auch nicht – die Klammern bis zum
+        # Etikett laufend gezählt statt je Etikett vom Zellenanfang (linear auch bei langen Zellen, Abnahme 2 A2-12)
         teiler = []
+        pos, offen = zelle.start, 0
         for et in labels:
-            vorn = text[zelle.start:et.start]
-            if vorn.count("(") > vorn.count(")"):
+            if et.start > pos:
+                stueck = text[pos:et.start]
+                offen += stueck.count("(") - stueck.count(")")
+                pos = et.start
+            if offen > 0:
                 continue
             if text[et.start:et.ende].casefold() in _EINHEITEN:
                 continue
@@ -132,18 +137,21 @@ def _kopfteile(text: str, reihe: Reihe, ets: list, starts: list) -> list | None:
                 return None                          # langer Text ohne Etikett: kein Kopf
             teile.append((zelle.x0, zelle.x1, None, inhalt))
             continue
-        grenzen = [t.start for t in teiler]
+        erste_je_start: dict = {}
+        for t in teiler:
+            erste_je_start.setdefault(t.start, t)
+        teiler_starts = [t.start for t in teiler]
         gruppen: list = []
         for w in woerter:
-            neu = any(w.start == g for g in grenzen)
-            if neu or not gruppen:
+            if w.start in erste_je_start or not gruppen:
                 gruppen.append([w])
             else:
                 gruppen[-1].append(w)
         for g in gruppen:
-            et = next((t for t in teiler if t.start == g[0].start), None)
+            et = erste_je_start.get(g[0].start)
             # Spaltenname aus einer Datenbank ("VN_PLZ", "KD_ORT", "VP_GEBDAT"): vorn die Rolle, hinten das Feld
-            hinten = [t for t in teiler if g[0].start < t.start < g[-1].ende and text[t.start - 1] == "_"]
+            hinten = [t for t in teiler[bisect_right(teiler_starts, g[0].start):bisect_left(teiler_starts, g[-1].ende)]
+                      if text[t.start - 1] == "_"]
             if et is not None and hinten:
                 et = hinten[-1]
             teile.append((min(w.x0 for w in g), max(w.x1 for w in g), et, text[g[0].start:g[-1].ende]))
@@ -295,6 +303,7 @@ class _Tabelle:
         self.anker = frozenset()                      # belegte Spalten der ersten Zeile des letzten Datensatzes
         self.umbrochen: set = set()                   # (Spalte, Reihe) mit Folgezeilen (Zellumbruch)
         self.bis_ende = False                         # reicht bis an den unteren Seitenrand (Fortsetzung sicher)
+        self.angekuendigt = False                     # eine Fortsetzung ist ausdrücklich angekündigt
 
 
 # Hinweis auf eine Fortsetzung am Kopf der Folgeseite ("Fortsetzung", "Bestandsliste … – Seite 2", "Blatt 3 von 4",
@@ -305,21 +314,42 @@ _FORTSETZUNG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:fortsetzung|forts\.|fortg
 
 # Ankündigung einer Fortsetzung unter dem Ende einer Tabelle ("Weitere Kinder siehe Folgeseite.", "Fortsetzung auf Seite
 # 2", "siehe Rückseite", "Fortsetzung umseitig", "b. w."): die Tabelle setzt sich auf der nächsten Seite ohne Kopf fort
-# (Nachprüfung NP-09, Abnahme N8)
+# (Nachprüfung NP-09, Abnahme N8). "umseitig" und "umstehend" nur in einer Fortsetzungsformel ("Fortsetzung umseitig",
+# "Weitere Kinder umseitig") – nicht "Es gelten die Bedingungen umstehend." (Abnahme 2 A2-02)
 _FORTSETZUNG_FOLGT_RE = re.compile(
     r"(?i)(?<![\wäöüß])(?:folgeseiten?|folgeblatt|nächsten?[ \t]+seite|naechsten?[ \t]+seite|rückseite|rueckseite|"
-    r"umseitig|umstehend|"
+    r"(?:fortsetzung|forts\.|fortgesetzt|weitere[nrs]?(?:[ \t]+[^\s.;:,]{2,30}){0,3}?)[ \t]+(?:siehe[ \t]+|s\.[ \t]*)?"
+    r"(?:umseitig|umstehend)|"
     r"nächste[sn]?[ \t]+blatt|fortsetzung[ \t]+(?:auf|siehe|s\.|folgt)|wird[ \t]+fortgesetzt|"
     r"(?:siehe|s\.|weiter[ \t]+(?:auf|mit))[ \t]+(?:seite|blatt|s\.)[ \t]*\d{1,3}|bitte[ \t]+wenden|b\.[ \t]?w\.)"
     r"(?![\wäöüß])")
+# Eine Ankündigung ist eine Fortsetzungsformel ("Fortsetzung …", "Weitere Kinder siehe Folgeseite", "siehe Rückseite",
+# "b. w.") oder eine kurze Zeile ("Folgeseite", "→ Rückseite") – nicht ein Satz über etwas anderes ("Die
+# Tarifbausteine finden Sie auf der Folgeseite."; Abnahme 2 A2-02)
+_FORTSETZUNG_FORMEL_RE = re.compile(r"(?i)(?<![\wäöüß])(?:fortsetzung|forts\.|fortgesetzt|weiter\w{0,3}|siehe|s\.|"
+                                    r"bitte[ \t]+wenden|b\.[ \t]?w\.)(?![\wäöüß])")
 
 
 def _fortsetzung_folgt(text: str, reihen: list, ende: int, erste: int) -> bool:
     """Kündigt eine Reihe am Ende der Tabelle (die letzten zwei Reihen ab erste, die Tabelle endet vor reihen[ende]) oder
     eine der drei Reihen darunter eine Fortsetzung auf der nächsten Seite an? Die Ankündigung kann als letzte Reihe in
     die Tabelle geraten sein ("Weitere Kinder siehe Folgeseite." unter der Spalte "Name")."""
-    return any(_FORTSETZUNG_FOLGT_RE.search(text, z.start, z.ende)
-               for r in reihen[max(erste, ende - 2):ende + 3] for z in r.zellen)
+    for r in reihen[max(erste, ende - 2):ende + 3]:
+        for z in r.zellen:
+            if _FORTSETZUNG_FOLGT_RE.search(text, z.start, z.ende) and (
+                    _FORTSETZUNG_FORMEL_RE.search(text, z.start, z.ende) or len(text[z.start:z.ende].split()) <= 4):
+                return True
+    return False
+
+
+def _namensbeleg_in(dok, tab: "_Tabelle") -> bool:
+    """Steht in einer Personenspalte der Tabelle ein bekannter Vor- oder Nachname der Wissensbasis?"""
+    for idx, sp in enumerate(tab.spalten):
+        if "person" in sp.arten:
+            for nr, s, e, _ in tab.werte[idx]:
+                if _namensbeleg(dok.seiten[nr].text[s:e]):
+                    return True
+    return False
 
 
 def _datenreihen(text: str, reihen: list, i_kopf: int, tab: _Tabelle, h: float, nr: int, ist_kopf,
@@ -1042,17 +1072,24 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
         tab = None
         if not any(ist_kopf(r) for r in vorn):
             for i0 in range(len(vorn)):
-                if not offen.bis_ende and not any(_FORTSETZUNG_RE.search(text, z.start, z.ende)
-                                                  for r in reihen[:i0 + 1] for z in r.zellen):
+                oben = any(_FORTSETZUNG_RE.search(text, z.start, z.ende) for r in reihen[:i0 + 1] for z in r.zellen)
+                if not offen.bis_ende and not oben:
                     continue
                 kandidat = _Tabelle(offen.spalten, reihen[i0])
                 j = _datenreihen(text, reihen, i0 - 1, kandidat, h, nr, ist_kopf, hat_etikett)
-                if kandidat.reihen >= 2 and _passt_zur_tabelle(dok, kandidat):
+                # über den Reihen eine Überschrift ohne Hinweis auf die Fortsetzung ("Übersicht der gewählten
+                # Tarifbausteine"): eine neue Tabelle, außer in den Personenspalten steht ein bekannter Name; ebenso
+                # eine einzelne Reihe hinter einer Ankündigung (Abnahme 2 A2-02, N8)
+                ueberschrift = not oben and any(len(r.zellen) == 1 for r in reihen[:i0])
+                genug = kandidat.reihen >= 2 or (kandidat.reihen == 1 and (offen.angekuendigt or oben))
+                if genug and _passt_zur_tabelle(dok, kandidat) \
+                        and (not (ueberschrift or kandidat.reihen == 1) or _namensbeleg_in(dok, kandidat)):
                     treffer += _werte_der_tabelle(dok, kandidat, im_etikett)
                     tab, i = kandidat, j
                     break
         if tab is not None:
-            tab.bis_ende = _bis_seitenende(lg, tab) or _fortsetzung_folgt(text, reihen, i, 0)
+            tab.angekuendigt = _fortsetzung_folgt(text, reihen, i, 0)
+            tab.bis_ende = _bis_seitenende(lg, tab) or tab.angekuendigt
         offen = tab
     while i < len(reihen):
         spalten = _kopf_spalten(text, reihen[i], ets, starts, breite)
@@ -1090,7 +1127,8 @@ def _seite_lesen(dok, nr: int, seite, lg: Lage, ets: list, starts: list, reihen:
         j = _datenreihen(text, reihen, kopf_ende, tab, h, nr, ist_kopf, hat_etikett)
         if tab.reihen:
             treffer += _werte_der_tabelle(dok, tab, im_etikett)
-            tab.bis_ende = _bis_seitenende(lg, tab) or _fortsetzung_folgt(text, reihen, j, kopf_ende + 1)
+            tab.angekuendigt = _fortsetzung_folgt(text, reihen, j, kopf_ende + 1)
+            tab.bis_ende = _bis_seitenende(lg, tab) or tab.angekuendigt
             offen = tab                               # die letzte Tabelle der Seite kann sich fortsetzen
         i = max(j, i + 1)
     return treffer, offen

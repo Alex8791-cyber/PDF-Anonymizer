@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 
+from .. import personenkontext
 from . import Treffer, detektor
 from .struktur import (DATUMSWOERTER, etiketten, ist_kennungsform, kennung_spanne, lage, namen_spanne,
                        ort_spanne, plz_ort_spannen, ueberlappung)
@@ -36,8 +37,8 @@ _GRUSS_RE = re.compile(
     r"^[ \t]*(?:mit[ ]+(?:freundlichen|freundlichem|besten|bestem|herzlichen|herzlichem|lieben|liebem|kollegialen|"
     r"kollegialem|vielen|verbindlichen|sonnigen)[ ]+gr(?:ü|ue|u)(?:ß|ss)(?:en|e)?"
     r"|(?:(?:freundliche|viele|beste|herzliche|liebe|schöne|sonnige|kollegiale|sportliche)[ ]+)?gr(?:ü|ue)(?:ß|ss)e"
-    r"(?:[ ]+(?:aus|von|vom|nach|in)(?:[ ]+[^\W\d_][\w\-]*){1,4})?"
-    r"|gru(?:ß|ss)[ ]+(?:aus|von|vom|nach|in)(?:[ ]+[^\W\d_][\w\-]*){1,4}"
+    r"(?:[ ]+(?:aus|von|vom|nach|in)(?:[ ]+[^\W\d_][\w\-]*){1,6})?"
+    r"|gru(?:ß|ss)[ ]+(?:aus|von|vom|nach|in)(?:[ ]+[^\W\d_][\w\-]*){1,6}"
     r"|(?:danke|vielen[ ]+dank|besten[ ]+dank)(?:[ ]+und|[ ]*,)[ ]+(?:viele[ ]+|beste[ ]+|liebe[ ]+)?gr(?:ü|ue)(?:ß|ss)e"
     r"|hochachtungsvoll|mfg|lg|vg|gruß|grüße|best[ ]+regards|kind[ ]+regards|regards|cordialement"
     r"|freundlichst|herzlichst|servus|tschüss|tschüs|ciao|bis[ ]+bald|pfiat[ ]+di|baba)[ ]*[,.!]?[ \t]*$",
@@ -49,6 +50,38 @@ _HERR_FRAU_RE = re.compile(r"(?<![\wäöüß])(?:Herrn?|Frau|Hr\.|Fr\.)[ ]+(?=[^
 _UNTERZEICHNER_RE = re.compile(r"(?:i\.[ ]?A\.|i\.[ ]?V\.|gez\.|ppa\.|p\.[ ]?p\.|per[ ]+Prokura|im[ ]+Auftrag|"
                                r"in[ ]+Vertretung)[ ]+")
 QUELLE_ANREDE = "struktur.anrede_gruss"
+
+
+# Unterzeichner in der Grußzeile selbst: hinter "Grüße von" ("Liebe Grüße von Kreszenz Moosbichler aus Inzell", "Grüße
+# von Grohe") oder hinter einem Komma am Zeilenende ("Viele Grüße aus dem Allgäu, Rowenta"; Abnahme 2 V6) – ein bis drei
+# großgeschriebene Wörter, nicht "Grüße von der Messe", "Grüße von Herzen"
+_GRUSS_FORMEL = (r"(?:(?:viele|liebe|beste|schöne|sonnige|herzliche|freundliche|kollegiale|sportliche)[ ]+)?"
+                 r"(?:gr(?:ü|ue)(?:ß|ss)e|gru(?:ß|ss))")
+_GRUSS_VON_NAME_RE = re.compile(r"(?i:^[ \t]*" + _GRUSS_FORMEL + r")[ ]+(?i:von)[ ]+"
+                                r"(?P<name>[A-ZÄÖÜ][\w'’\-]+(?:[ ]+[A-ZÄÖÜ][\w'’\-]+){0,2})"
+                                r"(?:[ ]+(?i:aus|vom|von)(?:[ ]+[^\W\d_][\w\-]*){1,6})?[ ]*[,.!]?[ \t]*$")
+_GRUSS_KOMMA_NAME_RE = re.compile(r"(?i:^[ \t]*" + _GRUSS_FORMEL + r")(?:[ ]+(?i:aus|von|vom|nach|in)"
+                                  r"(?:[ ]+[^\W\d_][\w\-]*){1,6})?[ ]*,[ ]*"
+                                  r"(?P<name>[A-ZÄÖÜ][\w'’\-]+(?:[ ]+[A-ZÄÖÜ][\w'’\-]+){0,2})[ ]*[.!]?[ \t]*$")
+_GRUSS_KEIN_NAME = frozenset({"herzen", "haus", "hause", "team", "uns", "allen"})
+
+
+def _name_in_grusszeile(text: str, z) -> list:
+    """(start, ende) des Unterzeichners in der Grußzeile selbst (_GRUSS_VON_NAME_RE, _GRUSS_KOMMA_NAME_RE)."""
+    zt = text[z.start:z.ende]
+    m = _GRUSS_VON_NAME_RE.match(zt) or _GRUSS_KOMMA_NAME_RE.match(zt)
+    if m is None:
+        return []
+    name = m.group("name")
+    if name.split()[0].casefold() in _GRUSS_KEIN_NAME or personenkontext.ORG_EINHEIT_RE.search(name):
+        return []
+    try:
+        from .. import wissen
+        if all(wissen.ist_allerweltswort(w) or wissen.ist_ort(w) for w in name.split()):
+            return []
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        pass
+    return [(z.start + m.start("name"), z.start + m.end("name"), "namen", name if " " in name else None)]
 
 
 def _name_nach(text: str, pos: int, ende: int, streng: bool, komma: bool = False, kalender: bool = False):
@@ -86,6 +119,8 @@ def _zeile_ist_name(text: str, z) -> list:
             continue
         if sp.ende - sp.start < 0.6 * len(text[anfang:e].strip()):
             continue
+        if not m and personenkontext.ORG_EINHEIT_RE.search(text, sp.start, sp.ende):
+            continue                                    # "Allgäuer Versicherungsdienst", "Maklerbetreuung Bayern"
         aus.append((sp.start, sp.ende, "namen", text[sp.start:sp.ende] if sp.woerter > 1 else None))
     return aus
 
@@ -129,6 +164,7 @@ def anrede_gruss(dok, kontext):
                     werte.append((sp.start, sp.ende, "namen", text[sp.start:sp.ende] if sp.woerter > 1 else None))
             # Grußformel -> folgende kurze Zeilen; unter einer Ort-Datum-Zeile ("Prien, 14.11.2026" ⏎ "Sonntag") nur ein
             # Wochentag oder Monat allein (den die KI nie liest; Nachprüfung NP-06)
+            werte += _name_in_grusszeile(text, z)
             ort_datum = not _GRUSS_RE.match(zt) and bool(_ORT_DATUM_ZEILE_RE.match(zt))
             if _GRUSS_RE.match(zt) or ort_datum:
                 h = max(lg.hoehe, 4.0)

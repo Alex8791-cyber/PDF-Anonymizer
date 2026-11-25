@@ -396,6 +396,70 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     gefunden (32 000 Zeichen „Name“-Zeilen 12,0 s → 4,3 s); eine E-Mail-Adresse beginnt nur am Wortanfang (ein langes
     Wort ohne „@“ wuchs quadratisch). Neue Wachstumstests (Analyse 2 000 gegen 16 000 Zeichen, einzelne Regeln 4 000
     gegen 32 000) prüfen diese Formen und die der Nachprüfung B.
+- **Zweite Abnahme der Zusammenführung (Runde 5, vierte Nachbesserung):** Zwei Regeln der dritten Nachbesserung ließen
+  Werte durch, die vorher geschwärzt oder gemeldet waren, und mehrere neue Regeln schwärzten zu viel. Behoben, je
+  Befund mit Abwandlungen und Gegenproben in `tests/test_abnahme2_r7.py`:
+  - Stille Lecks (Regressionen): Ein Zugangscode hinter einem Gegenstand in Klammern oder Anführungszeichen, mit
+    doppeltem Gedankenstrich, Pfeil oder Schrägstrich („(Haustür) Code 1357“, „Garage (Tor) Code 4419“, „Schlüsselbox
+    (links neben der Tür) Code 2468“, „Eingangstür–– Code 8264“, „Haustür -> Code 1357“) wird wieder geschwärzt, auch
+    wenn die OCR den Gedankenstrich als Bindestriche direkt am Wort liest („Eingangstür-- Code 8264“). Ein
+    unbekannter Familienname mit Artikel, der auf ein Rollenwort endet („saß der Kirchsteiger“, „lenkte der
+    Hochsteiger“, „fuhr der Grubhalter“), wird wieder gemeldet: Nur ganze Rollen-, Fahrzeug- und Gerätewörter bleiben
+    ohne Meldung – das Grundwort allein („Schwager“, „Radler“), mit Vorsilben („Anwohner“, „Mitbewohner“, „Aufsteiger“)
+    oder hinter einem Bestimmungswort mit Vorsilbe („Hausbewohner“), nicht schon jede Endung.
+  - Weitere Lecks: Zugangscode hinter einem Gegenstand mit Nummer, Klammerzusatz oder in der Zeile davor („Tor 2: Code
+    1593“, „Tresor (Keller) Code 3141“, „Haustür:⏎Code 1357“), hinter Schlüsselbox, -safe, Keller und Einfahrt und mit
+    der Bedienung eines Schlosses („Die Alarmanlage schaltet man mit 6482 aus.“); ohne sicheren Gegenstand („Code:
+    7319“, „Schlüsselsafe an der Garage, Code 8642“, „…öffnet die Tür, Code ist 4711.“) und hinter einem Schloss als
+    Feldname ohne „Code“ („Haustür: 1357“, „Tor zur Tiefgarage:⏎4455“) meldet die Selbstkontrolle die Ziffern. Hausnamen auch ohne Ereignis
+    hinter „beim“/„vom“/„zum“ mit der Endung eines Hausnamens, auch gebeugt („Er arbeitet beim Wastlbauer“, „beim
+    Gruberwirt“, „beim Kammerloher“, „Hof des Zellerbauern“). Berufe auch in „übt den Beruf der … aus“, „Von Beruf ist er
+    …“, „hauptberuflich …“, „nebenbei …“ und im Nebensatz („seit sie Lehrerin ist“). Quadrate hinter „aus … ausgezogen“, „Umzug von“,
+    „kommt aus“, mit einem Umzugsverb auch ohne Person im Satz („ist nach S 2, 15 umgezogen“, „Zum 1. Mai nach T 4, 12
+    verzogen.“) und hinter einem Namen in Briefkopf oder Absender („Resi Huber · Q 5, 12“); die Selbstkontrolle meldet
+    Quadrate auch hinter „an“ („Zustellung bitte an R 3, 4“). Unterzeichner in der
+    Grußzeile selbst („Grüße von Grohe“, „Viele Grüße aus dem Allgäu, Rowenta“) und Grüße mit längerer Herkunft. Eine
+    angekündigte Fortsetzung einer Personentabelle zählt auch mit einer einzigen Reihe auf der Folgeseite.
+    Ein Doppelname zählt hinter einem Personenwort als Name, wenn ein Teil ein Name ist und keiner ein Sachwort
+    („Nachbarin Fischbacher-Zöttl rief die Feuerwehr.“; nicht „Kunden Service-Center“).
+    Selbstkontrolle: Familienname mit Zwischenwörtern („saß wohl der …“, „Gefahren ist laut Polizei die …“, „saß nach
+    Angaben der Polizei der …“, „Gefahren hat das Auto der …“) und am
+    Satzanfang („Der Lackner hat den Wagen gefahren.“), Rollen wie Fahrer, Betreuerin, Vertreter als Beruf, wenn der
+    Satz von Arbeit spricht („fährt nachts als Fahrer für einen Paketdienst“), Name in einer Partnerschaft („Waldherr &
+    Partner“).
+  - Über-Schwärzung: Fehler- und Anzeigecodes von Geräten bleiben lesbar („Der Motor meldet den Code P0300“, „Der
+    Laptop zeigt den Code 0xC000021A“, „Am Tor blinkt Code 3017“; eine Schaden- oder Strafanzeige im Satz macht aus
+    dem Code am Schloss keinen Gerätefehler: „Der Einbruch wurde angezeigt, die Alarmanlage hat den Code 2580.“
+    bleibt geschwärzt) – ohne Doppelpunkt hinter „Code“ zählt nur eine
+    Ziffernfolge, und Gegenstände sind nur Schlösser als ganzes Grundwort („Haustür“, „Hoftor“, nicht „natürlich“,
+    „Motor“, „Inspektor“, „abschließend“). „umseitig“ und „umstehend“ kündigen eine Fortsetzung nur in einer
+    Fortsetzungsformel an („Fortsetzung umseitig“, „Weitere Kinder umseitig“ – nicht „Es gelten die Bedingungen
+    umstehend.“), und unter einer neuen Überschrift setzt sich eine Personentabelle nur mit einem bekannten Namen fort
+    (Tarif- und Leistungstabellen der Folgeseite bleiben lesbar). Berufe nicht für die Rolle des Maklers, einer Firma
+    oder eines Vereins, nicht für Vertretungs- und Ehrenämter und nicht in allgemeinen Produkttexten mit „Sie“ („Als
+    Handwerker benötigen Sie …“). Hinter einem Personenwort am Anfang einer Notiz oder mit Begleiter wird nur ein Wort mit
+    Namensbeleg geschwärzt („Chef Sekretariat ist besetzt“, „Patient Visite um 10 Uhr“, „Ehefrau Mitversichert: ja“
+    bleiben stehen); eine bekannte Marke hinter dem Personenwort wird gemeldet statt geschwärzt („Laut Monteur Buderus
+    …“ – Monteur oder Hersteller?); ein Beruf direkt vor dem Platzhalter eines Namens ist für die Selbstkontrolle kein unbekannter
+    Eigenname mehr („Monteur [PERSON A] kam …“ – bisher je Zeile eine Meldung). Quadrate mit „gemeldet“, „lebt“ oder
+    „gezogen“ nur mit einer Person im Satz („Der Sanitätsdienst ist
+    in B 4, 1 gemeldet.“ bleibt stehen), kein Verdacht hinter „nach“ im Sinn von „gemäß“ („Die Leistung nach B 1, 4“).
+    Organisationseinheiten unter einem Gruß („Allgäuer Versicherungsdienst“, „Maklerbetreuung Bayern“), Betriebe statt
+    Hausnamen („beim Holzhändler in Waging“, „beim Gartencenter“) und Ausfüllhinweise rechts neben dem Feldnamen „Beruf“
+    auf Scans („Kaufmann reicht nicht, bitte genau“; in einer Spalte solcher Hinweise auch einer ohne Hinweiswort:
+    „Landwirt mit Fläche in Hektar“) und Anweisungen in der Zeile unter einem Beruf-Feld bleiben stehen.
+  - Laufzeit: Ein Gegenstand vor oder hinter „Code“ hat höchstens 40 Zeichen (eine Zeile „Code für die“ mit einem
+    langen Wort lief quadratisch zurück: 64 000 Zeichen 9,6 s → 0,6 s); die Kopfzeilen-Suche einer Tabelle und die
+    Wendung vor einem Personen-Etikett arbeiten in Fenstern statt über die ganze Zelle (64 000 Zeichen „Laut Nachbar
+    Grohe“ 7,3 s → 3,5 s). Neue Wachstumstests decken das E-Mail-Muster mit größerer Spreizung (4 000 gegen 32 000
+    Zeichen) und den Rohwert neben Feldnamen auf einem Formular ohne Werte ab; beide werden rot, wenn die Maßnahme
+    zurückgenommen wird. Schwärzen langer Zeilen mit vielen Kästen: Der Abgleich der Zeichen einer Zeile vor und nach
+    dem Entfernen (Lage des Platzhalters, M-31) ordnet die verbliebenen Zeichen der Reihe nach zu, statt jede
+    Zeichenfolge mit jeder zu vergleichen, und die Prüfungen auf verdeckte und beschädigte Nachbarwörter suchen nur in
+    Reichweite des Worts (drei Zeilen zu 8 000 Zeichen mit 810 Codes: Schwärzen 98 s → 12 s CPU, mit 1 260 Namen 191 s →
+    19 s; der Rest ist das Anlegen und Anwenden der Schwärzungen in PyMuPDF). Mit dem genauen
+    Abgleich rückt der Kasten auch auf Zeilen mit mehr als 13 Kästen an die verschobene Stelle (bisher blieben die
+    Folgewörter dort teilweise unter dem Kasten, mit Hinweis).
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene

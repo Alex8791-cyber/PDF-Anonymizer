@@ -358,16 +358,33 @@ _SERVICE_NUMMER_RE = re.compile(r"^(?:\+49\s?\(?0?\)?\s?|0049\s?|0)(?:800|180\d?
 # Hinter "der/die <Familienname>" ein Satzteil, der eine Person verlangt ("war der Haslbeck am Steuer", "wie die Wimmer
 # sagte", ", nicht die …") – nicht "die Scheibe ist gesprungen"
 _ARTIKEL_NAME_VERB_RE = re.compile(
-    r"(?i)[ \t]+(?:am[ \t]+steuer|sagt|sagte|meinte|meint|fuhr|behauptet|behauptete|erzählt|erzählte|erklärt|"
-    r"erklärte|rief|telefonierte|angerufen)(?![\wäöüß])"
+    r"(?i)[ \t]+(?:am[ \t]+steuer|sagt|sagte|meinte|meint|fuhr|lenkte|steuerte|saß|sass|behauptet|behauptete|erzählt|"
+    r"erzählte|erklärt|erklärte|rief|telefonierte|angerufen)(?![\wäöüß])"
+    # "Der Lackner hat den Wagen gefahren." – Hilfsverb, bis vier Wörter, Partizip (Abnahme 2 V5)
+    r"|(?i:[ \t]+(?:hat|hatte|ist|war)(?:[ \t]+[^\s.,;:!?]+){0,4}?[ \t]+(?:gefahren|gelenkt|gesteuert|gesessen|gesagt|"
+    r"erzählt|behauptet|erklärt|bestätigt|telefoniert|angerufen|gerufen))(?![\wäöüß])"
     r"|[ \t]*[,.;]?[ \t]*(?:nicht|und|oder)[ \t]+(?:der|die)[ \t]")
 # … oder davor ein Verb, das eine Person verlangt ("Am Steuer saß der Haslbeck", "Dann sagte die Wimmer")
-_VERB_ARTIKEL_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:saß|sass|fuhr|lenkte|steuerte|sagte|meinte|rief|erzählte|"
+_VERB_ARTIKEL_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:am[ \t]+steuer|saß|sass|fuhr|lenkte|steuerte|sagte|meinte|rief|"
+                                    r"erzählte|"
                                     r"erzaehlte|behauptete|erklärte|erklaerte|bestätigte|bestaetigte|schilderte|"
                                     # dieselben Verben als Partizip mit Hilfsverb ("Gefahren ist der Huberbauer.")
                                     r"(?:gesessen|gefahren|gelenkt|gesteuert|gesagt|gemeint|gerufen|erzählt|erzaehlt|"
                                     r"behauptet|erklärt|erklaert|bestätigt|bestaetigt|geschildert)[ \t]+"
                                     r"(?:ist|war|hat|hatte))"
+                                    # bis zu drei Zwischenwörter ("saß wohl der …", "Gefahren ist laut Polizei die …",
+                                    # "Erzählt hat es die …", "saß zum Unfallzeitpunkt der …"; Abnahme 2 V5)
+                                    r"(?:[ \t]+(?:wohl|dann|aber|auch|noch|nur|doch|eben|offenbar|offensichtlich|"
+                                    r"angeblich|vermutlich|wahrscheinlich|tatsächlich|nachweislich|zuletzt|zuerst|"
+                                    r"später|danach|gestern|heute|nachts|abends|morgens|es|das|dies|sogar|selbst|"
+                                    r"zunächst|wieder|leider)|[ \t]+(?:laut|lt\.|zum|zur|am|im|beim)[ \t]+"
+                                    r"[^\W\d_][\wäöüß\-]{1,30}"
+                                    # eine Präpositionalgruppe oder ein Objekt ("nach Angaben der Polizei", "zu diesem
+                                    # Zeitpunkt", "Gefahren hat das Auto der …")
+                                    r"|[ \t]+(?:zu|nach|vor|seit|bei|gemäß|gemaess|wegen|während|waehrend|trotz|in|an|"
+                                    r"auf|mit|das|den)(?:[ \t]+(?:dem|der|den|des|diesem|dieser|diesen|einem|einer|"
+                                    r"eines))?[ \t]+[^\W\d_][\wäöüß\-]{1,30}(?:[ \t]+(?:der|des)[ \t]+"
+                                    r"[^\W\d_][\wäöüß\-]{1,30}(?=[ \t]+(?:der|die)[ \t]))?){0,3}"
                                     r"[ \t]+(?:der|die)[ \t]+$")
 # Endungen von Rollen-, Fahrzeug- und Gerätewörtern auf "-er", die in den Wortlisten fehlen können ("Anwohner",
 # "Radfahrer", "Täter", "Schwager", "Bagger", "Laster", "Hubschrauber"): hinter "fuhr der", "rief der" kein
@@ -379,7 +396,32 @@ _ER_SACHWORT_ENDUNGEN = (
     "waerter", "camper", "bagger", "laster", "trecker", "schlepper", "sprinter", "kipper", "lader", "container",
     "bulldozer", "scooter", "dampfer", "flieger", "schrauber", "transporter", "anhänger", "anhaenger", "roller",
     "wecker", "schalter", "becher", "teller", "messer", "zähler", "zaehler", "ordner", "rechner", "router", "server",
-    "leser", "hörer", "hoerer", "drucker", "computer", "monitor", "tresor")
+    "leser", "hörer", "hoerer", "drucker", "computer", "monitor", "tresor", "treiber", "käufer", "kaeufer", "werber",
+    "empfänger", "empfaenger")
+# Vorsilben, mit denen aus einem dieser Grundwörter ein Rollenwort wird ("Anwohner", "Bewohner", "Mitbewohner",
+# "Aufsteiger", "Untermieter", "Vorbesitzer") – nicht "Hoch-", "Ober-", "Kirch-", "Hof-" eines Hausnamens
+# ("Hochsteiger", "Oberhalter", "Kirchsteiger", "Hofsteiger"; Abnahme 2 R2)
+_ER_VORSILBEN_RE = re.compile(r"(?:mit|an|ab|auf|aus|be|bei|ein|nach|um|unter|über|ueber|vor|zu|ver|er|ent|zer|"
+                              r"durch|gegen|neben|quer|wider|weg|zurück|zurueck){1,2}")
+_ER_ABLEITUNG_RE = re.compile(r"(.{3,}?)s?(?:mitbe|be|ver|an|mit|unter|ein|auf|ab|vor)")
+
+
+def _sachwort_er(w: str) -> bool:
+    """Ist ein Wort mit der Gestalt eines Familiennamens ein Rollen-, Fahrzeug- oder Gerätewort auf "-er": eines der
+    Grundwörter _ER_SACHWORT_ENDUNGEN allein ("Schwager", "Radler", "Bagger"), mit Vorsilben ("Anwohner",
+    "Mitbewohner", "Aufsteiger", "Untermieter") oder mit Vorsilbe hinter einem Bestimmungswort ("Hausbewohner",
+    "Wohnungsvermieter")? Ein Familien- oder Hausname aus Bestimmungswort und Grundwort ("Kirchsteiger",
+    "Hochsteiger", "Oberhalter", "Grubhalter", "Hofsteiger") ist es nicht: die Endung allein schließt ihn nicht aus
+    (Abnahme 2 R2)."""
+    k = (w or "").lower()
+    for endung in _ER_SACHWORT_ENDUNGEN:
+        if k.endswith(endung):
+            rest = k[:-len(endung)]
+            if not rest or _ER_VORSILBEN_RE.fullmatch(rest) or _ER_ABLEITUNG_RE.fullmatch(rest):
+                return True
+    return False
+
+
 # Beruf hinter "als" in einem Satz über eine Person ("Sie ist als Hebamme bei der Klinik in Traunstein.", "Er hilft am
 # Wochenende als Kellner aus."; Abnahme N3): die Erkennung schwärzt ihn nur mit einem Wort der Erwerbstätigkeit
 # ("tätig", "beschäftigt", "arbeitet"), die Selbstkontrolle meldet jeden Beruf der Wissensbasis – außer Rollen im
@@ -399,6 +441,21 @@ _PERSON_IM_SATZ_RE = re.compile(r"(?<![\wäöüß])(?:ich|er|sie|Ich|Er|Sie|"
                                 r"Kunde|Kundin|Ehemann|Ehefrau|Sohn|Tochter|Antragsteller(?:in)?)(?![\wäöüß])|"
                                 r"\[(?:PERSON|NAME|NAMEN)\b")
 _SATZENDE_RE = re.compile(r"[.!?;\n]")
+# eine Rolle (_ALS_ROLLE) ist im Satz ein Beruf, wenn er von Arbeit spricht ("Er fährt nachts als Fahrer für einen
+# Paketdienst.", "Sie hilft im Altenheim als Betreuerin aus.", "Er ist als Vertreter für Landmaschinen unterwegs.") und
+# nicht von einem Vorgang oder einer Vertretung ("als Fahrer am Unfall beteiligt", "als Betreuer seiner Mutter",
+# "als Zeugin geladen"; Abnahme 2 V3)
+_ROLLE_ARBEIT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:tätig|beschäftigt|angestellt|arbeitet\w{0,2}|gearbeitet|"
+                              r"verdient\w{0,2}|jobbt|aushilf\w{0,4}|nebenjob\w{0,2}|hauptberuflich|nebenberuflich|"
+                              r"unterwegs|hilft|half|für[ \t]+(?:einen|eine|ein)[ \t]+[A-ZÄÖÜ]\w+)(?![\wäöüß])")
+_ROLLE_VORGANG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:unfall\w{0,6}|beteiligt|schaden\w{0,6}|geladen|termin\w{0,2}|"
+                               r"bestellt|bestallung\w{0,8}|eingesetzt|vollmacht\w{0,2}|gericht\w{0,6}|haftet|"
+                               r"haftbar|verantwortlich|(?:seine[rsm]?|ihre[rsm]?|des|der)[ \t]+(?:Mutter|Vaters?|Eltern|"
+                               r"Tochter|Sohne?s?|Ehefrau|Ehemann\w?|Oma|Opa|Großmutter|Großvaters?|Schwester|"
+                               r"Bruders?|Tante|Onkels?|Kinder|Kindes))(?![\wäöüß])")
+# höfliches "Sie" mitten im Satz spricht den Leser an, keine Person, von der der Satz handelt ("Als Handwerker
+# benötigen Sie …"; Abnahme 2 A2-03)
+_SIE_IM_SATZ_RE = re.compile(r"(?<=[^\s.!?;:\n])[ \t]+Sie(?![\wäöüß])")
 _SATZTEIL_HINTER_ETIKETT_RE = re.compile(r"[ ]+(?:der|des|dem|den|die|das|eines|einer|einem|im|in|bei|beim|zum|zur|"
                                          r"seit|für|fuer)[ ]")
 _EINHEIT_RE = re.compile(
@@ -554,6 +611,8 @@ _NEUE_FORMEN = ((kennungsformen.ip_adressen, "IP-Adresse", "form"),
                 (kennungsformen.koordinaten, "Standort-Koordinaten", "form"),
                 (kennungsformen.email_verschleiert, "E-Mail-Adresse (verschleiert)", "kontakt"),
                 (kennungsformen.zugangsdaten, "Zugangsdaten (Benutzer, Kennwort, PIN, Code)", "kennung"),
+                (kennungsformen.zugangscode_verdacht, "Zugangscode (Ziffern hinter „Code“ oder einem Schloss)",
+                 "kennung"),
                 (kennungsformen.profilnamen, "Profil- bzw. Kontoname", "kontakt"))
 _KREDITKARTE_PLATZHALTER_RE = re.compile(r"\[KREDITKARTE\]")
 # Geburtsname direkt hinter "geb." / "geb:" / "geborene" ("[PERSON A] geb. Quarnstedt", "GEB. QUARNSTEDT") – nicht
@@ -651,6 +710,9 @@ _GESCHAEFTE = frozenset({
     "reisebüro", "fahrschule", "pflegedienst", "apotheke", "kanzlei", "praxis", "zahnarztpraxis", "physiotherapie",
     "ingenieurbüro", "architekturbüro", "steuerbüro", "gutachterbüro", "sachverständigenbüro", "maklerbüro",
     "versicherungsbüro", "abschleppdienst", "schlüsseldienst", "autovermietung", "optik", "friseur", "salon"})
+_GESCHAEFT_ENDUNGEN = ("kanzlei", "praxis", "büro", "werkstatt", "betrieb")
+_PARTNER_DAHINTER_RE = re.compile(r"[ \t]*(?:&|und|\+)[ \t]*(?:Partner|Partnerin|Partnerinnen|Kollegen|Kolleginnen|"
+                                  r"Söhne|Sohn|Töchter|Tochter)(?![\wäöüß])")
 _UMLAUT_GRUND = {"ä": "a", "ö": "o", "ü": "u", "Ä": "A", "Ö": "O", "Ü": "U"}
 # Formularwerte ohne Personenbezug, die stehen bleiben (Familienstand laut Handbuch, Geschlecht wie die Anrede) –
 # eine geschlossene Liste: Staatsangehörigkeit, Konfession, Gesundheit, Namen und Orte gehören nie dazu
@@ -2003,20 +2065,27 @@ class _Seitenpruefung:
         text = self.text
         if "als" not in text and "Als" not in text:
             return
+        from .detektoren import wissen_kontext
         for m in _ALS_BERUF_RE.finditer(text):
             s, e = m.span(1)
             wort = m.group(1)
-            if wort.casefold() in _ALS_ROLLE or not self.w.frage("ist_beruf", wort):
+            if not self.w.frage("ist_beruf", wort):
                 continue
             if self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e):
                 continue
-            anfang = max(0, m.start() - 160)
-            vorn = [x.end() for x in _SATZENDE_RE.finditer(text, anfang, m.start())]
-            satz_anfang = vorn[-1] if vorn else anfang
+            satz_anfang = wissen_kontext.satz_anfang(text, m.start(), 160)
             hinten = _SATZENDE_RE.search(text, e, min(len(text), e + 160))
             satz_ende = hinten.start() if hinten else min(len(text), e + 160)
-            if _PERSON_IM_SATZ_RE.search(text, satz_anfang, m.start()) or \
-                    _PERSON_IM_SATZ_RE.search(text, e, satz_ende):
+            rolle = wort.casefold() in _ALS_ROLLE or wort.casefold().endswith(wissen_kontext._ROLLE_ENDUNGEN)
+            if rolle and not (_ROLLE_ARBEIT_RE.search(text, satz_anfang, satz_ende)
+                              and not _ROLLE_VORGANG_RE.search(text, satz_anfang, satz_ende)):
+                continue                                # Rolle im Vorgang oder in einer Vertretung
+            if wissen_kontext._EHRENAMT_RE.search(text, satz_anfang, satz_ende) or \
+                    wissen_kontext.org_satz(text, satz_anfang, m.start()):
+                continue                                # Ehrenamt, Satz einer Organisation oder "wir"
+            if any(not (p.group(0) == "Sie" and _SIE_IM_SATZ_RE.match(text, p.start() - 1))
+                   for p in list(_PERSON_IM_SATZ_RE.finditer(text, satz_anfang, m.start()))
+                   + list(_PERSON_IM_SATZ_RE.finditer(text, e, satz_ende))):
                 self.neu(s, e, "Beruf hinter „als“ im Satz über eine Person", "form")
 
     def _seitenformen(self):
@@ -2353,6 +2422,12 @@ class _Seitenpruefung:
                 if art == "kontakt" and self.org_kontext(o + s):
                     continue                         # Auftritt der Organisation (Briefkopf, Fußzeile)
                 self.neu(o + s, o + e, grund, art)
+        # Schloss als Feldname am Ende der Zeile davor, die Ziffern allein in dieser ("Tor zur Tiefgarage:" ⏎ "4455")
+        if o > 1 and self.text[o - 1] == "\n" and any(c.isdigit() for c in zeile):
+            vorzeile = self.text[self.text.rfind("\n", max(0, o - 122), o - 1) + 1:o - 1]
+            for s, e in kennungsformen.schloss_feld_folgezeile(vorzeile, zeile):
+                if not self.ist_platzhalter_bei(o + s, o + e):
+                    self.neu(o + s, o + e, "Zugangscode (Ziffern unter einem Schloss als Feldname)", "kennung")
         # Handelsregisternummer (HRA) und USt-IdNr. im Angabenblock eines Einzelkaufmanns bzw. Inhabers: Angaben einer
         # Person (die Ausnahmen der Organisation gelten dort nicht; dieselbe Regel wie die Erkennung,
         # kennungsformen.einzelkaufmann_block und ust_id_der_firma, Domänen-Befunde 55 und 77)
@@ -3402,7 +3477,12 @@ class _Seitenpruefung:
             j = i - 1
             while j > 0 and direkt(j + 1, j) and woerter[j][2][:1].islower() and self.w.art(woerter[j][2])[7]:
                 j -= 1                                  # Namenszusätze "von", "van der", "de"
-            if not (j >= 0 and direkt(j + 1, j) and woerter[j][2].lower() in _GESCHAEFTE):
+            # Partnerschaft ("Waldherr & Partner", "Huber und Kollegen"): der Name steht vor dem Zusatz, auch ohne
+            # Geschäftswort davor; Geschäftswörter auch als Zusammensetzung ("Steuerkanzlei Waldherr"; Abnahme 2 A2-15)
+            partner = bool(_PARTNER_DAHINTER_RE.match(text, woerter[i][1]))
+            if not partner and not (j >= 0 and direkt(j + 1, j) and (woerter[j][2].lower() in _GESCHAEFTE
+                                                                       or woerter[j][2].lower().endswith(
+                                                                           _GESCHAEFT_ENDUNGEN))):
                 return False
             w = woerter[i][2]
             if w[:1].islower():
@@ -3465,13 +3545,16 @@ class _Seitenpruefung:
             if s in org_personen and not allow:
                 self.neu(s, e, "Name in einer Organisations-Spalte (Personenhinweis)", "name")
                 continue
-            if artikel_davor(i) and woerter[i - 1][2] in ("der", "die") and not (vn or aw or allow) \
-                    and (nn and not nnm
-                         or not w.lower().endswith(_ER_SACHWORT_ENDUNGEN)
-                         and (personenkontext.namensgestalt(w, self.w.modul)
-                              or (_VERB_ARTIKEL_DAVOR_RE.search(text, max(0, s - 40), s) and self._name_auf_er(w)))) \
-                    and (_ARTIKEL_NAME_VERB_RE.match(text, e)
-                         or _VERB_ARTIKEL_DAVOR_RE.search(text, max(0, s - 40), s)):
+            verb_davor = artikel_davor(i) and _VERB_ARTIKEL_DAVOR_RE.search(text, max(0, s - 90), s)
+            verb_dahinter = artikel_davor(i) and _ARTIKEL_NAME_VERB_RE.match(text, e)
+            familienname = artikel_davor(i) and not (vn or aw or allow) and (
+                nn and not nnm or personenkontext.namensgestalt(w, self.w.modul) and not _sachwort_er(w))
+            # "Der Lackner hat den Wagen gefahren.": am Satzanfang nur ein Familienname der Wissensbasis bzw. mit
+            # Namensgestalt und ein Personen-Verb dahinter (Abnahme 2 V5)
+            satzanfang = artikel_davor(i) and woerter[i - 1][2] in ("Der", "Die") and familienname and verb_dahinter
+            if artikel_davor(i) and (woerter[i - 1][2] in ("der", "die") or satzanfang) and not (vn or aw or allow) \
+                    and (familienname or ((verb_davor or verb_dahinter) and self._name_auf_er(w))) \
+                    and (verb_dahinter or verb_davor):
                 # "war der Brandstetter am Steuer", "wie die Wimmer sagte": ein Familienname mit Artikel (mundartlich;
                 # Nachprüfung LK-14) – nicht "die Scheibe ist gesprungen" (kein Satzteil einer Person dahinter)
                 self.neu(s, e, "Familienname mit Artikel (mundartlich)", "name")
@@ -3489,7 +3572,10 @@ class _Seitenpruefung:
                               and nachname_stark(i - 1) and vn))
             z_wort = self.zeile(s)
             gruss = (z_wort is not None and z_wort.id in gruss_zeilen and not w.isupper()
-                     and not self._org_zeile(z_wort) and not self._wort_harmlos(w))
+                     and not self._org_zeile(z_wort) and not self._wort_harmlos(w)
+                     # Organisationseinheit unter dem Gruß ("Kundenservice Traunstein"; Abnahme 2 A2-06) – ein
+                     # bekannter Name daneben bleibt ein Unterzeichner
+                     and not (not (vn or nn) and personenkontext.ORG_EINHEIT_RE.search(self.zeilen_text(z_wort))))
             geboren = geburtsname(i)
             rolle = s in wohn_starts or partei(i) or name_amt(i)
             kontext = (titel or platzhalter or etikett or links_vorname or rechts_nachname or komma_paar or gruss
@@ -3506,6 +3592,9 @@ class _Seitenpruefung:
                 continue
             if artikel_davor(i) and not titel and self.w.frage("ist_beruf", w):
                 continue                                # "Der Glaser [PERSON C] hat …": Beruf, kein Name
+            if platzhalter and not (vn or nn or titel) and self.w.frage("ist_beruf", w) \
+                    and self.neben_platzhalter(s, e, _PERSONEN_PLATZHALTER_RE)[0] >= e:
+                continue                                # "Monteur [PERSON A] kam …": Beruf vor dem Namen, kein Name
             if not (titel or platzhalter or etikett or rolle) and (vn or nn) and organisation(i):
                 continue                                # "Adam Riese", "Versicherer" ⏎ "Roland": ein Versicherer
             if vorname_stark(i) or nachname_stark(i) or doppelname(i):
@@ -3577,8 +3666,9 @@ class _Seitenpruefung:
             if z.rect is not None and inhalt.strip():
                 zeilen.append((self.lese_rect(z.rect, self._herkunft(z)), z, inhalt, self._herkunft(z)))
         for r, z, inhalt, herkunft in zeilen:
-            if not ist_grussformel(inhalt) or len(inhalt.split()) > 6:
-                continue
+            if not ist_grussformel(inhalt) or (len(inhalt.split()) > 6
+                                               and not personenkontext.GRUSS_ZEILE_RE.match(inhalt)):
+                continue                                # Gruß mit Herkunft bis sechs Wörter (Abnahme 2 V6)
             h = max(r.height, 8.0)
             darunter = sorted((t for t in zeilen if t[3] == herkunft and t[1].id != z.id and t[0].y0 >= r.y1 - 0.3 * h
                                and t[0].y0 <= r.y1 + UNTERSCHRIFT_ZEILEN * h and t[0].x0 >= r.x0 - 15
@@ -3598,7 +3688,9 @@ class _Seitenpruefung:
         weder sie noch die Grundform ein bekanntes Wort ist ("Fahrerin", "Beifahrerin" bleiben frei). Nur für die
         Meldung, nicht zum Schwärzen."""
         if len(w) >= 7 and w.endswith("erin") and w[:1].isupper() and w.isalpha() and not w.isupper():
-            return self._name_auf_er(w[:-2]) and not any(
+            grund = w[:-2]
+            return (self._name_auf_er(grund) or (personenkontext.namensgestalt(grund, self.w.modul)
+                                                 and not _sachwort_er(grund))) and not any(
                 self.w.frage(f, w) for f in ("ist_allerweltswort", "ist_beruf", "ist_ort", "ist_vorname",
                                              "ist_allowlist", "ist_anrede_titel"))
         if len(w) < 5 or not w[:1].isupper() or w.isupper() or not w.endswith("er") or not w.isalpha():
@@ -4041,7 +4133,7 @@ _GRUSS_RE = re.compile(r"(?i)\bmit\s+(?:freundlichen|besten|herzlichen|lieben|vi
                        r"herzliche|liebe|schöne|sonnige|kollegiale)n?\s+gr[üu](?:ß|ss)e|\bhochachtungsvoll\b|\bmfg\b")
 # Gruß mit Herkunft als ganze Zeile ("Grüße aus dem Allgäu", "Gruß vom Chiemsee"; Abnahme N6)
 _GRUSS_AUS_ZEILE_RE = re.compile(r"(?i)^\s*(?:gru(?:ß|ss)|gr[üu](?:ß|ss)e)\s+(?:aus|von|vom|nach|in)"
-                                 r"(?:\s+[^\W\d_][\w\-]*){1,4}\s*[,.!]?\s*$")
+                                 r"(?:\s+[^\W\d_][\w\-]*){1,6}\s*[,.!]?\s*$")
 # Grußformeln für den unscharfen Vergleich mit OCR-Zeilen ("Mit freundlichen GrüBen", "Mlt freundllchen Grüßen")
 _GRUSS_FORMELN = ("mit freundlichen grüßen", "mit freundlichem gruß", "freundliche grüße", "mit besten grüßen",
                   "beste grüße", "mit herzlichen grüßen", "herzliche grüße", "mit lieben grüßen", "liebe grüße",

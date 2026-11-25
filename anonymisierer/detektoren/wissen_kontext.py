@@ -318,9 +318,19 @@ _BERUF_VOR_RE = re.compile(
     r"[ \t]+(?:als|zum|zur)[ \t]+"
     r"|(?<![\wäöüß])(?:ist|war|bin|sind|wird|wurde|Beruf:?)[ \t]+(?:von[ \t]+Beruf[ \t]+)?"
     r"|(?<![\wäöüß])von[ \t]+Beruf[ \t]+"
+    # weitere Satzstellungen (Abnahme 2 V3): "Von Beruf ist er Schreiner", "übt den Beruf der Floristin aus",
+    # "hauptberuflich Zimmerer", "ist nebenberuflich als Kellner tätig"
+    r"|(?<![\wäöüß])[Vv]on[ \t]+Beruf[ \t]+(?:ist|war|wird|wurde|bin|sind)[ \t]+(?:er|sie|ich|wir)[ \t]+"
+    r"|(?<![\wäöüß])(?:übt|übte|üben|übten|ausübt|ausübte)[ \t]+(?:den|einen|seinen|ihren)[ \t]+Beruf[ \t]+"
+    r"(?:der|des|eines|einer|als)[ \t]+"
+    r"|(?<![\wäöüß])(?:(?:[Hh]aupt|[Nn]eben)beruflich|[Nn]ebenbei|[Nn]ebenher)(?:[ \t]+als)?[ \t]+"
     # Lebensunterhalt ("Sie verdient ihr Geld als Hebamme"; Abnahme N3)
     r"|(?<![\wäöüß])(?:verdient(?:e)?|verdienen|bestreitet|bestritt)[ \t]+(?:ihr(?:en)?|sein(?:en)?|das|den)[ \t]+"
     r"(?:Geld|Lebensunterhalt|Unterhalt|Brot)[ \t]+als[ \t]+")
+_BERUF_NEBENSATZ_RE = re.compile(r"(?<![\wäöüß])(?:er|sie|ich|Mann|Frau|Ehemann|Ehefrau|Sohn|Tochter|Vater|Mutter|"
+                                 r"Partner(?:in)?|Lebensgefährt(?:e|in))[ \t]+(?=[A-ZÄÖÜ])")
+_NEBENSATZ_VERB_RE = re.compile(r"[ \t]+(?:ist|war|wurde|wird|geworden[ \t]+ist|gewesen[ \t]+ist)[ \t]*(?:[.,;!?)]|$)",
+                                re.MULTILINE)
 # "als <Beruf>" mit einem Verb der Erwerbstätigkeit dahinter ("ist als Dachdecker tätig", "war bis 2020 als Schreiner
 # tätig", "hat als Monteur gearbeitet"; Abnahme N3) – ohne dieses Verb ist "als Fahrer" eine Rolle, kein Beruf
 _ALS_RE = re.compile(r"(?<![\wäöüß])als[ \t]+")
@@ -337,6 +347,63 @@ _BERUF_ALLGEMEIN = {"arzt", "ärztin", "kunde", "kundin", "vermittler", "vermitt
                     "versicherte", "versicherter", "sachbearbeiter", "sachbearbeiterin", "gutachter", "gutachterin",
                     "bevollmächtigter", "bevollmächtigte", "geschäftsführer", "geschäftsführerin", "vorstand",
                     "aufsichtsrat", "mitarbeiter", "mitarbeiterin", "rentner", "rentnerin", "student", "studentin"}
+
+
+# Rollen statt Berufen im Satz: die eigene Rolle des Maklers, Vertretungs- und Verwaltungsrollen, Ehrenämter
+# ("Wir sind als Versicherungsmakler für Sie tätig", "Die Kanzlei ist als Insolvenzverwalter tätig", "Der Sohn ist als
+# Betreuer seiner Mutter tätig", "ist ehrenamtlich als Trainer tätig"; Abnahme 2 A2-03) – die Selbstkontrolle meldet
+# sie, wenn der Satz von einer Person und ihrer Arbeit spricht
+_ROLLE_ENDUNGEN = ("makler", "maklerin", "vermittler", "vermittlerin", "verwalter", "verwalterin", "betreuer",
+                   "betreuerin", "bevollmächtigter", "bevollmächtigte", "veranstalter", "veranstalterin", "trainer",
+                   "trainerin", "schiedsrichter", "schiedsrichterin", "sachverständiger", "sachverständige", "vormund",
+                   "treuhänder", "treuhänderin", "testamentsvollstrecker", "testamentsvollstreckerin")
+# Satz einer Organisation oder des Schreibers in der Mehrzahl: Subjekt am Satzanfang ("Wir sind …", "Die Kanzlei Dr.
+# Reitmayr ist …", "Der Verein verdient sein Geld …", "Die GmbH …")
+_ORG_SATZANFANG_RE = re.compile(
+    r"(?:^|[.!?;:\n])[ \t]*(?:(?:[Ww]ir|[Uu]ns)(?![\wäöüß])|(?:(?:[Dd]er|[Dd]ie|[Dd]as|[Uu]nser\w{0,2}|[Ii]hr\w{0,2})[ \t]+)?"
+    r"(?:Kanzlei|Verein|Gesellschaft|Firma|Betrieb|Unternehmen|Hausverwaltung|Verwaltung|Agentur|Büro|Praxis|"
+    r"Genossenschaft|Stiftung|Gemeinde|Stadt|Behörde|Versicherung|Versicherer|Bank|Sparkasse|Gruppe|Holding|"
+    r"GmbH|AG|KG|OHG|GbR|UG)(?![\wäöüß]))")
+_EHRENAMT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:ehrenamtlich\w{0,2}|im[ \t]+ehrenamt|unentgeltlich)(?![\wäöüß])")
+
+
+# Abkürzungen mit Punkt beenden keinen Satz ("Die Kanzlei Dr. Reitmayr ist …", "Fa. Huber")
+_ABKUERZUNG_VOR_PUNKT_RE = re.compile(r"(?<![\wäöüß])(?:Dr|Prof|Dipl|Ing|med|jur|rer|nat|Nr|Fa|St|Hr|Fr|Str|bzw|ca|"
+                                      r"vgl|ggf|inkl|zzgl|evtl|usw|Mio|Tsd|Abs|Art|Ziff|Pos|Kfm|Gebr|Inh|[A-ZÄÖÜ])$")
+
+
+def satz_anfang(text: str, pos: int, fenster: int = 200) -> int:
+    """Anfang des Satzes, in dem pos steht: hinter dem letzten Satzzeichen bzw. Zeilenumbruch im Fenster davor –
+    ein Punkt hinter einer Abkürzung zählt nicht."""
+    anfang = max(0, pos - fenster)
+    i = pos
+    while i > anfang:
+        i -= 1
+        c = text[i]
+        if c in "!?;\n" or (c == "." and not _ABKUERZUNG_VOR_PUNKT_RE.search(text, max(anfang, i - 6), i)):
+            return i + 1
+    return anfang
+
+
+def beruf_satz_ausgenommen(text: str, start: int, ende: int) -> bool:
+    """Ist der Beruf text[start:ende] in seinem Satz eine Rolle statt des Berufs einer Person: eine Rolle der Liste
+    _ROLLE_ENDUNGEN, ein Ehrenamt oder der Satz einer Organisation bzw. des Schreibers ("Wir sind als
+    Versicherungsmakler für Sie tätig")? Für die Sätze der Erkennung (nicht hinter einem Etikett) und die
+    Selbstkontrolle."""
+    wort = text[start:ende].casefold()
+    if wort.endswith(_ROLLE_ENDUNGEN):
+        return True
+    satz_anfang_ = satz_anfang(text, start)
+    hinten = re.search(r"[.!?;\n]", text[ende:ende + 200])
+    satz_ende = ende + (hinten.start() if hinten else min(200, len(text) - ende))
+    if _EHRENAMT_RE.search(text, satz_anfang_, satz_ende):
+        return True
+    return org_satz(text, satz_anfang_, start)
+
+
+def org_satz(text: str, satz_anfang_: int, bis: int) -> bool:
+    """Beginnt der Satz ab satz_anfang_ mit einer Organisation oder "wir" als Subjekt?"""
+    return bool(_ORG_SATZANFANG_RE.match(text, max(0, satz_anfang_ - 1), bis))
 
 
 def _beruf_wert(text: str, pos: int, etikett: bool):
@@ -402,9 +469,18 @@ def _feldbezeichner(wert: str) -> bool:
         return False
 
 
+# Anweisung an den Ausfüllenden in der Zeile unter einem Beruf-Feld ("Kaufmann reicht nicht, bitte genau", "Arzt
+# bitte Fachrichtung angeben"; Abnahme 2 A2-08) – nur Wörter einer Aufforderung, kein "nicht" oder "kein" (die stehen
+# auch in einem Wert: "Lehrerin, nicht verbeamtet")
+_ANWEISUNG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:bitte|angeben|anzugeben|eintragen|einzutragen|ankreuzen|nennen|"
+                           r"reicht[ \t]+nicht|z\.[ \t]?b\.|zum[ \t]+beispiel)(?![\wäöüß])")
+
+
 def _kein_beruf(wert: str) -> bool:
-    """Ziffern, Ankreuzwerte, Feldbezeichner oder mehr als fünf Wörter: kein Beruf."""
+    """Ziffern, Ankreuzwerte, Feldbezeichner, eine Ausfüllanweisung oder mehr als fünf Wörter: kein Beruf."""
     if not wert or not wert[0].isalpha() or any(c.isdigit() for c in wert) or len(wert.split()) > 5:
+        return True
+    if _ANWEISUNG_RE.search(wert):
         return True
     if wert.casefold() in {"ja", "nein", "keine", "keine angabe", "entfällt", "ohne", "k. a.", "k.a.", "-"}:
         return True
@@ -545,13 +621,20 @@ def berufe_stellen(text: str) -> list:
     aus += _beruf_in_formularzeile(text)
     for m in _BERUF_VOR_RE.finditer(text):
         w = _beruf_wert(text, m.end(), False)
-        if w:
+        if w and not beruf_satz_ausgenommen(text, w[0], w[1]):
             aus.append(w)
     if "als" in text:
         for m in _ALS_RE.finditer(text):
             w = _beruf_wert(text, m.end(), False)
-            if w and _ERWERB_DANACH_RE.match(text, w[1], min(len(text), w[1] + 80)):
+            if w and _ERWERB_DANACH_RE.match(text, w[1], min(len(text), w[1] + 80)) \
+                    and not beruf_satz_ausgenommen(text, w[0], w[1]):
                 aus.append(w)
+    # Nebensatz mit dem Beruf vor dem Verb ("seit sie Lehrerin ist", "deren Mann Polizist ist", "weil er Beamter war";
+    # Abnahme 2 V3): Person, Beruf der Wissensbasis, "ist"/"war"/"wurde" am Ende des Satzteils
+    for m in _BERUF_NEBENSATZ_RE.finditer(text):
+        w = _beruf_wert(text, m.end(), False)
+        if w and _NEBENSATZ_VERB_RE.match(text, w[1]) and not beruf_satz_ausgenommen(text, w[0], w[1]):
+            aus.append(w)
     for m in re.finditer(r"[ \t]+von[ \t]+Beruf(?![\wäöüß])", text):
         a = text.rfind("\n", 0, m.start()) + 1
         vor = [v for v in wissen.index("berufe").finde(text[a:m.start()]) if a + v.ende == m.start()]
@@ -666,6 +749,13 @@ _BERUF_ALLEIN_RE = re.compile(
     r"erlernte[rn]?|aktuelle[rn]?)[ \t]+)?(?:Beruf|Berufsbezeichnung|berufliche[ \t]+Tätigkeit))[ \t]*:?[ \t]*$")
 
 
+# Ausfüllhinweis statt eines Werts rechts neben dem Feldnamen ("Kaufmann reicht nicht, bitte genau", "Angestellte bitte
+# Arbeitgeber nennen", "z. B. Dachdecker")
+_AUSFUELLHINWEIS_RE = re.compile(r"(?i)(?<![\wäöüß])(?:bitte|nennen|angeben|eintragen|ankreuzen|reicht|genau|"
+                                 r"z\.[ \t]?b\.|zum[ \t]+beispiel|beispiel\w{0,2}|etwa|nicht|kein\w{0,2}|ggf\.|"
+                                 r"falls|wenn)(?![\wäöüß])")
+
+
 class _Stelle:
     """Anfang eines Feldnamens für struktur._zelle_rechts_daneben (braucht nur .start)."""
     __slots__ = ("start",)
@@ -686,6 +776,7 @@ def beruf_rechts_daneben(dok) -> list:
         if "eruf" not in text or berufe is None:
             continue
         lg = None
+        kandidaten = []
         for m in _BERUF_ALLEIN_RE.finditer(text):
             lg = lg or struktur.lage(seite)
             zelle = lg.zelle_bei(m.start("etikett"))
@@ -695,6 +786,15 @@ def beruf_rechts_daneben(dok) -> list:
             if z is None or not lg.zeilen_ocr.get(z.zeile):
                 continue
             inhalt = text[z.start:z.ende]
+            # "Kaufmann reicht nicht, bitte genau" (Abnahme 2 A2-08)
+            kandidaten.append((z, inhalt, len(inhalt.split()) > 5 or bool(_AUSFUELLHINWEIS_RE.search(inhalt))))
+        # Hinweisspalte: steht in derselben Spalte rechts neben einem anderen Beruf-Feld ein Ausfüllhinweis, sind
+        # auch die übrigen Zellen dieser Spalte Hinweise ("Landwirt mit Fläche in Hektar" unter "Arzt bitte
+        # Fachrichtung angeben"; ein eingetragener Wert steht näher am Feldnamen, im Kästchen)
+        hinweis_x = [z.x0 for z, _, hinweis in kandidaten if hinweis]
+        for z, inhalt, hinweis in kandidaten:
+            if hinweis or any(abs(z.x0 - x) <= 12 for x in hinweis_x):
+                continue
             vorn = len(inhalt) - len(inhalt.lstrip())
             treffer = [v for v in berufe.finde(inhalt) if v.start == vorn]
             if treffer:

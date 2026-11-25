@@ -1884,8 +1884,10 @@ _WENDUNG_DAVOR_RE = re.compile(r"(?<![\w])(?:zum|zur|vom|beim|des|eines|für|fur
 def _in_wendung(text: str, lg: Lage, et: Etikett) -> bool:
     """Steht ein Personen-Etikett mitten in einer Wendung ("Verhältnis zum VN", "Angaben des Fahrers")?"""
     zelle = lg.zelle_bei(et.start)
-    vorn = text[zelle.start if zelle else max(0, et.start - 30):et.start]
-    return bool(_WENDUNG_DAVOR_RE.search(vorn))
+    # nur das Ende vor dem Etikett zählt – ein Fenster statt der ganzen Zelle (linear auch in einer langen Zeile mit
+    # Tausenden Etiketten, Abnahme 2 A2-12)
+    anfang = max(zelle.start if zelle else 0, et.start - 30)
+    return bool(_WENDUNG_DAVOR_RE.search(text, anfang, et.start))
 
 
 def _etikett_am_zellanfang(seite, lg: Lage, et: Etikett) -> bool:

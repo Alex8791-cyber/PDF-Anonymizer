@@ -93,7 +93,11 @@ ERLAEUTERUNG = {
           "E-Mail „Received: from …“; direkt hinter einem Versionswort wie „Version 10.0.19045.1234“ nie) und IPv6",
     "zugangsdaten": "Benutzername/-kennung, Kennwort, PIN, Geheimzahl, Aktivierungs-, Freischalt-, Zahlen- und "
                     "Entsperrcode hinter ihrem Etikett (auch „WPA2-Kennwort“, „Kennwort für das Portal: …“, als "
-                    "Spaltenkopf „PIN“) – nicht „Passwort vergessen?“ oder „PIN: siehe separates Schreiben“",
+                    "Spaltenkopf „PIN“); ein Zugangscode aus Ziffern hinter „Code“ mit einem Schloss davor, im Satz "
+                    "oder dahinter („Haustür: Code 1357“, „(Haustür) Code 1357“, „Die Garage hat den Code 1199.“, "
+                    "„Code 4455 für die Tiefgarage“, „schaltet man mit 6482 aus“) – nicht „Passwort vergessen?“, "
+                    "„PIN: siehe separates Schreiben“, Fehler- und Anzeigecodes von Geräten („Der Motor meldet den "
+                    "Code P0300“, „Das Garagentor zeigte den Code 3017“) oder Tarif- und Rabattcodes",
     "profilname": "@-Namen, Nutzer- und Profilnamen hinter Plattform-Etiketten („eBay-Name:“, „Telegram:“), der "
                   "Pfad eines Profil-Links („facebook.com/vorname.nachname“) und Kunden-, Vertrags- und Namensangaben "
                   "in Links („?kdnr=4711081&name=…“) – nicht die Seite einer Firma",
@@ -103,9 +107,12 @@ ERLAEUTERUNG = {
                      "vierstellige PLZ mit Ort hinter einer Straße oder mit Länderhinweis („8002 Zürich“), "
                      "sechsstellige PLZ mit Länderhinweis und ausländische Kennzeichen im Satz mit Länderhinweis",
     "ort": "Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“",
-    "beruf": "hinter „Beruf:“, im Satz („arbeitet als …“), in der Spalte „Beruf“/„Tätigkeit“ einer "
-             "Personenliste und im Beruf-Feld eines Kastenformulars (Wert unter dem Feldbezeichner, auch unter „Beruf "
-             "des Ehepartners“)",
+    "beruf": "hinter „Beruf:“, im Satz („arbeitet als …“, „ist als … tätig“, „verdient ihr Geld als …“, „übt den "
+             "Beruf der … aus“, „seit sie Lehrerin ist“), in der Spalte „Beruf“/„Tätigkeit“ einer Personenliste, im "
+             "Beruf-Feld eines Kastenformulars (Wert unter dem Feldbezeichner, auch unter „Beruf des Ehepartners“) "
+             "und auf Scans rechts neben dem Feldnamen „Beruf“ – nicht die Rolle des Maklers, einer Firma oder eines "
+             "Vereins („Wir sind als Versicherungsmakler für Sie tätig“), Vertretungs- und Ehrenämter („als Betreuer "
+             "seiner Mutter“, „ehrenamtlich als Trainer“) und Ausfüllhinweise („bitte genau angeben“)",
     "arbeitgeber": "hinter „Arbeitgeber:“ oder im Satz; bekannte Versicherer, Banken und Behörden bleiben stehen",
     "diagnose": "nur bekannte Begriffe und ICD-Codes mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten "
                 "(⚕, nicht angehakt)",
