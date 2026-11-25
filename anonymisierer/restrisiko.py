@@ -3696,9 +3696,10 @@ class _Seitenpruefung:
             # "Der Lackner hat den Wagen gefahren.": am Satzanfang nur ein Familienname der Wissensbasis bzw. mit
             # Namensgestalt und ein Personen-Verb dahinter (Abnahme 2 V5)
             # auch die weibliche Form auf "-erin" eines Familiennamens ("Die Wimmerin hat angerufen.", "Die Moserin hat den
-            # Wagen gefahren."; Abnahme 3 AB3-05)
+            # Wagen gefahren."; Abnahme 3 AB3-05) und ein unbekanntes Wort auf "-er" ("Der Mooshammer hat angerufen.";
+            # Abnahme 3, Probe gen3) – nicht ein bekanntes Wort ("Der Vater", "Der Absender", "Der Fahrer")
             satzanfang = artikel_davor(i) and woerter[i - 1][2] in ("Der", "Die") and verb_dahinter \
-                and (familienname or (not (vn or aw or allow) and w.endswith("erin") and self._name_auf_er(w)))
+                and (familienname or (not (vn or aw or allow) and self._name_auf_er(w)))
             if artikel_davor(i) and (woerter[i - 1][2] in ("der", "die") or satzanfang) and not (vn or aw or allow) \
                     and (familienname or ((verb_davor or verb_dahinter) and self._name_auf_er(w))) \
                     and (verb_dahinter or verb_davor):
@@ -3846,10 +3847,13 @@ class _Seitenpruefung:
     def _name_auf_er(self, w: str) -> bool:
         """Kann ein unbekanntes Wort direkt hinter "saß der", "lenkte die" … ein Familienname sein, auch ohne die
         Endungen von namensgestalt ("Hinterstoißer", "Wimmer"; Abnahme N5): großgeschrieben, ab fünf Buchstaben, auf
-        "-er" – kein Allerwelts-, Berufs-, Orts- oder Etikettwort, keine Substantiv-Endung ("Beifahrer", "Fahrer",
-        "Gutachter" bleiben frei). Auch die mundartliche weibliche Form auf "-erin" ("die Hinterstoißerin"), wenn
-        weder sie noch die Grundform ein bekanntes Wort ist ("Fahrerin", "Beifahrerin" bleiben frei). Nur für die
-        Meldung, nicht zum Schwärzen."""
+        "-er" – kein Allerwelts-, Berufs-, Orts- oder Etikettwort und kein Rollenwort nach _sachwort_er ("Beifahrer",
+        "Fahrer", "Anwohner", "Gutachter" bleiben frei) oder aus einem gewöhnlichen Wort und einem Rollen-Grundwort
+        ("Unfallfahrer", "Fahrradfahrer"). Ein Wort aus einem unbekannten Bestimmungswort und einem Rollen-Grundwort
+        ("Kirchhelfer", "Leitgeber", "Brunnfahrer") kann ein Familienname sein und wird gemeldet (dritte Abnahme,
+        Grundsatz: im Zweifel melden), auch wenn es ein seltenes Rollenwort ist ("Hausbesitzer"). Auch die
+        mundartliche weibliche Form auf "-erin" ("die Hinterstoißerin"), wenn weder sie noch die Grundform ein
+        bekanntes Wort ist ("Fahrerin", "Beifahrerin" bleiben frei). Nur für die Meldung, nicht zum Schwärzen."""
         if len(w) >= 7 and w.endswith("erin") and w[:1].isupper() and w.isalpha() and not w.isupper():
             grund = w[:-2]
             return (self._name_auf_er(grund) or (personenkontext.namensgestalt(grund, self.w.modul)
@@ -3858,8 +3862,8 @@ class _Seitenpruefung:
                                              "ist_allowlist", "ist_anrede_titel"))
         if len(w) < 5 or not w[:1].isupper() or w.isupper() or not w.endswith("er") or not w.isalpha():
             return False
-        if w.lower().endswith(_ER_SACHWORT_ENDUNGEN):
-            return False                                # "fuhr der Radfahrer", "rief der Anwohner", "fuhr der Bagger"
+        if _sachwort_er(w) or self._rollen_kompositum(w):
+            return False                                # "fuhr der Fahrer", "rief der Anwohner", "der Unfallfahrer"
         if any(self.w.frage(f, w) for f in ("ist_allerweltswort", "ist_beruf", "ist_ort", "ist_vorname",
                                              "ist_allowlist", "ist_anrede_titel", "ist_mehrdeutig")):
             return False                                # auch ein mehrdeutiger Nachname ("saß der Winter")
@@ -3869,6 +3873,18 @@ class _Seitenpruefung:
                            for art in wissen_modul.ETIKETTEN_ARTEN)
         except Exception:  # pragma: no cover - Wissensbasis fehlt
             return False
+
+    def _rollen_kompositum(self, w: str) -> bool:
+        """Ein Wort aus einem gewöhnlichen Wort der Wissensbasis und dem Grundwort eines Rollen-, Fahrzeug- oder
+        Gerätewortes auf "-er" ("Unfallfahrer", "Fahrradfahrer", "Grundstücksbesitzer") ist ein Rollenwort; mit einem
+        unbekannten Bestimmungswort ("Kirchhelfer", "Brunnfahrer") kann es ein Familienname sein."""
+        k = w.lower()
+        for endung in _ER_SACHWORT_ENDUNGEN:
+            if k.endswith(endung) and len(w) - len(endung) >= 3:
+                bestimmung = w[:len(w) - len(endung)]
+                if self.w.frage("ist_allerweltswort", bestimmung[:1].upper() + bestimmung[1:]):
+                    return True
+        return False
 
     def _strassenwort(self, i, woerter) -> bool:
         """Wort ist Teil eines Straßennamens ("Theodor-Heuss-Ring", "Goethe Straße")."""

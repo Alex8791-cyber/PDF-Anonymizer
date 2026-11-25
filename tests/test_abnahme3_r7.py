@@ -200,6 +200,37 @@ def test_ab3_01_gegenproben(text, wert):
     assert _lesbar_ohne_meldung(text, wert), (_stellen(_funde(text)), _verdacht(text))
 
 
+# Probe gen3 der Abnahme: ein Raum oder Gegenstand ohne sicheres Schloss in weiteren Formen um "Code" (in Klammern
+# oder Anführung davor, "Code für den …:", "Code … für den …", als Satzgegenstand, allein in der Zeile davor – auch
+# schon geschwärzt) blieb ohne Meldung
+@pytest.mark.parametrize("text, wert", [
+    ("(Fahrradraum) Code 3603", "3603"),
+    ("„Heizungsraum“ Code 5590", "5590"),
+    ("Code für die Werkstatt: 5029", "5029"),
+    ("Code zum Lagerraum: 9054", "9054"),
+    ("Code 6573 für das Lager", "6573"),
+    ("Der Technikraum hat den Code 3389.", "3389"),
+    ("Die Werkstatt hat einen neuen Code 7741.", "7741"),
+    ("Werkstatt\nCode 9079", "9079"),
+    ("Müllraum\nCode 2648", "2648"),
+])
+def test_ab3_01_code_mit_raum_in_weiteren_formen_gemeldet(text, wert):
+    assert _weg_oder_gemeldet(text, wert), (_stellen(_funde(text)), _verdacht(text))
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Code 4711 für die Bestellung", "4711"),
+    ("(Tarif) Code 2207", "2207"),
+    ("Der Artikel hat den Code 4711.", "4711"),
+    ("Fehlerspeicher:\nCode 1234", "1234"),
+    ("Störung\nCode 1234", "1234"),
+    ("Code 3017 für die Störung", "3017"),
+    ("Fahrzeug (Typ) Code 7272", "7272"),
+])
+def test_ab3_01_code_mit_raum_gegenproben(text, wert):
+    assert _lesbar_ohne_meldung(text, wert), (_stellen(_funde(text)), _verdacht(text))
+
+
 def test_ab3_01_scan(tmp_path):
     pdf = _scan_pdf(tmp_path / "ab3_01.pdf", ["Hinweise für den Handwerker", "Gartenhaus: Code 9184",
                                               "Geräteschuppen – Code 3016", "Carport: Code 4185"])
@@ -513,6 +544,77 @@ def test_ab3_05_familienname_mit_schadenverb_gemeldet(text, name):
 ])
 def test_ab3_05_gegenproben(text, wort):
     assert _lesbar_ohne_meldung(text, wort), (_stellen(_funde(text)), _verdacht(text))
+
+
+# Probe gen3 der Abnahme: unbekannter Familienname auf "-er" ohne Namensgestalt am Satzanfang (männliche Form)
+@pytest.mark.parametrize("text, name", [
+    ("Der Mooshammer hat angerufen.", "Mooshammer"),
+    ("Der Hinterstocker hat den Schaden gemeldet.", "Hinterstocker"),
+    ("Der Kreuthammer hat den Unfall verursacht.", "Kreuthammer"),
+])
+def test_ab3_05_familienname_auf_er_am_satzanfang_gemeldet(text, name):
+    assert _weg_oder_gemeldet(text, name), (_stellen(_funde(text)), _verdacht(text))
+
+
+@pytest.mark.parametrize("text, wort", [
+    ("Der Vater hat angerufen.", "Vater"),
+    ("Der Absender hat den Brief geschickt.", "Absender"),
+    ("Der Versicherer hat den Schaden reguliert.", "Versicherer"),
+    ("Der Hersteller hat geantwortet.", "Hersteller"),
+    ("Der Teilnehmer hat angerufen.", "Teilnehmer"),
+    ("Der Unfallgegner hat angerufen.", "Unfallgegner"),
+])
+def test_ab3_05_bekanntes_wort_auf_er_am_satzanfang_ohne_meldung(text, wort):
+    assert _lesbar_ohne_meldung(text, wort), (_stellen(_funde(text)), _verdacht(text))
+
+
+# Offener Punkt der vierten Nachbesserung (Probe leck_er_endung, 9 still): ein unbekannter Familienname aus
+# Bestimmungswort und dem Grundwort eines Rollenworts auf "-er" hinter einem Verb einer Person und Artikel war von
+# einem Rollenwort nicht zu unterscheiden und blieb ohne Meldung. Grundsatz: im Zweifel melden.
+@pytest.mark.parametrize("text, name", [
+    ("Am Steuer saß der Leitgeber, als der Unfall passierte.", "Leitgeber"),
+    ("Den Unfall verursachte der Kirchhelfer.", "Kirchhelfer"),
+    ("Dann rief der Bergleser die Polizei.", "Bergleser"),
+    ("Laut Polizei fuhr der Haslbecher zu schnell.", "Haslbecher"),
+    ("Am Steuer saß die Pointweckerin, als es krachte.", "Pointweckerin"),
+    ("Den Schaden meldete der Lechdrucker am Montag.", "Lechdrucker"),
+    ("Wie der Hinterführer sagte, war die Ampel rot.", "Hinterführer"),
+    ("Am Steuer saß der Kreuzläufer.", "Kreuzläufer"),
+    ("Gefahren ist der Brunnfahrer, nicht seine Frau.", "Brunnfahrer"),
+])
+def test_n4_familienname_aus_bestimmungswort_und_rollenwort_gemeldet(text, name):
+    assert _weg_oder_gemeldet(text, name), (_stellen(_funde(text)), _verdacht(text))
+
+
+@pytest.mark.parametrize("text, wort", [
+    ("Am Steuer saß der Beifahrer, als der Unfall passierte.", "Beifahrer"),
+    ("Am Steuer saß der Mitfahrer.", "Mitfahrer"),
+    ("Den Unfall verursachte der Radfahrer.", "Radfahrer"),
+    ("Den Schaden meldete der Versicherungsnehmer.", "Versicherungsnehmer"),
+    ("Laut Polizei fuhr der Busfahrer zu schnell.", "Busfahrer"),
+    ("Dann rief der Anwohner die Polizei.", "Anwohner"),
+    ("Dann fuhr der Bagger weg.", "Bagger"),
+    ("Dann rief der Untermieter an.", "Untermieter"),
+    ("Den Schaden verursachte der Mitarbeiter.", "Mitarbeiter"),
+    ("Am Steuer saß die Beifahrerin.", "Beifahrerin"),
+    ("Gefahren ist der Unfallfahrer.", "Unfallfahrer"),                  # gewöhnliches Wort + Rollen-Grundwort
+    ("Am Steuer saß der Fahrradfahrer.", "Fahrradfahrer"),
+    ("Am Steuer saß der Lieferwagenfahrer.", "Lieferwagenfahrer"),
+    ("Den Schaden meldete der Grundstücksbesitzer.", "Grundstücksbesitzer"),
+])
+def test_n4_rollenwort_auf_er_ohne_namensverdacht(text, wort):
+    assert _lesbar_ohne_meldung(text, wort), (_stellen(_funde(text)), _verdacht(text))
+
+
+@pytest.mark.parametrize("text, wort", [
+    ("Den Schaden meldete der Hausbesitzer.", "Hausbesitzer"),
+    ("Am Steuer saß der Schulbusfahrer.", "Schulbusfahrer"),
+])
+def test_n4_seltenes_rollenwort_auf_er_hoechstens_gemeldet(text, wort):
+    """Die Kehrseite: ein Rollenwort, dessen Bestimmungswort die Wissensbasis nicht kennt, wird gemeldet, aber nie
+    geschwärzt."""
+    assert not _beruehrt(text, wort), _stellen(_funde(text))
+    assert _gemeldet_nicht_geschwaerzt(text, wort), _verdacht(text)
 
 
 # ----------------------------------------------------------------------

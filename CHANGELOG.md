@@ -481,8 +481,13 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Schloss meldet die Selbstkontrolle die Ziffern: hinter einem Raum, Gerät oder Feldnamen direkt vor „Code“
     („Waschküche: Code 6161“, „Serverraum Code 6169“), hinter „Code ist/lautet“ („Code lautet 5656.“, „Der Code ist
     7878.“), hinter einem Gegenstand im Satz davor und hinter einem Satz mit Schloss in der Zeile davor, auch wenn diese
-    mit einem Punkt endet („Bitte im Keller nachsehen.⏎Code 9595“). Fehler- und Anzeigecodes, Tarif-, Rabatt- und
-    Katalogcodes, Mengen („mit 2500 Euro“, „mit 120 Stellplätzen“) und „Code 128 auf dem Etikett“ bleiben ohne Meldung.
+    mit einem Punkt endet („Bitte im Keller nachsehen.⏎Code 9595“). Ebenso in weiteren Formen um „Code“ mit einem
+    Raum oder Gegenstand: in Klammern oder Anführung davor („(Fahrradraum) Code 3603“), „Code für die Werkstatt: 5029“,
+    „Code 6573 für das Lager“, als Satzgegenstand („Der Technikraum hat den Code 3389.“) und allein in der Zeile davor
+    („Werkstatt⏎Code 9079“, auch wenn das Wort dort schon geschwärzt ist) – in der Probe gen3 der Abnahme waren 28
+    solche Zeilen still, jetzt 4: der Raum als Feldname mit den Ziffern allein in der nächsten Zeile („Werkstatt:⏎7144“)
+    ist von „Baujahr:⏎1998“ nicht zu unterscheiden. Fehler- und Anzeigecodes, Tarif-, Rabatt- und Katalogcodes, Mengen
+    („mit 2500 Euro“, „mit 120 Stellplätzen“) und „Code 128 auf dem Etikett“ bleiben ohne Meldung.
   - Name hinter einem Personenwort: Am Satz- oder Notizanfang mit einem Verb einer Person dahinter ist das Wort der Name
     („Monteur Grohe kam am 03.03.“, „Nachbar Zettl hat den Brand gemeldet.“, „Kollegin Pointl ruft zurück“, „Mieter
     Liebherr hat gekündigt.“), auch eine Marke und ein unbekanntes Wort ohne Namensbeleg; ebenso mitten im Satz ohne
@@ -510,8 +515,15 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Kratzer.“ bleibt stehen und wird gemeldet).
   - Selbstkontrolle: Familienname mit Artikel auch mit den Verben eines Schadens oder seiner Meldung („Der Gruber hat den
     Schaden gemeldet.“, „Den Unfall verursachte der Riedhalter.“, „Den Schaden meldete der Holzwohner.“) und in der
-    weiblichen Form auf „-erin“ am Satzanfang („Die Wimmerin hat angerufen.“); ein unbekanntes Wort hinter „als“ in
-    einem Satz über Erwerbsarbeit und eine Rolle mit gewohnter Tätigkeit („Sie macht als Gutachterin Hausbesuche.“).
+    weiblichen Form auf „-erin“ am Satzanfang („Die Wimmerin hat angerufen.“), am Satzanfang auch ein unbekannter
+    Familienname auf „-er“ ohne Namensgestalt („Der Mooshammer hat angerufen.“; nicht „Der Absender hat …“, „Der
+    Versicherer hat …“); ein unbekanntes Wort hinter „als“ in einem Satz über Erwerbsarbeit und eine Rolle mit
+    gewohnter Tätigkeit („Sie macht als Gutachterin Hausbesuche.“).
+    Ein Familienname aus einem unbekannten Bestimmungswort und dem Grundwort eines Rollenworts hinter einem Verb
+    einer Person blieb ohne Meldung („Am Steuer saß der Kirchhelfer, als …“, „Laut Polizei fuhr der Haslbecher zu
+    schnell.“; offener Punkt der vierten Nachbesserung, 9 von 20 Namen der Probe) und wird jetzt gemeldet; mit einem
+    gewöhnlichen Wort davor bleibt es ein Rollenwort ohne Meldung („der Unfallfahrer“, „der Fahrradfahrer“,
+    „der Grundstücksbesitzer“), ein seltenes Rollenwort wird gemeldet („der Hausbesitzer“).
   - Beruf: auch gebeugt („übt den Beruf des Schreiners aus“, „übt seit Jahren den Beruf des Maurers aus“), im
     Relativsatz („Ihr Mann, der Polizist ist, …“; nicht Rollen wie „der Fahrer war“) und Tätigkeiten nach ihrem
     Grundwort hinter einem Wort der Erwerbstätigkeit („arbeitet als Putzfrau“, „ist als Putzkraft tätig“, „arbeitet als

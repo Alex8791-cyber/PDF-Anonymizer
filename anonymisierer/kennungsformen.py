@@ -3691,6 +3691,54 @@ _CODE_WORT_DAVOR_RE = re.compile(r"(?<![\wäöüß\-])([A-ZÄÖÜ][\wäöüß\-]
                                  r"(?:[ \t]*[:/=>\-–—]{1,3}[ \t]*|[ \t]+)$")
 
 
+# Ein Gegenstand, Raum oder Feldname ohne sicheres Schloss in weiteren Formen um "Code": in Klammern oder Anführung
+# davor ("(Fahrradraum) Code 3603", "„Werkstatt“ Code 5653"), hinter "Code für den …:" ("Code für den Fahrradraum:
+# 6807"), hinter dem Wert ("Code 2545 für den Fahrradraum"), als Satzgegenstand ("Der Fahrradraum hat den Code 9666.")
+# oder allein in der Zeile davor ("Werkstatt⏎Code 9079"): für die Selbstkontrolle (Abnahme 3, Probe gen3; Grundsatz:
+# jeder ausgenommene Fall wird gemeldet)
+_CODE_KLAMMER_WORT_RE = re.compile(r"[(„“\"»‚‘']([A-ZÄÖÜ][\wäöüß\-]{1,39})[)“”\"«‘’'][ \t]*(?:[:\-–—][ \t]*)?$")
+_CODE_FUER_WORT_RE = re.compile(r"[ \t]+(?:f(?:ü|ue)r|zum|zur)[ \t]+(?:(?:den|die|das|dem|einen|eine|unseren?|unsere)"
+                                r"[ \t]+)?([A-ZÄÖÜ][\wäöüß\-]{2,39})")
+_CODE_FUER_WERT_RE = re.compile(r"[ \t]*:[ \t]*([^\s,;\"„“”«»<>|]{3,64})")
+_CODE_SUBJEKT_RE = re.compile(r"(?<![\wäöüß])(?:[Dd]er|[Dd]ie|[Dd]as|[Uu]nser|[Uu]nsere)[ \t]+"
+                              r"([A-ZÄÖÜ][\wäöüß\-]{2,39})[ \t]+(?:hat|hatte|bekommt|bekam|besitzt|braucht)[ \t]+"
+                              r"(?:(?:jetzt|nun|einen|den|neuen|eigenen)[ \t]+){1,3}$")
+_CODE_ZEILE_WORT_RE = re.compile(r"[ \t]*(?:(?:der|die|das|Der|Die|Das)[ \t]+)?[„“\"»(]?([A-ZÄÖÜ][\wäöüß\-]{2,39})"
+                                 r"[“”\"«)]?[ \t]*:?[ \t]*")
+# eine Zeile nur aus einem Platzhalter der Ausgabe ("[NAMEN]" ⏎ "Code 2648": das Wort davor ist schon geschwärzt)
+_CODE_ZEILE_PLATZHALTER_RE = re.compile(r"[ \t]*\[[A-ZÄÖÜ][A-ZÄÖÜ0-9 _\-]{0,30}\][ \t]*:?[ \t]*")
+
+
+# Wörter einer Bauart oder Ausführung ("Fahrzeug (Typ) Code 7272", "Modell: Code 4711"): ein Typ-, kein Zugangscode
+_CODE_BAUART_RE = re.compile(r"(?i)(?:typ|modell|serie|baureihe|variante|ausf(?:ü|ue)hrung|bauart)\w{0,4}")
+
+
+def _gegenstand_wort(wort: str) -> bool:
+    """Kann das Wort ein Gegenstand, Raum oder Feldname mit Zugangscode sein – kein Funktions- oder Füllwort, keine
+    Einordnung, kein Tarif, keine Bauart, keine Störung?"""
+    return not (ist_funktionswort(wort) or wort.casefold() in _ZUGANG_FUELLWORT or _CODE_EINORDNUNG_RE.fullmatch(wort)
+                or _CODE_KEIN_GEHEIMNIS_RE.fullmatch(wort) or _CODE_BAUART_RE.fullmatch(wort)
+                or _CODE_FEHLER_RE.fullmatch(wort))
+
+
+def _code_bezug_gegenstand(text: str, zeilenanfang: int, code_start: int, wert_ende: int, zeilenende: int,
+                           satz: str) -> bool:
+    """Nennt die Umgebung von "Code" einen Gegenstand, Raum oder Feldnamen in einer der Formen von
+    _CODE_KLAMMER_WORT_RE, _CODE_FUER_WORT_RE (hinter dem Wert), _CODE_SUBJEKT_RE oder _CODE_ZEILE_WORT_RE (Zeile
+    davor)?"""
+    for m in (_CODE_KLAMMER_WORT_RE.search(satz), _CODE_SUBJEKT_RE.search(satz),
+              _CODE_FUER_WORT_RE.match(text, wert_ende, zeilenende)):
+        if m is not None and _gegenstand_wort(m.group(1)):
+            return True
+    if satz.strip() or zeilenanfang <= 0:
+        return False
+    vz = text.rfind("\n", 0, zeilenanfang - 1) + 1
+    if _CODE_ZEILE_PLATZHALTER_RE.fullmatch(text, vz, zeilenanfang - 1):
+        return True
+    m = _CODE_ZEILE_WORT_RE.fullmatch(text, vz, zeilenanfang - 1)
+    return m is not None and _gegenstand_wort(m.group(1))
+
+
 def zugangscode_verdacht(text: str) -> list:
     """(start, ende) der Ziffernfolgen hinter "Code", die ein Zugangscode sein können (siehe oben), auch mit "ist" oder
     "lautet" dazwischen ("Der Hausmeister öffnet die Tür, Code ist 4711."), und hinter einem Schloss als Feldname
@@ -3720,6 +3768,13 @@ def zugangscode_verdacht(text: str) -> list:
         angekuendigt = ankuendigung is not None and ankuendigung.end() > m.end()
         nach = ankuendigung.end() - 1 if angekuendigt else m.end()
         w = _CODE_WERT_DAHINTER_RE.match(text, nach, zeilenende)
+        fuer = None
+        if (w is None or not _pin_form(w.group(1))) and not angekuendigt:
+            fuer = _CODE_FUER_WORT_RE.match(text, m.end(), zeilenende)        # "Code für den Fahrradraum: 6807"
+            if fuer is not None and _gegenstand_wort(fuer.group(1)):
+                w = _CODE_FUER_WERT_RE.match(text, fuer.end(), zeilenende)
+            else:
+                fuer = None
         if w is None or not _pin_form(w.group(1)):
             continue
         zeilenanfang = text.rfind("\n", max(0, m.start() - 4 * CODE_GEGENSTAND_FENSTER), m.start()) + 1
@@ -3728,8 +3783,9 @@ def zugangscode_verdacht(text: str) -> list:
             continue
         doppelpunkt = ":" in text[w.start():w.start(1)]
         if not (_CODE_SCHLOSS_RE.search(satz) or (doppelpunkt and _CODE_ANFANG_DAVOR_RE.search(satz))
-                or angekuendigt or _CODE_GEGENSTAND_RE.search(satz) or _code_wort_davor(satz)
-                or _schloss_im_satz_davor(text, zeilenanfang, m.start(), satz)):
+                or angekuendigt or fuer is not None or _CODE_GEGENSTAND_RE.search(satz) or _code_wort_davor(satz)
+                or _schloss_im_satz_davor(text, zeilenanfang, m.start(), satz)
+                or _code_bezug_gegenstand(text, zeilenanfang, m.start(), w.end(), zeilenende, satz)):
             continue
         hinten = re.search(r"[.!?;]", text[w.end():min(zeilenende, w.end() + 60)] + ".")
         if _CODE_EINORDNUNG_RE.search(satz) or _CODE_EINORDNUNG_RE.search(text, w.end(), w.end() + hinten.start()) \
