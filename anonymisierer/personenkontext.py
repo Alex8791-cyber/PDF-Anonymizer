@@ -928,9 +928,10 @@ _KEIN_NAME_IN_ORG_ZELLE_RE = re.compile(
 
 
 # Hof- und Hausnamen: "Hof Hintermoser", "Anwesen Gschwandtner", "beim Stögerbauer" – der Name nennt die Familie und
-# ihren Wohnort zugleich (Nachprüfung NP-14)
+# ihren Wohnort zugleich (Nachprüfung NP-14); "Beim"/"Vom"/"Zum" auch am Satz- und Feldanfang ("Beim Stögerbauer
+# ereignete sich der Unfall", "Schadenort: Beim Stögerbauer" – Nachbesserung n2)
 _HOF_KOPF_RE = re.compile(r"(?<![\wäöüß\-])(?:(Hof|Anwesen|Gehöft|Bauernhof|Hofstelle|Hofgut|Gutshof|Aussiedlerhof)|"
-                          r"(beim|vom|zum))[ \t]+(?=[A-ZÄÖÜ])")
+                          r"([Bb]eim|[Vv]om|[Zz]um))[ \t]+(?=[A-ZÄÖÜ])")
 _HOF_NAME_RE = re.compile(r"[A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß]+)?(?![\wäöüß\-])")
 # Ort eines Ereignisses oder Wohnorts in derselben Zeile: ein Orts-Etikett mit Doppelpunkt oder ein Ereignis-/Wohnwort
 _HOF_ORTSKONTEXT_RE = re.compile(

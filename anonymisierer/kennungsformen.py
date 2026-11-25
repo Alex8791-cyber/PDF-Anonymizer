@@ -2385,8 +2385,9 @@ def fahrzeugmarke(wort: str) -> bool:
 
 
 # Wertformen eines Kennzeichens hinter einem Kfz-Etikett (kfz_wert) – Trenner auch mit Leerzeichen um den
-# Bindestrich und als Gedankenstrich ("RO - KL 2207", "RO – KL 2207")
-_KFZ_TRENNER = r"(?:[ \t]?[-–‐][ \t]?|[ \t])"
+# Bindestrich, als Gedankenstrich und als Mittel- oder Aufzählungspunkt ("RO - KL 2207", "RO – KL 2207", "RO · KL 2207":
+# so schreibt eine Standardschrift ohne Gedankenstrich ihn; dieselben Ausnahmen wie für das Leerzeichen, C-2)
+_KFZ_TRENNER = r"(?:[ \t]?[-–‐·•][ \t]?|[ \t])"
 _KFZ_DE_RE = re.compile(r"([A-ZÄÖÜ]{1,3})" + _KFZ_TRENNER + r"([A-Z]{1,2})[ \t]?(\d{1,4})([EH])?(?![\wäöüß])")
 _KFZ_DE_KLEIN_RE = re.compile(r"([a-zäöü]{1,3})" + _KFZ_TRENNER + r"([a-z]{1,2})[ \t]?(\d{1,4})([eh])?(?![\wäöüß])")
 # Kurzzeit- und rote Kennzeichen: Erkennungsnummer ohne Buchstaben, beginnend mit 03 bis 07 ("RO-04 1287", "RO-07 451",
@@ -2484,7 +2485,7 @@ KFZ_WERTFORM = Wertform(kfz_wert)          # kfz_wert als Wertform der Regel „
 
 # Kennzeichen ohne Etikett (kennzeichen_stellen): die deutsche Form mit amtlichem Unterscheidungszeichen
 _KFZ_FREI_RE = re.compile(
-    r"(?<![\wÄÖÜäöü\-/.])([A-ZÄÖÜ]{1,3})([ \t]?[-–‐][ \t]?|[ \t])([A-Z]{1,2})[ \t]?(\d{1,4})([EH])?(?![\wäöüß])"
+    r"(?<![\wÄÖÜäöü\-/.])([A-ZÄÖÜ]{1,3})([ \t]?[-–‐·•][ \t]?|[ \t])([A-Z]{1,2})[ \t]?(\d{1,4})([EH])?(?![\wäöüß])"
     r"(?![ \t]*(?:Uhr|EUR|€|%|Prozent|km|Jahre|Monate|Tage|Punkte)(?![\wäöüß]))")
 _KFZ_SONDER_FREI_RE = re.compile(r"(?<![\wÄÖÜäöü\-/.])([A-ZÄÖÜ]{1,3})[ \t]?[-–‐][ \t]?(0[3-7])[ \t](\d{1,4})"
                                  r"(?![\wäöüß])")

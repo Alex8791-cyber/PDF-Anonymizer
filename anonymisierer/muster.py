@@ -1415,6 +1415,13 @@ _STEUERNR_ETIKETT_RE = re.compile(
     r"(\d{10,13}|\d{2,5}(?:[ \t]{0,2}/[ \t]{0,2}\d{1,5}){1,3}|\d{2,5}(?:[ \t]\d{3,5}){1,2})(?![\d/])")
 _UST_ID_RE = re.compile(r"(?i:USt[-\s]?Id(?:Nr)?\.?|Umsatzsteuer-?(?:Identifikationsnummer|ID|IdNr\.?))"
                         r"[ \t]*:?[ \t]*(DE[ \t]?\d{9}|DE[ \t]?\d{3}[ \t]\d{3}[ \t]\d{3})(?!\d)")
+# Dieselbe Angabe so, wie die Texterkennung sie liest: "DE28765432]" (]/l/I/| statt 1), "DE2876S4321" (S statt 5), andere
+# Gruppierung ("DE 2876 5432 1") – nur direkt hinter dem Etikett, 8 bis 10 Zeichen, davon mindestens 7 echte Ziffern
+# (Nachbesserung n2, Gegenprüfung LK-10: Fußzeile eines Mehrfachagenten als Scan)
+_UST_OCR_ZEICHEN = r"[\dOoIl|\]!SBZ]"
+_UST_ID_OCR_RE = re.compile(r"(?i:USt[-\s]?Id(?:Nr)?\.?|Umsatzsteuer-?(?:Identifikationsnummer|ID|IdNr\.?))"
+                            r"[ \t]*:?[ \t]*(DE[ \t]?(?:" + _UST_OCR_ZEICHEN + r"{8,10}|" + _UST_OCR_ZEICHEN
+                            + r"{1,4}(?:[ \t]" + _UST_OCR_ZEICHEN + r"{1,4}){1,4}))(?![\w\]|!])")
 # Firmenzusammenhang einer USt-IdNr. (Fußzeile des Versicherers, Gutachten EQ-16) und USt-IdNr. eines Einzelkaufmanns,
 # Inhabers oder Freiberuflers (Domänen-Befunde 55 und 77): kennungsformen.ust_id_der_firma
 
@@ -1424,12 +1431,24 @@ def _steuernr_spannen(text: str) -> list:
     for m in _STEUERNR_ETIKETT_RE.finditer(text):
         if 10 <= sum(c.isdigit() for c in m.group(1)) <= 13:
             aus.append(Stelle(m.start(1), m.end(1)))
+    ust = []
     for m in _UST_ID_RE.finditer(text):
+        ust.append((m.start(1), m.end(1)))
         # Firmenangaben in der Zeile der Nummer und den zwei Zeilen davor -> USt-IdNr. der Firma, kein Personenbezug;
         # bei Einzelkaufleuten, Inhabern und Freiberuflern eine Angabe der Person (eine Regel mit der Selbstkontrolle)
         if kennungsformen.ust_id_der_firma(text, m.start(1)):
             continue
         aus.append(Stelle(m.start(1), m.end(1)))
+    if "DE" in text:
+        for m in _UST_ID_OCR_RE.finditer(text):
+            if any(a < m.end(1) and m.start(1) < b for a, b in ust):
+                continue                        # die gültige Form gilt schon (auch als Firmenangabe)
+            zeichen = re.sub(r"[ \t]", "", m.group(1))[2:]
+            if not 8 <= len(zeichen) <= 10 or sum(c.isdigit() for c in zeichen) < 7:
+                continue
+            if kennungsformen.ust_id_der_firma(text, m.start(1)):
+                continue
+            aus.append(Stelle(m.start(1), m.end(1)))
     return sorted(set(aus))
 
 

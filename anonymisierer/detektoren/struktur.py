@@ -806,7 +806,8 @@ PARTIKEL = frozenset({"von", "van", "de", "der", "den", "dem", "des", "del", "de
                       "af", "av", "op"})
 # Artikel unter den Partikeln: Teil eines Namens nur hinter einem anderen Partikel ("van den Berg", "von der Leyen")
 _ARTIKEL_PARTIKEL = frozenset({"der", "den", "dem", "des", "die", "das"})
-# großgeschriebene Funktionswörter (Satzanfang, Anrede, Grußformel), die nie Teil eines Namens sind
+# großgeschriebene Funktionswörter (Satzanfang, Anrede, Grußformel), die nie Teil eines Namens sind – auch keine Orts-
+# präposition am Anfang eines Ortsfelds ("Schadenort: Beim Stögerbauer", "Vor dem Haus", "Hinter der Scheune")
 FUNKTIONSWOERTER = frozenset("""
 ihr ihre ihren ihrem ihrer ihres sie wir ich er es der die das den dem des ein eine einen einem einer mit bei
 für fur von vom zu zum zur im am an auf aus nach bitte sehr liebe lieber hallo guten tag herzliche herzlichen
@@ -814,6 +815,7 @@ viele beste freundliche freundlichen danke vielen und oder mein meine meinen mei
 dieser diese dieses siehe anlage anlagen seite betreff datum ort uhr kopie vorab per via cc bcc an
 damen herren kolleginnen kollegen kunden kundinnen mitglieder eltern freunde team alle zusammen leute
 heute morgen gestern
+beim vor vorm hinter hinterm neben unter unterm über überm ueber gegenüber gegenueber zwischen ins ans
 """.split())
 # Wochentage und Monate: keine Orte ("Montag, 12.03.2025"), als Name nur mit Namenskontext ("Freitag, Jonas")
 DATUMSWOERTER = frozenset("""

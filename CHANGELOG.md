@@ -308,7 +308,12 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     „Gruber Sepp“, „GbR Seidlmayr“, ein einzelner Familienname); Profilnamen im Satz („auf Instagram unter …“); Berufe
     im Satz („arbeitet in Teilzeit als …“); Zugangsdaten mit „ist ab sofort“, hinter „Displaysperre“, „WLAN-Schlüssel“
     und hinter einem Gegenstand („Garagentoröffner Code 1199“); Hof- und Hausnamen („Hof Hintermoser“, „beim
-    Stögerbauer“ im Orts- oder Ereigniskontext) und die mundartliche Folge „die Kölbl Resi“; Kopf- oder Allerweltswörter
+    Stögerbauer“ im Orts- oder Ereigniskontext, auch am Satz- oder Feldanfang: „Beim Stögerbauer ereignete sich …“,
+    „Schadenort: Beim Stögerbauer“) und die mundartliche Folge „die Kölbl Resi“; die USt-IdNr. eines Vermittlers oder
+    Freiberuflers so, wie die Texterkennung sie liest („DE28765432]“, „DE2876S4321“, „DE 2876 5432 1“ – nur hinter dem
+    Etikett, mindestens sieben echte Ziffern); ein Kfz-Kennzeichen mit Mittel- oder Aufzählungspunkt als Trenner („RO ·
+    KL 2207“ – so setzt eine Standardschrift ohne Gedankenstrich „RO – KL 2207“; dieselben Ausnahmen wie für das
+    Leerzeichen); Kopf- oder Allerweltswörter
     als Familienname hinter „Familienname:“/„Geburtsname:“ und in Datenzeilen einer Namensspalte mit Vornamen oder
     Geburtsdatum („Stand“, „Summe“, „Termin“); Geburtsdaten mit Komma und zweistelligem Jahr hinter einem
     Geburts-Etikett („geb. 05.09,16“); Kinderlisten mit Orts- oder Monatsnamen („Paris, 02.02.2011“; nur Einträge direkt
@@ -319,7 +324,8 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Anschrift:“ („Lindenweg 9, Hinterhaus, 83229 …“); ein Straßenname allein auf seiner Zeile oder in seiner
     Tabellenzelle mit der Hausnummer vor der PLZ darunter („Edelweißstraße“ ⏎ „4, 83080 Oberaudorf“, auch auf Scans).
   - Selbstkontrolle: abgewählte Gesundheitsdaten oder Konfession nennen einen eigenen Grund für `_PRUEFEN`; ein Datum in
-    einer Tabellenzeile aus lauter geschwärzten Namen (Folgeseite ohne Kopf), ein Familienname mit Artikel vor oder
+    einer Tabellenzeile aus lauter geschwärzten Namen in mindestens zwei Zellen (Folgeseite ohne Kopf – das Briefdatum
+    neben dem geschwärzten Empfänger zählt nicht), ein Familienname mit Artikel vor oder
     hinter einem Personen-Verb („war der Brandstetter am Steuer“, „saß der Haslbeck“), Marken im Personenkontext – auch
     unter einem Tabellenkopf mit nur einem Personen-Etikett („Anrufer ⇥ Anliegen ⇥ Rückruf bis“) –, Personen in
     Organisations-Spalten und dort auch eine Versicherer-Marke mit Vor- und Familienname („Adam Riese“), wenn die Zeile
@@ -335,7 +341,9 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     stehen); Zugangsdaten ohne Mengen- und Längenangaben („3-mal“, „4-stellig“) und ohne Tarif- oder Rabattcodes;
     „Signal Iduna“ ist kein Profil-Etikett; Versionen hinter „from“/„von“ ohne Zugriffs- oder Host-Wort sind keine
     IP-Adresse; die Tätigkeit in einer Betriebstabelle (Firma, Umsatz) ist kein Beruf; Organisationssignaturen („Neff
-    Kundendienst Süd“, „Ihr Miele Team“) und Privatbanken in der Spalte „Anbieter“ bleiben stehen.
+    Kundendienst Süd“, „Ihr Miele Team“) und Privatbanken in der Spalte „Anbieter“ bleiben stehen; eine Präposition am
+    Anfang eines Ortsfelds ist kein Ortsname („Schadenort: Vor dem Haus“, „Ort: Zum …“, „Unfallort: Hinter der
+    Scheune“ – vorher wurde „Vor“, „Zum“, „Hinter“ als Ort geschwärzt).
   - Laufzeit: Quadrat-, Profil-, Beruf- und Ortsregeln und die Spaltensuche rechts neben Etiketten arbeiten in
     begrenzten Fenstern – linear auch bei 16 000 Zeichen je Zeile. Beim Schwärzen vieler Stellen in einer Zeile prüfen
     ein Gitter aus Höhenstreifen und Spalten (bereits geschwärzte Rechtecke, Nachbarwörter), je Zeile sortierte

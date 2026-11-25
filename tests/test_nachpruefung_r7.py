@@ -314,6 +314,28 @@ def test_np09_selbstkontrolle_personenzeile():
                          platzhalter=ph)
 
 
+@pytest.mark.parametrize("empfaenger", [["Frau", "Sabine Krüger"], ["Herrn und Frau", "Josef und Sabine Krüger"]])
+def test_np09_briefdatum_neben_empfaenger_ist_keine_personenreihe(tmp_path, empfaenger):
+    """Das Briefdatum rechts in Höhe des geschwärzten Empfängers ist kein Datensatz einer Person (Fehlmeldung der
+    Selbstkontrolle in 008_beitragsrechnung: der Platzhalter stand doppelt in der Liste, die Namen in einer Zelle)."""
+    pdf = tmp_path / "brief.pdf"
+    doc = fitz.open()
+    s = doc.new_page(width=595, height=842)
+    for i, t in enumerate(empfaenger + ["Lindenweg 4", "83022 Rosenheim"]):
+        s.insert_text((71, 185 + 13 * i), t, fontsize=10, fontname="helv")
+    s.insert_text((354, 193), "Datum", fontsize=8, fontname="helv")
+    s.insert_text((354, 203), "16.05.2025", fontsize=10, fontname="helv")
+    s.insert_text((71, 300), "Sehr geehrte Frau Krüger,", fontsize=10, fontname="helv")
+    s.insert_text((71, 316), "anbei erhalten Sie die Beitragsrechnung für 2025.", fontsize=10, fontname="helv")
+    doc.save(pdf)
+    doc.close()
+    erg = analysiere_pdf(str(pdf), ALLE, [], [], profil="hoch")
+    a, _ = auftrag.standard_auftrag(erg, schwaerze_pdf)
+    p = auftrag.schwaerz_parameter(a, True, "hoch", schwaerze_pdf)
+    r = schwaerze_pdf(str(pdf), a["funde"], ziel_ordner=tmp_path / "aus", **p)
+    assert "16.05.2025" not in {v.text for v in r["verdacht"]}, r["verdacht"]
+
+
 # ----------------------------------------------------------------------
 # A/NP-10: Komma-Datum mit zweistelligem Jahr hinter einem Geburts-Etikett
 # ----------------------------------------------------------------------
@@ -396,6 +418,38 @@ def test_np14_hofname(text, name):
                                   "Wir haben den Hof Süd besichtigt.", "Amtsgericht Hof, Zivilabteilung",
                                   "Der Schaden entstand beim Oktoberfest."])
 def test_np14_gegenproben(text):
+    assert not _stellen(_funde(text), "namen"), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text, name", [
+    ("Beim Stögerbauer ereignete sich der Unfall.", "Stögerbauer"),
+    ("Vom Stögerbauer aus fuhr sie zur Weide, dort passierte der Unfall.", "Stögerbauer"),
+    ("Zum Hintermaier gehört die Scheune, in der es brannte.", "Hintermaier"),
+    ("Schadenort: Beim Stögerbauer, Ortsteil Hammer", "Stögerbauer"),
+    ("Ort: Zum Stögerbauer", "Stögerbauer"),
+])
+def test_np14_hofname_am_satzanfang(text, name):
+    """Hausname hinter großgeschriebenem "Beim"/"Vom"/"Zum" am Satz- oder Feldanfang: wie mitten im Satz geschwärzt
+    (Nachbesserung n2: am Satzanfang still, hinter "Schadenort:" wurde nur "Beim" geschwärzt)."""
+    assert _geschwaerzt(text, name, "namen"), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text, wort", [
+    ("Schadenort: Beim Stögerbauer, Ortsteil Hammer", "Beim"),
+    ("Schadenort: Vor dem Haus", "Vor"),
+    ("Ort: Zum Stögerbauer", "Zum"),
+    ("Unfallort: Hinter der Scheune", "Hinter"),
+    ("Schadenort: Neben der Garage", "Neben"),
+])
+def test_np14_praeposition_ist_kein_ort(text, wort):
+    """Eine Präposition am Anfang eines Ortsfelds ist kein Ortsname (vorher "[PLZORT] Stögerbauer", "[ORT] dem Haus")."""
+    assert not any(s.split()[0] == wort for s in _stellen(_funde(text))), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text", ["Beim Abbiegen übersah sie den Radfahrer.", "Zum Unfall kam es gegen 14 Uhr.",
+                                  "Vom Versicherer kam keine Antwort.", "Beim Einparken streifte er die Garage.",
+                                  "Zum Glück wurde niemand verletzt.", "Vom Hersteller liegt ein Gutachten vor."])
+def test_np14_satzanfang_gegenproben(text):
     assert not _stellen(_funde(text), "namen"), _stellen(_funde(text))
 
 
@@ -727,6 +781,65 @@ def test_lk18_formen(text, wert, kategorie):
                                   "Tarif CC+PLUS", "SNR 30 dB"])
 def test_lk18_gegenproben(text):
     assert not _stellen(_funde(text)), _stellen(_funde(text))
+
+
+# ----------------------------------------------------------------------
+# LK-10: USt-IdNr. eines Vermittlers, wie die Texterkennung sie liest (Probe v10: "DE28765432]")
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, wert", [
+    ("Mehrfachagent Rupert Stangassinger : Marktplatz 5 : 83324 Ruhpolding - USt-IdNr. DE28765432]", "DE28765432]"),
+    ("Fotografin Resi Zwackelhuber · USt-IdNr.: DE28765432l", "DE28765432l"),
+    ("Fotografin Resi Zwackelhuber · USt-IdNr.: DE2876S4321", "DE2876S4321"),
+    ("Versicherungsmakler Quirin Zwackl · USt-IdNr. DE 2876 5432 1", "DE 2876 5432 1"),
+    ("Versicherungsmakler Quirin Zwackl · USt-IdNr. DE 287 654 32]", "DE 287 654 32]"),
+])
+def test_lk10_ust_idnr_ocr(text, wert):
+    """Hinter dem Etikett "USt-IdNr." gilt auch ein von der Texterkennung verlesener Wert (]/l/| statt 1, S statt 5,
+    andere Gruppierung) als USt-IdNr. – ohne Firmenmerkmal eine Angabe der Person."""
+    assert any(s.replace(" ", "") == wert.replace(" ", "") for s in _stellen(_funde(text), "steuernr")), \
+        _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text", [
+    "Malerbetrieb Huber GmbH · HRB 1234 · USt-IdNr. DE28765432]",       # Firma: keine Angabe einer Person
+    "USt-IdNr. DE 2024",                                                # zu kurz
+    "USt-IdNr.: entfällt",
+    "Kontrollnummer DE28765432]",                                        # ohne USt-Etikett
+    "USt-IdNr. DE SBZ OIl 2024",                                         # zu wenige Ziffern
+])
+def test_lk10_ust_idnr_ocr_gegenproben(text):
+    assert not _stellen(_funde(text), "steuernr"), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text, wert", [
+    ("Mein Auto, RO · KL 2207, stand ordnungsgemäß in der Parkbucht.", "RO · KL 2207"),
+    ("Kennzeichen vom Unfallgegner: RO · KL 2207", "RO · KL 2207"),
+    ("Kennzeichen: M • AB 123", "M • AB 123"),
+    ("Der Wagen RO·KL 2207 parkte daneben.", "RO·KL 2207"),
+])
+def test_c2_kennzeichen_mit_mittelpunkt(text, wert):
+    """Ein Kennzeichen mit Mittel- oder Aufzählungspunkt als Trenner (so setzt eine Standardschrift ohne Gedankenstrich
+    "RO – KL 2207"; Domänen-Probe a27, Eingabe C-2) – vorher still, auch hinter "Kennzeichen:"."""
+    assert _geschwaerzt(text, wert, "kfz"), _stellen(_funde(text))
+
+
+@pytest.mark.parametrize("text", [
+    "Harz Assekuranz AG · HRB 1234 · Amtsgericht Stendal",
+    "Breite Straße 70 · 38855 Wernigerode · Tel. 0800 826 9819",
+    "Vorstand: Dr. A. Müller · B. Schmidt · C. Weber",
+    "Tarife: HP · SF 12 und RS · SB 150",
+    "Ausgabe VVG · AB 2008",
+])
+def test_c2_mittelpunkt_gegenproben(text):
+    """Mittelpunkte als Trenner in Fuß- und Aufzählungszeilen bleiben ohne Kennzeichen (dieselben Ausnahmen wie für
+    das Leerzeichen: Jahreszahl, SF/SB, Sperrliste)."""
+    assert not _stellen(_funde(text), "kfz"), _stellen(_funde(text))
+
+
+def test_lk10_ust_idnr_ocr_nur_der_wert():
+    """Die tolerante Form nimmt nichts hinter dem Wert mit ("DE287654321 1234" bleibt beim gültigen Wert)."""
+    text = "Fotografin Resi Zwackelhuber · USt-IdNr. DE287654321 1234 Stück"
+    assert _stellen(_funde(text), "steuernr") == {"DE287654321"}, _stellen(_funde(text))
 
 
 # ----------------------------------------------------------------------

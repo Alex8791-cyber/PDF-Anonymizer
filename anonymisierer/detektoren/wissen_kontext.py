@@ -682,7 +682,10 @@ _KEIN_ORT = {"datum", "stand", "ort", "unterschrift", "montag", "dienstag", "mit
              "zugang", "versand", "einzug", "lastschrift", "abbuchung", "zahlbar", "beitrag", "ausgabe", "seite",
              "bescheid", "hamburg-mannheimer", "nachtrag", "änderung", "stornierung", "vorgang", "bearbeitet",
              "geprüft", "freigegeben", "gesendet", "empfangen", "versandt", "ausgefertigt", "unterschrieben",
-             "im", "am", "in", "und", "der", "die", "das"}
+             "im", "am", "in", "und", "der", "die", "das",
+             # Präpositionen am Feldanfang ("Ort: Zum Stögerbauer", "Ort: Hinter der Scheune") sind kein Ortsname
+             "zum", "zur", "beim", "bei", "vor", "hinter", "neben", "unter", "über", "ueber", "an", "auf", "ins",
+             "ans", "nach", "aus", "gegenüber", "gegenueber", "zwischen", "von", "mit"}
 
 
 def _ort_ok(name: str) -> bool:

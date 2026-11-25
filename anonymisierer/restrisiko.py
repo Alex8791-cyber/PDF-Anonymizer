@@ -2726,7 +2726,15 @@ class _Seitenpruefung:
         links = [rand for ps, pe, rand in self.platzhalter_boxen()
                  if _PERSONEN_PLATZHALTER_RE.match(self.text[ps:pe]) and rand[2] <= b.x0 + 1
                  and min(b.y1, rand[3]) - max(b.y0, rand[1]) >= 0.5 * min(hoehe, rand[3] - rand[1])]
-        if len(links) < 2:
+        # jede Box einmal (ein Platzhalter steht unter Umständen doppelt in der Liste) und mindestens zwei Zellen mit
+        # einer Spaltenlücke dazwischen: der geschwärzte Empfänger im Anschriftfeld eines Briefs ("Frau [PERSON A]")
+        # neben dem Briefdatum ist kein Datensatz einer Tabelle (Fehlmeldung in 008_beitragsrechnung, Nachbesserung n2)
+        zellen, bis = 0, None
+        for x0, _, x1, _ in sorted({tuple(round(x, 1) for x in r) for r in links}):
+            if bis is None or x0 - bis > max(2 * hoehe, 12.0):
+                zellen += 1
+            bis = x1 if bis is None else max(bis, x1)
+        if zellen < 2:
             return False
         x_links = min(r[0] for r in links)
         for y in self.m.zeilen:
