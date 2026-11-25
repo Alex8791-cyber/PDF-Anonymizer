@@ -515,6 +515,15 @@ def _etiketten_roh(text: str) -> list:
     return aus
 
 
+# Straßenname allein auf seiner Zeile bzw. in seiner Zelle, die Hausnummer erst am Anfang der nächsten Zeile vor der PLZ
+# ("Edelweißstraße" ⏎ "4, 83080 Oberaudorf": eine schmale Anschriftspalte bricht nach dem Straßennamen um; Gegenprüfung
+# LK-12, Probe tab03) – genutzt von struktur.adressblock und struktur.tabelle. Ein Straßenwort allein ("Weg", "Ring")
+# ist kein Straßenname.
+STRASSENNAME_ALLEIN_RE = re.compile(
+    r"(?:[A-ZÄÖÜ][\wäöüß'.\-]*[ \-]){0,3}[A-ZÄÖÜ][\wäöüß\-]*"
+    r"(?i:straße|strasse|str\.|weg|gasse|platz|allee|ring|damm|ufer|steig|pfad|chaussee|promenade|stieg)")
+HAUSNUMMER_VOR_PLZ_RE = re.compile(r"[ \t]*(\d{1,4}(?:[ ]?[a-zA-Z])?)(?![\w.])[ \t]*[,;]?[ \t]*")
+
 # Straßenwort als Teil eines Straßennamens statt als Feldname: Wort + ein Leerzeichen davor, Hausnummer danach
 _STRASSENNAME_TEIL_RE = re.compile(r"(?i)stra(?:ß|ss)e|str\.?")
 _VOR_STRASSENWORT_RE = re.compile(r"[A-Za-zÄÖÜäöüß][\wäöüß'’.\-]*[ ]$")

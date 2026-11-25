@@ -36,8 +36,8 @@ import re
 
 from ..seitenmodell import SPALTENTRENNER
 from . import REGISTER, Treffer, detektor, registrieren
-from .struktur import (_GREMIUM_RE, _ORG_ROLLEN_RE, adresszusatz, etiketten, lage, namen_spanne, ort_verlaengern,
-                       plz_ort_kappen,
+from .struktur import (_GREMIUM_RE, _ORG_ROLLEN_RE, HAUSNUMMER_VOR_PLZ_RE, STRASSENNAME_ALLEIN_RE, adresszusatz,
+                       etiketten, lage, namen_spanne, ort_verlaengern, plz_ort_kappen,
                        plz_ort_spannen, strasse_spanne, _muster, _wissen)
 
 MM = 72 / 25.4
@@ -558,6 +558,34 @@ def _block_werte(seite, lg, z_plz, plz_spanne, fk: _Firmenkontext, im_fenster: b
     return aus
 
 
+def _strasse_ueber_plz_zeile(seite, lg, z_plz, plz_start: int, fk: _Firmenkontext) -> list:
+    """Nur eine Hausnummer vor der PLZ ("4, 83080 Oberaudorf") und darüber in derselben Spalte eine Zeile, die allein
+    ein Straßenname ist ("Edelweißstraße"): die umgebrochene Anschrift – Straßenname und Hausnummer (Gegenprüfung
+    LK-12, Probe tab03; auf Scans liest die Texterkennung jede Zelle als eigene Zeile)."""
+    text = seite.text
+    nummer = HAUSNUMMER_VOR_PLZ_RE.fullmatch(text, z_plz.start, plz_start)
+    box = lg.zeilen_box.get(z_plz.id)
+    if nummer is None or box is None:
+        return []
+    h = max(lg.hoehe, 4.0)
+    zeilen_nach_id = {z.id: z for z in seite.zeilen}
+    for zid in lg.zeilen_darueber(z_plz.id, 1.9 * h):
+        ob = lg.zeilen_box.get(zid)
+        if ob is None or abs(ob[0] - box[0]) > 2.0 * h:
+            continue
+        z = zeilen_nach_id.get(zid)
+        if z is None or fk.firma(z.id, z.ende):
+            return []
+        zt = text[z.start:z.ende]
+        name = zt.strip().rstrip(",").rstrip()
+        if not STRASSENNAME_ALLEIN_RE.fullmatch(name):
+            return []
+        s = z.start + zt.index(name)
+        return [(s, s + len(name), "strasse", f"{name} {nummer.group(1)}"),
+                (nummer.start(1), nummer.end(1), "strasse", f"{name} {nummer.group(1)}")]
+    return []
+
+
 def _anschriftfeld(seite, y0: float, x1: float) -> bool:
     """Liegt eine Zeile im Anschriftfeld nach DIN 5008 (Form A oder B, ±8 mm)?"""
     return 19 * MM <= y0 <= 98 * MM and x1 <= 125 * MM
@@ -586,6 +614,8 @@ def adressblock(dok, kontext):
             segmente = _segment_werte(seite, z.start, z.ende, fk, z.id)
             werte += segmente
             erste = plz[0]
+            if 0 < erste[0] - z.start <= 12:
+                werte += _strasse_ueber_plz_zeile(seite, lg, z, erste[0], fk)
             if erste[0] - z.start <= 3 and not segmente:
                 box = lg.zeilen_box.get(z.id)
                 im_fenster = bool(box) and nr == 0 and _anschriftfeld(seite, box[1], box[2])

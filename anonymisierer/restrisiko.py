@@ -3184,6 +3184,13 @@ class _Seitenpruefung:
         # die Erkennung (Nachprüfung NP-04)
         org_personen = {a for a, _ in personenkontext.personen_in_org_spalten(text, self.w.modul)} \
             if "\t" in text and self.w.modul is not None else set()
+        # Markenkern eines Versicherers mit der Gestalt "Vorname Familienname" in einer Organisations-Spalte ("Adam
+        # Riese" als Versicherer oder als Bürge): die Erkennung lässt ihn stehen, gemeldet wird er (Nachprüfung A, o12)
+        if "\t" in text and self.w.modul is not None:
+            for a, b in personenkontext.org_marken_in_personengestalt(text, self.w.modul):
+                if not (self.ist_gesperrt(a, b) or self.ist_platzhalter_bei(a, b)):
+                    self.neu(a, b, "Versicherer-Marke mit Vor- und Familienname in einer Organisations-Spalte "
+                             "(Person?)", "name")
 
         def sachname(i) -> bool:
             """Steht das Wort in einer Marke, einem Modell oder einer Tierrasse der Wissensbasis ("Weber Genesis",

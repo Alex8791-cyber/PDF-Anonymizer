@@ -978,21 +978,10 @@ def artikel_nachname_vorname(text: str, wissen) -> list:
     return aus
 
 
-def personen_in_org_spalten(text: str, wissen=None) -> list:
-    """(start, ende) der Namen in Zellen einer Organisations-Spalte, die eine Person sind (_org_zellteil False):
-    die großgeschriebenen Wörter außer den Hinweiswörtern ("beim Vater Rauschenbach" -> "Rauschenbach", "GbR
-    Seidlmayr" -> "Seidlmayr", "Privatdarlehen Hirschbichler" -> "Hirschbichler"; Nachprüfung NP-04). Zeile für Zeile
-    mit dem zuletzt gesehenen Kopf je Zellenzahl (lineare Laufzeit auch bei großen Tabellen). Eine Regel für Erkennung
-    (namen.py) und Selbstkontrolle."""
-    if not text or "\t" not in text:
-        return []
-    if wissen is None:
-        try:
-            from . import wissen as wissen_modul
-            wissen = wissen_modul
-        except Exception:  # pragma: no cover - Wissensbasis fehlt
-            return []
-    aus = []
+def _org_spalten_zellteile(text: str):
+    """(Anfang, Zellteil, Zelle, Zeile) je Zellteil (getrennt durch Komma, Semikolon, Schrägstrich, Klammer) in den
+    Zellen einer Organisations-Spalte – Zeile für Zeile mit dem zuletzt gesehenen Kopf je Zellenzahl (lineare Laufzeit
+    auch bei großen Tabellen)."""
     koepfe: dict = {}                       # Zellenzahl -> (Zeilennummer, Spalten mit Organisations-Kopf)
     za = 0
     for nr, zeile in enumerate(text.split("\n")):
@@ -1014,20 +1003,82 @@ def personen_in_org_spalten(text: str, wissen=None) -> list:
             x, y = zellen[k]
             zelle = zeile[x:y]
             for teil in _ZELLTEIL_RE.finditer(zelle):
-                if _org_zellteil(teil.group(0), zelle, wissen) is not False:
+                yield anfang + x + teil.start(), teil.group(0), zelle, zeile
+
+
+def _wissen_oder_modul(wissen):
+    if wissen is not None:
+        return wissen
+    try:
+        from . import wissen as wissen_modul
+        return wissen_modul
+    except Exception:  # pragma: no cover - Wissensbasis fehlt
+        return None
+
+
+def personen_in_org_spalten(text: str, wissen=None) -> list:
+    """(start, ende) der Namen in Zellen einer Organisations-Spalte, die eine Person sind (_org_zellteil False):
+    die großgeschriebenen Wörter außer den Hinweiswörtern ("beim Vater Rauschenbach" -> "Rauschenbach", "GbR
+    Seidlmayr" -> "Seidlmayr", "Privatdarlehen Hirschbichler" -> "Hirschbichler"; Nachprüfung NP-04). Eine Regel für
+    Erkennung (namen.py) und Selbstkontrolle."""
+    if not text or "\t" not in text:
+        return []
+    wissen = _wissen_oder_modul(wissen)
+    if wissen is None:
+        return []
+    aus = []
+    for anfang, teil, zelle, _zeile in _org_spalten_zellteile(text):
+        if _org_zellteil(teil, zelle, wissen) is not False:
+            continue
+        for m in re.finditer(r"(?<![\wäöüß'’\-])[A-ZÄÖÜ][a-zäöüß'’]+(?:-[A-ZÄÖÜ][a-zäöüß'’]+)?"
+                             r"(?![\wäöüß'’])", teil):
+            w = m.group(0)
+            if _KEIN_NAME_IN_ORG_ZELLE_RE.match(w) or _ORG_WORT_RE.fullmatch(w):
+                continue
+            try:
+                if (wissen.ist_allerweltswort(w) and not wissen.ist_nachname(w)) or wissen.ist_allowlist(w):
                     continue
-                for m in re.finditer(r"(?<![\wäöüß'’\-])[A-ZÄÖÜ][a-zäöüß'’]+(?:-[A-ZÄÖÜ][a-zäöüß'’]+)?"
-                                     r"(?![\wäöüß'’])", teil.group(0)):
-                    w = m.group(0)
-                    if _KEIN_NAME_IN_ORG_ZELLE_RE.match(w) or _ORG_WORT_RE.fullmatch(w):
-                        continue
-                    try:
-                        if (wissen.ist_allerweltswort(w) and not wissen.ist_nachname(w)) or wissen.ist_allowlist(w):
-                            continue
-                    except Exception:
-                        continue
-                    s0 = anfang + x + teil.start() + m.start()
-                    aus.append((s0, s0 + len(w)))
+            except Exception:
+                continue
+            aus.append((anfang + m.start(), anfang + m.start() + len(w)))
+    return aus
+
+
+# Hinweis in derselben Tabellenzeile, dass hinter einer Versicherer-Marke mit Personengestalt eine Person stehen kann
+# (Bürgschaft, Darlehen, privat: "Kautionsbürgschaft ⇥⇥ Adam Riese ⇥⇥ 3.600 EUR") – auch in Zusammensetzungen
+_PERSON_ZEILE_RE = re.compile(r"(?i)bürgschaft|bürge|bürgin|darlehen|privat")
+
+
+def org_marken_in_personengestalt(text: str, wissen=None) -> list:
+    """(start, ende) der Zellteile einer Organisations-Spalte, die der Markenkern eines Versicherers mit der Gestalt
+    "Vorname Familienname" sind ("Adam Riese" aus "Adam Riese Versicherung", _org_kerne), wenn ihre Tabellenzeile auf
+    eine Person deuten kann (Bürgschaft, Darlehen, privat, Personenhinweis): die Erkennung lässt sie als Versicherer
+    stehen, die Selbstkontrolle meldet sie – ein Bürge dieses Namens ist dort nicht auszuschließen (Nachprüfung A,
+    Probe o12). In Vergleichs- und Bestandslisten ("PHV ⇥⇥ Adam Riese ⇥⇥ XXL") bleibt die Marke ohne Meldung
+    (Domänen-Befund 92, Gegenprüfung LK-03)."""
+    if not text or "\t" not in text:
+        return []
+    wissen = _wissen_oder_modul(wissen)
+    if wissen is None:
+        return []
+    kerne = _org_kerne(wissen)
+    aus = []
+    for anfang, teil, zelle, zeile in _org_spalten_zellteile(text):
+        woerter = teil.split()
+        if len(woerter) != 2 or " ".join(woerter).casefold() not in kerne:
+            continue
+        rest = zeile.replace(zelle, " ", 1)
+        if not (_PERSON_ZEILE_RE.search(rest) or _PERSON_HINWEIS_RE.search(rest)):
+            continue
+        vor, nach = woerter
+        try:
+            if not wissen.ist_vorname(vor) or wissen.ist_vorname_mehrdeutig(vor) \
+                    or not (wissen.ist_nachname(nach) or namensgestalt(nach, wissen)):
+                continue
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            continue
+        s = anfang + len(teil) - len(teil.lstrip())
+        aus.append((s, s + len(teil.strip())))
     return aus
 
 

@@ -45,7 +45,7 @@ from .struktur import (_ANREDEN, _ORG_ROLLEN_RE, _ROH_FUNKTIONSWORT, _ROH_KEIN_W
                        eigene_wertform, eigener_wert, etikett_fuer_text, etiketten, geburtsdatum_plausibel,
                        ist_kennungsform, kennung_spanne, lage, muster_spannen, namen_spanne, ort_spanne,
                        plz_ort_spannen, strasse_spanne, ueberlappung, wort_namensartig, _muster, _vergleichsform,
-                       _wort_ist_titel)
+                       _wort_ist_titel, HAUSNUMMER_VOR_PLZ_RE, STRASSENNAME_ALLEIN_RE)
 
 QUELLE = "struktur.tabelle"
 _EINHEITEN = frozenset({"eur", "euro", "€", "%", "p.a.", "chf", "usd", "gbp", "mtl.", "monatlich", "jährlich",
@@ -831,6 +831,8 @@ def _werte_der_tabelle(dok, tab: _Tabelle, im_etikett=None) -> list:
                 if m and not text[m.end():e].strip():
                     ganze_zellen.append((nr, m.start(1), m.end(1), "namen", None, reihe, idx, False))
         roh += _umbrochene_zellen(dok, tab, idx, sp, karten_tabelle)
+        if "adresse" in arten:
+            roh += _strasse_ueber_zwei_reihen(dok, werte)
         if not arten & PII_ARTEN and "vertragsdaten" not in arten:
             # Spalte ohne Personen-Etikett ("Nr.", unbekannter Kopf): Kennungsform in >= 3 Werten
             if hat_person:
@@ -928,6 +930,39 @@ def _werte_der_tabelle(dok, tab: _Tabelle, im_etikett=None) -> list:
             continue
         gesehen[schl] = len(aus)
         aus.append(Treffer(dok.global_(nr, a), dok.global_(nr, b), kat, QUELLE, SICHERHEIT_SPALTE, gruppe))
+    return aus
+
+
+def _strasse_ueber_zwei_reihen(dok, werte: list) -> list:
+    """Straßenname allein in einer Zelle der Anschriftspalte, die Hausnummer am Anfang der Zelle derselben Spalte in
+    der nächsten Reihe ("Edelweißstraße" ⏎ "4, 83080 Oberaudorf"): brechen die Nachbarspalten ebenfalls um, liest die
+    Tabelle zwei Reihen statt einer umbrochenen Zelle (Gegenprüfung LK-12, Probe tab03).
+    [(seite, start, ende, kategorie, gruppe, reihe, beleg)]"""
+    je_reihe: dict = {}
+    for nr, s, e, reihe in werte:
+        je_reihe.setdefault(reihe, []).append((nr, s, e))
+    aus = []
+    for reihe, teile in je_reihe.items():
+        folge = je_reihe.get(reihe + 1)
+        if len(teile) != 1 or not folge:
+            continue
+        nr, s, e = teile[0]
+        text = dok.seiten[nr].text
+        name = text[s:e].strip().rstrip(",").rstrip()
+        if not name or not STRASSENNAME_ALLEIN_RE.fullmatch(name):
+            continue
+        nr2, s2, e2 = folge[0]
+        text2 = dok.seiten[nr2].text
+        m = HAUSNUMMER_VOR_PLZ_RE.match(text2, s2, e2)
+        if m is None:
+            continue
+        plz = plz_ort_spannen(text2, m.end(), e2)
+        if text2[m.end():e2].strip() and not (plz and plz[0][0] - m.end() <= 1):
+            continue                                   # "4 Zimmer", "3. OG": keine Hausnummer vor PLZ und Ort
+        a = s + text[s:e].index(name)
+        gruppe = f"{name} {m.group(1)}"
+        aus.append((nr, a, a + len(name), "strasse", gruppe, reihe, True))
+        aus.append((nr2, m.start(1), m.end(1), "strasse", gruppe, reihe + 1, True))
     return aus
 
 

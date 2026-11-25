@@ -315,14 +315,17 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     einer Tabelle, die die Vorseite ankündigt („Weitere Kinder siehe Folgeseite.“); die Hausnummer in der Folgezeile
     einer Scan-Zelle (eine Ziffer ist kein Rest der Texterkennung); Grad und Dezimalminuten, Plus Codes, „Green Card“
     und „SNR“ (Seriennummer); ein Adresszusatz, der selbst ein Anschrift-Etikett ist, hinter „Neue Anschrift:“
-    („Lindenweg 9, Hinterhaus, 83229 …“).
+    („Lindenweg 9, Hinterhaus, 83229 …“); ein Straßenname allein auf seiner Zeile oder in seiner Tabellenzelle mit der
+    Hausnummer vor der PLZ darunter („Edelweißstraße“ ⏎ „4, 83080 Oberaudorf“, auch auf Scans).
   - Selbstkontrolle: abgewählte Gesundheitsdaten oder Konfession nennen einen eigenen Grund für `_PRUEFEN`; ein Datum in
     einer Tabellenzeile aus lauter geschwärzten Namen (Folgeseite ohne Kopf), ein Familienname mit Artikel vor oder
     hinter einem Personen-Verb („war der Brandstetter am Steuer“, „saß der Haslbeck“), Marken im Personenkontext – auch
-    unter einem Tabellenkopf mit nur einem Personen-Etikett („Anrufer ⇥ Anliegen ⇥ Rückruf bis“) – und Personen in
-    Organisations-Spalten werden verortet gemeldet; ein Platzhalter („[GEB-DATUM]“) gilt nicht mehr als Spaltenkopf,
-    „Mitglied der …“ im Satz nicht als Etikett; Maße mit ausgeschriebener Einheit und Leerwörter („Geburtsname:
-    Entfällt“) werden nicht gemeldet.
+    unter einem Tabellenkopf mit nur einem Personen-Etikett („Anrufer ⇥ Anliegen ⇥ Rückruf bis“) –, Personen in
+    Organisations-Spalten und dort auch eine Versicherer-Marke mit Vor- und Familienname („Adam Riese“), wenn die Zeile
+    auf eine Person deuten kann („Kautionsbürgschaft“, Darlehen, privat; sie bleibt stehen, in Vergleichslisten ohne
+    Meldung) werden verortet gemeldet; ein Platzhalter („[GEB-DATUM]“) gilt nicht mehr als Spaltenkopf, „Mitglied der …“
+    im Satz nicht als Etikett; Maße mit ausgeschriebener Einheit und Leerwörter („Geburtsname: Entfällt“) werden nicht
+    gemeldet.
   - Weniger Über-Schwärzung: Ort hinter einer Person nur mit Ortsbeleg (Fachrichtungen wie „Orthopädie“ bleiben stehen);
     Adresszusatz nur mit Merkmal (OG, Whg., Hinterhaus, c/o …; „Augenzeugin“, „Privatkunde“ bleiben stehen); Quadrate
     nur mit Etikett, Wohnwort oder Mannheim direkt dahinter (AKB-Gliederung, Sitzplatz, Skizzenfeld, „A 8, 3 km“ bleiben

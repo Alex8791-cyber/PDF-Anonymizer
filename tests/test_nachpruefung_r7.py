@@ -490,6 +490,69 @@ def test_m02_gegenproben(text):
 
 
 # ----------------------------------------------------------------------
+# Probe o12 der Nachprüfung A (A/NP-04): Versicherer-Marke mit der Gestalt "Vorname Familienname" in einer
+# Organisations-Spalte – bleibt als Versicherer stehen, wird aber gemeldet (ein Bürge dieses Namens ist möglich)
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text", [
+    "Sicherheiten\nArt\t\tVersicherer\t\tBetrag\nKautionsbürgschaft\t\tAdam Riese\t\t3.600 EUR",
+    "Vorversicherungen\nSparte\t\tVorversicherer\t\tBemerkung\nBürgschaft\t\tAdam Riese\t\tSchwiegervater",
+])
+def test_o12_marke_in_personengestalt_gemeldet(text):
+    aus, ph = _ausgabe(text)
+    assert _geschwaerzt(text, "Adam Riese") or _gemeldet(aus, "Adam Riese", platzhalter=ph), (aus,
+                                                                                            _ausgabe_verdacht(text))
+
+
+# ----------------------------------------------------------------------
+# LK-12 (Probe tab03 der ersten Gegenprüfung): Straßenname allein auf seiner Zeile bzw. in seiner Zelle, die
+# Hausnummer vor der PLZ in der Zeile bzw. Tabellenreihe darunter ("Edelweißstraße" ⏎ "4, 83080 Oberaudorf")
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, werte", [
+    ("Anschrift\nEdelweißstraße\n4, 83080 Oberaudorf", ["Edelweißstraße", "4"]),
+    ("Neue Anschrift ab 01.12.2026:\nAm Lindenweg\n12a, 83229 Aschau im Chiemgau", ["Am Lindenweg", "12a"]),
+])
+def test_lk12_strasse_ueber_zwei_zeilen(text, werte):
+    stellen = _stellen(_funde(text), "strasse")
+    assert all(w in stellen for w in werte), _stellen(_funde(text))
+
+
+def test_lk12_strasse_ueber_zwei_tabellenreihen(tmp_path):
+    pfad = _pdf(str(tmp_path / "zellumbruch.pdf"), [[
+        "Antragsübersicht Familie", "Versicherungsnehmer\t\tAnschrift\t\tKonto",
+        "Eheleute\t\tEdelweißstraße\t\tDE91 7115 0000", "Gschwandtner\t\t4, 83080 Oberaudorf\t\t0000 4471 22"]],
+        xs=(40, 220, 400))
+    stellen = _pdf_stellen(pfad)
+    assert {"Edelweißstraße", "4"} <= stellen, stellen
+
+
+@pytest.mark.parametrize("text", ["Bitte beachten Sie den Fußweg\n4, 83080 Oberaudorf",
+                                  "Lieferanschrift\nLagerplatz Nord\n4, 83080 Oberaudorf",
+                                  "Wegbeschreibung: über den Ring\n2, 83022 Rosenheim"])
+def test_lk12_strasse_ueber_zwei_zeilen_gegenproben(text):
+    assert not _stellen(_funde(text), "strasse"), _stellen(_funde(text))
+
+
+def test_lk12_tabelle_gegenprobe(tmp_path):
+    pfad = _pdf(str(tmp_path / "objekte.pdf"), [[
+        "Objekte", "Versicherungsnehmer\t\tAnschrift\t\tWohnfläche", "Huber\t\tHauptstraße\t\t84 qm",
+        "Maier\t\t3 Zimmer, 2. OG\t\t62 qm"]], xs=(40, 220, 400))
+    assert not _pdf_stellen(pfad, "strasse"), _pdf_stellen(pfad)
+
+
+def test_o12_regel_und_gegenproben():
+    text = "Art\t\tVersicherer\t\tBetrag\nKautionsbürgschaft\t\tAdam Riese\t\t3.600 EUR\nHausrat\t\tGothaer\t\t120 EUR"
+    spannen = personenkontext.org_marken_in_personengestalt(text)
+    assert [text[a:b] for a, b in spannen] == ["Adam Riese"]
+    for gegen in ("Versicherer\t\tSparte\t\tBeitrag\nAllianz\t\tHausrat\t\t120 EUR\nGothaer\t\tKfz\t\t300 EUR",
+                  # Vergleichs- und Bestandslisten: die Marke ist der Versicherer (Domänen-Befund 92, LK-03)
+                  "Sparte\t\tVersicherer\t\tTarif\nPHV\t\tAdam Riese\t\tXXL\nHausrat\t\tAdam Riese\t\tgekündigt"):
+        assert not personenkontext.org_marken_in_personengestalt(gegen)
+        assert not _ausgabe_verdacht(gegen), _ausgabe_verdacht(gegen)
+    # außerhalb einer Organisations-Spalte gilt der Name wie bisher als Person (geschwärzt)
+    assert _geschwaerzt("Der Schwiegervater Adam Riese hat die Bürgschaft übernommen.", "Adam Riese", "namen")
+
+
+# ----------------------------------------------------------------------
 # A/NP-15: Kopf- oder Allerweltswort als Familienname hinter dem Etikett und in Datenzeilen der Namensspalte
 # ----------------------------------------------------------------------
 @pytest.mark.parametrize("text, name", [
