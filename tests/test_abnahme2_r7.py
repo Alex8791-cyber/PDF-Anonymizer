@@ -987,7 +987,8 @@ def test_widerlegt3_laut_gegenproben(text, wort):
 
 # V6: unbekannter Vorname vor einem Familiennamen nach Gestalt – gemeldet
 @pytest.mark.parametrize("text", ["Liebe Grüße aus Inzell von Kreszenz Moosbichler",
-                                  "Kreszenz Moosbichler aus Inzell hat angerufen."])
+                                  "Kreszenz Moosbichler aus Inzell hat angerufen.",
+                                  "Kreszenz Moosbichler-Hinterhuber hat angerufen."])
 def test_v6_unbekannter_vorname_vor_familienname_nach_gestalt(text):
     assert _weg_oder_gemeldet(text, "Moosbichler"), _verdacht(text)
     assert _weg_oder_gemeldet(text, "Kreszenz"), _verdacht(text)
@@ -1002,6 +1003,8 @@ def test_v6_unbekannter_vorname_vor_familienname_nach_gestalt(text):
     ("Technische Prüfstelle Rosenheim", "Prüfstelle"),
     ("Typ Mercedes-Benz", "Mercedes-Benz"),                       # Endmessung 8ebeede, s3x 060: Marke hinter "Typ"
     ("Marke, Typ Mercedes-Benz C 200", "Typ"),
+    ("Hund OP-Schutz\t\t12,90 EUR", "OP-Schutz"),                  # Probenkette 4803d52, b/lauf_np: Tarifname
+    ("Tarif Kfz-Schutzbrief Plus", "Schutzbrief"),
 ])
 def test_v6_vorname_familienname_gegenproben(text, wort):
     assert _lesbar_ohne_meldung(text, wort), (_stellen(_funde(text)), _verdacht(text))

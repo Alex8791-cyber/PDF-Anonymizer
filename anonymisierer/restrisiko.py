@@ -3458,9 +3458,12 @@ class _Seitenpruefung:
                     and not self.w.frage("ist_ort", w2) and not self.w.ist_etikett(w2) and not self._kompositum(w2))
 
         def marke_im_wort(w) -> bool:
-            """Ist das Wort oder ein Teil davon eine Marke ("Mercedes-Benz" hinter "Typ" im Unfallbericht)? Dann ist
-            es kein Familienname nach Gestalt."""
-            for t in [w] + [t for t in w.split("-") if t]:
+            """Ist das Wort oder ein Teil davon eine Marke ("Mercedes-Benz" hinter "Typ" im Unfallbericht) oder eine
+            Abkürzung ("OP-Schutz" im Tarif "Hund OP-Schutz")? Dann ist es kein Familienname nach Gestalt."""
+            teile = [t for t in w.split("-") if t]
+            if len(teile) > 1 and any(len(t) < 3 or t.isupper() for t in teile):
+                return True
+            for t in [w] + teile:
                 if t.lower() in _MARKEN:
                     return True
                 try:

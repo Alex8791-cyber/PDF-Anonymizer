@@ -434,8 +434,8 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     einem Schloss (‚Haustür". Code 1357‘, „Der Schlüssel liegt im Tresor. Code 3141.“, „Bitte an der Haustür
     klingeln⏎Code 1357“), ein mehrdeutiger Name der Wissensbasis hinter „laut“ oder „gemäß“ („laut Vorwerk war der
     Keller trocken“) und ein unbekannter Vorname vor einem Familiennamen nach seiner Gestalt („Kreszenz Moosbichler aus
-    Inzell hat angerufen“; nicht hinter einem gebeugten Adjektiv oder vor einer Marke: „Erfahrene Bergsteiger“,
-    „Typ Mercedes-Benz“).
+    Inzell hat angerufen“; nicht hinter einem gebeugten Adjektiv und nicht vor einer Marke oder Abkürzung:
+    „Erfahrene Bergsteiger“, „Typ Mercedes-Benz“, „Hund OP-Schutz“).
   - Über-Schwärzung: Fehler- und Anzeigecodes von Geräten bleiben lesbar („Der Motor meldet den Code P0300“, „Der
     Laptop zeigt den Code 0xC000021A“, „Am Tor blinkt Code 3017“; eine Schaden- oder Strafanzeige im Satz macht aus
     dem Code am Schloss keinen Gerätefehler: „Der Einbruch wurde angezeigt, die Alarmanlage hat den Code 2580.“
