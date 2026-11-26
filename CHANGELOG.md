@@ -592,7 +592,8 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Schadenwort davor („Zum Schaden in der Ferienwohnung: …“) ordnet den Code nicht ein. „Der Code für das Postfach
     lautet …“ wird gemeldet, wenn das Wort hinter „für“ ein Raum, Schloss oder Zugang ist (nicht „Der Code für den
     Prospekt lautet 3344.“). Frei bleiben Beträge, Baujahre (auch in der Spalte „Baujahr“ einer Tabelle: „Wohnhaus: ⇥
-    1974 ⇥ Massiv“) und Jahreszahlen vor einem Partizip in Gebäudeangaben („mit 1890 gebautem Dachstuhl“), Möbelcodes
+    1974 ⇥ Massiv“) und Jahreszahlen vor einem gebeugten Partizip mit seinem Hauptwort („mit 1890 gebautem
+    Dachstuhl“; ein ungebeugtes Partizip wie „gesichert“ bedient das Schloss, siebte Nachbesserung), Möbelcodes
     ohne Bedienung, Tarif-, Typklassen-, Gebührenordnungs- und Kostenstellencodes (auch als Grundwort).
   - Namen: Wörter hinter einem Personenwort, die die Wissensbasis als gewöhnliche Wörter kennt oder die ohne Beleg
     hinter einem Begleiter stehen („Zeugin Ledig“, „mit dem Onkel Grebl“), werden gemeldet; ein Titel- oder Berufswort,
@@ -602,9 +603,10 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     „Die Becherin hat angerufen.“), ein Wort mit Namensbeleg hinter einem Berufswort auch ohne Verb („Glaser Frost ist
     erst nächste Woche frei.“, „Laut Klempner Dyson …“), ein Hausname mit Besuchs- oder Ereigniskontext („Vom Kaltl
     kam der Anruf …“, „Wir waren beim Pfnürl zum Essen.“) und ein Organisationswort mit unbekanntem Wort unter einem
-    Gruß („Agentur Moik“) werden gemeldet. Die Kehrseite nach P2: Gemeldet werden dort auch unbekannte Wörter, die
-    kein Name sind („brannte es beim Holzhändler in Waging“, „Den Traktor lenkte der …“, „dem Nachbarn Brot
-    gebracht“); im Differenztest sind es gegenüber 0230782 159 neue und 65 weggefallene Meldungen nicht geheimer
+    Gruß („Agentur Moik“) werden gemeldet. Die Kehrseite nach P2: Gemeldet werden dort auch unbekannte und bekannte
+    Wörter, die kein Name sind („brannte es beim Holzhändler in Waging“, „Vom Sturm …“, „Den Traktor lenkte der …“,
+    „dem Nachbarn Brot gebracht“; auf 5efcc0c 131 bis 140 von 333 Nomen der Hof-Probe der fünften Abnahme, nach der
+    siebten Nachbesserung 95 bis 97); im Differenztest sind es gegenüber 0230782 159 neue und 65 weggefallene Meldungen nicht geheimer
     Wörter, 82 der neuen hinter beim/vom/zum. Ein bekannter Familienname hinter beim/vom/zum wird wieder geschwärzt
     („Wir waren beim Brandl zum Essen.“). Abteilungs-, Orts- und Firmenwörter hinter einem Personenwort („Kollege
     Außendienst“, „Nachbar Gegenüber“, „Techniker Wasserversorger“) werden nicht mehr geschwärzt, nur gemeldet;
@@ -627,8 +629,9 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Schwärzung), gilt er als links („[PERSON A] Bauer-Hinterseer hat angerufen.“ war kein „Beruf vor dem Namen“); auf
     Scans zählt auch ein Schwärzungsrechteck, in dem die Kontroll-OCR den Platzhalter verliest („IPERSONAI“), und die
     Längengrenze für OCR-Wörter gilt je Teil eines Doppelnamens. „Wasser“ und „Regen“ stehen als gewöhnliche Wörter in
-    der Wissensbasis („dem Nachbarn Wasser abgegraben“ wird nicht gemeldet); ein am Zeilenende getrenntes Wort hinter
-    „Herr“ („Herr Versiche-“ ⏎ „rer“) ist kein Familienname.
+    der Wissensbasis („dem Nachbarn Wasser abgegraben“ wird nicht gemeldet); für die Selbstkontrolle ist ein am
+    Zeilenende getrenntes Wort hinter „Herr“ („Herr Versiche-“ ⏎ „rer“) kein Familienname – die Erkennung schwärzt
+    „Versiche“ weiter als Namen (vorbestehend, auf der Textebene und im Textlayer-PDF).
   - Laufzeit: Die Kontroll-OCR liest eine Scan-Seite, deren Original kein Kammfeld hatte, ohne Kammfeld-Suche; die
     Suche selbst verkleinert das Bild über versetzte Teilbilder und bestimmt die Papierhelligkeit über das Histogramm
     (gleiches Ergebnis, bei 300 dpi 0,22 s → 0,11 s je Seite). Neue Wachstumstests (8 000 gegen 64 000 Zeichen ohne
@@ -641,6 +644,131 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     dazu die Kammfeld-Prüfung der Selbstkontrolle; auf den übrigen Scan-Seiten die Kammfeld-Suche (etwa 0,1 s je
     Seite), die Kontroll-OCR der zusätzlich geschwärzten Seiten und die neuen Regeln der Selbstkontrolle (etwa 0,1 s
     je Datei).
+- **Fünfte Abnahme der Zusammenführung (Runde 5, siebte Nachbesserung):** Einige Ausnahmen der sechsten Nachbesserung
+  ließen Werte ohne Meldung stehen, die 0230782 noch geschwärzt oder gemeldet hatte (ein Zugangscode in Jahresform,
+  ein Familienname gleich einem Geräte-Grundwort, eine Tätigkeit hinter einem Satzgegenstand, die weiteren Vorkommen
+  kurzer Werte, „Regen“ und „Wasser“ als Namen), der Code eines Möbelschranks wurde ohne Eintrag in der Tauschliste nur
+  noch gemeldet, und auf Kammfeld-Formularen verlor ein Feldname unter dem Feld gegen den Mengen-Feldnamen darüber.
+  Je Befund mit Abwandlungen und Gegenproben in `tests/test_abnahme5_r7.py`:
+  - Zugangscodes: Eine Zahl in Jahresform hinter „mit“ an einem Schloss wird mit einem Verb der Sicherung oder
+    Bedienung geschwärzt („Die Tiefgarage ist mit 1984 gesichert.“, „Die Garage ist mit 2015 abgesperrt.“, „Die Haustür
+    lässt sich mit 1990 aufschließen.“); frei bleibt sie nur vor einem gebeugten Partizip mit seinem Hauptwort („mit
+    2021 erneuerter Heizung“, „mit 2019 eingebauten Rolltoren“) – erkannt an der Beugungsendung statt an einer Liste
+    von Vorsilben. Ein Möbel mit Code ist ein Schloss („Code Badschrank: 8815“, „Küchenschrank (Code 2207)“); nur mit
+    einem Wort des Kaufs oder Produkts im Satz und ohne Verb der Bedienung bleibt sein Code beim Melden („Laut Rechnung
+    des Möbelhauses trägt der Kleiderschrank den Code 66130.“). An einem sicheren Schloss ohne Melde- oder Anzeigewort
+    ist auch ein Code in Fehlercode-Gestalt ein Zugangscode („Die Haustür hat den Code KB475.“, „Code Garagentor
+    B4471“, „Der Tresor hat den Code XK42.“); die Schreibweise einer Geräteanzeige mit Bindestrich bleibt mit einem
+    Wort der Reparatur oder Anzeige ein Fehlercode („Garagentor ⏎ Code E-04 blinkt, Elektriker kommt am Montag.“).
+    Der Code eines Alarms als Ereignis (Feuer-, Brand-, Rauch-, Stör-, Probe-, Fehlalarm) wird mit seiner Bedienung
+    geschwärzt („Zum Abschalten des Feueralarms den Code 6619 eingeben.“, „Der Feueralarm wird mit dem Code 1412
+    quittiert.“), mit „lautet“ oder Doppelpunkt gemeldet, allein („Feueralarmcode 3401“) als mehrdeutig gemeldet.
+    Neu erkannt werden „PIN für Wohnungstür 7100“, ein Raum als Bestimmungswort von „…code“ („Lagerhallecode: 9444“),
+    Portal, Konto und Zugang als Grundwort („Code für das Kundenportal (Typklasse 17): 0628“), ein Meldewort mit
+    Empfänger („Der Vermieter meldete uns den Code der Haustür: 2827“) und „gilt für die Garage der Code 9930“.
+    Weniger geschwärzt: „Zugang Lagerhalle: 7-17 Uhr“ und „Zugang Haupteingang: 24/7“ sind Öffnungszeiten (ein
+    Stundenbereich ohne „Uhr“ wird gemeldet); ein Verb der Nutzung hinter einem Komma gilt nicht dem Code („Die
+    Alarmanlage zeigte Code 4021 an, danach bitte die Anlage scharf schalten.“), außer der Satzteil nimmt den Code
+    wieder auf („…, bitte den Code am Bedienteil eingeben.“: geschwärzt), ein Code für einen Plan, eine Liste
+    oder eine Buchung („Der Code der Stadthalle für den Saalplan lautet 2019-A.“) und Kostenstellen eines Plans werden
+    nur gemeldet. Ein Betrag hinter einem Gebäude als Feldname meldet auch die zeilenweise Prüfung nicht mehr
+    („Wohnhaus: ⇥ 450.000 ⇥ EUR“); Jahreszahlen hinter Gebäuden ohne Spaltenkopf „Baujahr“ („Wohnhaus: ⇥ 1974“,
+    „Carport: ⇥ 2021“) bleiben gemeldet – ohne Kopf kann es auch ein Code sein (P2).
+  - Kammfelder: Steht ein Feldname unter dem Feld und näher als der Text darüber (der Feldname des Felds davor), gilt
+    er – in der Erkennung und in der Selbstkontrolle („Vorname“ unter „T H E K L A“, darüber „Wohnfläche (m²)“); der
+    eigene Feldname der Zeile geht dem Feldnamen darüber vor („Letzte Hauptuntersuchung ⇥ Jahr [2024]“ unter
+    „Fahrzeughalter (Name, Vorname)“ bleibt lesbar). Auf der Textebene werden geschwärzt: „Mon.“ als Teil-Feldname, ein
+    Teil-Datum hinter einem Feldnamen mit Klammerzusatz („Geburtsdatum (Fahrer) ⇥⇥ Tag 1 9 …“), ein kurzer Wert hinter
+    einer gesperrten Folge am Zeilenende („Straße ⇥⇥ B I R K E N W E G ⇥⇥ Nr. ⇥⇥ 6 ⇥⇥ 4“) und vor dem nächsten
+    Feldnamen („Name ⇥⇥ R ⇥⇥ E ⇥⇥ Vorname ⇥⇥ A N N A“), Initialen („Initialen ⇥⇥ K H“) und ein Geburtsort aus zwei
+    Buchstaben („Geburtsort ⇥⇥ A U“); „Nr.“ ohne Straße in der Zeile ist eine Positionsnummer, „Etage ⇥⇥ 1 ⇥⇥ 2“ bleibt
+    lesbar. Auf Scans nimmt ein unlesbarer Teil-Feldname („Srae“ oder „See“ statt „Straße“) den Feldnamen der Zeile
+    („Anschrift“: geschwärzt wie auf 0230782), ein kurzer Wert im Anschriftfeld gilt nur unter einem Feldnamen der
+    Hausnummer als Hausnummer („Wohnung ⇥ Etage [3]“ wird nicht geschwärzt) – dort auch verlesen, wenn er eine Ziffer
+    enthält („Hausnr.“ unter „2&1“ statt „27“; auf 0230782 geschwärzt, auf 5efcc0c gemeldet) –, und ein kurzer Datumsteil ohne
+    Trennzeichen („Monat [0 4]“ unter „Geburtsdatum“) gilt nur an seiner Stelle – der gleiche Monat im
+    Versicherungsbeginn wird nicht mehr mitgeschwärzt. Damit gilt die Angabe der sechsten Nachbesserung, dass Teile
+    eines Datums unter einem Feldnamen ohne Personenbezug lesbar bleiben, auch auf Scans: in der Kammfeld-Probe der
+    fünften Abnahme wird keines der Teil-Felder unter „Versicherungsbeginn“ und „Hauptuntersuchung“ mehr entfernt (auf
+    5efcc0c 3); gemeldet werden 9 davon (0230782: 8), wenn die Texterkennung den Inhalt oder den Feldnamen nicht lesen
+    kann.
+  - Namen: Ein Geräte-Grundwort allein („Kocher“, „Bohrer“, „Regler“, „Sender“, „Melder“) mit Artikel und einem Verb
+    einer Person wird gemeldet („Der Kocher hat angerufen.“); ein Gerät als Kompositum („Hochdruckreiniger“,
+    „Gabelstapler“), ein Gerät mit Geräteschaden und Maschinen auf „-e“ („Die Fräse beschädigte das Erdkabel.“) bleiben
+    frei. Ein Allerweltswort wie „Regen“ oder „Wasser“ direkt hinter einem Personenwort ohne Begleiter gilt wieder wie
+    auf 0230782 (dort standen beide noch nicht in der Liste der Allerweltswörter) als Name und wird geschwärzt: am
+    Satzanfang mit dem Verb oder Zustand einer Person („Nachbar Wasser hat angerufen.“), hinter „laut“ („Laut Nachbarin
+    Regen war die Tür offen.“), mit Kontaktangabe oder einem weiteren Personenwort dahinter („Zeugen: Nachbar Wasser und
+    Nachbarin Regen“) und mitten im Satz hinter der Grundform der Einzahl („Rücksprache mit Nachbar Wasser am Montag.“,
+    „Gestern rief Nachbar Regen an.“). Hinter „Mieter“ oder „Mitarbeiter“ (Einzahl wie Mehrzahl), hinter gebeugten
+    Formen und hinter „als“ kann es Name oder Satzteil sein und wird gemeldet („Die Kosten trägt Mieter Wasser
+    selbst.“, „Er telefonierte mit Kollegen Wasser.“, „Er stellte sich als Nachbar Wasser vor.“, aber auch „Er zeigte
+    Kollegen Fotos.“); hinter einem Genitiv auf „-s“ („Nachbars Garten“) und wie bisher hinter einem Begleiter („Er
+    hat dem Nachbarn Wasser abgegraben.“) ist es ein Satzteil. Stockwerk, Gebäudeteil, Kanal, Sparte und Gewerk hinter einem Personenwort sind
+    ein Zusatz der Rolle („Mieter Erdgeschoss meldet …“, „Mitarbeiter Hotline“, „Kunde Gewerbe“, „Monteur Fernwärme“)
+    und bleiben wie Abteilungen beim Melden, ebenso Zeitwörter („Nachbar Morgen kommt vorbei.“) und Komposita mit einem
+    Allerweltswort als Grundwort („Laut Nachbar Wasserschaden war alles nass.“); mit Artikel und Personenverb wird das
+    Allerweltswort gemeldet („Der Wasser hat den Schaden gemeldet.“). Familiennamen mit einem Allerweltswort darin
+    („Regensburger“, „Wasserbauer“, „Regenauer“) werden mindestens gemeldet. Wie ein Verb zählt am Satzanfang auch der
+    Zustand einer Person („Zeuge Tremml wird morgen zurückrufen.“, „Onkel Raffl wurde befragt.“, „Kollegin Tremml war
+    gestern krank.“: geschwärzt wie auf fbd755b, auf 0230782 und 5efcc0c nur gemeldet); Sekretariat, Registratur,
+    Praxis, Redaktion, Disposition und Wörter auf „-stelle“ zählen zu den Abteilungen („Chef Sekretariat ist heute
+    besetzt.“ wird gemeldet). Mindestens gemeldet wird außerdem ein
+    Familienname mit Artikel im Satz einer Person („Laut Polizei hat der Schwarzl den Unfall gemeldet.“, „Der Nachbar
+    beschuldigte die Zeitlhofer.“), hinter einem gebeugten Personenwort („bei dem Mandanten Kreuzl“: geschwärzt, „des
+    Onkels Tremml“, „des Vermieters Leser“), ein Beruf, Titel oder eine Rolle hinter einem Personenwort („Kollege Pfarrer hat angerufen.“, „Rücksprache
+    mit Mieter Käufer“, „Kunde Halter wurde befragt.“) und ein Wort mit Artikel, das zugleich Tier, Marke, Gerät oder
+    Rufname ist, mit der Tat einer Person („Den Schaden meldete der Fink.“, „Am Steuer saß der Hase.“, „Der Wastl hat
+    angerufen.“); frei bleiben Jahreszeiten und Kalenderwörter („Am Steuer saß der Winter.“), Wetter („Der Hagel hat
+    den Schaden verursacht.“) und Fahrzeuge („Den Zaun rammte der Wagen.“). Ein bekannter Familienname hinter
+    beim/vom/zum wird mit Besuch, Entfernung, Weg oder Besitz geschwärzt („Wir waren gestern beim Gruber zum Essen.“,
+    „Zum Wimmer sind es nur zwei Kilometer.“, „Der Traktor vom Wimmer …“, „Die Kühe vom Gruber …“), ein unbekannter
+    gemeldet; „Zum Glück“, Infinitive („Beim Grillen“, „Beim Rangieren“, „Beim Einkaufen“) und Geräte-Komposita sind
+    sichere Gegenbelege und bleiben frei, nie aber ein Familienname der Wissensbasis oder ein Wort in Namensgestalt.
+    „Herr Kollege Maier“: geschwärzt wird nur „Maier“. Die gebeugten Personenwörter erweitern die Ausnahme für einen
+    Familiennamen, der zugleich ein gewöhnliches Wort ist, hinter einem Begleiter (nur gemeldet, „Beim Nachbarn Fuchs
+    brannte Licht.“) nicht auf den Genitiv: „Die Kaution des Mandanten Wolf ist offen.“ bleibt geschwärzt.
+  - Beruf: Eine Tätigkeit nach ihrem Grundwort zählt hinter jedem Satzgegenstand, der kein Programm, Gerät, keine
+    Anlage und kein System ist („Der Verletzte arbeitet als Lagerhilfe.“, „Die Bevollmächtigte arbeitet als
+    Bürokraft.“). Zeitangaben und Adverbien zwischen „ist“/„war“ und dem Beruf heben ihn nicht auf („Sie war früher
+    Lehrerin an der Grundschule.“, „Er ist seit 2015 Busfahrer bei den Stadtwerken.“), ein Ehrenamt ohne Personenwort
+    wird gemeldet („Seit 2018 ehrenamtlich als Erzieherin in der Kita tätig.“). Eine Rolle mit Ergänzung („Er ist
+    Trainer der F-Jugend.“, „Sie ist Betreuerin ihrer Mutter.“) und „den Beruf des X“ ohne ein Verb des Erlernens oder
+    Ausübens („Für den Beruf des Dachdeckers gilt die Gefahrengruppe B.“) werden nur gemeldet.
+  - Weitergabe und Selbstkontrolle: Ein kurzer Wert, der nur hinter seinem Etikett gilt, wird an weitere Stellen
+    weitergegeben, wo der Text ihn als Ort hinter einer Präposition des Orts („Geburtsort: Au ⏎ Sie wuchs in Au bei
+    Freising auf.“) oder als Hausnummer hinter „Haus“ nennt („Hausnummer: 7 ⏎ Das Haus 7 hat einen Wasserschaden.“);
+    „Halle 8“ und „Tor 8“ werden nicht geschwärzt. Eine Postleitzahl links neben einem geschwärzten Ort meldet die Selbstkontrolle
+    („Wohnort: 72070 [PLZ ORT]“ – auf einem Handschrift-Fax las die Erkennung die Postleitzahl nicht).
+  - Scans: Hinter einem Personenwort im Fließtext („Mitarbeiter Vertrieb meldet sich bis Freitag.“, „Nachbar
+    Gegenüber sah den Rauch zuerst.“) ist der Satz kein Rohwert eines Formularfelds mehr – vorher wurde er auf allen
+    Vorständen ganz geschwärzt; wie auf der Textebene wird ein Name darin über die Personenwort-Regeln geschwärzt, eine
+    Abteilung oder Lage gemeldet. Ein Feld mit Doppelpunkt, Tabulator oder dem Wert darunter bleibt ein Feld.
+  - Laufzeit: Hausnamen und Hausnamen-Kandidaten suchen ihren Kontext einmal je Zeile, die Jahreszahl unter einem
+    Spaltenkopf sucht den Kopf nur bis zu einer Zeilengrenze, die Kammfeld-Regel der Textebene findet die Zeilen darüber
+    und darunter, die Feldnamen je Zeile und den Feldnamen links vor einem Wert über einen Index (bisect) statt je Wert
+    über alle Zeilen bzw. Feldnamen der Seite – auf einer Seite mit 5 120 Kammfeld-Werten 0,9 s statt 28 s auf 5efcc0c.
+    Auf Scans suchen der eigene Feldname eines Kammfelds, die Felder eines Worts und das Feld unter einem Feldnamen nur
+    auf ihrer Höhe (Index nach der Höhe statt je Feld über alle Wörter bzw. Felder der Seite). Neue Wachstumstests
+    (8 000 gegen 64 000 Zeichen, 4 000 gegen 64 000 für die Kammfeld-Regel der Textebene, 250 gegen 2 000 Kammfelder
+    auf Scans) werden rot, wenn eine dieser Schleifen wieder je Treffer über alles läuft (eingebaute Regressionen R6,
+    R7 der Abnahme und elf eigene, N1 bis N11). Gemessen auf dem Probensatz der fünften Abnahme (CPU-Zeit je
+    Scan-Seite einschließlich Texterkennung, Oberflächen-Weg, zwei Runden mit allen drei Ständen gleichzeitig;
+    55 Maklerdokumente als Scan mit 200 dpi, 42 Kammfeld-Scans): ohne Kammfeld 2,06 s gegen 2,20 s auf 5efcc0c (−6 %)
+    und 1,85 s auf 818990e (+11 %), mit Kammfeldern 3,55 s gegen 3,53 s auf 5efcc0c (gleich innerhalb der
+    Messstreuung: Runde 1 +0,03 s, Runde 2 ±0) und 2,11 s auf 818990e (+68 %), über alle 97 Seiten 2,70 s gegen
+    2,78 s auf 5efcc0c und 1,96 s auf 818990e. Gegenüber 818990e bleibt damit der Mehraufwand der Kammfeld-Seiten
+    (Suche und Lesen der Kästchen in der Analyse und in der Kontroll-OCR, Kammfeld-Prüfung der Selbstkontrolle) und
+    auf den übrigen Seiten der Aufwand der Kammfeld-Suche und der neuen Regeln der Selbstkontrolle.
+  - Kehrseite nach P2 (gemeldet statt still): Im Differenztest (21 411 Texte, 10 819 geheime Werte) sind gegenüber
+    5efcc0c 838 Werte besser gestellt (412 von lesbar auf geschwärzt, 341 von lesbar auf gemeldet, 85 von gemeldet auf
+    geschwärzt) und keiner schlechter; gegenüber 0230782 stehen 3 Werte schlechter (nur gemeldet statt geschwärzt:
+    Abteilungs-, Lage- und Firmenwörter hinter einem Personenwort, AB4U-01), gegenüber 818990e 21 und gegenüber
+    fbd755b 105 (ebenso nur gemeldet statt geschwärzt, vor allem mehrdeutige Wörter hinter Personenwörtern, Ehrenamt,
+    Alarmcodes ohne Bedienung). Kein geheimer Wert ist mehr lesbar, der auf einem der vier Stände geschwärzt oder
+    gemeldet war, und geschwärzt werden 229 statt 245 nicht geheime Prüfwörter. Die Selbstkontrolle meldet dafür mehr
+    nicht geheime Wörter; unter den Hof-Kandidaten der Abnahme (333 Nomen hinter beim/vom/zum in drei Satzrahmen) sind
+    es 95 bis 97 statt 131 bis 140.
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene

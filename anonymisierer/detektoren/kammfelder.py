@@ -25,6 +25,7 @@ selbst ausweist. Was die OCR in einem gefüllten Feld gar nicht liest, meldet di
 
 from __future__ import annotations
 
+import bisect
 import re
 
 from . import ALLE_PROFILE, Treffer, detektor
@@ -35,6 +36,8 @@ QUELLE = "struktur.kammfeld"
 _STUECK_RE = re.compile(r"\S+")
 # Vorfilter je Seite: drei einzelne Zeichen, getrennt durch ein Leerzeichen oder einen Spaltentrenner
 _VORFILTER_RE = re.compile(r"(?:(?<!\S)\S(?: |[ ]?\t\t[ ]?)){3}")
+# … oder ein kurzer Wert hinter einem Spaltentrenner am Zeilenende ("Initialen ⇥⇥ K H", "Hausnr. ⇥⇥ 7"; Abnahme 5 A5-08)
+_VORFILTER_KURZ_RE = re.compile(r"(?m)\t[ ]?[^\W_](?:(?: |[ ]?\t\t[ ]?)[^\W_])?[ \t]*$")
 _SELBSTLAUT = frozenset("AEIOUÄÖÜYÀÁÂÃÅÈÉÊËÌÍÎÏÒÓÔÕØÙÚÛÆŒ")
 _PLZ_ORT_ETIKETT_RE = re.compile(r"(?i)^(?:plz|postleitzahl|ort|wohnort|plz[ ,/]*ort|postleitzahl und ort)\.?:?$")
 _ZEICHEN = re.compile(r"[^\W_]|[-/.]")
@@ -89,6 +92,30 @@ def _kurzer_lauf(text: str, start: int, ende: int):
     return m.start(1), e, re.sub(r"\s+", "", text[m.start(1):e])
 
 
+# ein kurzer Wert (ein oder zwei einzelne Zeichen) vor dem nächsten Feldnamen derselben Zeile ("Name ⇥⇥ R ⇥⇥ E ⇥⇥
+# Vorname ⇥⇥ A N N A"; Abnahme 5 A5-08)
+_KURZ_VOR_FELD_RE = re.compile(r"(?<=\t)([^\W_])(?:(?: |[ ]?\t\t[ ]?)([^\W_]))?(?=[ ]?\t\t[ ]?[^\W\d_]{2,})")
+
+
+def _kurze_laeufe(text: str, start: int, ende: int, laeufe: list) -> list:
+    """[(s, e, wert, neu)] kurzer Kammfeld-Werte einer Zeile: am Zeilenende (_kurzer_lauf; mit gesperrten Folgen in der
+    Zeile nur hinter der letzten) und vor dem nächsten Feldnamen (_KURZ_VOR_FELD_RE) außerhalb der Folgen – ob ein
+    Feldname davor steht, prüft kammfeld. neu: einer der Fälle der Abnahme 5 (nicht am Zeilenende einer Zeile ohne
+    gesperrte Folge)."""
+    aus = []
+    ende_lauf = max((e for _, e, _ in laeufe), default=start)
+    k = _kurzer_lauf(text, ende_lauf, ende)
+    if k is not None and (not laeufe or text[ende_lauf:k[0]].strip()):
+        aus.append((*k, bool(laeufe)))
+    for m in _KURZ_VOR_FELD_RE.finditer(text, start, ende):
+        e = m.end(2) if m.group(2) else m.end(1)
+        if any(s0 < e and m.start(1) < e0 for s0, e0, _ in laeufe) \
+                or any(a < e and m.start(1) < b for a, b, _, _ in aus):
+            continue
+        aus.append((m.start(1), e, re.sub(r"\s+", "", text[m.start(1):e]), True))
+    return aus
+
+
 def _kurz_passt(kategorie: str, wert: str) -> bool:
     """Passt ein kurzer Kammfeld-Wert zur Kategorie seines Feldnamens? Nur Hausnummern ("13", "7A", "8") und Namen
     aus zwei Buchstaben mit Selbstlaut ("LI") – Zählfelder, Kreuzchen und Kürzel hinter anderen Feldnamen nicht."""
@@ -114,21 +141,103 @@ def _kurz_passt_scan(kategorie: str, wert: str) -> bool:
     return _kurz_passt(kategorie, wert) or (kategorie == "namen" and wert.isalpha())
 
 
+def _ets_index(ets: list):
+    """(Anfänge, Enden) der Feldnamen einer Seite für die Suche per bisect – oder None, wenn die Liste nicht nach Lage
+    geordnet und überlappungsfrei ist (struktur.etiketten liefert sie so; dann sucht der Aufrufer linear wie zuvor).
+    Je Wert alle Feldnamen der Seite zu durchlaufen wuchs auf Seiten mit vielen Kammfeldern quadratisch (Abnahme 5,
+    Wachstumstest)."""
+    if any(a.ende > b.start for a, b in zip(ets, ets[1:])):
+        return None
+    adresse = [0]
+    for et in ets:
+        adresse.append(adresse[-1] + ("adresse" in et.arten))
+    return [et.start for et in ets], [et.ende for et in ets], adresse
+
+
+def _ets_zwischen(ets: list, idx, anfang: int, ende: int) -> list:
+    """Die Feldnamen ganz in [anfang, ende) – in der Reihenfolge der Liste."""
+    if idx is None:
+        return [et for et in ets if anfang <= et.start and et.ende <= ende]
+    return ets[bisect.bisect_left(idx[0], anfang):bisect.bisect_right(idx[1], ende)]
+
+
+def _adresse_ab(ets: list, idx, anfang: int, vor: int) -> bool:
+    """Beginnt in [anfang, vor) ein Feldname der Art Anschrift?"""
+    if idx is None:
+        return any(anfang <= et.start < vor and "adresse" in et.arten for et in ets)
+    a, b = bisect.bisect_left(idx[0], anfang), bisect.bisect_left(idx[0], vor)
+    return b > a and idx[2][b] - idx[2][a] > 0
+
+
+def _letzte_zwei_davor(ets: list, idx, anfang: int, s: int) -> tuple:
+    """(letzter, vorletzter) Feldname ganz in [anfang, s) – je None, wenn es ihn nicht gibt."""
+    if idx is None:
+        davor = [et for et in ets if anfang <= et.start and et.ende <= s]
+        return (davor[-1] if davor else None), (davor[-2] if len(davor) > 1 else None)
+    a, b = bisect.bisect_left(idx[0], anfang), bisect.bisect_right(idx[1], s)
+    return (ets[b - 1] if b - 1 >= a else None), (ets[b - 2] if b - 2 >= a else None)
+
+
 def _etikett_darueber(lg, ets: list, text: str, s: int, wert: str):
     """Feldname allein in der Zeile direkt über dem Wert. Stehen dort mehrere Feldnamen („Straße, Hausnr.“,
     „PLZ ⇥⇥ Ort“), zählt die Zeile nur, wenn alle dieselbe Kategorie ergeben – dann der waagerecht nächste."""
     zelle = lg.zelle_bei(s)
     if zelle is None:
         return None
+    je_zeile = _etiketten_je_zeile(lg, ets)
     for zid in _zeilen_darueber(lg, zelle.zeile, zelle.hoehe)[:1]:
-        kandidaten = [et for et in ets if lg.zelle_bei(et.start) is not None
-                      and lg.zelle_bei(et.start).zeile == zid]
+        kandidaten = je_zeile.get(zid, [])
         if len(kandidaten) == 1:
             return kandidaten[0]
         kategorien = {kategorie_fuer(et, text[et.start:et.ende], wert) for et in kandidaten}
         if len(kandidaten) > 1 and len(kategorien) == 1 and None not in kategorien:
             return min(kandidaten, key=lambda et: abs(lg.zelle_bei(et.start).x0 - zelle.x0))
     return None
+
+
+def _etiketten_je_zeile(lg, ets: list) -> dict:
+    """{Zeilen-ID: [Feldnamen]} – einmal je Seite und Feldnamen-Liste gebildet (je Wert sonst alle Feldnamen der Seite
+    durchsucht: quadratisch auf Seiten mit vielen Kammfeldern; Abnahme 5, Wachstumstest)."""
+    ablage = getattr(lg, "_kamm_ets_je_zeile", None)
+    if ablage is not None and ablage[0] is ets:
+        return ablage[1]
+    je_zeile: dict = {}
+    for et in ets:
+        z = lg.zelle_bei(et.start)
+        if z is not None:
+            je_zeile.setdefault(z.zeile, []).append(et)
+    try:
+        lg._kamm_ets_je_zeile = (ets, je_zeile)
+    except AttributeError:  # pragma: no cover
+        pass
+    return je_zeile
+
+
+def _etikett_darunter(lg, ets: list, text: str, s: int, wert: str):
+    """Feldname allein in der Zeile direkt unter dem Wert (Feldnamen unter den Kästchen; wie _etikett_darueber)."""
+    zelle = lg.zelle_bei(s)
+    if zelle is None:
+        return None
+    je_zeile = _etiketten_je_zeile(lg, ets)
+    for zid in _zeilen_darunter(lg, zelle.zeile, zelle.hoehe)[:1]:
+        kandidaten = je_zeile.get(zid, [])
+        if len(kandidaten) == 1:
+            return kandidaten[0]
+        kategorien = {kategorie_fuer(et, text[et.start:et.ende], wert) for et in kandidaten}
+        if len(kandidaten) > 1 and len(kategorien) == 1 and None not in kategorien:
+            return min(kandidaten, key=lambda et: abs(lg.zelle_bei(et.start).x0 - zelle.x0))
+    return None
+
+
+def _zeilen_abstand(lg, et, s: int) -> float:
+    """Senkrechter Abstand zwischen der Zeile des Feldnamens et und der Zeile des Werts bei s (Punkte)."""
+    a, b = lg.zelle_bei(et.start), lg.zelle_bei(s)
+    if a is None or b is None:
+        return float("inf")
+    ba, bb = lg.zeilen_box.get(a.zeile), lg.zeilen_box.get(b.zeile)
+    if ba is None or bb is None:
+        return float("inf")
+    return max(ba[1] - bb[3], bb[1] - ba[3], 0.0)
 
 
 def _teil_darueber(seite, lg, ets: list, text: str, s: int, e: int):
@@ -224,7 +333,8 @@ def _ohne_etikett(wert: str) -> str | None:
 # die Ziffern (auch gesperrt oder über Kästchenlücken) direkt hinter "Tag", "Monat", "Jahr", "TT", "MM", "JJJJ" – auf Scans
 # auch so, wie die OCR Ziffern in Kästchen verliest ("Monat O 1", "Monat 0.4": O/o/I/l/S/B/Z, Punkt, Komma oder Wand
 # zwischen den Ziffern); mindestens eine echte Ziffer prüft _teil_wert
-_TEIL_WERT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:tag|monat|jahr|tt|mm|jj|jjjj)\.?:?(?: |[ ]?\t\t[ ]?)[ \t]*"
+# auch "Mon." (Abnahme 5 A5-08)
+_TEIL_WERT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:tag|monat|mon|jahr|tt|mm|jj|jjjj)\.?:?(?: |[ ]?\t\t[ ]?)[ \t]*"
                            r"([\dOoIlSBZ](?:(?: |[ ]?\t\t[ ]?|[.,|])?[\dOoIlSBZ]){0,3})(?![\d\wäöüß])")
 # ein kurzes Stück vor dem ersten Teil-Feldnamen einer OCR-Zeile, das ein verlesener Kästchenwert ist: mit Ziffer oder
 # Kästchenwand ("2,35,", "ala]")
@@ -236,6 +346,12 @@ def _teil_wert(m) -> bool:
     return any(c.isdigit() for c in m.group(1))
 
 
+def _in_klammern(text: str, za: int, pos: int) -> bool:
+    """Steht pos hinter einer offenen Klammer derselben Zeile (höchstens 40 Zeichen zurück)?"""
+    vorn = text[max(za, pos - 40):pos]
+    return vorn.rfind("(") > vorn.rfind(")")
+
+
 def _geteiltes_datum(seite, ets: list) -> list:
     """[(start, ende, kategorie)] der Teile eines Datums in Feldern für Tag, Monat und Jahr hinter einem
     übergeordneten Feldnamen für ein Geburtsdatum in derselben Zeile ("Geburtsdatum ⇥⇥ Tag ⇥⇥ 2 5 ⇥⇥ Monat 0 4 ⇥⇥ Jahr
@@ -245,11 +361,15 @@ def _geteiltes_datum(seite, ets: list) -> list:
     if "ag" not in text and "onat" not in text and "ahr" not in text and "TT" not in text:
         return []
     aus = []
+    idx = _ets_index(ets)
     for z in seite.zeilen:
         teile = [m for m in _TEIL_WERT_RE.finditer(text, z.start, z.ende) if _teil_wert(m)]
         if not teile:
             continue
-        davor = [et for et in ets if z.start <= et.start and et.ende <= teile[0].start()]
+        # ein Feldname in Klammern ("Geburtsdatum (Fahrer)", "Geb.-Datum (Kind)") ergänzt den Feldnamen davor
+        # (Abnahme 5 A5-08)
+        davor = [et for et in _ets_zwischen(ets, idx, z.start, teile[0].start())
+                 if not _in_klammern(text, z.start, et.start)]
         if davor:
             zwischen = text[davor[-1].ende:teile[0].start()]
             if "datum_geburt" not in davor[-1].arten \
@@ -292,8 +412,8 @@ def _geteiltes_datum(seite, ets: list) -> list:
 # eine OCR-Zeile nur aus einem Teil-Feldnamen bzw. eine, die mit einer kurzen Ziffernfolge beginnt (ein bis vier
 # Ziffern, auch mit Kästchenwänden "2|5" oder Leerzeichen dazwischen) – dahinter nichts, ein Tabulator oder der nächste
 # Teil-Feldname ("2 5 Monat ⇥⇥ Jahr")
-_TEIL_ALLEIN_RE = re.compile(r"(?i)[ \t]*(?:tag|monat|jahr|tt|mm|jj|jjjj)\.?:?[ \t]*")
-_ZIFFERN_VORN_RE = re.compile(r"(?i)[ \t|]*(\d(?:[ \t|]{0,3}\d){0,3})(?=[ \t|]*$|\t|[ \t|]+(?:tag|monat|jahr|tt|mm|jj|jjjj)"
+_TEIL_ALLEIN_RE = re.compile(r"(?i)[ \t]*(?:tag|monat|mon|jahr|tt|mm|jj|jjjj)\.?:?[ \t]*")
+_ZIFFERN_VORN_RE = re.compile(r"(?i)[ \t|]*(\d(?:[ \t|]{0,3}\d){0,3})(?=[ \t|]*$|\t|[ \t|]+(?:tag|monat|mon|jahr|tt|mm|jj|jjjj)"
                               r"(?![\wäöüß]))")
 
 
@@ -325,7 +445,8 @@ def kammfeld(dok, kontext):
                 teil_ets = [et for et in etiketten(seite) if et.arten]
                 for s, e, kat in _geteiltes_datum(seite, teil_ets):
                     treffer.append(Treffer(dok.global_(nr, s), dok.global_(nr, e), kat, QUELLE, 0.85))
-        if not text.strip() or not _VORFILTER_RE.search(text):
+        vorfilter_alt = bool(_VORFILTER_RE.search(text))
+        if not text.strip() or not (vorfilter_alt or _VORFILTER_KURZ_RE.search(text) or _KURZ_VOR_FELD_RE.search(text)):
             continue
         laeufe_je_zeile = []
         for z in seite.zeilen:
@@ -335,20 +456,19 @@ def kammfeld(dok, kontext):
                 if zellen and not gleiche_teilung(seite, text, s, e):
                     continue                          # Tabellenzeile mit je einem Zeichen in Spalten
                 laeufe_je_zeile.append((z, s, e, wert, zellen, False))
-            kurz = None if laeufe else _kurzer_lauf(text, z.start, z.ende)
-            if kurz is not None:                      # "1 3" unter "Hausnr.": nur mit Feldnamen (unten)
-                laeufe_je_zeile.append((z, *kurz, False, True))
+            # "1 3" unter "Hausnr.": nur mit Feldnamen (unten); auch hinter einer gesperrten Folge am Zeilenende
+            # ("Straße ⇥⇥ B I R K E N W E G ⇥⇥ Nr. ⇥⇥ 6 ⇥⇥ 4") und vor dem nächsten Feldnamen ("Name ⇥⇥ R ⇥⇥ E ⇥⇥ Vorname
+            # ⇥⇥ A N N A"; Abnahme 5 A5-08)
+            for ks, ke, kwert, neu in _kurze_laeufe(text, z.start, z.ende, laeufe):
+                laeufe_je_zeile.append((z, ks, ke, kwert, False, "neu" if neu else True))
         if not laeufe_je_zeile:
             continue
         lg = lage(seite)
         ets = [et for et in etiketten(seite) if et.arten]
+        idx = _ets_index(ets)
         for z, s, e, wert, zellen, kurz in laeufe_je_zeile:
             # Feldname: links in derselben Zeile (das nächste davor) oder allein in einer Zeile darüber
-            et_wahl = None
-            vorher = None
-            for et in ets:
-                if z.start <= et.start and et.ende <= s:
-                    vorher, et_wahl = et_wahl, et     # das letzte Etikett vor dem Wert
+            et_wahl, vorher = _letzte_zwei_davor(ets, idx, z.start, s)
             if et_wahl is not None and vorher is not None and kammraster.teil_etikett(text[et_wahl.start:et_wahl.ende]) \
                     and not any(c.isalnum() for c in text[vorher.ende:et_wahl.start]):
                 et_wahl = vorher                      # "Geburt ⇥⇥ Datum ⇥⇥ 2 5 0 4 …": der übergeordnete Feldname
@@ -361,6 +481,13 @@ def kammfeld(dok, kontext):
             teil_oben = False
             if et_wahl is None and not text[z.start:s].strip():
                 et_wahl = _etikett_darueber(lg, ets, text, s, wert)
+                # Feldname unter dem Feld ("Hausnr." unter den Kästchen, darüber der Feldname des Felds darüber): der
+                # nähere zählt, ein Feldname ohne Personen- oder Anschriftart darüber nicht (Abnahme 5 A5-08, A5-07)
+                unten = _etikett_darunter(lg, ets, text, s, wert)
+                if unten is not None and (
+                        et_wahl is None or kategorie_fuer(et_wahl, text[et_wahl.start:et_wahl.ende], wert) is None
+                        or _zeilen_abstand(lg, unten, s) < _zeilen_abstand(lg, et_wahl, s)):
+                    et_wahl = unten
                 if et_wahl is None:
                     # Teil-Feldname darüber ("Tag" ⏎ "2 5"): der übergeordnete Feldname in der Zeile des Werts links
                     # oder in der Zeile darüber ("Geburtsdatum")
@@ -372,7 +499,22 @@ def kammfeld(dok, kontext):
                 kat = None if kurz else _ohne_etikett(wert)
             if teil_oben and kat != "geburt":
                 continue                              # Teil eines Datums nur unter einem Geburtsdatum
-            if kurz and (kat is None or not (_kurz_passt(kat, wert) or (teil_oben and wert.isdigit()))):
+            et_text = text[et_wahl.start:et_wahl.ende] if et_wahl is not None else ""
+            sonder = False
+            if kurz and kat is None and et_wahl is not None \
+                    and re.fullmatch(r"(?i)(?:nr|no|nummer)\.?:?", et_text.strip()) \
+                    and _adresse_ab(ets, idx, z.start, et_wahl.start):
+                kat = "strasse"                       # "Straße ⇥⇥ B I R K E N W E G ⇥⇥ Nr. ⇥⇥ 6 ⇥⇥ 4" (A5-08)
+            if kurz and kat == "geburt" and re.search(r"(?i)ort", et_text) and len(wert) == 2 and _name_moeglich(wert):
+                kat, sonder = "plzort", True          # "Geburtsort ⇥⇥ A U" (Abnahme 5 A5-08)
+            if kurz and kat == "namen" and re.match(r"(?i)initial", et_text) and wert.isalpha():
+                sonder = True                         # "Initialen ⇥⇥ K H"
+            if kurz and not vorfilter_alt and kat == "strasse" and not re.search(r"(?i)haus|nr|nummer", et_text):
+                continue                              # Seite nur mit kurzen Werten: Hausnummer, nicht "Etage ⇥⇥ 1 ⇥⇥ 2"
+            if kurz == "neu" and kat == "strasse" and re.fullmatch(r"(?i)(?:nr|no|nummer)\.?:?", et_text.strip()) \
+                    and not _adresse_ab(ets, idx, z.start, et_wahl.start):
+                continue                              # "Nr." ohne Straße in der Zeile: eine Positionsnummer
+            if kurz and (kat is None or not (sonder or _kurz_passt(kat, wert) or (teil_oben and wert.isdigit()))):
                 continue                              # kurzer Wert nur als Hausnummer bzw. Name hinter Feldnamen
             if kat is None or (kontext.aktive and kat not in kontext.aktive):
                 continue
@@ -383,18 +525,55 @@ def kammfeld(dok, kontext):
     return treffer
 
 
+def _zeilen_index(lg) -> tuple:
+    """(Oberkanten, Unterkanten) der Zeilen von lg, je sortiert als [(y, zid)] – einmal je Seite gebildet, damit die
+    Suche nach der Zeile darüber bzw. darunter nicht je Wert alle Zeilen durchläuft (Abnahme 5: Wachstumstest)."""
+    idx = getattr(lg, "_kamm_zeilen_index", None)
+    if idx is None:
+        oben = sorted((b[1], z) for z, b in lg.zeilen_box.items())
+        unten = sorted((b[3], z) for z, b in lg.zeilen_box.items())
+        idx = ([y for y, _ in oben], [z for _, z in oben], [y for y, _ in unten], [z for _, z in unten])
+        try:
+            lg._kamm_zeilen_index = idx
+        except AttributeError:  # pragma: no cover - Lage ohne Attribute
+            pass
+    return idx
+
+
+def _zeilen_darunter(lg, zid: int, hoehe: float) -> list:
+    """Zeilen-IDs direkt unter `zid` (nächste zuerst), höchstens gut zwei Zeilenhöhen entfernt."""
+    box = lg.zeilen_box.get(zid)
+    if box is None:
+        return []
+    h = max(hoehe, 6.0)
+    oben_y, oben_z, _, _ = _zeilen_index(lg)
+    kandidaten = []
+    for i in range(bisect.bisect_left(oben_y, box[3] - 0.3 * h), bisect.bisect_right(oben_y, box[3] + 2.2 * h)):
+        z2 = oben_z[i]
+        b2 = lg.zeilen_box[z2]
+        if z2 == zid:
+            continue
+        abstand = b2[1] - box[3]
+        if min(box[2], b2[2]) - max(box[0], b2[0]) > -2 * h:
+            kandidaten.append((abstand, z2))
+    return [z2 for _, z2 in sorted(kandidaten)]
+
+
 def _zeilen_darueber(lg, zid: int, hoehe: float) -> list:
     """Zeilen-IDs direkt über `zid` (nächste zuerst), höchstens gut zwei Zeilenhöhen entfernt."""
     box = lg.zeilen_box.get(zid)
     if box is None:
         return []
     h = max(hoehe, 6.0)
+    _, _, unten_y, unten_z = _zeilen_index(lg)
     kandidaten = []
-    for z2, b2 in lg.zeilen_box.items():
+    for i in range(bisect.bisect_left(unten_y, box[1] - 2.2 * h), bisect.bisect_right(unten_y, box[1] + 0.3 * h)):
+        z2 = unten_z[i]
+        b2 = lg.zeilen_box[z2]
         if z2 == zid:
             continue
         abstand = box[1] - b2[3]
-        if -0.3 * h <= abstand <= 2.2 * h and min(box[2], b2[2]) - max(box[0], b2[0]) > -2 * h:
+        if min(box[2], b2[2]) - max(box[0], b2[0]) > -2 * h:
             kandidaten.append((abstand, z2))
     return [z2 for _, z2 in sorted(kandidaten)]
 
@@ -497,6 +676,17 @@ def etikett_text_zum_feld(seite, feld, felder: list) -> tuple:
         return gruppe[0][0], gruppe[-1][1], "links"
     oben = [w for w in woerter if w[5] <= y0 + FELD_RAND_PT and y0 - w[5] <= ETIKETT_OBEN_HOEHEN * hoehe
             and x0 - 10.0 <= w[2] <= x0 + 0.5 * (x1 - x0)]
+    # Feldname unter dem Feld ("[ 7 4 ]" ⏎ "Hausnr."): steht darunter Text näher am Feld als darüber, gehört er zum Feld
+    # – der Text darüber ist dann der Feldname des Felds davor (Abnahme 5 A5-07)
+    unten = [w for w in woerter if w[3] >= y1 - FELD_RAND_PT and w[3] - y1 <= ETIKETT_OBEN_HOEHEN * hoehe
+             and x0 - 10.0 <= w[2] <= x0 + 0.5 * (x1 - x0)]
+    if unten and (not oben or min(w[3] for w in unten) - y1 < y0 - max(w[5] for w in oben)) \
+            and not kammraster.gehoert_zum_feld_darunter(feld, felder, min(w[3] for w in unten),
+                                                         max(w[5] for w in unten)):
+        naechstes = min(unten, key=lambda w: w[3])
+        zeile = sorted((w for w in woerter if abs(w[3] - naechstes[3]) <= 0.5 * max(w[5] - w[3], 4.0)
+                        and x0 - 10.0 <= w[2] <= x1), key=lambda w: w[2])
+        return zeile[0][0], zeile[-1][1], "unten"
     if not oben:
         return -1, -1, ""
     naechstes = max(oben, key=lambda w: w[5])
@@ -586,9 +776,76 @@ def uebergeordnetes_etikett(seite, feld, ets: list, felder: list = (), teilname:
     return et
 
 
+def _woerter_nach_hoehe(seite) -> tuple:
+    """(Mitten, Indizes): die Wörter der Seite (_woerter) nach ihrer senkrechten Mitte sortiert – einmal je Seite, damit
+    die Suche in einer Zeile nicht je Feld alle Wörter der Seite durchläuft (Abnahme 5, Wachstumstest)."""
+    woerter = _woerter(seite)
+    zw = getattr(seite, "_kamm_woerter_y", None)
+    if zw is not None and zw[0] is woerter:
+        return zw[1], zw[2]
+    paare = sorted(((w[3] + w[5]) / 2.0, i) for i, w in enumerate(woerter))
+    mitten, idx = [p[0] for p in paare], [p[1] for p in paare]
+    try:
+        seite._kamm_woerter_y = (woerter, mitten, idx)
+    except AttributeError:  # pragma: no cover - Seite ohne Attribute
+        pass
+    return mitten, idx
+
+
+def _felder_nach_hoehe(seite, felder) -> tuple:
+    """(Oberkanten, Felder, größte Höhe): die Felder nach der Oberkante ihrer Kästchen sortiert – einmal je Seite und
+    Feldliste (wie _woerter_nach_hoehe)."""
+    zw = getattr(seite, "_kamm_felder_y", None)
+    if zw is not None and zw[0] is felder:
+        return zw[1]
+    eintraege = []
+    for f in felder:
+        kaesten = f.get("kaesten") or ()
+        if kaesten:
+            eintraege.append((min(k[1] for k in kaesten), max(k[3] for k in kaesten), f))
+    eintraege.sort(key=lambda e: e[0])
+    idx = ([e[0] for e in eintraege], [e[2] for e in eintraege], max((e[1] - e[0] for e in eintraege), default=0.0))
+    try:
+        seite._kamm_felder_y = (felder, idx)
+    except AttributeError:  # pragma: no cover - Seite ohne Attribute
+        pass
+    return idx
+
+
+def _in_einem_feld(seite, felder, w) -> bool:
+    """Liegt das Wort in einem der Felder (_im_feld) – geprüft nur gegen die Felder auf seiner Höhe?"""
+    oben, sortiert, groesste = _felder_nach_hoehe(seite, felder)
+    mitte = (w[3] + w[5]) / 2.0
+    rand = FELD_RAND_PT + 0.5
+    a = bisect.bisect_left(oben, mitte - groesste - rand)
+    b = bisect.bisect_right(oben, mitte + rand)
+    return any(_im_feld(w, f) for f in sortiert[a:b])
+
+
+def _eigener_feldname(seite, feld, felder) -> bool:
+    """Steht links vom Feld in seiner Zeile ein Wort außerhalb der Felder, das kein Teil-Feldname ist (der eigene
+    Feldname der Zeile)? Über die nach Höhe sortierten Wörter und Felder der Seite (bisect), nicht je Feld über alle."""
+    x0, y0, _, y1 = kammraster.kopfkasten(feld)
+    hoehe = max(y1 - y0, 4.0)
+    woerter = _woerter(seite)
+    mitten, idx = _woerter_nach_hoehe(seite)
+    for k in range(bisect.bisect_left(mitten, y0 - 0.3 * hoehe), bisect.bisect_right(mitten, y1 + 0.3 * hoehe)):
+        w = woerter[idx[k]]
+        if w[4] <= x0 + FELD_RAND_PT and any(c.isalpha() for c in seite.text[w[0]:w[1]]) \
+                and not kammraster.teil_etikett(seite.text[w[0]:w[1]].strip(".:;,()")) \
+                and not _in_einem_feld(seite, felder, w):
+            return True
+    return False
+
+
 def _uebergeordnet(seite, feld, ets: list, felder: list = ()):
     x0, y0, x1, y1 = kammraster.kopfkasten(feld)
     hoehe = max(y1 - y0, 4.0)
+    # Ein Teil-Feldname erbt zuerst vom Feldnamen davor in derselben Zeile, auch von einem ohne Personenbezug
+    # ("Letzte Hauptuntersuchung ⇥ Jahr [2024]" unter "Fahrzeughalter (Name, Vorname)"; Abnahme 5 AB5U-03): steht links
+    # in der Zeile Text außer Teil-Feldnamen, gilt nur ein Etikett dort – vom Feldnamen darüber erbt das Feld nur, wenn
+    # die Zeile keinen eigenen hat
+    eigener = _eigener_feldname(seite, feld, felder)
     beste, beste_x = None, None
     for et in ets:
         b = _box(seite, et.start, et.ende)
@@ -598,7 +855,7 @@ def _uebergeordnet(seite, feld, ets: list, felder: list = ()):
         if y0 - 0.3 * hoehe <= mitte <= y1 + 0.3 * hoehe and b[2] <= x0 + FELD_RAND_PT:
             if beste_x is None or b[2] > beste_x:
                 beste, beste_x = et, b[2]
-    if beste is not None:
+    if beste is not None or eigener:
         return beste
     oben = []
     for et in ets:
@@ -607,6 +864,11 @@ def _uebergeordnet(seite, feld, ets: list, felder: list = ()):
             continue
         oben.append((y0 - b[3], -b[2], et))
     return min(oben, key=lambda t: (t[0], t[1]))[2] if oben else None
+
+
+# Feldname einer Hausnummer: nur er macht einen kurzen Wert unter einem Anschrift-Feldnamen zur Hausnummer – "Etage",
+# "Stock", "Zimmer" nicht (Kammfeld-Probe der Abnahme 5, k04; wie die Regel der Textebene, "Etage ⇥⇥ 1 ⇥⇥ 2")
+_HAUSNUMMER_ETIKETT_RE = re.compile(r"(?i)haus|nr|nummer|\bno\b")
 
 
 @detektor(QUELLE_SCAN, ALLE_KATEGORIEN, ALLE_PROFILE)
@@ -634,6 +896,13 @@ def kammfeld_scan(dok, kontext):
                 if s_ >= 0 and kammraster.teil_etikett(seite.text[s_:e_]):
                     et = uebergeordnetes_etikett(seite, feld, ets, felder, seite.text[s_:e_])
                     etikett_text = seite.text[et.start:et.ende] if et is not None else ""
+                elif sum(c.isalpha() for c in wert) >= 3:
+                    # eigener Feldname unlesbar ("Straße" als "See" gelesen) unter einem Feldnamen der Zeile für
+                    # Personenangaben ("Anschrift ⇥ Straße [LINDENWEG] ⇥ Hausnr. [14]"): ein Wert mit Buchstaben gilt mit
+                    # ihm (auf 0230782 über den Rohwert geschwärzt; Kammfeld-Probe der Abnahme 5, k04)
+                    ueber = _uebergeordnet(seite, feld, ets, felder)
+                    if ueber is not None and ueber.arten & _PERSONEN_ARTEN:
+                        et, etikett_text = ueber, seite.text[ueber.start:ueber.ende]
             if et is not None:
                 kat = kategorie_fuer(et, etikett_text, wert)
             else:
@@ -641,8 +910,15 @@ def kammfeld_scan(dok, kontext):
             if kat is None or (kontext.aktive and kat not in kontext.aktive):
                 continue
             kompakt = re.sub(r"[\s|]+", "", wert)
-            if _kurz_scan(feld, kompakt) and kat != "geburt" and not _kurz_passt_scan(kat, kompakt):
-                continue                              # "DE" hinter "Staatsangehörigkeit": gemeldet (restrisiko)
+            hausnummer = kat == "strasse" and bool(_HAUSNUMMER_ETIKETT_RE.search(etikett_text or ""))
+            if _kurz_scan(feld, kompakt) and kat != "geburt" and not _kurz_passt_scan(kat, kompakt) \
+                    and not (hausnummer and any(c.isdigit() for c in kompakt)):
+                # "DE" hinter "Staatsangehörigkeit": gemeldet (restrisiko); unter dem Feldnamen einer Hausnummer gilt
+                # ein kurzer Wert mit einer Ziffer auch verlesen als Hausnummer ("27" als "2&1"; Kammfeld-Korpus
+                # eigen505 der Abnahme 5, auf 0230782 geschwärzt)
+                continue
+            if _kurz_scan(feld, kompakt) and kat == "strasse" and not hausnummer:
+                continue                              # "Lage der Wohnung ⇥ Etage [3]": keine Hausnummer, gemeldet
             for a, b in spannen:
                 treffer.append(Treffer(dok.global_(nr, a), dok.global_(nr, b), kat, QUELLE_SCAN,
                                        0.8 if et is not None else 0.9))

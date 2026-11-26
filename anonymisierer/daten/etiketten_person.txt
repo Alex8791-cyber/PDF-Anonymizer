@@ -403,6 +403,7 @@ Inhaber(in)
 Inhaber/-in
 Inhaber/in
 Inhaberin
+Initialen
 Insasse
 Insassin
 Insolvenzverwalter

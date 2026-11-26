@@ -189,6 +189,23 @@ _NACHNAMEN_ENDUNG_RE = re.compile(r"(?:berger|burger|inger|ner|ger|ler|ter|mann|
 # typische Endungen gewöhnlicher Substantive und Partizipien – kein Name
 _SUBSTANTIV_ENDUNG_RE = re.compile(r"(?i)(?:ung|ungen|heit|keit|schaft|tion|ität|ismus|nis|tum|chen|ierte[nr]?|"
                                    r"ende[nr]?)$")
+# Grundwörter von Geräten, Maschinen, Tieren und Rollen auf "-er", die mit beliebigem Bestimmungswort ein Sachwort bleiben
+# ("Hochdruckreiniger", "Kondenstrockner", "Heizlüfter", "Gabelstapler", "Spaziergänger", "Marder"; Abnahme 4 AB4U-04) –
+# geteilt mit der Selbstkontrolle (restrisiko._sachwort_er)
+ER_GERAET_GRUNDWORT = ("reiniger", "trockner", "lüfter", "luefter", "stapler", "gänger", "gaenger", "strahler",
+                       "kocher", "sauger", "spüler", "spueler", "trimmer", "mäher", "maeher", "toaster", "marder",
+                       "enthärter", "enthaerter", "boiler", "kühler", "kuehler", "verteiler", "zünder", "zuender",
+                       "erhitzer", "wärmer", "waermer", "fräser", "fraeser", "bohrer", "rasierer", "föhner",
+                       "foehner", "mixer", "kompressor", "generator", "regler", "melder", "sender", "empfänger",
+                       "lautsprecher", "verstärker", "verstaerker", "akkuschrauber", "hamster")
+
+
+def geraete_kompositum(wort: str) -> bool:
+    """Ist das Wort ein Kompositum aus einem Bestimmungswort und einem Geräte-Grundwort ("Gabelstapler",
+    "Hochdruckreiniger", "Heizlüfter")? Das Grundwort allein ("Kocher", "Regler") ist auch ein Familienname und zählt
+    nicht (Abnahme 5 A5-02)."""
+    k = (wort or "").casefold()
+    return any(k.endswith(g) and len(k) >= len(g) + 3 for g in ER_GERAET_GRUNDWORT)
 
 
 def namensgestalt(wort: str, wissen=None) -> bool:
@@ -586,12 +603,14 @@ def sachbeleg(text: str, start: int, ende: int, wissen=None, direkt: bool = Fals
 
 # Personenwort direkt vor einem Namen im Satz ("mit Kollege Hengst", "unser Nachbar Wallach", "die Zeugin Grundig"):
 # das Wort dahinter ist eine Person, auch wenn es zugleich Marke, Modell oder Rasse ist (Nachprüfung NP-03)
+# auch gebeugt ("des Onkels Tremml", "bei dem Mandanten Kreuzl", "des Vermieters Leser"; Abnahme 5 A5-13)
 _PERSONENWORT = (
-    r"(?:Kollegen?|Kollegin|Nachbarn?|Nachbarin|Zeugen?|Zeugin|Mitarbeiter(?:in)?|Chef(?:in)?|Kunden?|"
-    r"Kundin|Mieter(?:in)?|Vermieter(?:in)?|Sachbearbeiter(?:in)?|Monteur(?:in)?|Hausmeister(?:in)?|Schwager|"
-    r"Schwägerin|Onkel|Tante|Cousine?|Neffe|Nichte|Ehemann|Ehefrau|Sohn|Tochter|Vater|Mutter|Bruder|Schwester|"
-    r"Opa|Oma|Enkel(?:in)?|Patient(?:in)?|Mandant(?:in)?|Vermittler(?:in)?|Makler(?:in)?|Gutachter(?:in)?|"
-    r"Anrufer(?:in)?|Unfallgegner(?:in)?|Geschädigte[rn]?)")
+    r"(?:Kollegen?|Kollegin|Nachbarn?|Nachbars|Nachbarin|Zeugen?|Zeugin|Mitarbeiter(?:in|s)?|Chef(?:in|s)?|Kunden?|"
+    r"Kundin|Mieter(?:in|s)?|Vermieter(?:in|s)?|Sachbearbeiter(?:in|s)?|Monteur(?:in|s|e)?|Hausmeister(?:in|s)?|"
+    r"Schwagers?|Schwägerin|Onkels?|Tante|Cousine?|Cousins|Neffen?|Nichte|Ehemann(?:e?s)?|Ehefrau|Sohn(?:e?s)?|"
+    r"Tochter|Vaters?|Mutter|Bruders?|Schwester|Opas?|Oma|Enkel(?:in|s)?|Patient(?:in|en)?|Mandant(?:in|en)?|"
+    r"Vermittler(?:in|s)?|Makler(?:in|s)?|Gutachter(?:in|s)?|Anrufer(?:in|s)?|Unfallgegner(?:in|s)?|"
+    r"Geschädigte[rn]?)")
 PERSONENWORT_DAVOR_RE = re.compile(r"(?<![\wäöüß])" + _PERSONENWORT + r"[ \t]+$")
 # Personenwort ohne Begleiter direkt vor einem großgeschriebenen Wort im Satz ("Laut Nachbar Grohe war …", "Rücksprache
 # mit Nachbar Grohe am Montag"; Abnahme N7) – das Wort ist der Name der Person; nur mit Leerzeichen dazwischen, nicht
@@ -634,8 +653,9 @@ _PERSON_VERB_DAHINTER_RE = re.compile(
     r"informierte|bemerkte|entdeckte)(?![\wäöüß])")
 # Personenwörter, hinter denen auch der Name einer Firma stehen kann ("Monteur Buderus", "Mitarbeiterin Vorwerk",
 # "Gutachter Dekra", "Kunde Miele"): dort ist eine bekannte Marke ohne weiteren Beleg kein sicherer Name
-_FIRMEN_PERSONENWORT_RE = re.compile(r"(?:Monteur(?:in)?|Mitarbeiter(?:in)?|Sachbearbeiter(?:in)?|Vermittler(?:in)?|"
-                                     r"Makler(?:in)?|Gutachter(?:in)?|Kunden?|Kundin|Anrufer(?:in)?)[ ]")
+_FIRMEN_PERSONENWORT_RE = re.compile(r"(?:Monteur(?:in|s|e)?|Mitarbeiter(?:in|s)?|Sachbearbeiter(?:in|s)?|"
+                                     r"Vermittler(?:in|s)?|Makler(?:in|s)?|Gutachter(?:in|s)?|Kunden?|Kundin|"
+                                     r"Anrufer(?:in|s)?)[ ]")
 # Kontaktangabe direkt hinter dem Wort ("Monteur Grohe, Tel. 0171 …", "Nachbar Zettl (Handy 0160 …)"): eine Person
 _KONTAKT_DAHINTER_RE = re.compile(r"[ \t]*[,(]?[ \t]*(?:Tel(?:efon)?\.?|Tel\.-Nr\.?|Handy|Mobil(?:nummer)?|Fax|"
                                   r"E-?Mail|Durchwahl)(?![a-zäöüß])")
@@ -665,7 +685,20 @@ _LAGE_ADVERB = frozenset("gegenüber gegenueber nebenan drüben drueben oben unt
 _ORG_GESTALT_RE = re.compile(r"(?i)[\wäöüß]{0,25}(?:dienst|service|betreuung|management|leitung|team|abteilung|büro|"
                              r"buero|agentur|zentrale|vertrieb|filiale|niederlassung|verwaltung|gruppe|center|kanzlei|"
                              r"werk|werke|betrieb|office|betreiber|versorger|anbieter|hersteller|lieferant|händler|"
-                             r"haendler|einkauf|verkauf|technik|buchhaltung|empfang|personal|marketing|support)")
+                             r"haendler|einkauf|verkauf|technik|buchhaltung|empfang|personal|marketing|support|"
+                             r"sekretariat|registratur|stelle|praxis|redaktion|disposition)")
+
+
+def verb_einer_person_dahinter(text: str, pos: int, ende: int | None = None) -> bool:
+    """Steht ab pos (hinter Leerraum) das Verb einer Person ("meldet", "sah", "hat", "ist erreichbar")? Für die
+    Rohwert-Regel der Formulare (struktur.ocr_rohwert): ein Satz hinter einem Personenwort ist kein Feldwert."""
+    ende = len(text) if ende is None else ende
+    return bool(_PERSON_VERB_DAHINTER_RE.match(text, pos, ende) or _PERSON_ZUSTAND_DAHINTER_RE.match(text, pos, ende))
+
+
+def org_gestalt(w: str) -> bool:
+    """Öffentlich für die Selbstkontrolle: _org_gestalt."""
+    return _org_gestalt(w)
 
 
 def _org_gestalt(w: str) -> bool:
@@ -739,6 +772,73 @@ def personenwort_kandidaten(text: str, wissen=None, beruf_nachname: bool = False
     return aus
 
 
+# Zeitwörter hinter einem Personenwort ("Nachbar Morgen kommt vorbei"): eine Zeitangabe oder ein Name – nur gemeldet
+_ZEITWORT = frozenset("morgen heute gestern abend mittag nachmittag vormittag nacht früh frueh bald später spaeter jetzt "
+                      "sofort gleich nachher vorhin".split())
+# Zusatz einer Rolle statt eines Namens hinter einem Personenwort: Stockwerk oder Gebäudeteil ("Mieter Erdgeschoss",
+# "Mieter Souterrain"), Kanal ("Mitarbeiter Hotline"), Sparte, Kundengruppe oder Gewerk ("Kunde Gewerbe", "Monteur
+# Fernwärme") – wie Abteilungen und Firmenrollen (_ORG_GESTALT_RE) kein Familienname (Abnahme 4 AB4U-01)
+_ROLLEN_ZUSATZ_RE = re.compile(
+    r"(?i)[\wäöüß]{0,20}(?:geschoss|geschoß|etage|stockwerk|souterrain|parterre|dachboden|speicher|anbau|hinterhaus|"
+    r"vorderhaus|seitenflügel|seitenfluegel|nebengebäude|nebengebaeude|hotline|telefon|schalter|gewerbe|privat|wärme|"
+    r"waerme|heizung|sanitär|sanitaer|elektro|elektrik|klima|lüftung|lueftung|bereich|sparte)")
+# Grundform der Einzahl eines Personenworts, die sich von Mehrzahl, Dativ und Genitiv unterscheidet ("Nachbar",
+# "Kollegin", "Kunde"; nicht "Mieter", "Kollegen", "Nachbars"): mitten im Satz ohne Begleiter steht dahinter ein Name
+_PERSONENWORT_EINZAHL_RE = re.compile(
+    r"Kollege|Kollegin|Nachbar|Nachbarin|Zeuge|Zeugin|Mitarbeiterin|Chef|Chefin|Kunde|Kundin|Mieterin|Vermieterin|"
+    r"Sachbearbeiterin|Monteur|Monteurin|Hausmeisterin|Schwägerin|Tante|Cousin|Cousine|Neffe|Nichte|Ehemann|Ehefrau|"
+    r"Sohn|Tochter|Vater|Mutter|Bruder|Schwester|Opa|Oma|Enkelin|Patient|Patientin|Mandant|Mandantin|Vermittlerin|"
+    r"Maklerin|Gutachterin|Anruferin|Unfallgegnerin")
+# "als" vor dem Personenwort: eine Rolle ("Sie macht als Gutachterin Hausbesuche.")
+_ALS_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])als[ \t]+$")
+# dahinter ein weiteres Personenwort in einer Aufzählung ("Zeugen: Nachbar Wasser und Nachbarin Regen"): eine Person
+_PERSONENWORT_FOLGT_RE = re.compile(r"[ \t]*(?:,|und|oder|sowie)[ \t]+" + _PERSONENWORT + r"[ \t]")
+
+
+def _allerwelt_als_name(text: str, m, wissen) -> bool:
+    """Ein Allerweltswort, das ein Familienname sein kann ("Wasser", "Regen"), direkt hinter einem Personenwort ohne
+    Begleiter – dort ist es der Name wie ein unbekanntes Wort (auf 0230782 standen "Wasser" und "Regen" noch nicht in der
+    Liste der Allerweltswörter und wurden so geschwärzt; Abnahme 5 A5-05):
+    - hinter "laut" ("Laut Nachbarin Regen war die Tür offen."), mit einer Kontaktangabe oder einem weiteren
+      Personenwort einer Aufzählung dahinter ("Zeugen: Nachbar Wasser und Nachbarin Regen");
+    - am Satz- oder Notizanfang mit dem Verb einer Person dahinter ("Nachbar Wasser hat angerufen.");
+    - mitten im Satz hinter der Grundform der Einzahl ("Rücksprache mit Nachbar Wasser am Montag.", "Gestern rief
+      Kollegin Regen an."); hinter "Mieter", "Kollegen", "Kunden" kann es ein Satzteil sein ("Er zeigte Kollegen
+      Fotos.") – das meldet die Selbstkontrolle (personenwort_allerwelt) –, hinter "als" ist das Personenwort eine
+      Rolle ("Sie macht als Gutachterin Hausbesuche.").
+    Hinter einem Begleiter ("Er hat dem Nachbarn Wasser abgegraben.") ist es ein Satzteil; Abteilungs-, Lage-,
+    Kanal-, Sparten-, Kalender-, Zeit-, Berufs-, Orts- und Feldwörter ("Mieter Erdgeschoss", "Kunde Gewerbe") und
+    Komposita mit einem Allerweltswort als Grundwort ("Wasserschaden") bleiben beim Melden (AB4U-01)."""
+    w = m.group(1)
+    k = w.casefold()
+    if "-" in w or _SUBSTANTIV_ENDUNG_RE.search(w) or k in _KALENDER or k in _KEIN_NAME_VERWEIS or k in _LAGE_ADVERB \
+            or k in _ZEITWORT or _org_gestalt(w) or _ROLLEN_ZUSATZ_RE.fullmatch(w):
+        return False
+    try:
+        if not wissen.ist_allerweltswort(w) or wissen.ist_beruf(w) or wissen.ist_ort(w) or wissen.ist_anrede_titel(w) \
+                or wissen.ist_allowlist(w) or any(wissen.index(f"etiketten_{art}").eintrag_fuer(w) is not None
+                                                  for art in wissen.ETIKETTEN_ARTEN):
+            return False
+        # ein zusammengesetztes Hauptwort, dessen Grundwort selbst ein Allerweltswort ist ("Wasserschaden" = Wasser +
+        # Schaden, "Heizungsausfall"), ist kein Familienname; nur die letzten 30 Zeichen (linear je Wort)
+        for i in range(max(3, len(w) - 30), len(w) - 3):
+            if not w[i].isupper() and wissen.ist_allerweltswort(w[i].upper() + w[i + 1:]):
+                return False
+    except Exception:  # pragma: no cover - Wissensbasis beschädigt
+        return False
+    davor_start = max(0, m.start() - 20)
+    if _BEGLEITER_DAVOR_RE.search(text, davor_start, m.start()) \
+            or text[m.end(1):m.end(1) + 3].lstrip(" \t").startswith(":"):
+        return False                                     # Satzteil bzw. Feldname ("Mieter Dachgeschoss: kein Schaden")
+    if PERSON_LAUT_DAVOR_RE.search(text, davor_start, m.start()) or _KONTAKT_DAHINTER_RE.match(text, m.end(1)) \
+            or _PERSONENWORT_FOLGT_RE.match(text, m.end(1)):
+        return True
+    if _satzanfang(text, m.start()):
+        return verb_einer_person_dahinter(text, m.end(1))
+    return (_PERSONENWORT_EINZAHL_RE.fullmatch(text[m.start():m.start(1)].rstrip()) is not None
+            and not _ALS_DAVOR_RE.search(text, davor_start, m.start()))
+
+
 def personenwort_namen(text: str, wissen=None, unsicher: list | None = None) -> list:
     """(start, ende) der Namen direkt hinter einem Personenwort ("Laut Nachbar Grohe", "mit Kollegin Zwickl", "Zeuge
     Hinterstoißer"; nicht "dem Nachbarn Wasser", "beim Nachbarn Regen"): ein großgeschriebenes Wort, das kein
@@ -766,6 +866,8 @@ def personenwort_namen(text: str, wissen=None, unsicher: list | None = None) -> 
     for m in _PERSONENWORT_NAME_RE.finditer(text):
         w = m.group(1)
         if not _personenwort_wort(w, wissen):
+            if _allerwelt_als_name(text, m, wissen):
+                aus.append((m.start(1), m.end(1)))
             continue
         davor_start = max(0, m.start() - 20)
         bm = _BEGLEITER_DAVOR_RE.search(text, davor_start, m.start())
@@ -774,7 +876,7 @@ def personenwort_namen(text: str, wissen=None, unsicher: list | None = None) -> 
         # Satzgegenstand: Personenwort am Satzanfang, dahinter ein Verb einer Person; oder eine Kontaktangabe dahinter –
         # eine Abteilung, Firmenrolle oder Lage ("Kollege Außendienst ruft zurück", "Mieter Nebenan hat …") nur mit
         # eigenem Namensbeleg, sonst gemeldet (Abnahme 4 AB4U-01)
-        if (anfang and _PERSON_VERB_DAHINTER_RE.match(text, m.end(1))) or _KONTAKT_DAHINTER_RE.match(text, m.end(1)):
+        if (anfang and verb_einer_person_dahinter(text, m.end(1))) or _KONTAKT_DAHINTER_RE.match(text, m.end(1)):
             if not _org_gestalt(w) or _org_namensbeleg(w, wissen):
                 aus.append((m.start(1), m.end(1)))
             continue
@@ -850,6 +952,10 @@ def berufswort_namen(text: str, wissen=None, alle: bool = False, beruf_nachname:
                 # ohne Verb: ein Vor- oder Nachname der Wissensbasis, auch mehrdeutig ("Glaser Frost ist …")
                 beleg = (_namensbeleg_personenwort(w, wissen) or wissen.ist_nachname(w)) \
                     and not (_org_gestalt(w) and not _org_namensbeleg(w, wissen))
+            if not beleg and laut:
+                # hinter "laut <Beruf>" auch ein unbekanntes Wort ("Laut Zimmerer Hinterseer ist das Dach dicht."):
+                # die Person, deren Angabe zitiert wird (Abnahme 5 A5-13; nur Selbstkontrolle)
+                beleg = not _org_gestalt(w)
         except Exception:  # pragma: no cover - Wissensbasis beschädigt
             beleg = False
         if beleg or (alle and verb):
@@ -877,6 +983,113 @@ def personenwort_vor_name(text: str, start: int, ende: int, wissen=None) -> bool
     return wissen is not None and _personenwort_wort(m.group(1), wissen, beruf_nachname=True)
 
 
+def personenwort_allerwelt(text: str, wissen=None) -> list:
+    """(start, ende) der Allerweltswörter direkt hinter einem Personenwort ohne Begleiter, die dort ein Familienname sein
+    können: am Satzanfang mit einem Verb einer Person dahinter ("Nachbar Wasser hat angerufen."), hinter "laut"/"gemäß"
+    ("Laut Nachbarin Regen war die Tür offen."), mitten im Satz ("Die Kosten trägt Mieter Wasser selbst.", "Er
+    telefonierte mit Kollegen Wasser.") oder mit einer Kontaktangabe dahinter – für die Selbstkontrolle, die sie meldet
+    (Abnahme 5 A5-05, Grundsatz P2: Alltagswort oder Familienname). Hinter einem Begleiter ("Er hat dem Nachbarn
+    Wasser abgegraben.", "Beim Nachbarn Regen gemessen.") ist das Wort ein Satzteil und bleibt frei; ebenso Kalender-,
+    Lage-, Leer- und Verweiswörter, Wörter mit Substantiv-Endung, Organisationswörter und Etiketten."""
+    if not text or not _PERSONENWORT_VORAB_RE.search(text):
+        return []
+    wissen = _wissen_oder_modul(wissen)
+    if wissen is None:
+        return []
+    aus = []
+    for m in _PERSONENWORT_NAME_RE.finditer(text):
+        w = m.group(1)
+        k = w.casefold()
+        try:
+            if not wissen.ist_allerweltswort(w) or wissen.ist_beruf(w) or wissen.ist_anrede_titel(w):
+                continue
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            continue
+        if "-" in w or _SUBSTANTIV_ENDUNG_RE.search(w) or k in _KALENDER or k in _KEIN_NAME_VERWEIS \
+                or k in _LAGE_ADVERB or _org_gestalt(w) or text[m.end(1):m.end(1) + 3].lstrip(" \t").startswith(":"):
+            continue
+        davor_start = max(0, m.start() - 20)
+        if _BEGLEITER_SATZTEIL_DAVOR_RE.search(text, davor_start, m.start()):
+            continue                                     # "dem Nachbarn Wasser abgegraben": ein Satzteil
+        try:
+            if any(wissen.index(f"etiketten_{art}").eintrag_fuer(w) is not None for art in wissen.ETIKETTEN_ARTEN):
+                continue
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            continue
+        # hinter einem Begleiter im Genitiv oder Nominativ ("Der Wagen des Nachbarn Regen …", "Die Nachbarin Wasser
+        # hat …") ist das Wort kein Satzteil (Abnahme 5 A5-13)
+        genitiv = _BEGLEITER_DAVOR_RE.search(text, davor_start, m.start()) is not None
+        laut = PERSON_LAUT_DAVOR_RE.search(text, davor_start, m.start()) is not None
+        anfang = _satzanfang(text, m.start())
+        verb = anfang and verb_einer_person_dahinter(text, m.end(1))
+        # mitten im Satz ohne Begleiter: der Name oder ein Satzteil ("Die Kosten trägt Mieter Wasser selbst.", "Er
+        # telefonierte mit Kollegen Wasser.", "Er stellte sich als Nachbar Wasser vor.", aber auch "Er zeigte Kollegen
+        # Fotos.") – gemeldet (auf 0230782 wurden "Wasser" und "Regen" dort geschwärzt); nicht hinter einem Genitiv auf
+        # "-s" ("Nachbars Garten": ein Besitz)
+        mitte = not anfang and not text[m.start():m.start(1)].rstrip().endswith("s")
+        if genitiv or laut or verb or mitte or _KONTAKT_DAHINTER_RE.match(text, m.end(1)):
+            aus.append((m.start(1), m.end(1)))
+    return aus
+
+
+# Zustand oder Vorgang einer Person hinter dem Wort ("Kollegin Pfarrer ist seit Montag im Urlaub.", "Kunde Halter wurde
+# befragt."; Abnahme 5 A5-13) und ein Verb davor ("Gestern rief Mieter Pfarrer an.")
+_PERSON_ZUSTAND_DAHINTER_RE = re.compile(r"(?i)[ \t]+(?:ist|war|wird|wurde)[ \t]+(?:seit|im|in|bei|am|nicht|noch|heute|"
+                                         r"gestern|morgen|krank|verreist|erreichbar|zuständig|zustaendig|befragt|"
+                                         r"informiert|angerufen|benachrichtigt|verständigt|verstaendigt|geladen|"
+                                         r"vernommen|gebeten)(?![\wäöüß])")
+_VERB_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:rief|ruft|kam|kommt|schrieb|schreibt|sagte|sagt|meldete|meldet|"
+                            r"bestätigte|bestaetigte|erklärte|erklaerte)[ \t]+$")
+
+
+def personenwort_rollenwort(text: str, wissen=None) -> list:
+    """(start, ende) eines Berufs-, Titel- oder Rollenworts direkt hinter einem Personenwort, das dort ein Familienname
+    sein kann ("Nachbarin Pfarrer hat angerufen.", "Rücksprache mit Mieter Käufer am Montag.", "Kunde Halter wurde
+    befragt.", "Der Wagen des Mieters Pfarrer …"; Abnahme 5 A5-13) – für die Selbstkontrolle, die es meldet (P2: Rolle
+    oder Name; die Erkennung nimmt Berufe, Titel und Etiketten hinter einem Personenwort aus). Ein Rollenwort aus den
+    Etiketten zählt nur mit der Endung einer Person ("Käufer", "Halter"; nicht "Anschrift", "Name"); ein Allerweltswort
+    hinter einem Begleiter bleibt ein Satzteil ("dem Nachbarn Wasser"); kein Wort vor einem Doppelpunkt."""
+    if not text or not _PERSONENWORT_VORAB_RE.search(text):
+        return []
+    wissen = _wissen_oder_modul(wissen)
+    if wissen is None:
+        return []
+    aus = []
+    for m in _PERSONENWORT_NAME_RE.finditer(text):
+        w = m.group(1)
+        k = w.casefold()
+        if "-" in w or _SUBSTANTIV_ENDUNG_RE.search(w) or k in _KALENDER or k in _KEIN_NAME_VERWEIS \
+                or k in _LAGE_ADVERB or _PERSONENWORT_GANZ_RE.fullmatch(w) \
+                or text[m.end(1):m.end(1) + 3].lstrip(" \t").startswith(":"):
+            continue
+        try:
+            if wissen.ist_nachname(w) or wissen.ist_vorname(w) or wissen.ist_ort(w):
+                continue                                 # Namen und Orte: die übrigen Regeln
+            beruf_titel = bool(wissen.ist_beruf(w) or wissen.ist_anrede_titel(w))
+            rolle = bool(re.search(r"(?:er|erin)$", w)) and any(
+                wissen.index(f"etiketten_{art}").eintrag_fuer(w) is not None for art in wissen.ETIKETTEN_ARTEN)
+            allerwelt = wissen.ist_allerweltswort(w)
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            continue
+        if not (beruf_titel or rolle) or (_org_gestalt(w) and not beruf_titel):
+            continue                                     # "Kollege Außendienst" (Organisation), "Nachbar Händler" zählt
+        davor_start = max(0, m.start() - 20)
+        if allerwelt and _BEGLEITER_SATZTEIL_DAVOR_RE.search(text, davor_start, m.start()):
+            continue                                     # ein Satzteil hinter einem Begleiter
+        # ohne Begleiter nur mit einem Beleg einer Person im Satz – eine Aufzählung beschreibt die Person ("Sohn
+        # Auszubildender, Tochter Studentin"; Abnahme 3 AB3-03)
+        if not _BEGLEITER_DAVOR_RE.search(text, davor_start, m.start()) \
+                and not (PERSON_LAUT_DAVOR_RE.search(text, davor_start, m.start())
+                         or _PRAEPOSITION_DAVOR_RE.search(text, davor_start, m.start())
+                         or _PERSON_VERB_DAHINTER_RE.match(text, m.end(1))
+                         or _PERSON_ZUSTAND_DAHINTER_RE.match(text, m.end(1))
+                         or _KONTAKT_DAHINTER_RE.match(text, m.end(1))
+                         or _VERB_DAVOR_RE.search(text, davor_start, m.start())):
+            continue
+        aus.append((m.start(1), m.end(1)))
+    return aus
+
+
 def personenwort_nur_meldung(text: str, wissen=None) -> set:
     """(start, ende) der Wörter hinter einem Personenwort, die nach personenwort_namen kein Name sind und die die
     Erkennung auch nicht über die KI schwärzt – die Selbstkontrolle meldet sie (personenwort_kandidaten):
@@ -893,10 +1106,16 @@ def personenwort_nur_meldung(text: str, wissen=None) -> set:
     if wissen is None:
         return set()
     namen_ = set(personenwort_namen(text, wissen))
+    # nur hinter einem Begleiter, hinter dem das Wort ein Satzteil sein kann ("beim Mieter Schimmel festgestellt", "dem
+    # Nachbarn Holz gebracht") – im Genitiv ist es der Name ("Die Kaution des Mandanten Wolf ist offen.": weiter über die
+    # KI geschwärzt wie bis 5efcc0c; die gebeugten Personenwörter der siebten Nachbesserung, A5-13, erweitern die
+    # Ausnahme nicht auf den Genitiv)
+    satzteil = {m.span(1) for m in _PERSONENWORT_NAME_RE.finditer(text)
+                if _BEGLEITER_SATZTEIL_DAVOR_RE.search(text, max(0, m.start() - 20), m.start())}
     aus = set()
     for s, e, begleiter, _ in personenwort_kandidaten(text, wissen):
         try:
-            if begleiter and (s, e) not in namen_ and wissen.ist_mehrdeutig(text[s:e]):
+            if begleiter and (s, e) in satzteil and (s, e) not in namen_ and wissen.ist_mehrdeutig(text[s:e]):
                 aus.add((s, e))
         except Exception:  # pragma: no cover - Wissensbasis beschädigt
             continue
@@ -924,6 +1143,11 @@ _PERSONENWORT_VORAB_RE = re.compile(_PERSONENWORT + r"[ ]{1,2}[A-ZÄÖÜ]")
 _BEGLEITER_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:der|die|das|dem|den|des|beim|vom|zum|zur|im|am|ein|eine|einem|"
                                  r"einen|einer|eines|kein\w*|unser\w*|mein\w*|dein\w*|sein\w*|ihr\w*|eure?\w*|"
                                  r"dies\w*|jen\w*|jed\w*|welch\w*)[ \t]+$")
+# Begleiter, hinter dem ein gewöhnliches Wort ein Satzteil sein kann ("Er hat dem Nachbarn Wasser abgegraben.", "Beim
+# Nachbarn Regen gemessen.") – nicht im Genitiv oder Nominativ ("Der Wagen des Mandanten Halter", "Die Tante Halter hat
+# …"; Abnahme 5 A5-13)
+_BEGLEITER_SATZTEIL_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:dem|den|beim|vom|zum|zur|im|am|einem|einen|"
+                                          r"(?:mein|dein|sein|ihr|unser|euer|eur|dies|jed|kein|welch)(?:em|en))[ \t]+$")
 # schwächerer Hinweis im Satz: "laut Wallach ist …" – für die Selbstkontrolle (Verdacht statt Schwärzung)
 PERSON_LAUT_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:laut|lt\.|gemäß|nach[ \t]+angaben[ \t]+von)[ \t]+$")
 
@@ -1318,7 +1542,8 @@ _HOF_NAME_RE = re.compile(r"[A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß
 _HOF_ORTSKONTEXT_RE = re.compile(
     r"(?i)(?<![\wäöüß])(?:(?:unfall|schadens?|ereignis|tat|risiko|versicherungs|wohn|stand|abstell|einsatz)?ort|"
     r"unfallstelle|schadenstelle|lage|anschrift|adresse|belegenheit)[ \t]*:|"
-    r"(?<![\wäöüß])(?:[\wäöüß]*(?:unfall|unfälle|schaden|schäden|brand|brände|einbruch|diebstahl)|sturm|hagel|"
+    r"(?<![\wäöüß])(?:[\wäöüß]*(?:unfall|unfälle|schaden|schäden|brand|brände|einbruch|diebstahl)(?:s|es|n|en|e)?|"
+    r"sturm|hagel|"
     r"zusammensto(?:ß|ss)|kollision|geschah|passierte|ereignete|brannte|brennt|gebrannt|abgebrannt|feuer|blitz\w*|"
     r"überschwemm\w*|hochwasser|rohrbruch|eingebrochen|einbrecher|gestohlen|unwetter|explosion|"
     r"wohnt|wohnen|wohnte|lebt|leben|lebte|zufahrt|einfahrt|hofeinfahrt|weide|stall|stadel|scheune|tenne)(?![\wäöüß])")
@@ -1385,6 +1610,28 @@ def _hofname_wort(wort: str, wissen) -> bool:
         return False
 
 
+# Aufenthalt oder Besuch bei einer Familie bzw. einem Hof ("Wir waren beim Pfnürl zum Essen.", "Er arbeitet beim
+# Kaltl als Knecht.", "Ich war gestern beim Huberbauer zu Besuch."; Abnahme 4 AB4-15)
+_HOF_BESUCH_RE = re.compile(r"(?i)(?<![\wäöüß])(?:(?:war|waren|bin|sind|sei|seien|wäre|wären|arbeitet|arbeitete|"
+                            r"wohnt|wohnte|übernachtete|uebernachtete)(?:[ \t]+[a-zäöüß]+){0,2}[ \t]+beim(?![\wäöüß])|"
+                            r"zum[ \t]+(?:essen|kaffee|mittagessen|abendessen|frühstück)|zu[ \t]+(?:besuch|gast)|"
+                            r"eingeladen)(?![\wäöüß])")
+# Entfernung zu einem Hof ("Zum Wimmer sind es nur zwei Kilometer.", "Bis zum Huber fährt man zehn Minuten.")
+_HOF_ENTFERNUNG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:\d+|ein|eine|zwei|drei|vier|fünf|zehn|paar|wenige)[ \t]+"
+                                r"(?:kilometer|km|meter|minuten|min\.?|gehminuten|fahrminuten)(?![\wäöüß])")
+# Weg zu einem Hof ("Zum Gruber fahren wir am Montag.", "Beim Wimmer schauen wir vorbei.") und Besitz eines Hofs
+# ("Der Traktor vom Wimmer stand quer auf der Fahrbahn.", "Die Kühe vom Gruber"): nur für ein Wort mit der Gestalt eines
+# Familiennamens (Abnahme 5 A5-14; "Anbei das Foto vom Kratzer" bleibt beim Melden)
+_HOF_WEG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:fahren|fahre|fährt|faehrt|fuhr|fuhren|gehen|gehe|geht|ging|gingen|"
+                         r"laufen|läuft|laeuft|lief|liefen|radeln|radelt|bringen|bringt|brachte|brachten|liefern|"
+                         r"liefert|lieferte|hinauf|hinüber|hinueber|rüber|rueber|vorbei[a-zäöüß]*)(?![\wäöüß])")
+_HOF_BESITZ_VOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:traktor|bulldog|schlepper|auto|wagen|pkw|lkw|anhänger|"
+                                r"anhaenger|hund|hunde|katze|pferd|pferde|kuh|kühe|kuehe|kälber|kaelber|rinder|vieh|"
+                                r"schafe|ziegen|hühner|huehner|haus|stadel|scheune|stall|garten|feld|felder|acker|"
+                                r"wiese|wiesen|wald|grundstück|grundstueck|tochter|töchter|toechter|sohn|söhne|soehne|"
+                                r"bub|buben|knecht|magd|bäuerin|baeuerin|leute)[ \t]+$")
+
+
 def hofnamen(text: str, wissen) -> list:
     """(start, ende) der Hof- und Hausnamen: hinter "Hof", "Anwesen", "Gehöft" … ein möglicher Familienname
     (_hofname_wort) mit Namensgestalt oder in einer Zeile mit Orts- bzw. Ereigniskontext ("Unfallort: Zufahrt zum Hof
@@ -1395,18 +1642,47 @@ def hofnamen(text: str, wissen) -> list:
         return []
     aus = []
     kontext_je_zeile: dict = {}
+    za, letztes_ende = 0, -1
     for m in _HOF_KOPF_RE.finditer(text):
         n = _HOF_NAME_RE.match(text, m.end())
         if n is None or not _hofname_wort(n.group(0), wissen) \
                 or personenwort_vor_name(text, n.start(), n.end(), wissen):
             continue                                     # "Beim Schwager Schimmel …": Rolle vor dem Namen
-        za = text.rfind("\n", 0, m.start()) + 1
+        try:
+            if geraete_kompositum(n.group(0)) and not wissen.ist_nachname(n.group(0)):
+                continue                                 # "Vom Gabelstapler kam der Anruf …" (Abnahme 5 A5-02)
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            pass
+        if m.start() > letztes_ende:                    # Zeilenanfang nur beim Zeilenwechsel suchen
+            za = text.rfind("\n", 0, m.start()) + 1
         if za not in kontext_je_zeile:
             ze = text.find("\n", m.start())
-            kontext_je_zeile[za] = bool(_HOF_ORTSKONTEXT_RE.search(text, za, len(text) if ze < 0 else ze))
+            ze = len(text) if ze < 0 else ze
+            letztes_ende = ze
+            # Ort oder Ereignis, Besuch ("Wir waren gestern beim Gruber zum Essen.") oder Entfernung ("Zum Wimmer sind es
+            # nur zwei Kilometer."): ein Hof bzw. eine Familie; ein Weg dorthin ("Zum Gruber fahren wir am Montag.")
+            # zählt für "zum"/"beim" (Abnahme 5 A5-14)
+            kontext_je_zeile[za] = (bool(_HOF_ORTSKONTEXT_RE.search(text, za, ze) or _HOF_BESUCH_RE.search(text, za, ze)
+                                         or _HOF_ENTFERNUNG_RE.search(text, za, ze)),
+                                    bool(_HOF_WEG_RE.search(text, za, ze)))
         haus = _hausname_gestalt(n.group(0), wissen)
         gestalt = namensgestalt(n.group(0), wissen) or haus
-        kontext = kontext_je_zeile[za] or (_ort_danach(text, n.end(), wissen) and haus)
+        zeile_kontext, weg = kontext_je_zeile[za]
+        kontext = zeile_kontext or (_ort_danach(text, n.end(), wissen) and haus)
+        if not kontext and m.group(2):
+            # Weg und Besitz nur für einen Familiennamen der Wissensbasis ("Zum Gruber fahren wir", nicht "Er fuhr zum
+            # Discounter"; ein unbekanntes Wort meldet hofnamen_kandidaten)
+            try:
+                bekannter_name = wissen.ist_nachname(n.group(0)) and not wissen.ist_mehrdeutig(n.group(0))
+            except Exception:  # pragma: no cover - Wissensbasis beschädigt
+                bekannter_name = False
+            if not bekannter_name:
+                pass
+            elif m.group(2).casefold() == "vom":
+                # Besitz direkt davor ("Der Traktor vom Wimmer"); die Suche ist auf 40 Zeichen begrenzt
+                kontext = bool(_HOF_BESITZ_VOR_RE.search(text, max(za, m.start() - 40), m.start()))
+            else:
+                kontext = weg
         # hinter "beim"/"vom"/"zum" ein Wort mit der Endung eines Hausnamens auch ohne Ereignis ("Er arbeitet beim
         # Wastlbauer als Knecht", "Die Kühe vom Lechnerbauer", "zum Zellerbauern hinauf"; Abnahme 2 V2) – nur die
         # Endung, nicht jeder Nachname der Wissensbasis ("Anbei das Foto vom Kratzer/Kleber": ein Sachwort; Abnahme 3
@@ -1414,9 +1690,10 @@ def hofnamen(text: str, wissen) -> list:
         k = n.group(0).casefold()
         endung = len(k) >= 7 and bool(_HAUSNAME_ENDUNG_RE.search(k) or _HAUSNAME_BEUGUNG_RE.search(k))
         # ein Familienname der Wissensbasis, der kein gewöhnliches Wort ist ("beim Brandl", "vom Lindinger"; Abnahme 4
-        # AB4-10) – ein mehrdeutiger ("vom Kratzer", "beim Schimmel") meldet die Selbstkontrolle
-        # – ein Nomen auf "-er" ohne die Endung eines Familiennamens ("vom Kratzer", "vom Kleber": Kratzer und Kleber
-        # sind auch Familiennamen) bleibt beim Melden
+        # AB4-10) – ein mehrdeutiger ("beim Schimmel") meldet die Selbstkontrolle; ein Nomen auf "-er" ohne die Endung
+        # eines Familiennamens ("vom Kratzer", "vom Kleber": Kratzer und Kleber sind auch Familiennamen) braucht den
+        # Kontext einer Zeile (Ort, Ereignis, Besuch, Entfernung: "beim Gruber zum Essen", "Zum Wimmer sind es zwei
+        # Kilometer"; Abnahme 5 A5-14) und bleibt sonst beim Melden
         try:
             bekannt = wissen.ist_nachname(n.group(0)) and not wissen.ist_mehrdeutig(n.group(0)) \
                 and not wissen.ist_vorname(n.group(0)) and not k.endswith(_BETRIEB_ENDUNG) \
@@ -1428,12 +1705,81 @@ def hofnamen(text: str, wissen) -> list:
     return aus
 
 
-# Aufenthalt oder Besuch bei einer Familie bzw. einem Hof ("Wir waren beim Pfnürl zum Essen.", "Er arbeitet beim
-# Kaltl als Knecht.", "Ich war gestern beim Huberbauer zu Besuch."; Abnahme 4 AB4-15)
-_HOF_BESUCH_RE = re.compile(r"(?i)(?<![\wäöüß])(?:(?:war|waren|bin|sind|sei|seien|wäre|wären|arbeitet|arbeitete|"
-                            r"wohnt|wohnte|übernachtete|uebernachtete)(?:[ \t]+[a-zäöüß]+){0,2}[ \t]+beim(?![\wäöüß])|"
-                            r"zum[ \t]+(?:essen|kaffee|mittagessen|abendessen|frühstück)|zu[ \t]+(?:besuch|gast)|"
-                            r"eingeladen)(?![\wäöüß])")
+
+
+# Sichere Gegenbelege eines Worts hinter "beim"/"vom"/"zum" (Abnahme 5 AB5U-02) – nie für einen Familiennamen der
+# Wissensbasis, nie für die Gestalt eines Familien- oder Hausnamens:
+# - ein substantiviertes Verb: Endung "-ieren" ("beim Rangieren", "beim Renovieren"), "-eln"/"-ern" ("beim Segeln",
+#   "beim Wandern"), eine abtrennbare Vorsilbe vor "-en" ("beim Einkaufen", "beim Ausparken", "beim Aufräumen") oder ein
+#   Bewegungsverb als Grundwort ("beim Skifahren", "beim Spazierengehen")
+# - ein Kompositum, dessen Grundwort ein gewöhnliches Wort, ein Beruf oder ein Etikett ist und kein Bestandteil eines
+#   Haus- oder Familiennamens ("beim Baumarkt", "vom Volksfest", "beim Autohändler" – nicht "Huberbauer", "Moarhof")
+# - ein Ereignis- oder Wetterwort, das kein Familienname ist ("vom Blitz", "beim Unfall"; "vom Sturm" bleibt gemeldet)
+# - ein Bindestrich-Kompositum aus gewöhnlichen Wörtern ("zum Einbruchdiebstahl-Risiko")
+# - eine feste Wendung ("zum Glück", "zum Schutz", "zum Beispiel")
+_VERB_NOMINAL_RE = re.compile(r"(?:ieren|[^aeiouäöü]eln|[^aeiouäöü]ern)$")
+_VERB_VORSILBE_EN_RE = re.compile(r"(?i)(?:ein|aus|auf|ab|an|um|über|ueber|unter|zurück|zurueck|durch|weg|vor|nach|"
+                                  r"zu|los|mit|her|hin|heim|fest|frei|kaputt|sauber|leer|voll)[a-zäöüß]{3,}en$")
+_VERB_GRUNDWORT_EN_RE = re.compile(r"(?i)[a-zäöüß]{2,}(?:fahren|gehen|laufen|steigen|springen|fallen|rutschen|"
+                                   r"stürzen|stuerzen|stolpern|schieben|ziehen|tragen|heben|parken|biegen|wenden)$")
+# substantivierter Infinitiv eines unbekannten Worts ("beim Grillen", "beim Schwimmen", "vom Laufen"): Mitlaut vor
+# "-en" – Familien- und Hausnamen der Wissensbasis und mit Namensgestalt sind vorher ausgeschlossen (Abnahme 5 AB5U-02)
+_VERB_INFINITIV_RE = re.compile(r"(?:[bcdfgklmnprstvwxzß]|ch|ck|tz|ss)en$")
+HOF_EREIGNIS_WETTER = _HOF_EREIGNIS_WETTER = frozenset("""unfall einbruch diebstahl brand feuer rauch blitz blitzschlag sturm orkan hagel
+regen starkregen schnee eis glatteis frost wind gewitter unwetter hochwasser überschwemmung ueberschwemmung wasser
+sturz aufprall zusammenstoß zusammenstoss schimmel rost""".split())
+_HOF_WENDUNG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:zum[ \t]+(?:glück|glueck|schutz|beispiel|teil|schluss|thema|"
+                             r"ausgleich|erhalt|ablauf|abschluss|zeitpunkt|stichtag|nachweis|vergleich|abschied|"
+                             r"verkauf|kauf|wohl|ende|anfang)|beim[ \t]+(?:besten|ersten|zweiten|nächsten|naechsten)|"
+                             r"vom[ \t]+(?:feinsten|besten|ersten))(?![\wäöüß])")
+_HAUS_FAMILIE_GRUNDWORT_RE = re.compile(r"(?i)(?:hof|höfe|hoefe|haus|häusl|haeusl|gut|mühle|muehle|mühl|muehl|wirt|"
+                                        r"bauer|bauern|huber|hofer|maier|mayr|meier|mair|moser|müller|mueller|"
+                                        r"schuster|berger|bichler|lehner|leitner|reiter|egger|wieser|bacher|hauser|"
+                                        r"loher|rainer|stetter|stätter|staetter|eder|auer)$")
+
+
+def _hof_gegenbeleg(text: str, start: int, w: str, wissen) -> bool:
+    """Spricht das Wort hinter "beim"/"vom"/"zum" sicher gegen einen Haus- oder Familiennamen (siehe oben)?"""
+    try:
+        if geraete_kompositum(w) and not wissen.ist_nachname(w):
+            return True                                 # "Vom Gabelstapler kam der Anruf" (Abnahme 5 A5-02)
+        if wissen.ist_nachname(w) or wissen.ist_vorname(w) or namensgestalt(w, wissen) or _hausname_gestalt(w, wissen):
+            return bool(_HOF_WENDUNG_RE.search(text, max(0, start - 5), start + len(w)))   # "zum Glück"
+    except Exception:  # pragma: no cover - Wissensbasis beschädigt
+        return False
+    if _HOF_WENDUNG_RE.search(text, max(0, start - 5), start + len(w)):
+        return True
+    k = w.casefold()
+    if _VERB_NOMINAL_RE.search(k) and not _HAUSNAME_BEUGUNG_RE.search(k) and len(k) >= 6:
+        return True                                     # "beim Rangieren", "beim Segeln", "beim Wandern"
+    if _VERB_VORSILBE_EN_RE.fullmatch(k) or _VERB_GRUNDWORT_EN_RE.fullmatch(k):
+        return True                                     # "beim Einkaufen", "beim Skifahren"
+    if _VERB_INFINITIV_RE.search(k) and len(k) >= 6:
+        return True                                     # "beim Grillen", "beim Schwimmen", "vom Laufen" (kein Name)
+    if k in _HOF_EREIGNIS_WETTER:
+        return True                                     # "vom Blitz" (Familiennamen sind oben ausgeschlossen)
+    try:
+        from . import namen as namen_modul
+        if not _HAUS_FAMILIE_GRUNDWORT_RE.search(k) and namen_modul._ist_sachwort(w):
+            return True                                 # Sachwort der Erkennung ("beim Supermarkt", "vom Baumarkt")
+    except Exception:  # pragma: no cover - Wissensbasis beschädigt
+        return False
+    teile = [t for t in w.split("-") if t]
+    try:
+        if len(teile) >= 2 and all(wissen.ist_allerweltswort(t) or wissen.ist_beruf(t) or t.isupper()
+                                   for t in teile[-1:]) and not any(wissen.ist_nachname(t) for t in teile):
+            return True                                 # "zum Einbruchdiebstahl-Risiko", "beim Kfz-Händler"
+        if _HAUS_FAMILIE_GRUNDWORT_RE.search(k):
+            return False
+        for i in range(3, len(w) - 2):
+            grund = w[i].upper() + w[i + 1:]
+            if len(grund) >= 3 and (wissen.ist_allerweltswort(grund) or wissen.ist_beruf(grund)
+                                    or any(wissen.index(f"etiketten_{art}").eintrag_fuer(grund) is not None
+                                           for art in wissen.ETIKETTEN_ARTEN)):
+                return True                             # "beim Baumarkt", "vom Volksfest", "beim Autohändler"
+    except Exception:  # pragma: no cover - Wissensbasis beschädigt
+        return False
+    return False
 
 
 def hofnamen_kandidaten(text: str, wissen) -> list:
@@ -1441,11 +1787,14 @@ def hofnamen_kandidaten(text: str, wissen) -> list:
     aber nicht schwärzt (ohne Hausnamen-Endung, ohne Namensgestalt, auch ein Betrieb wie "Kohlhändler") – in einer
     Zeile mit Ereignis- oder Ortskontext bzw. mit einem Verb einer Person dahinter ("Vom Kaltl kam der Anruf wegen des
     Hagelschadens.", "Beim Kohlhändler ist der Stadel abgebrannt."): für die Selbstkontrolle, die sie meldet (Abnahme 4
-    AB4-15; Grundsatz P1)."""
+    AB4-15; Grundsatz P1) – außer mit einem sicheren Gegenbeleg (_hof_gegenbeleg; Abnahme 5 AB5U-02). Der Kontext wird
+    je Zeile einmal gesucht (eine lange Zeile mit vielen Treffern wächst sonst quadratisch; AB5U-10)."""
     if wissen is None or not text:
         return []
     sicher = set(hofnamen(text, wissen))
     aus = []
+    za = ze = -1                                        # aktuelle Zeile [za, ze) – nur beim Zeilenwechsel neu gesucht
+    zeile_kontext = zeile_weg = False
     for m in _HOF_KOPF_RE.finditer(text):
         if not m.group(2):
             continue
@@ -1456,14 +1805,28 @@ def hofnamen_kandidaten(text: str, wissen) -> list:
         if not (_hofname_wort(w, wissen) or (w.casefold().endswith(_BETRIEB_ENDUNG) and len(w) >= 8
                                                and _hofname_wort(w[:1] + "x" * 8, wissen))):
             continue
-        za = text.rfind("\n", 0, m.start()) + 1
-        ze = text.find("\n", m.start())
-        ze = len(text) if ze < 0 else ze
-        if _HOF_ORTSKONTEXT_RE.search(text, za, ze) or _PERSON_VERB_DAHINTER_RE.match(text, n.end()) \
-                or re.match(r"[ \t]+(?:kam|kamen|rief|riefen|meldete|meldeten)(?![\wäöüß])", text[n.end():ze]) \
-                or _HOF_BESUCH_RE.search(text, za, ze):
+        if text[n.end():n.end() + 1] in ("!", "?"):
+            continue                                    # "Vom Kalt! kam …": ein Ausruf, der Satz endet dort
+        if _hof_gegenbeleg(text, n.start(), w, wissen):
+            continue
+        if m.start() > ze:
+            za = text.rfind("\n", 0, m.start()) + 1
+            ze = text.find("\n", m.start())
+            ze = len(text) if ze < 0 else ze
+            zeile_kontext = bool(_HOF_ORTSKONTEXT_RE.search(text, za, ze) or _HOF_BESUCH_RE.search(text, za, ze)
+                                 or _HOF_ENTFERNUNG_RE.search(text, za, ze))
+            zeile_weg = bool(_HOF_WEG_RE.search(text, za, ze))
+        # auch ein Weg dorthin ("Zum Grebl fahren wir am Montag.") und Besitz ("Die Kühe vom Gsödl", "Das Auto vom
+        # Moierl wurde beschädigt."; Abnahme 5 AB5U-02/A5-14: nie still für einen unbekannten Familiennamen)
+        weg_besitz = (zeile_weg if m.group(2).casefold() != "vom"
+                      else _HOF_BESITZ_VOR_RE.search(text, max(za, m.start() - 40), m.start()) is not None)
+        if zeile_kontext or weg_besitz or _PERSON_VERB_DAHINTER_RE.match(text, n.end()) \
+                or _HOF_KAM_DAHINTER_RE.match(text, n.end(), min(ze, n.end() + 40)):
             aus.append((n.start(), n.end()))
     return aus
+
+
+_HOF_KAM_DAHINTER_RE = re.compile(r"[ \t]+(?:kam|kamen|rief|riefen|meldete|meldeten)(?![\wäöüß])")
 
 
 # Mundartliche Namensfolge mit Artikel: "die Kölbl Resi", "der Gruber Sepp" – Familienname vor dem Rufnamen (Nachprüfung

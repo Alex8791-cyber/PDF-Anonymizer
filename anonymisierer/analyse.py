@@ -356,7 +356,35 @@ def _nur_am_etikett(kategorie: str, text: str) -> bool:
     n = sum(c.isalnum() for c in text or "")
     return (kategorie == "zugangsdaten" and n <= 6) or (kategorie == "religion" and n <= 4) \
         or (kategorie == "strasse" and bool(_HAUSNUMMER_KURZ_RE.fullmatch((text or "").strip()))) \
-        or (kategorie not in ("namen", "begriff") and n <= 2) or (kategorie == "namen" and n <= 1)
+        or (kategorie not in ("namen", "begriff") and n <= 2) or (kategorie == "namen" and n <= 1) \
+        or (kategorie == "geburt" and _datumsteil_kurz(text or ""))
+
+
+def _datumsteil_kurz(text: str) -> bool:
+    """Tag oder Monat eines Geburtsdatums für sich (höchstens drei Ziffern, kein Trennzeichen eines Datums: "04",
+    "Tg25", "Monat O0 4" aus einem Kammfeld): anderswo dieselben Ziffern sind ein anderes Datum oder eine Zahl
+    (Kammfeld-Probe der Abnahme 5, k01: der Monat des Versicherungsbeginns wurde über den Geburtsmonat geschwärzt) –
+    wie die übrigen kurzen Werte nur an seiner Stelle. Ein Jahr und ein ganzes Datum werden weitergegeben."""
+    return sum(c.isdigit() for c in text) <= 3 and not re.search(r"\d[ ]?[./-][ ]?\d", text)
+
+
+# Ein kurzer Wert, der nur hinter seinem Etikett gilt (_nur_am_etikett), wird trotzdem weitergegeben, wo der Text ihn
+# als Ort bzw. Hausnummer nennt: ein Ort hinter einer Präposition des Orts ("Geburtsort: Au" ⏎ "Sie wuchs in Au bei
+# Freising auf."), eine Hausnummer hinter "Haus" ("Hausnummer: 7" ⏎ "Das Haus 7 …"; Abnahme 5 A5-04) – nicht "Halle 8",
+# "Tor 8", "Seite 1 von 8" und kein Länderkürzel (Abnahme 4 AB4U-02/12)
+_KURZ_ORT_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:in|aus|nach|bei|von|vom|zu|nahe|nähe|naehe|über|ueber|ab)"
+                                r"[ \t]+$")
+_KURZ_HAUS_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:haus|hausnummer|hausnr\.?|haus-nr\.?)[ \t]*$")
+
+
+def _kurzwert_im_kontext(kategorie: str, text: str, s: int, e: int) -> bool:
+    """Steht der kurze Wert text[s:e] als Ort hinter einer Präposition des Orts bzw. als Hausnummer hinter "Haus"?"""
+    davor = text[max(0, s - 14):s]
+    if kategorie == "plzort":
+        return _KURZ_ORT_DAVOR_RE.search(davor) is not None and text[s:e][:1].isupper()
+    if kategorie == "strasse":
+        return _KURZ_HAUS_DAVOR_RE.search(davor) is not None
+    return False
 
 
 def _kontext_davor(fund: dict) -> str | None:
@@ -1366,10 +1394,10 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
             if kategorie != "begriff" and nie.umhuellt(s, e):
                 ausgelassen.append((s, e, schl, GRUND_NIE))
                 continue
-            if kurz or nur_etikett:
+            if (kurz or nur_etikett) and not (nur_etikett and not kurz and _kurzwert_im_kontext(kategorie, text, s, e)):
                 # Kartenprüfnummer, PIN, Kirchensteuermerkmal: nur hinter ihrem Etikett (Detektor-Treffer); gleiche
                 # Zeichen anderswo bleiben als abgewählte Stelle bekannt – die Selbstkontrolle meldet sie dann nicht
-                # als Rest
+                # als Rest; ein kurzer Ort bzw. eine Hausnummer im Ortskontext wird weitergegeben (A5-04)
                 ausgelassen.append((s, e, schl, GRUND_KARTENPRUEFNUMMER if kurz else GRUND_NUR_ETIKETT))
                 continue
             grund = ausschluss(s, e, roh) if einzelwort else None

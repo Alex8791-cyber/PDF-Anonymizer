@@ -520,6 +520,20 @@ def _anrede_namen(text: str) -> list:
         kern = [w for w in woerter if not _partikel(w)]
         if not kern:
             continue
+        # ein Personenwort oder eine Amtsbezeichnung vor dem Namen gehört nicht zum Namen ("Wie Herr Kollege Maier
+        # sagte" -> "Maier"; Abnahme 5 AB5U-12)
+        versatz = 0
+        while len(kern) >= 2 and not _art(kern[0])[2] and (personenkontext.ist_personenwort(kern[0])
+                                                            or wissen.ist_anrede_titel(kern[0])):
+            versatz = name.index(kern[1], name.index(kern[0]) + len(kern[0]))
+            kern = kern[1:]
+        if versatz:
+            ende_wort = m.start("name") + versatz + len(kern[0])
+            if not _art(kern[0])[2] and not _art(kern[0])[0]:
+                continue                                     # dahinter kein Name der Wissensbasis: die übrigen Regeln
+            aus.append(_treffer(m.start("name") + versatz, ende_wort, text, 0.75))
+            continue
+
         # zweites Wort nur, wenn es ein Name sein kann ("Frau Anna Schmidt", nicht "Frau Schmidt Sie")
         if len(kern) == 2 and not (_art(kern[1])[2] or (_art(kern[0])[0] and _nachname_moeglich(kern[1], False))):
             ende_wort = m.start("name") + name.index(kern[0]) + len(kern[0])

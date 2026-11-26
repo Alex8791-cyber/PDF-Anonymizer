@@ -2061,6 +2061,32 @@ _FELDNAME_REST_RE = re.compile(r"[ ]((?:[^\W\d_][\w'’.\-]*[ ]?){1,4}?)[ ]?:")
 _FUEHRUNGSPUNKTE_RE = re.compile(r"[^\s.…_]{1,2}(?=[.…_]{3})[.…_]{3,}[;:,]?")
 
 
+# Fließtext statt Formularfeld: das Etikett ist ein Personenwort im Satz ("Mitarbeiter Vertrieb meldet sich bis
+# Freitag.", "Nachbar Gegenüber sah den Rauch zuerst."; Abnahme 5 AB5U-13)
+_ROH_GROSSWORT_RE = re.compile(r"[A-ZÄÖÜ][\wäöüß'’\-]*")
+
+
+def _roh_satz_hinter_etikett(text: str, et_ende: int, s: int, e: int) -> bool:
+    """Ist der Rohwert ab s ein Satz hinter einem Personenwort – zwischen Etikett und Wert nur Leerzeichen (kein
+    Doppelpunkt, Tabulator oder Zeilenwechsel), dann ein bis drei großgeschriebene Wörter und das Verb einer Person?
+    Dann ist er kein Feldwert: sein Satzgegenstand geht wie auf der Textebene über die Personenwort-Regeln
+    (personenkontext; ein Name wird geschwärzt, eine Abteilung oder Lage gemeldet), der Rest des Satzes ist kein
+    Name. Ein Feld ("Mitarbeiter: …", "Nachbar ⇥⇥ …", der Wert darunter oder daneben) bleibt ein Feld."""
+    if s <= et_ende or text[et_ende:s].strip(" "):
+        return False
+    pos = s
+    for _ in range(3):
+        m = _ROH_GROSSWORT_RE.match(text, pos, e)
+        if m is None:
+            return False
+        pos = m.end()
+        if personenkontext.verb_einer_person_dahinter(text, pos, e):
+            return True
+        while pos < e and text[pos] == " ":
+            pos += 1
+    return False
+
+
 def _rohwert_passt(wert: str, kat: str) -> bool:
     """Passt ein OCR-Rohwert zur Kategorie seines Feldnamens? Ohne lesbare Wertform zählt nur die grobe Gestalt:
     Kennungen, Daten und Telefonnummern tragen Ziffern, Namen keine; kein Satzrest, kein weiterer Feldname
@@ -2217,6 +2243,8 @@ def ocr_rohwert(seite, lg: Lage, et: Etikett, alle: list) -> list:
             return None                                 # Firma als Zahlungsempfänger/Versicherer
         if not _rohwert_passt(sauber, kat):
             return None
+        if kat == "namen" and _roh_satz_hinter_etikett(text, et.ende, s, e):
+            return None                                 # ein Satz hinter einem Personenwort, kein Feld (AB5U-13)
         if art is not None and not _muster.eigener_rohwert(art, sauber) and not \
                 allgemeiner_wert_passt(et.eintrag, sauber):
             return None                                 # eVB, Transferticket, CVC: "gültig bis 12/2025" ist keine

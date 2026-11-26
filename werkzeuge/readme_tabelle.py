@@ -97,11 +97,17 @@ ERLAEUTERUNG = {
                     "oder dahinter („Haustür: Code 1357“, „(Haustür) Code 1357“, „Die Garage hat den Code 1199.“, "
                     "„Code 4455 für die Tiefgarage“, „schaltet man mit 6482 aus“, „Das Hoftor geht mit 2601 auf.“) – "
                     "auch hinter Gebäuden und Behältern mit Schloss („Gartenhaus: Code 9090“, „Geräteschuppen – Code "
-                    "3016“, Scheune, Stall, Carport, Wallbox, Spind); ohne sicheres Schloss meldet die Selbstkontrolle "
-                    "die Ziffern („Waschküche: Code 6161“, „Code lautet 5656.“, „Bitte im Keller nachsehen.⏎Code "
-                    "9595“) – nicht „Passwort vergessen?“, "
-                    "„PIN: siehe separates Schreiben“, Fehler- und Anzeigecodes von Geräten („Der Motor meldet den "
-                    "Code P0300“, „Das Garagentor zeigte den Code 3017“) oder Tarif- und Rabattcodes",
+                    "3016“, Scheune, Stall, Carport, Wallbox, Spind, ein Möbel mit Code: „Code Badschrank: 8815“); "
+                    "an einem sicheren Schloss auch Buchstaben und Ziffern („Die Haustür hat den Code KB475.“) und "
+                    "eine Zahl in Jahresform mit einem Verb der Sicherung („Die Tiefgarage ist mit 1984 gesichert.“), "
+                    "„PIN für Wohnungstür 7100“, „Lagerhallecode: 9444“ und der Code eines Alarms mit seiner "
+                    "Bedienung („Zum Abschalten des Feueralarms den Code 6619 eingeben.“); ohne sicheres Schloss "
+                    "meldet die Selbstkontrolle die Ziffern („Waschküche: Code 6161“, „Code lautet 5656.“, „Bitte im "
+                    "Keller nachsehen.⏎Code 9595“, „Feueralarmcode 3401“) – nicht „Passwort vergessen?“, „PIN: siehe "
+                    "separates Schreiben“, Fehler- und Anzeigecodes von Geräten („Der Motor meldet den Code P0300“, "
+                    "„Das Garagentor zeigte den Code 3017“, „Code E-04 blinkt, Elektriker kommt“), Öffnungszeiten "
+                    "(„Zugang Lagerhalle: 7-17 Uhr“, „24/7“), ein Baujahr vor einem gebeugten Partizip („mit 2021 "
+                    "erneuerter Heizung“) oder Tarif- und Rabattcodes",
     "profilname": "@-Namen, Nutzer- und Profilnamen hinter Plattform-Etiketten („eBay-Name:“, „Telegram:“), der "
                   "Pfad eines Profil-Links („facebook.com/vorname.nachname“) und Kunden-, Vertrags- und Namensangaben "
                   "in Links („?kdnr=4711081&name=…“) – nicht die Seite einer Firma",

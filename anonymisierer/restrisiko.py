@@ -467,12 +467,87 @@ _ER_ABLEITUNG_RE = re.compile(r"(.{3,}?)s?(?:mitbe|be|ver|an|mit|unter|ein|auf|a
 
 # Grundwörter von Geräten, Maschinen, Tieren und Rollen auf "-er", die mit beliebigem Bestimmungswort ein Sachwort bleiben
 # ("Hochdruckreiniger", "Kondenstrockner", "Heizlüfter", "Gabelstapler", "Spaziergänger", "Marder"; Abnahme 4 AB4U-04)
-_ER_GERAET_GRUNDWORT = ("reiniger", "trockner", "lüfter", "luefter", "stapler", "gänger", "gaenger", "strahler",
-                        "kocher", "sauger", "spüler", "spueler", "trimmer", "mäher", "maeher", "toaster", "marder",
-                        "enthärter", "enthaerter", "boiler", "kühler", "kuehler", "verteiler", "zünder", "zuender",
-                        "erhitzer", "wärmer", "waermer", "fräser", "fraeser", "bohrer", "rasierer", "föhner",
-                        "foehner", "mixer", "kompressor", "generator", "regler", "melder", "sender", "empfänger",
-                        "lautsprecher", "verstärker", "verstaerker", "akkuschrauber", "hamster")
+_ER_GERAET_GRUNDWORT = personenkontext.ER_GERAET_GRUNDWORT
+_ER_GERAET_ALLEIN = frozenset(_ER_GERAET_GRUNDWORT)
+# Maschinen und Werkzeuge auf "-e" ("Die Fräse beschädigte das Erdkabel."; Abnahme 5 AB5U-09) – geprüft gegen die
+# Nachnamen der Wissensbasis (keiner ist einer); frei nur mit einem Schaden, den ein Gerät selbst anrichtet
+_GERAET_E_ALLEIN = frozenset(("fräse", "fraese", "säge", "saege", "walze", "raupe", "presse", "winde", "egge",
+                              "hebebühne", "hebebuehne", "kettensäge", "kettensaege", "motorsäge", "motorsaege",
+                              "planierraupe", "kreissäge", "kreissaege", "bohrmaschine", "schleifmaschine"))
+# Endungen von Familiennamen, die als Rest hinter einem Allerweltswort stehen können ("Regen|auer", "Wasser|bauer")
+_NAME_GRUNDWORT_RE = re.compile(r"(?:auer|bauer|huber|hofer|mayer|maier|meier|mayr|moser|mann|inger|berger|burger|eder|"
+                                r"bichler|reiter|leitner|lechner|staller|thaler|egger|ecker|perger|pointner|wieser)$")
+# Schaden, den ein Gerät oder Tier selbst anrichtet ("Der Toaster verursachte den Küchenbrand.", "Der Marder beschädigte
+# die Zündkabel."): ein Geräte-Grundwort allein ist dann eine Sache – sonst ("Der Kühler hat den Zaun beschädigt.",
+# "Den Unfall verursachte der Kocher.", "Der Kocher hat angerufen.") auch ein Familienname (Abnahme 5 A5-02, P2)
+_GERAET_SCHADEN_RE = re.compile(r"(?i)(?<![\wäöüß])[\wäöüß]{0,20}(?:brand|brände|braende|feuer|kabel|leitung|"
+                                r"kurzschluss|kurzschlüsse|wasserschaden|wasserschäden|überhitz|ueberhitz|rauch|"
+                                r"explosion|schmor|überspannung|ueberspannung|funken|isolierung|schlauch|schläuche)"
+                                r"[\wäöüß]{0,6}(?![\wäöüß])")
+# Präposition vor dem Artikel ("Beim Aushub für die Bodenplatte beschädigte der Bagger …"): das Wort ist nicht der
+# Satzgegenstand des Verbs dahinter (Abnahme 5 AB5U-09)
+_PRAEP_VOR_ARTIKEL_RE = re.compile(r"(?i)(?<![\wäöüß])(?:für|fuer|mit|bei|an|auf|in|unter|über|ueber|aus|von|zu|nach|"
+                                   r"vor|hinter|neben|gegen|durch|ohne|um|zwischen|wegen|trotz|während|waehrend|seit|"
+                                   r"gemäß|gemaess|laut)[ \t]+$")
+
+# Abnahme 5 A5-13 (zusätzliche Meldung, Grundsatz P2): ein Wort mit Artikel, das zugleich Tier, Marke, Gerät, Rufname
+# oder unbekannt ist, in einem Satz, der eine Person verlangt – gemeldet, nie geschwärzt
+_A13_ARTIKEL_WORT_RE = re.compile(r"(?<![\wäöüß])([Dd]er|[Dd]ie|den|dem)[ \t]+([A-ZÄÖÜ][a-zäöüß]{2,})(?![\wäöüß\-])")
+# Verben, die nur eine Person tut, hinter dem Wort ("Der Fink meldete den Brand.", "Der Melder sagte, …", "Der Melder
+# hat die Schadenanzeige unterschrieben.", "Der Adler hat den Wagen gefahren.")
+_A13_TAT_DAHINTER_RE = re.compile(
+    r"(?i)[ \t]*,?[ \t]+(?:sagt|sagte|meinte|meint|behauptet|behauptete|erzählt|erzählte|erzaehlte|erklärt|erklärte|"
+    r"erklaerte|rief|ruft|telefonierte|meldete|meldet|schrieb|bestätigte|bestaetigte|unterschrieb|unterschreibt|"
+    r"kündigte|kuendigte|beantragte|fragte|antwortete|schilderte)(?![\wäöüß])"
+    r"|(?i:[ \t]+(?:fuhr|lenkte|steuerte)[ \t]+(?:den|einen|seinen|ihren|das|ein|sein|ihr)[ \t]+[A-ZÄÖÜ])"
+    r"|(?i:[ \t]+(?:hat|hatte)(?:[ \t]+[^\s.,;:!?]+){0,4}?[ \t]+(?:gesagt|erzählt|erzaehlt|behauptet|erklärt|erklaert|"
+    r"bestätigt|bestaetigt|telefoniert|angerufen|gerufen|gemeldet|angezeigt|gesehen|geschrieben|unterschrieben|"
+    r"gekündigt|gekuendigt|beantragt|gefragt|geschildert))(?![\wäöüß])"
+    r"|(?i:[ \t]+(?:hat|hatte)[ \t]+(?:den|einen|seinen|ihren|das|ein|sein|ihr)[ \t]+[A-ZÄÖÜ][\wäöüß\-]*[ \t]+"
+    r"(?:gefahren|gelenkt|gesteuert))(?![\wäöüß])")
+# … davor ("Den Schaden meldete der Fink.", "Gesehen hat es der Fink.", "Angerufen hat der Wolf.", "Am Steuer saß der
+# Hase.", "Den Wagen lenkte der Hahn.")
+_A13_TAT_DAVOR_RE = re.compile(
+    r"(?i)(?<![\wäöüß])(?:sagte|meinte|rief|erzählte|erzaehlte|behauptete|erklärte|erklaerte|bestätigte|bestaetigte|"
+    r"schilderte|meldete|unterschrieb|telefonierte|steuer[ \t]+saß|steuer[ \t]+sass|saß[ \t]+am[ \t]+steuer|"
+    r"sass[ \t]+am[ \t]+steuer|(?:wagen|auto|pkw|lkw|fahrzeug|traktor)[ \t]+(?:lenkte|steuerte|fuhr)|"
+    r"(?:gesagt|gemeldet|gesehen|angerufen|angezeigt|erzählt|erzaehlt|bestätigt|bestaetigt|unterschrieben|"
+    r"telefoniert)[ \t]+(?:hat|hatte)(?:[ \t]+(?:es|das|den[ \t]+(?:schaden|unfall|brand)))?)[ \t]+(?:der|die)[ \t]+$")
+# "Laut Polizei hat der Schwarzl den Unfall gemeldet.": Hilfsverb und Artikel davor, ein Partizip einer Person bis zu
+# vier Wörter dahinter (Rest von AB4-12)
+_A13_HAT_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:hat|hatte)[ \t]+(?:es[ \t]+)?(?:der|die)[ \t]+$")
+_A13_PARTIZIP_NAH_RE = re.compile(r"(?i)(?:[ \t]+[^\s.,;:!?]+){0,4}?[ \t]+(?:gesagt|erzählt|erzaehlt|behauptet|erklärt|"
+                                  r"erklaert|bestätigt|bestaetigt|telefoniert|angerufen|gemeldet|angezeigt|gesehen|"
+                                  r"geschrieben|unterschrieben|beantragt|gefahren|gelenkt|gesteuert)(?![\wäöüß])")
+# Objekt eines Verbs, das sich nur an eine Person richtet ("Der Nachbar beschuldigte die Zeitlhofer.", "Die Polizei
+# befragte den Zeitlhofer.", "Wir informierten den Zeitlhofer schriftlich.", "Der Fahrer übersah die Moierl beim
+# Abbiegen.", "Der Hausmeister beobachtete die Tremml beim Einparken.")
+_A13_OBJEKT_DAVOR_RE = re.compile(
+    r"(?i)(?<![\wäöüß])(?:beschuldigte[n]?|beschuldigt|befragte[n]?|befragt|informierte[n]?|benachrichtigte[n]?|"
+    r"verständigte[n]?|verstaendigte[n]?|kontaktierte[n]?|verklagte[n]?|besuchte[n]?|warnte[n]?|mahnte[n]?|"
+    r"beleidigte[n]?|bedrohte[n]?|beschimpfte[n]?|begleitete[n]?|beobachtete[n]?|übersah(?:en)?|uebersah(?:en)?)"
+    r"[ \t]+(?:die|den|dem)[ \t]+$")
+# Verben eines Schadens ("Der Bock hat den Zaun beschädigt.", "Den Unfall verursachte der Vogel.", "Der Fink rammte das
+# Garagentor.") – nur für einen mehrdeutigen Familiennamen, ein Geräte-Grundwort allein ohne Geräteschaden im Satz und
+# eine Marke, die kein Fahrzeug ist, mit "rammen"
+_A13_SCHADEN_DAHINTER_RE = re.compile(
+    r"(?i)[ \t]+(?:verursachte|beschädigte|beschaedigte|rammte)(?![\wäöüß])"
+    r"|(?i:[ \t]+(?:hat|hatte)(?:[ \t]+[^\s.,;:!?]+){0,4}?[ \t]+(?:verursacht|beschädigt|beschaedigt|gerammt))"
+    r"(?![\wäöüß])")
+_A13_SCHADEN_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:verursachte|beschädigte|beschaedigte|rammte|(?:verursacht|"
+                                   r"beschädigt|beschaedigt|gerammt)[ \t]+(?:hat|hatte)(?:[ \t]+(?:es|das))?)"
+                                   r"[ \t]+(?:der|die)[ \t]+$")
+# Jahreszeiten, Monate und Wochentage: mit Artikel eine Zeitangabe ("Am Steuer saß der Winter." bleibt ohne Meldung)
+_JAHRESZEIT_KALENDER = frozenset({"winter", "sommer", "herbst", "frühling", "fruehling", "frühjahr", "fruehjahr",
+                                  "lenz"}) | personenkontext.KALENDERWOERTER
+_A13_RAMMEN_RE = re.compile(r"(?i)(?<![\wäöüß])(?:rammte|gerammt)(?![\wäöüß])")
+# Fahrt eines unbekannten Worts mit Artikel ("Der Tremml fuhr zu schnell.") – nur ein Wort mit der Gestalt eines
+# Familiennamens, kein Fahrzeug ("Der Wagen fuhr zu schnell.")
+# bairische Namensendung: Mitlaut + "l" ("Tremml", "Gsödl", "Pfnürl", "Kreuzl", "Zachl"), nicht "-el", "-hl", "-ll"
+_MUNDART_NAME_RE = re.compile(r"(?:[bcdfgkmnprstwxzß]|ch)l$")
+_A13_FAHRT_DAHINTER_RE = re.compile(r"(?i)[ \t]+(?:fuhr|raste|bremste|überholte|ueberholte|wendete|parkte|bog)(?![\wäöüß])")
+_A13_SCHADEN_PARTIZIP_RE = re.compile(r"(?i)(?:[ \t]+[^\s.,;:!?]+){0,4}?[ \t]+(?:verursacht|beschädigt|beschaedigt|"
+                                      r"gerammt)(?![\wäöüß])")
 
 
 def _sachwort_er(w: str) -> bool:
@@ -488,7 +563,9 @@ def _sachwort_er(w: str) -> bool:
             rest = k[:-len(endung)]
             if not rest or _ER_VORSILBEN_RE.fullmatch(rest) or _ER_ABLEITUNG_RE.fullmatch(rest):
                 return True
-    return k.endswith(_ER_GERAET_GRUNDWORT)
+    # Geräte-, Tier- und Rollen-Grundwörter nur mit Bestimmungswort ("Hochdruckreiniger", "Heizlüfter",
+    # "Spaziergänger"); das Grundwort allein ("Kocher", "Bohrer", "Regler") ist auch ein Familienname (Abnahme 5 A5-02)
+    return any(k.endswith(g) and len(k) > len(g) for g in _ER_GERAET_GRUNDWORT)
 
 
 # Beruf hinter "als" in einem Satz über eine Person ("Sie ist als Hebamme bei der Klinik in Traunstein.", "Er hilft am
@@ -532,6 +609,10 @@ _ROLLE_VORGANG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:unfall\w{0,6}|beteiligt
 # höfliches "Sie" mitten im Satz spricht den Leser an, keine Person, von der der Satz handelt ("Als Handwerker
 # benötigen Sie …"; Abnahme 2 A2-03)
 _SIE_IM_SATZ_RE = re.compile(r"(?<=[^\s.!?;:\n])[ \t]+Sie(?![\wäöüß])")
+# Rolle hinter "ist"/"war" und "den Beruf des X" (Selbstkontrolle der Ausnahmen in wissen_kontext; Abnahme 5 AB5U-07)
+_IST_ROLLE_RE = re.compile(r"(?<![\wäöüß])(?:ist|war|wird|wurde)[ \t]+([A-ZÄÖÜ][a-zäöüß]{3,30})(?![\wäöüß\-])")
+_BERUF_DES_TREFFER_RE = re.compile(r"(?i)(?<![\wäöüß])(?:den|einen|seinen|ihren)[ \t]+Beruf[ \t]+(?:des|der|eines|einer)"
+                                   r"[ \t]+((?-i:[A-ZÄÖÜ])[a-zäöüß]{3,30})(?![\wäöüß\-])")
 # Einstufung der angeschriebenen Person nach ihrem Beruf ("Berufsgruppenrabatt", "Rabatt", "Nachlass", "eingestuft")
 _EINSTUFUNG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:[\wäöüß]*rabatt\w{0,2}|[\wäöüß]*nachlass\w{0,2}|"
                             r"berufsgruppe\w{0,8}|eingestuft|einstufung\w{0,2}|sondertarif\w{0,2})(?![\wäöüß])")
@@ -692,6 +773,9 @@ _NEUE_FORMEN = ((kennungsformen.ip_adressen, "IP-Adresse", "form"),
                 (kennungsformen.zugangsdaten, "Zugangsdaten (Benutzer, Kennwort, PIN, Code)", "kennung"),
                 (kennungsformen.zugangscode_verdacht, "Zugangscode (Ziffern hinter „Code“ oder einem Schloss)",
                  "kennung"),
+                # Code eines Alarms als Ereignis ohne Bedienung ("Feueralarmcode 3401"): Ereignis- oder Bediencode
+                # (Abnahme 5 A5-10, Grundsatz P2)
+                (kennungsformen.alarm_code_mehrdeutig, "Code eines Alarms (Ereignis- oder Bediencode?)", "kennung"),
                 (kennungsformen.profilnamen, "Profil- bzw. Kontoname", "kontakt"))
 _KREDITKARTE_PLATZHALTER_RE = re.compile(r"\[KREDITKARTE\]")
 # Geburtsname direkt hinter "geb." / "geb:" / "geborene" ("[PERSON A] geb. Quarnstedt", "GEB. QUARNSTEDT") – nicht
@@ -2260,9 +2344,87 @@ class _Seitenpruefung:
         self._ort_datum()
         self._seitenformen()
         self._beruf_hinter_als()
+        self._beruf_ohne_schwaerzung()
         self._personenwort_namen()
+        self._artikel_person()
         self._teil_datum()
         return self.kandidaten
+
+    def _artikel_person(self):
+        """Wort mit Artikel als Person eines Satzes, das die übrigen Regeln als Tier, Marke, Gerät, Rufname oder
+        unbekanntes Wort stehen lassen (Abnahme 5 A5-13; zusätzliche Meldung nach P2, nie Schwärzung):
+        - ein Verb, das nur eine Person tut, dahinter oder davor ("Der Fink meldete den Brand.", "Am Steuer saß der
+          Hase.", "Der Wastl hat angerufen.", "Der Melder hat die Schadenanzeige unterschrieben.");
+        - "hat der X … <Partizip einer Person>" ("Laut Polizei hat der Schwarzl den Unfall gemeldet.");
+        - Objekt eines Verbs, das sich an eine Person richtet ("Der Nachbar beschuldigte die Zeitlhofer.");
+        - ein Schadenverb nur bei einem mehrdeutigen Familiennamen, der kein Wetter- oder Ereigniswort ist ("Der Bock
+          hat den Zaun beschädigt."), bei einem Geräte-Grundwort allein ohne Geräteschaden im Satz ("Der Melder rammte
+          das Garagentor."; Abnahme 5 A5-02) und bei einer Marke, die kein Fahrzeug ist, mit "rammen".
+        Nicht: Allerwelts-, Berufs-, Orts-, Titel-, Etikett- und Personenwörter ("Der Mieter hat den Schaden gemeldet.",
+        "Den Unfall verursachte der Fahrer."), Tiere und Marken ohne Familiennamen mit einem Schadenverb ("Der Hund
+        beschädigte die Couch.", "Den Zaun rammte der Wagen."), Wetterwörter ("Der Hagel hat den Schaden verursacht.")."""
+        text = self.text
+        if "der " not in text and "die " not in text and "den " not in text and "dem " not in text \
+                and "Der " not in text and "Die " not in text:
+            return
+        try:
+            fahrzeugmarken = self.w.modul.index("fahrzeugmarken") if self.w.modul is not None else None
+        except Exception:
+            fahrzeugmarken = None
+        sachnamen = self.w.index("sachnamen")
+        for m in _A13_ARTIKEL_WORT_RE.finditer(text):
+            s, e = m.span(2)
+            w = m.group(2)
+            if self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e):
+                continue
+            vn, nn, vnm, nnm, aw, tit, allow, part = self.w.art(w)
+            geraet = w.lower() in _ER_GERAET_ALLEIN
+            if w.casefold() in _JAHRESZEIT_KALENDER:
+                continue                                 # "Am Steuer saß der Winter." (Abnahme N5, Gegenprobe)
+            if aw or tit or allow or part or _NOMEN_ENDUNG.search(w) or (self.w.ist_etikett(w) and not geraet) \
+                    or any(self.w.frage(f, w) for f in ("ist_beruf", "ist_ort")) \
+                    or personenkontext.ist_personenwort(w) or personenkontext.PERSONENWORT_DAVOR_RE.search(w + " "):
+                continue
+            try:
+                marke = sachnamen is not None and bool(sachnamen.finde(w)) and not (nn or vn)
+                fahrzeug = fahrzeugmarken is not None and bool(fahrzeugmarken.finde(w))
+            except Exception:
+                marke, fahrzeug = False, False
+            mehrdeutig = nn and nnm
+            rufname = vn and not vnm and not nn
+            unbekannt = not (vn or nn or marke or fahrzeug or geraet) and len(w) >= 4 and w.isalpha() \
+                and not _sachwort_er(w) and not self._kompositum(w) and not self._rollen_kompositum(w) \
+                and (personenkontext.namensgestalt(w, self.w.modul) or _MUNDART_NAME_RE.search(w) is not None)
+            sicherer_name = nn and not nnm
+            if not (mehrdeutig or rufname or unbekannt or sicherer_name or marke or geraet or fahrzeug):
+                continue
+            a = max(0, m.start() - 70)
+            tat = _A13_TAT_DAHINTER_RE.match(text, e) is not None \
+                or _A13_TAT_DAVOR_RE.search(text, a, m.start(2)) is not None \
+                or (_A13_HAT_DAVOR_RE.search(text, a, m.start(2)) is not None
+                    and _A13_PARTIZIP_NAH_RE.match(text, e) is not None) \
+                or (not (marke or fahrzeug) and _A13_OBJEKT_DAVOR_RE.search(text, a, m.start(2)) is not None)
+            if not tat and unbekannt and _A13_FAHRT_DAHINTER_RE.match(text, e) is not None:
+                tat = True                               # "Der Tremml fuhr zu schnell."
+            if not tat:
+                schaden = _A13_SCHADEN_DAHINTER_RE.match(text, e) is not None \
+                    or _A13_SCHADEN_DAVOR_RE.search(text, a, m.start(2)) is not None \
+                    or (_A13_HAT_DAVOR_RE.search(text, a, m.start(2)) is not None
+                        and _A13_SCHADEN_PARTIZIP_RE.match(text, e) is not None)
+                if not schaden:
+                    continue
+                if mehrdeutig and not marke:
+                    if w.casefold() in personenkontext.HOF_EREIGNIS_WETTER:
+                        continue                         # "Den Zaun hat der Sturm beschädigt."
+                elif geraet:
+                    if self._satz_hat(s, e, _GERAET_SCHADEN_RE):
+                        continue                         # "Der Toaster verursachte den Küchenbrand."
+                elif marke and not fahrzeug:
+                    if not self._satz_hat(s, e, _A13_RAMMEN_RE):
+                        continue                         # "Der Hund beschädigte die Couch."
+                else:
+                    continue                             # unbekannte Wörter: die Regeln in _namen
+            self.neu(s, e, "Familienname mit Artikel (Person im Satz, zugleich Tier, Marke oder Gerät?)", "name")
 
     def _teil_datum(self):
         """Teile eines Geburtsdatums in Feldern für Tag, Monat und Jahr hinter ihrem Teil-Feldnamen ("Geburtsdatum ⇥⇥
@@ -2299,6 +2461,16 @@ class _Seitenpruefung:
             if personenkontext.medizinisch(self.text[s:e], self.text, s, self.w.modul):
                 continue                                # "Familienanamnese: Vater Alzheimer" (eigene Kategorie)
             self.neu(s, e, "möglicher Name hinter einem Personenwort (Nachbar, Monteur, Zeuge …)", "name")
+        # ein Allerweltswort hinter einem Personenwort ohne Begleiter, das dort ein Familienname sein kann ("Nachbar
+        # Wasser hat angerufen.", "Laut Nachbarin Regen war die Tür offen."; Abnahme 5 A5-05)
+        for s, e in personenkontext.personenwort_allerwelt(self.text, self.w.modul):
+            if not (self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e)):
+                self.neu(s, e, "möglicher Name hinter einem Personenwort (zugleich gewöhnliches Wort)", "name")
+        # ein Berufs-, Titel- oder Rollenwort hinter einem Personenwort ("Nachbarin Pfarrer hat angerufen.", "Rücksprache
+        # mit Mieter Käufer"; Abnahme 5 A5-13)
+        for s, e in personenkontext.personenwort_rollenwort(self.text, self.w.modul):
+            if not (self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e)):
+                self.neu(s, e, "möglicher Name hinter einem Personenwort (zugleich Beruf, Titel oder Rolle)", "name")
         # Berufswort am Satzanfang mit Verb einer Person dahinter: "Handwerker Grohe kam am Montag." (die Erkennung
         # schwärzt dort nur Wörter mit Namensbeleg)
         for s, e in personenkontext.berufswort_namen(self.text, self.w.modul, alle=True, beruf_nachname=True,
@@ -2348,6 +2520,12 @@ class _Seitenpruefung:
                     (wissen_kontext.org_satz(text, satz_anfang, m.start())
                      and not wissen_kontext._PERSON_OBJEKT_RE.search(text, satz_anfang + 1, m.start())):
                 continue                                # Ehrenamt einer Rolle, Satz einer Organisation oder "wir"
+            if not rolle and wissen_kontext._EHRENAMT_RE.search(text, satz_anfang, satz_ende) \
+                    and not wissen_kontext.org_satz(text, satz_anfang, m.start()):
+                # ein Beruf im Ehrenamt ohne Organisation als Satzgegenstand, auch ohne Person im Satz ("Seit 2018
+                # ehrenamtlich als Erzieherin in der Kita tätig."; Abnahme 5 A5-12): gemeldet
+                self.neu(s, e, "Beruf hinter „als“ im Ehrenamt (Satz über eine Person)", "form")
+                continue
             # das höfliche "Sie" ist die angeschriebene Person, wenn der Satz von ihrer Arbeit oder einer Einstufung
             # nach dem Beruf spricht ("da Sie als Krankenschwester im Schichtdienst arbeiten", "Als Bäcker haben Sie
             # Anspruch auf den Berufsgruppenrabatt") oder die weibliche Form nennt ("Als Lehrerin haben Sie …";
@@ -2360,6 +2538,25 @@ class _Seitenpruefung:
                    for p in list(_PERSON_IM_SATZ_RE.finditer(text, satz_anfang, m.start()))
                    + list(_PERSON_IM_SATZ_RE.finditer(text, e, satz_ende))):
                 self.neu(s, e, "Beruf hinter „als“ im Satz über eine Person", "form")
+
+    def _beruf_ohne_schwaerzung(self):
+        """Berufe, die die Erkennung nur ausnimmt, weil der Satz sie als Rolle oder Einstufung zeigt (Abnahme 5
+        AB5U-07): eine Rolle mit Ergänzung hinter "ist"/"war" ("Er ist Trainer der F-Jugend.") und "den Beruf des X"
+        ohne Verb des Erlernens oder Ausübens ("Für den Beruf des Dachdeckers gilt …") – verortet gemeldet (P1)."""
+        text = self.text
+        if "ist " not in text and "war " not in text and "Beruf" not in text:
+            return
+        from .detektoren import wissen_kontext
+        for m in _IST_ROLLE_RE.finditer(text):
+            s, e = m.span(1)
+            if wissen_kontext.rolle_mit_ergaenzung(text, s, e) and not (self.ist_gesperrt(s, e)
+                                                                       or self.ist_platzhalter_bei(s, e)):
+                self.neu(s, e, "Rolle oder Beruf hinter „ist“ (Ehrenamt, Familie?)", "form")
+        for m in _BERUF_DES_TREFFER_RE.finditer(text):
+            s, e = m.span(1)
+            if self.w.frage("ist_beruf", m.group(1)) or self.w.frage("ist_beruf", m.group(1).rstrip("s")):
+                if not (self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e)):
+                    self.neu(s, e, "Beruf hinter „Beruf des“", "form")
 
     def _seitenformen(self):
         """Formen über Zeilen- und Zellgrenzen der Seite: Religion/Konfession hinter ihrem Etikett oder unter ihrem
@@ -3881,8 +4078,6 @@ class _Seitenpruefung:
                 verb_dahinter = None
             if artikel_davor(i) and not verb_dahinter and _HAT_ARTIKEL_DAVOR_RE.search(text, max(0, s - 20), s):
                 verb_dahinter = _PARTIZIP_DIREKT_RE.match(text, e)     # "hat der Wimmer beschädigt"
-            familienname = artikel_davor(i) and not (vn or aw or allow) and (
-                nn and not nnm or personenkontext.namensgestalt(w, self.w.modul) and not _sachwort_er(w))
             # "Der Lackner hat den Wagen gefahren.": am Satzanfang nur ein Familienname der Wissensbasis bzw. mit
             # Namensgestalt und ein Personen-Verb dahinter (Abnahme 2 V5)
             # auch die weibliche Form auf "-erin" eines Familiennamens ("Die Wimmerin hat angerufen.", "Die Moserin hat den
@@ -3918,20 +4113,47 @@ class _Seitenpruefung:
             # die weibliche Form eines solchen Grundworts ("die Becherin") ist keine Sache: ein Familienname
             sache_in = w.lower().endswith("in") and w.lower()[:-2] in _ER_SACHE_ALLEIN \
                 and (person_tat or schadentat or verb_davor or verb_dahinter)
-            unbekannt = not (vn or aw or allow) and len(w) >= 4 and w.isalpha() and not w.isupper() \
-                and (sache_er or (not _sachwort_er(w) and not self._rollen_kompositum(w))) \
+            # ein Geräte- oder Tier-Grundwort allein ("Der Toaster verursachte den Küchenbrand.") ist nur mit einem
+            # Schaden, den ein Gerät oder Tier selbst anrichtet, eine Sache – sonst ein möglicher Familienname
+            # (gemeldet; Abnahme 5 A5-02)
+            geraet_frei = (w.lower() in _ER_GERAET_ALLEIN or w.lower() in _GERAET_E_ALLEIN) and not person_tat \
+                and bool(schadentat) \
+                and self._satz_hat(s, e, _GERAET_SCHADEN_RE)
+            sachwort = _sachwort_er(w) or geraet_frei
+            familienname = artikel_davor(i) and not (vn or aw or allow) and (
+                nn and not nnm or personenkontext.namensgestalt(w, self.w.modul) and not sachwort)
+            # Präposition vor dem Artikel ("für die Bodenplatte beschädigte der Bagger"): das Wort ist nicht der
+            # Satzgegenstand des Verbs dahinter – die Regeln mit Artikel und Verb gelten nicht (AB5U-09)
+            praep = artikel_davor(i) and _PRAEP_VOR_ARTIKEL_RE.search(text, max(0, woerter[i - 1][0] - 12),
+                                                                        woerter[i - 1][0]) is not None \
+                and not verb_davor
+            unbekannt = not (vn or aw or allow) and len(w) >= 4 and w.isalpha() and not w.isupper() and not praep \
+                and (sache_er or (not sachwort and not self._rollen_kompositum(w))) \
                 and not _NOMEN_ENDUNG.search(w) \
                 and not any(self.w.frage(f, w) for f in ("ist_beruf", "ist_ort", "ist_anrede_titel")) \
                 and not self.w.ist_etikett(w) and not personenkontext.PERSONENWORT_DAVOR_RE.search(w + " ") \
                 and not self._kompositum(w)
-            if sache_in or (unbekannt and not nn and (person_tat or (schadentat_wort and not self._wort_harmlos(w)))) \
-                    or (nnm and not aw and (person_tat or (schadentat and self.w.frage("ist_beruf", w)))):
+            # ein Allerweltswort mit Artikel und einem Verb, das nur eine Person tut ("Der Wasser hat den Schaden
+            # gemeldet."; Abnahme 5 A5-05): Alltagswort oder Familienname – gemeldet (P2); nicht ein Wort mit
+            # Substantiv-Endung, eine Organisation oder Rolle
+            # nur mit einem Artikel im Nominativ ("Den Schaden meldete der …": "den" ist das Objekt) und kein Rollen- oder
+            # Etikettwort ("Der Teilnehmer hat angerufen.", "der Versicherungsnehmer"; Abnahme 3 AB3-05, N4)
+            aw_person = aw and not allow and person_tat and w.isalpha() and not _NOMEN_ENDUNG.search(w) \
+                and woerter[i - 1][2] in ("der", "die", "Der", "Die") \
+                and not personenkontext.org_gestalt(w) and not personenkontext.PERSONENWORT_DAVOR_RE.search(w + " ") \
+                and not _sachwort_er(w) and not self._rollen_kompositum(w) and not self.w.ist_etikett(w) \
+                and not any(self.w.frage(f, w) for f in ("ist_beruf", "ist_ort", "ist_anrede_titel"))
+            if not praep and (sache_in or aw_person
+                              or (unbekannt and not nn and (person_tat or (schadentat_wort
+                                                                           and not self._wort_harmlos(w))))
+                              or (nnm and not aw and (person_tat or (schadentat and self.w.frage("ist_beruf", w))))):
                 self.neu(s, e, "Familienname mit Artikel (mundartlich)", "name")
                 continue
             satzanfang = artikel_davor(i) and woerter[i - 1][2] in ("Der", "Die") and verb_dahinter \
-                and (familienname or (not (vn or aw or allow) and self._name_auf_er(w)))
-            if artikel_davor(i) and (woerter[i - 1][2] in ("der", "die") or satzanfang) and not (vn or aw or allow) \
-                    and (familienname or ((verb_davor or verb_dahinter) and self._name_auf_er(w))) \
+                and (familienname or (not (vn or aw or allow) and not geraet_frei and self._name_auf_er(w)))
+            if artikel_davor(i) and not praep and (woerter[i - 1][2] in ("der", "die") or satzanfang) \
+                    and not (vn or aw or allow) \
+                    and (familienname or ((verb_davor or verb_dahinter) and not geraet_frei and self._name_auf_er(w))) \
                     and (verb_dahinter or verb_davor):
                 # "war der Brandstetter am Steuer", "wie die Wimmer sagte": ein Familienname mit Artikel (mundartlich;
                 # Nachprüfung LK-14) – nicht "die Scheibe ist gesprungen" (kein Satzteil einer Person dahinter)
@@ -3949,8 +4171,10 @@ class _Seitenpruefung:
                           or (direkt(i, i - 1, komma=True) and "," in luecke(i, i - 1)
                               and nachname_stark(i - 1) and vn))
             z_wort = self.zeile(s)
+            # im Unterschriftsblock gilt ein Wort nur als Kompositum, wenn sein Grundwort bekannt ist – nicht ein
+            # Allerweltswort vor einem unbekannten Rest ("Regenhardt", "Wasserthal": Familiennamen; Abnahme 5 AB5U-04)
             gruss = (z_wort is not None and z_wort.id in gruss_zeilen and not w.isupper()
-                     and not self._org_zeile(z_wort) and not self._wort_harmlos(w)
+                     and not self._org_zeile(z_wort) and not self._wort_harmlos(w, nur_grundwort=True)
                      # Organisationseinheit unter dem Gruß ("Kundenservice Traunstein"; Abnahme 2 A2-06) – ein
                      # bekannter Name daneben bleibt ein Unterzeichner; ein unbekanntes Wort neben dem
                      # Organisationswort ("Agentur Moik", "Team Holzwohner") ist Firma oder Familienname und wird
@@ -4049,7 +4273,7 @@ class _Seitenpruefung:
                     or w.casefold() in kennungsformen.KEIN_NAMENSWERT:
                 continue                                # "Geburtsname: Entfällt": ein leeres Feld
             if (w.isupper() and len(w) < 5) or text[e:e + 2].lstrip(")").startswith(":") \
-                    or self._kompositum(w):
+                    or self._kompositum(w, nur_grundwort=bool(titel or platzhalter or etikett or rolle or gruss)):
                 continue                                # OCR-Bruchstück, Etikett ("(Selbstständige):"), Kompositum
             if re.search(r"(?i)" + _STRASSEN_ENDUNG + r"$", w):
                 continue                                # "Hauptstr" – Anschrift, nicht Name
@@ -4190,6 +4414,10 @@ class _Seitenpruefung:
             if kern.isdigit():
                 if len(kern) <= 4 and rechts and not ocr_wort:
                     self.neu(s, e, "Rest neben Platzhalter", "rest")   # Hausnummer
+                elif 4 <= len(kern) <= 5 and not rechts:
+                    # Postleitzahl links neben dem geschwärzten Ort, auch auf einem Scan ("72070 [PLZ ORT]" auf einem
+                    # Fax, die Handschrift der Postleitzahl las die Erkennung nicht; Abnahme 5 A5-15)
+                    self.neu(s, e, "Postleitzahl neben einem geschwärzten Ort", "rest")
                 continue
             wort = kern.rstrip(".")
             if len(wort) < 2 or _ocr_unsinn(wort) or wort.lower() in _STOPPWOERTER:
@@ -4322,6 +4550,13 @@ class _Seitenpruefung:
             return False                                # Name der Wissensbasis – hier steht eine Person
         return bool(tit or part or aw or allow or self.w.ist_etikett(wort))
 
+    def _satz_hat(self, s: int, e: int, muster) -> bool:
+        """Steht muster im Satz um text[s:e] (bis zum Satzende bzw. Zeilenumbruch, höchstens 160 Zeichen weit)?"""
+        text = self.text
+        a = max(text.rfind(c, max(0, s - 160), s) for c in ".!?;\n") + 1
+        hinten = re.search(r"[.!?;\n]", text[e:e + 160])
+        return muster.search(text, a, e + (hinten.start() if hinten else min(160, len(text) - e))) is not None
+
     def _objekt_hinter_verb(self, verb_start: int) -> bool:
         """Steht vor dem Verb bei verb_start am Satz- bzw. Zeilenanfang ein Subjekt im Nominativ (_SUBJEKT_VORFELD_RE:
         "Der Saugroboter", "Der neue Hund des Nachbarn", "Er")? Dann ist "die X" hinter dem Verb sein Objekt."""
@@ -4329,7 +4564,7 @@ class _Seitenpruefung:
         vorfeld = self.text[anfang:verb_start].lstrip(" \t\"„“»«")
         return bool(vorfeld) and _SUBJEKT_VORFELD_RE.fullmatch(vorfeld) is not None
 
-    def _wort_harmlos(self, wort: str) -> bool:
+    def _wort_harmlos(self, wort: str, nur_grundwort: bool = False) -> bool:
         """Einzelwort ohne Ziffern: kein möglicher Name (siehe lesung_harmlos)? Bekanntes Wort, sonst – wenn es kein
         Name der Wissensbasis ist – kleingeschrieben, Hauptwort-Endung, Beruf oder Wort einer Berufsangabe ("Leiter",
         "Medizin"), Organisationseinheit ("Hauptagentur", "Süd"), gebeugte Form eines solchen Worts
@@ -4338,7 +4573,7 @@ class _Seitenpruefung:
             return True
         if any(self.w.art(wort)[:2]):
             return False
-        if wort[:1].islower() or _NOMEN_ENDUNG.search(wort) or self._kompositum(wort):
+        if wort[:1].islower() or _NOMEN_ENDUNG.search(wort) or self._kompositum(wort, nur_grundwort):
             return True
         klein = wort.lower()
         berufe = self.w.berufswoerter()
@@ -4354,10 +4589,12 @@ class _Seitenpruefung:
                 return True
         return False
 
-    def _kompositum(self, w: str) -> bool:
+    def _kompositum(self, w: str, nur_grundwort: bool = False) -> bool:
         """Zusammengesetztes Hauptwort ("Bestandsliste", "Maklerbüro", "Unfallhergang")? Geprüft werden Grund- und
         Bestimmungswörter bis 30 Zeichen – auf einem sehr langen Wort ("Ab-Ab-…", 2 000 Zeichen) sonst je Trennstelle
-        ein Nachschlagen über das ganze Wort (quadratisch, Laufzeit L3)."""
+        ein Nachschlagen über das ganze Wort (quadratisch, Laufzeit L3). nur_grundwort (Personenrahmen: Gruß, Titel,
+        Etikett, Rolle): nur ein bekanntes Grundwort zählt, nicht ein bekanntes Bestimmungswort vor einem unbekannten
+        Rest (Abnahme 5 AB5U-04)."""
         teil = 30
         for i in range(max(3, len(w) - teil), len(w) - 3):
             rest = w[i:]
@@ -4366,6 +4603,10 @@ class _Seitenpruefung:
             kandidat = rest[0].upper() + rest[1:]
             if self.w.art(kandidat)[4] or self.w.ist_etikett(kandidat):
                 return True
+        # ein Allerweltswort als Bestimmungswort vor einem unbekannten Rest: nicht bei der Gestalt eines Familiennamens
+        # ("Regensburger", "Wasserbauer", "Regenauer": keine Komposita gewöhnlicher Wörter; Abnahme 5 AB5U-04)
+        if nur_grundwort or personenkontext.namensgestalt(w, self.w.modul) or _NAME_GRUNDWORT_RE.search(w):
+            return False
         for i in range(4, min(len(w) - 2, teil + 1)):
             if (self.w.art(w[:i])[4] and i >= 5) or self.w.ist_etikett(w[:i]):
                 return True
@@ -5409,6 +5650,16 @@ def _kamm_etikett(woerter: list, feld: dict, felder: list) -> str:
         return " ".join(w[4] for w in gruppe)
     oben = [w for w in frei if w[3] <= y0 + 1.5 and y0 - w[3] <= KAMM_ETIKETT_OBEN * hoehe
             and x0 - 10.0 <= w[0] <= x0 + 0.5 * (x1 - x0)]
+    # Feldname unter dem Feld, näher als der Text darüber (Feldname des Felds davor; Abnahme 5 A5-07)
+    unten = [w for w in frei if w[1] >= y1 - 1.5 and w[1] - y1 <= KAMM_ETIKETT_OBEN * hoehe
+             and x0 - 10.0 <= w[0] <= x0 + 0.5 * (x1 - x0)]
+    if unten and (not oben or min(w[1] for w in unten) - y1 < y0 - max(w[3] for w in oben)) \
+            and not kammraster.gehoert_zum_feld_darunter(feld, felder, min(w[1] for w in unten),
+                                                         max(w[3] for w in unten)):
+        oberkante = min(w[1] for w in unten)
+        zeile = sorted((w for w in frei if abs(w[1] - oberkante) <= 0.5 * max(w[3] - w[1], 4.0)
+                        and x0 - 10.0 <= w[0] <= x1), key=lambda w: w[0])
+        return " ".join(w[4] for w in zeile)
     if not oben:
         return ""
     unterkante = max(w[3] for w in oben)
@@ -5426,6 +5677,10 @@ def _kamm_uebergeordnet(woerter: list, feld: dict, felder: list) -> str:
     frei = [w for w in woerter if not any(kammraster.im_feld(f, (w[0] + w[2]) / 2, (w[1] + w[3]) / 2) for f in felder)]
     links = sorted((w for w in frei if y0 - 0.3 * hoehe <= (w[1] + w[3]) / 2 <= y1 + 0.3 * hoehe
                     and w[2] <= x0 + 1.5), key=lambda w: w[0])
+    # erst die Zeile selbst: hat sie einen eigenen Feldnamen außer Teil-Feldnamen ("Letzte Hauptuntersuchung ⇥ Jahr"),
+    # zählt nur er – die Zeile darüber nur ohne ihn (Abnahme 5 AB5U-03)
+    if any(any(c.isalpha() for c in w[4]) and not kammraster.teil_etikett(w[4].strip(".:;,()")) for w in links):
+        return " ".join(w[4] for w in links)
     oben = sorted((w for w in frei if w[3] <= y0 + 1.5 and y0 - w[3] <= 3.0 * hoehe and w[0] <= x0 + hoehe),
                   key=lambda w: (w[1], w[0]))
     return " ".join(w[4] for w in links + oben)

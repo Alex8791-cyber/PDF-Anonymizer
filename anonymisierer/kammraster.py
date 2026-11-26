@@ -42,6 +42,7 @@ deshalb die Kästchen, nicht den Rahmen.
 """
 from __future__ import annotations
 
+import bisect
 import datetime
 import math
 import re
@@ -856,10 +857,10 @@ _PERSONEN_WORT = re.compile(r"(?i)geburt|geb\.|name|anschrift|straße|strasse|te
                             r"versicherungsn|vertragsn|steuer|ausweis|führerschein|fuhrerschein|ort\b|plz")
 # Feldname eines Teils einer Angabe, die erst der übergeordnete Feldname bestimmt: ein Datum in Feldern für Tag, Monat
 # und Jahr ("Geburtsdatum ⇥ Tag [2|5] Monat [0|4] Jahr [2|0|1|6]"; Abnahme 4 AB4-01) – "Jahr" allein ist kein Baujahr
-_TEIL_ETIKETT_RE = re.compile(r"(?i)^(?:tag|monat|jahr|tt|mm|jj|jjjj|datum)\.?$")
+_TEIL_ETIKETT_RE = re.compile(r"(?i)^(?:tag|monat|mon|jahr|tt|mm|jj|jjjj|datum)\.?$")
 # ein Teil ohne eigenes Datum ("Jahr" mit "2016"): ohne übergeordneten Feldnamen nie frei; "Datum" allein ("Ort ⇥ Datum")
 # ist ein Datum wie "Antragsdatum" – nur unter einem Geburts-Feldnamen eine Personenangabe (AB4-01)
-_TEIL_OHNE_DATUM_RE = re.compile(r"(?i)^(?:tag|monat|jahr|tt|mm|jj|jjjj)\.?$")
+_TEIL_OHNE_DATUM_RE = re.compile(r"(?i)^(?:tag|monat|mon|jahr|tt|mm|jj|jjjj)\.?$")
 # vorgedruckter Ausfüllhinweis in einem leeren Feld ("TTMMJJJJ", "TT.MM.JJJJ", "MM/JJ"): kein Wert (AB4U-03)
 _AUSFUELLHINWEIS_RE = re.compile(r"(?i)^(?:t{1,2}[.\-/]?m{1,2}[.\-/]?(?:j{2}|j{4}|y{2}|y{4})|m{1,2}[.\-/]?(?:j{2}|j{4})|"
                                  r"(?:j{2}|j{4}|y{2}|y{4})|t{1,2}[.\-/]?m{1,2}|d{1,2}[.\-/]?m{1,2}[.\-/]?(?:y{2}|y{4}))$")
@@ -923,3 +924,34 @@ def wert_ohne_personenbezug(feldname: str, wert: str) -> bool:
             return True
     return False
 
+
+# die zuletzt gefragte Feldliste mit ihren Feldern nach der Oberkante des ersten Kästchens (gehoert_zum_feld_darunter
+# fragt je Feld einer Seite mit derselben Liste)
+_FELDER_OBERKANTE = None
+
+
+def _felder_nach_oberkante(felder) -> tuple:
+    """(Oberkanten, Felder) nach der Oberkante des ersten Kästchens (kopfkasten) sortiert – einmal je Feldliste."""
+    global _FELDER_OBERKANTE
+    zw = _FELDER_OBERKANTE
+    if zw is not None and zw[0] is felder and zw[1] == len(felder):
+        return zw[2]
+    paare = sorted(((kopfkasten(f)[1], i) for i, f in enumerate(felder)), key=lambda p: p[0])
+    idx = ([p[0] for p in paare], [felder[p[1]] for p in paare])
+    _FELDER_OBERKANTE = (felder, len(felder), idx)
+    return idx
+
+
+def gehoert_zum_feld_darunter(feld, felder: list, oberkante: float, unterkante: float) -> bool:
+    """Steht der Text unter einem Feld (oberkante/unterkante) näher am nächsten Feld darunter als am Feld selbst – dann
+    ist er dessen Feldname ("Antragsdatum" über dem nächsten Feld), nicht der Feldname unter diesem (Abnahme 5 A5-07).
+    Gesucht wird nur unter den Feldern, deren Oberkante zwischen dem Text und dem Abstand zum eigenen Feld liegt
+    (bisect über die sortierten Oberkanten; je Feld alle Felder der Seite wüchse quadratisch)."""
+    x0, _, _, y1 = kopfkasten(feld)
+    x1 = feld["rahmen"][2]
+    abstand_eigen = oberkante - y1
+    oben, sortiert = _felder_nach_oberkante(felder)
+    for f in sortiert[bisect.bisect_left(oben, unterkante - 1.0):bisect.bisect_right(oben, unterkante + abstand_eigen)]:
+        if f is not feld and min(x1, f["rahmen"][2]) - max(x0, kopfkasten(f)[0]) > -10.0:
+            return True
+    return False
