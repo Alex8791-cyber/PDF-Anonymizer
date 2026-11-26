@@ -606,7 +606,7 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Gruß („Agentur Moik“) werden gemeldet. Die Kehrseite nach P2: Gemeldet werden dort auch unbekannte und bekannte
     Wörter, die kein Name sind („brannte es beim Holzhändler in Waging“, „Vom Sturm …“, „Den Traktor lenkte der …“,
     „dem Nachbarn Brot gebracht“; auf 5efcc0c 131 bis 140 von 333 Nomen der Hof-Probe der fünften Abnahme, nach der
-    siebten Nachbesserung 97 bis 99); im Differenztest sind es gegenüber 0230782 159 neue und 65 weggefallene
+    siebten Nachbesserung 96 bis 98); im Differenztest sind es gegenüber 0230782 159 neue und 65 weggefallene
     Meldungen nicht geheimer Wörter, 82 der neuen hinter beim/vom/zum. Ein bekannter Familienname hinter beim/vom/zum
     wird wieder geschwärzt
     („Wir waren beim Brandl zum Essen.“). Abteilungs-, Orts- und Firmenwörter hinter einem Personenwort („Kollege
@@ -787,7 +787,7 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Alarmcodes ohne Bedienung). Kein geheimer Wert ist mehr lesbar, der auf einem der vier Stände geschwärzt oder
     gemeldet war, und geschwärzt werden 229 statt 245 nicht geheime Prüfwörter. Die Selbstkontrolle meldet dafür mehr
     nicht geheime Wörter; unter den Hof-Kandidaten der Abnahme (333 Nomen hinter beim/vom/zum in drei Satzrahmen) sind
-    es 97 bis 99 statt 131 bis 140.
+    es 96 bis 98 statt 131 bis 140.
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene
