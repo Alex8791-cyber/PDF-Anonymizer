@@ -855,7 +855,7 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - Domänen-Probe als Werkzeug im Repository (`werkzeuge/domaenenprobe/`): die 41 Falldateien der
   Domänen-Durchsicht (691 Fälle mit 2261 frei erfundenen geheimen Werten aus Kfz, Personenversicherungen, Sach,
   Finanzen/Digitales und Briefverkehr/Listen/Scans), der Harness `e2e.py` und die Messung `messen.py` (je Wert weg,
-  sichtbar mit `_PRUEFEN` oder STILL; Vergleich mit `referenz.json`, gemessen auf c4a807b). Die Messlogik ist
+  sichtbar mit `_PRUEFEN` oder STILL; Vergleich mit `referenz.json`, gemessen auf fd73eac). Die Messlogik ist
   unverändert übernommen, nur Pfade und Plattform angepasst (relative Pfade, UTF-8, Windows ohne `nice`,
   Tesseract- und Schriftsuche); eine fehlschlagende Tesseract-Kommandozeile bricht ab, statt Werte still als „weg“ zu
   zählen. Eine Regressionsprobe für die Entwicklung, keine Blindprüfung – die Regeln wurden an diesen Fällen
