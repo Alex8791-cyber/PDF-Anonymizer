@@ -787,7 +787,13 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Alarmcodes ohne Bedienung). Kein geheimer Wert ist mehr lesbar, der auf einem der vier Stände geschwärzt oder
     gemeldet war, und geschwärzt werden 229 statt 245 nicht geheime Prüfwörter. Die Selbstkontrolle meldet dafür mehr
     nicht geheime Wörter; unter den Hof-Kandidaten der Abnahme (333 Nomen hinter beim/vom/zum in drei Satzrahmen) sind
-    es 96 bis 98 statt 131 bis 140.
+    es 96 bis 98 statt 131 bis 140. Neu gemeldet werden dabei auch ein gewöhnliches Wort mit Artikel vor einem Verb,
+    das nur eine Person tut, wenn es eine Einrichtung bezeichnet („Die Bank hat angerufen.“, „Der Versicherer hat den
+    Schaden gemeldet.“; auf 5efcc0c ohne Meldung), eine Anrede oder ein abgekürzter Titel zwischen Personenwort und
+    geschwärztem Namen („Ihre Nachbarin Frau …“, „Der Gutachter Dipl.-Ing. …“) und ein unbekanntes Wort in
+    Namensgestalt im Personenkontext („Fichtelgebirge Feuerkasse VVaG“ hinter „Zahlungsempfänger“). In der Endmessung
+    von 98a3957 (320 Dokumente der Entwicklungskorpora) sind dadurch vier Dokumente `_PRUEFEN` statt fertig; keines
+    ist schlechter geschwärzt.
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene
