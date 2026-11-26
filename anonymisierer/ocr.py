@@ -2163,7 +2163,7 @@ def _fehlertext(fehler: BaseException) -> str:
 
 
 def _ocr_worker(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pruefen=True,
-                nur_bilder=False, winkel_fest=None):
+                nur_bilder=False, winkel_fest=None, kamm_suchen=True):
     """Modulfunktion für den Kindprozess (muss per Import erreichbar sein – Start-Methode "spawn").
 
     Liest die Seite mit _ocr_lesen (Beschreibung dort). Reicht der Speicher nicht (_speicherfehler), wird einmal
@@ -2173,13 +2173,13 @@ def _ocr_worker(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_p
     warnings.simplefilter("ignore")
     try:
         return _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pruefen, nur_bilder,
-                          winkel_fest)
+                          winkel_fest, kamm_suchen=kamm_suchen)
     except Exception as e:
         if not _speicherfehler(e):
             raise RuntimeError(_fehlertext(e)) from None
     try:
         ergebnis = _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pruefen, nur_bilder,
-                              winkel_fest, verkleinern=0.5)
+                              winkel_fest, verkleinern=0.5, kamm_suchen=kamm_suchen)
         ergebnis["speicher_knapp"] = True
         return ergebnis
     except Exception as e:
@@ -2189,7 +2189,7 @@ def _ocr_worker(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_p
 
 
 def _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pruefen=True,
-               nur_bilder=False, winkel_fest=None, verkleinern: float = 1.0):
+               nur_bilder=False, winkel_fest=None, verkleinern: float = 1.0, kamm_suchen: bool = True):
     """OCR einer Seite bzw. eines Ausschnitts (im Arbeiter; aufgerufen von _ocr_worker).
 
     Rückgabe: {"woerter": [(x0, y0, x1, y1, text, block, zeile, nr, winkel, schraeg), ...],
@@ -2209,7 +2209,8 @@ def _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pr
     winkel_fest: Ausrichtung vorgeben (Kontroll-OCR der Ausgabe) statt sie zu suchen.
     Ausschnitte (clip) bekommen die Ausrichtungssuche erst ab AUSRICHTUNG_BILD_ANTEIL der Seitenfläche.
     Riesige Seiten liest render_dpi mit geringerer Auflösung (Befund R-06); verkleinern < 1 senkt sie weiter
-    (Wiederholung nach Speichermangel).
+    (Wiederholung nach Speichermangel). kamm_suchen=False: volle Lesungen ohne Kammfeld-Suche (Kontroll-OCR einer
+    Seite, die im Original kein Kammfeld hatte; AB4U-08).
     """
     doc = fitz.open(pdf_pfad)
     gesperrt = False
@@ -2258,7 +2259,7 @@ def _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pr
         def lesen(winkel, aufloesung, probe=False, aufteilung=False):
             t0 = time.perf_counter()
             zaehler: dict = {}
-            kamm = None if probe else {}
+            kamm = None if probe or not kamm_suchen else {}
             if probe and aufteilung and seitenaufteilung["psm"] != 6:
                 korr = 0.0                          # Probe mit Seitenaufteilung (zweite Probenstufe)
                 woerter = _ocr_durchlauf(seite, aufloesung, clip_rect, winkel, sprache, tessdata_voll, False, zaehler)
@@ -2277,13 +2278,13 @@ def _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pr
                     _protokollieren(e)
                     seitenaufteilung["psm"] = 6
                     zaehler = {}
-                    kamm = {}
+                    kamm = {} if kamm_suchen else None
                     woerter = _ocr_durchlauf(seite, aufloesung, clip_rect, winkel - korr, sprache, tessdata,
                                              analyse["hintergrund"], zaehler, kamm)
             if not probe:
                 seitenaufteilung["entartet"] = zaehler
                 seitenaufteilung["korrektur"] = korr
-                kamm_je_winkel[winkel % 360] = kamm.get("felder") or []
+                kamm_je_winkel[winkel % 360] = (kamm or {}).get("felder") or []
             bewertung = _lesung_bewerten([w[4] for w in woerter])
             protokoll.append(dict(bewertung, winkel=winkel, dpi=aufloesung,
                                   dauer=round(time.perf_counter() - t0, 2)))
@@ -2551,6 +2552,7 @@ class OcrDienst:
         self._abbruch = threading.Event()
         self._cache: dict = {}
         self._vorgaben: dict = {}         # (Datei, Seite, Ausschnitt) -> vorgegebene Ausrichtung (Kontroll-OCR)
+        self._ohne_kammsuche: set = set()  # (Datei, Seite): Kontroll-OCR ohne Kammfeld-Suche (Original ohne Kammfeld)
         self._laufend: dict = {}          # Schlüssel -> _Auftrag (vorab eingereiht)
         self.tessdata = _tessdata_finden()
         self.sprache, self.sprach_warnung = _ocr_sprache(self.tessdata)
@@ -2732,10 +2734,24 @@ class OcrDienst:
         with self._lock:
             self._vorgaben[schluessel] = int(winkel or 0) % 360
 
+    def kammsuche_vorgeben(self, pdf_pfad, seite_nr0: int, suchen: bool) -> None:
+        """Kontroll-OCR einer Ausgabe (Abnahme 4 AB4U-08): hatte die Seite im Original kein Kammfeld, liest die
+        Kontroll-OCR sie ohne Kammfeld-Suche – Schwärzungen schaffen keine Kammfelder, und die Lage der Felder des
+        Originals kennt die Prüfung schon (restrisiko: kammfelder). Vor vorab()/ergebnis() für diese Seite setzen."""
+        schluessel = (self._datei_schluessel(pdf_pfad), int(seite_nr0))
+        with self._lock:
+            if suchen:
+                self._ohne_kammsuche.discard(schluessel)
+            else:
+                self._ohne_kammsuche.add(schluessel)
+
     def _auftrag_fuer(self, pdf_pfad, seite_nr0, dpi, clip_tupel, winkel) -> _Auftrag:
         # _ocr_worker wird erst hier nachgeschlagen (Tests ersetzen ihn im Modul)
-        return _Auftrag(_ocr_worker, (str(pdf_pfad), int(seite_nr0), int(dpi), clip_tupel, self.sprache,
-                                      self.tessdata, True, clip_tupel is not None, winkel))
+        args = (str(pdf_pfad), int(seite_nr0), int(dpi), clip_tupel, self.sprache, self.tessdata, True,
+                clip_tupel is not None, winkel)
+        if self._ohne_kammsuche and (self._datei_schluessel(pdf_pfad), int(seite_nr0)) in self._ohne_kammsuche:
+            args += (False,)                         # kamm_suchen (AB4U-08)
+        return _Auftrag(_ocr_worker, args)
 
     def vorab(self, pdf_pfad, seiten, dpi: int = OCR_DPI, winkel=None) -> int:
         """Reiht OCR-Aufträge parallel im Pool ein (wartet nicht); spätere woerter()/ergebnis()/text()
@@ -2949,6 +2965,7 @@ class OcrDienst:
         with self._lock:
             self._cache.clear()
             self._vorgaben.clear()
+            self._ohne_kammsuche.clear()
             self._laufend.clear()
 
     def __enter__(self):

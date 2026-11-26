@@ -248,7 +248,17 @@ Bitte vor dem Einsatz lesen – das sind die Grenzen des Werkzeugs:
   oder „war“ („Monteur Grohe war vor Ort“) oder ist es eine Marke hinter dem Personenwort einer Firma
   („Laut Monteur Buderus …“), bleibt es stehen und wird als Verdacht gemeldet (`_PRUEFEN`) – bitte in
   der Vorschau ansehen. Das gilt auch für einen echten Namen dieser Art ohne Verb einer Person („mit
-  dem Kollegen Wolf telefoniert“).
+  dem Kollegen Wolf telefoniert“). Abteilungs-, Orts- und Firmenwörter hinter einem Personenwort
+  („Kollege Außendienst“, „Nachbar Gegenüber“, „Techniker Wasserversorger“) werden nicht geschwärzt, nur
+  gemeldet.
+- **Kammfelder** (je Kästchen ein Zeichen) auf Scans: Steht der Feldname über dem Feld und liest die
+  Texterkennung ihn nicht, wird der Inhalt nur gemeldet, nicht geschwärzt. Nicht als Kammfeld erkannt
+  werden Raster ganz ohne Linien (etwa ein Fax, auf dem die Kästchenlinien fehlen), Felder mit nur zwei
+  Kästchen ohne ein gleichartiges Feld in derselben Zeile („Tag [..] Monat [..] Jahr [....]“ wird erkannt,
+  ein einzelnes Feld mit zwei Kästchen nicht – dessen Inhalt prüfen die übrigen Regeln und die
+  Restrisiko-Prüfung) und Seiten, deren Bild für die Texterkennung größer als 15 Megapixel wird (etwa A3
+  bei 300 dpi). Eine Tabelle mit gleich breiten schmalen Zellen kann als Kammfeld gelten; ihr Inhalt wird
+  dann meist gemeldet.
 - **Nummern ohne Beschriftung** – SEPA-Mandatsreferenzen, USt-IdNr., Führerscheinnummern
   (außerhalb einer Führerscheinkopie), Steuernummern ohne Schrägstriche und BICs, die weder
   neben einer IBAN stehen noch eindeutig geformt sind (z. B. „COBADEFF“ ohne Ziffer), werden

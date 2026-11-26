@@ -74,17 +74,19 @@ def _laeufe(text: str, start: int, ende: int) -> list:
     return aus
 
 
-_KURZ_RE = re.compile(r"(?<!\S)([^\W_])(?: ([^\W_]))?[ \t]*$")
+_KURZ_RE = re.compile(r"(?<!\S)([^\W_])(?:(?: |[ ]?\t\t[ ]?)([^\W_]))?[ \t]*$")
 
 
 def _kurzer_lauf(text: str, start: int, ende: int):
-    """(s, e, wert) eines kurzen Kammfeld-Werts am Zeilenende – ein oder zwei einzelne Zeichen ("1 3", "8") – oder
-    None. Für drei und mehr Zeichen gilt _laeufe; ein so kurzer Wert zählt nur hinter einem Feldnamen (kammfeld)."""
+    """(s, e, wert) eines kurzen Kammfeld-Werts am Zeilenende – ein oder zwei einzelne Zeichen ("1 3", "8"), auch über
+    einen Spaltentrenner ("1 ⇥⇥ 3", "L ⇥⇥ I": weit gesetzte Kästchen trennt die Textebene wie Zellen; Abnahme 4 AB4-17)
+    – oder None. Für drei und mehr Zeichen gilt _laeufe; ein so kurzer Wert zählt nur hinter einem Feldnamen
+    (kammfeld)."""
     m = _KURZ_RE.search(text, start, ende)
     if m is None:
         return None
     e = m.end(2) if m.group(2) else m.end(1)
-    return m.start(1), e, text[m.start(1):e].replace(" ", "")
+    return m.start(1), e, re.sub(r"\s+", "", text[m.start(1):e])
 
 
 def _kurz_passt(kategorie: str, wert: str) -> bool:
@@ -95,6 +97,21 @@ def _kurz_passt(kategorie: str, wert: str) -> bool:
     if kategorie == "namen":
         return len(wert) == 2 and _name_moeglich(wert)
     return False
+
+
+def _kurz_scan(feld: dict, kompakt: str) -> bool:
+    """Ist ein Kammfeld-Wert eines Scans kurz (bis zwei Zeichen)? Es zählt die größere Zahl: gelesene Buchstaben und
+    Ziffern oder gefüllte Kästchen – die Texterkennung verliert in Kästchen Zeichen („LI“ als „L“ bei 300 dpi JPEG,
+    eine Telefonnummer als „08“), dann ist der Wert so lang wie seine gefüllten Kästchen."""
+    gefuellt = sum(1 for g in feld.get("gefuellt") or () if g)
+    return max(sum(c.isalnum() for c in kompakt), gefuellt) <= 2
+
+
+def _kurz_passt_scan(kategorie: str, wert: str) -> bool:
+    """Wie _kurz_passt für Scans: hinter einem Feldnamen für Namen zählen auch ein Buchstabe und zwei Buchstaben ohne
+    Selbstlaut – die Texterkennung kann den zweiten Buchstaben verloren haben („LI“ als „L“); Kreuzchen sind vorher
+    ausgeschieden (kammraster.ausfuellhinweis)."""
+    return _kurz_passt(kategorie, wert) or (kategorie == "namen" and wert.isalpha())
 
 
 def _etikett_darueber(lg, ets: list, text: str, s: int, wert: str):
@@ -111,6 +128,32 @@ def _etikett_darueber(lg, ets: list, text: str, s: int, wert: str):
         kategorien = {kategorie_fuer(et, text[et.start:et.ende], wert) for et in kandidaten}
         if len(kandidaten) > 1 and len(kategorien) == 1 and None not in kategorien:
             return min(kandidaten, key=lambda et: abs(lg.zelle_bei(et.start).x0 - zelle.x0))
+    return None
+
+
+def _teil_darueber(seite, lg, ets: list, text: str, s: int, e: int):
+    """Übergeordnetes Etikett eines Werts, über dem allein ein Teil-Feldname steht ("Tag" ⏎ "2 5", "Jahr" ⏎ "2 0 1 6"):
+    das nächste Etikett links in der Zeile des Werts bzw. des Teil-Feldnamens ("Geburtsdatum") – oder None."""
+    zelle = lg.zelle_bei(s)
+    box = _box(seite, s, e)
+    if zelle is None or box is None:
+        return None
+    for zid in _zeilen_darueber(lg, zelle.zeile, zelle.hoehe)[:1]:
+        teil = [w for w in lg.je_zeile.get(zid, ()) if kammraster.teil_etikett(text[w.start:w.ende])
+                and abs(w.x0 - box[0]) <= 3.0 * max(box[3] - box[1], 6.0)]
+        if not teil:
+            return None
+        tb = _box(seite, teil[0].start, teil[0].ende)
+        beste, beste_x = None, None
+        for et in ets:
+            b = _box(seite, et.start, et.ende)
+            if b is None or b[2] > box[0]:
+                continue
+            gleiche_zeile = min(b[3], box[3]) - max(b[1], box[1]) > 0.3 * (box[3] - box[1])
+            teil_zeile = tb is not None and min(b[3], tb[3]) - max(b[1], tb[1]) > 0.3 * (tb[3] - tb[1])
+            if (gleiche_zeile or teil_zeile) and (beste_x is None or b[2] > beste_x):
+                beste, beste_x = et, b[2]
+        return beste
     return None
 
 
@@ -177,12 +220,111 @@ def _ohne_etikett(wert: str) -> str | None:
     return None
 
 
+# Teil eines Datums hinter seinem Teil-Feldnamen in einer Zeile ("Geburtsdatum ⇥⇥ Tag ⇥⇥ 2 5 ⇥⇥ Monat 0 4 ⇥⇥ Jahr ⇥⇥ 2 0 1 6"):
+# die Ziffern (auch gesperrt oder über Kästchenlücken) direkt hinter "Tag", "Monat", "Jahr", "TT", "MM", "JJJJ" – auf Scans
+# auch so, wie die OCR Ziffern in Kästchen verliest ("Monat O 1", "Monat 0.4": O/o/I/l/S/B/Z, Punkt, Komma oder Wand
+# zwischen den Ziffern); mindestens eine echte Ziffer prüft _teil_wert
+_TEIL_WERT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:tag|monat|jahr|tt|mm|jj|jjjj)\.?:?(?: |[ ]?\t\t[ ]?)[ \t]*"
+                           r"([\dOoIlSBZ](?:(?: |[ ]?\t\t[ ]?|[.,|])?[\dOoIlSBZ]){0,3})(?![\d\wäöüß])")
+# ein kurzes Stück vor dem ersten Teil-Feldnamen einer OCR-Zeile, das ein verlesener Kästchenwert ist: mit Ziffer oder
+# Kästchenwand ("2,35,", "ala]")
+_TEIL_VORN_WERT_RE = re.compile(r"[^\s]{1,8}")
+
+
+def _teil_wert(m) -> bool:
+    """Hat der Wert eines Teil-Feldnamens (_TEIL_WERT_RE) mindestens eine echte Ziffer ("O 1" ja, "So" nein)?"""
+    return any(c.isdigit() for c in m.group(1))
+
+
+def _geteiltes_datum(seite, ets: list) -> list:
+    """[(start, ende, kategorie)] der Teile eines Datums in Feldern für Tag, Monat und Jahr hinter einem
+    übergeordneten Feldnamen für ein Geburtsdatum in derselben Zeile ("Geburtsdatum ⇥⇥ Tag ⇥⇥ 2 5 ⇥⇥ Monat 0 4 ⇥⇥ Jahr
+    ⇥⇥ 2 0 1 6"; Abnahme 4 AB4-01) – jeder Teil allein ist kurz und sein Teil-Feldname sagt nichts über den Bezug.
+    Ein anderer übergeordneter Feldname (Antragsdatum, Versicherungsbeginn) lässt die Teile stehen."""
+    text = seite.text
+    if "ag" not in text and "onat" not in text and "ahr" not in text and "TT" not in text:
+        return []
+    aus = []
+    for z in seite.zeilen:
+        teile = [m for m in _TEIL_WERT_RE.finditer(text, z.start, z.ende) if _teil_wert(m)]
+        if not teile:
+            continue
+        davor = [et for et in ets if z.start <= et.start and et.ende <= teile[0].start()]
+        if davor:
+            zwischen = text[davor[-1].ende:teile[0].start()]
+            if "datum_geburt" not in davor[-1].arten \
+                    or any(c.isalnum() for c in re.sub(r"\([^()\n]{0,30}\)", "", zwischen)):
+                continue                              # anderer Feldname oder etwas anderes dazwischen
+        else:
+            if not _geburt_links(seite, ets, teile[0].start()):
+                continue                              # Scan: der Feldname steht in derselben Reihe links davon
+            vorn = text[z.start:teile[0].start()]
+            kern = vorn.strip(" \t")
+            if kern:
+                # Schräglage: die OCR liest "Geburtsdatum ⇥⇥ Tag" und den Wert des Tags als Anfang einer anderen Zeile
+                # derselben Reihe ("2,35, ⇥⇥ Monat 0.4 ⇥⇥ Jahr ⇥⇥ 2016", 150 dpi; Abnahme 4 AB4-01): ein kurzes Stück
+                # mit Ziffer oder Kästchenwand vor dem ersten Teil-Feldnamen ist der Wert des Teils davor
+                if not _TEIL_VORN_WERT_RE.fullmatch(kern) \
+                        or not (any(c.isdigit() for c in kern) or any(c in "[]|" for c in kern)):
+                    continue
+                a0 = z.start + len(vorn) - len(vorn.lstrip(" \t"))
+                aus.append((a0, a0 + len(kern), "geburt"))
+        aus += [(m.start(1), m.end(1), "geburt") for m in teile]
+    # Scan: die OCR liest Teil-Feldname und Wert als zwei Zeilen ("Tag" ⏎ "2 5"), beide in derselben Reihe – der Wert
+    # rechts neben dem Teil-Feldnamen, der Geburts-Feldname links davon (Abnahme 4 AB4-01, Scan 200 dpi)
+    zeilen = list(seite.zeilen)
+    for a, b in zip(zeilen, zeilen[1:]):
+        if not _TEIL_ALLEIN_RE.fullmatch(text, a.start, a.ende):
+            continue
+        m = _ZIFFERN_VORN_RE.match(text, b.start, b.ende)
+        if m is None:
+            continue
+        ba, bb = _box(seite, a.start, a.ende), _box(seite, m.start(1), m.end(1))
+        if ba is None or bb is None:
+            continue
+        h = max(ba[3] - ba[1], 4.0)
+        if bb[0] >= ba[2] - 1.0 and bb[0] - ba[2] <= 6.0 * h and min(ba[3], bb[3]) - max(ba[1], bb[1]) > 0.3 * h \
+                and _geburt_links(seite, ets, a.start):
+            aus.append((m.start(1), m.end(1), "geburt"))
+    return aus
+
+
+# eine OCR-Zeile nur aus einem Teil-Feldnamen bzw. eine, die mit einer kurzen Ziffernfolge beginnt (ein bis vier
+# Ziffern, auch mit Kästchenwänden "2|5" oder Leerzeichen dazwischen) – dahinter nichts, ein Tabulator oder der nächste
+# Teil-Feldname ("2 5 Monat ⇥⇥ Jahr")
+_TEIL_ALLEIN_RE = re.compile(r"(?i)[ \t]*(?:tag|monat|jahr|tt|mm|jj|jjjj)\.?:?[ \t]*")
+_ZIFFERN_VORN_RE = re.compile(r"(?i)[ \t|]*(\d(?:[ \t|]{0,3}\d){0,3})(?=[ \t|]*$|\t|[ \t|]+(?:tag|monat|jahr|tt|mm|jj|jjjj)"
+                              r"(?![\wäöüß]))")
+
+
+def _geburt_links(seite, ets: list, pos: int) -> bool:
+    """Steht links in derselben Reihe (Lage der Wörter, auf Scans liest die OCR die Reihe oft als eigene Zeilen) ein
+    Feldname für ein Geburtsdatum vor der Textstelle pos?"""
+    box = _box(seite, pos, pos + 1)
+    if box is None:
+        return False
+    h = max(box[3] - box[1], 4.0)
+    for et in ets:
+        if "datum_geburt" not in et.arten:
+            continue
+        b = _box(seite, et.start, et.ende)
+        if b is not None and b[2] <= box[0] + 1.0 and min(b[3], box[3]) - max(b[1], box[1]) > 0.3 * h:
+            return True
+    return False
+
+
 @detektor(QUELLE, ALLE_KATEGORIEN, ALLE_PROFILE)
 def kammfeld(dok, kontext):
     """Werte in Kammfeldern/gesperrter Schrift mit der Kategorie ihres Feldnamens."""
     treffer = []
     for nr, seite in enumerate(dok.seiten):
         text = seite.text
+        if text.strip() and (not kontext.aktive or "geburt" in kontext.aktive):
+            teil_ets = None
+            if _TEIL_WERT_RE.search(text):
+                teil_ets = [et for et in etiketten(seite) if et.arten]
+                for s, e, kat in _geteiltes_datum(seite, teil_ets):
+                    treffer.append(Treffer(dok.global_(nr, s), dok.global_(nr, e), kat, QUELLE, 0.85))
         if not text.strip() or not _VORFILTER_RE.search(text):
             continue
         laeufe_je_zeile = []
@@ -203,20 +345,34 @@ def kammfeld(dok, kontext):
         for z, s, e, wert, zellen, kurz in laeufe_je_zeile:
             # Feldname: links in derselben Zeile (das nächste davor) oder allein in einer Zeile darüber
             et_wahl = None
+            vorher = None
             for et in ets:
                 if z.start <= et.start and et.ende <= s:
-                    et_wahl = et                      # das letzte Etikett vor dem Wert
+                    vorher, et_wahl = et_wahl, et     # das letzte Etikett vor dem Wert
+            if et_wahl is not None and vorher is not None and kammraster.teil_etikett(text[et_wahl.start:et_wahl.ende]) \
+                    and not any(c.isalnum() for c in text[vorher.ende:et_wahl.start]):
+                et_wahl = vorher                      # "Geburt ⇥⇥ Datum ⇥⇥ 2 5 0 4 …": der übergeordnete Feldname
             if et_wahl is not None:
                 zwischen = re.sub(r"\([^()\n]{0,30}\)", "", text[et_wahl.ende:s])     # "(TTMMJJJJ)", "(n)"
+                # ein Teil-Feldname dazwischen gehört zum Feldnamen ("Geburt ⇥⇥ Datum ⇥⇥ 2 5 0 4 …"; AB4-01)
+                zwischen = " ".join(w for w in zwischen.split() if not kammraster.teil_etikett(w))
                 if any(c.isalnum() for c in zwischen):
                     et_wahl = None                    # zwischen Feldname und Wert steht noch etwas anderes
+            teil_oben = False
             if et_wahl is None and not text[z.start:s].strip():
                 et_wahl = _etikett_darueber(lg, ets, text, s, wert)
+                if et_wahl is None:
+                    # Teil-Feldname darüber ("Tag" ⏎ "2 5"): der übergeordnete Feldname in der Zeile des Werts links
+                    # oder in der Zeile darüber ("Geburtsdatum")
+                    et_wahl = _teil_darueber(seite, lg, ets, text, s, e)
+                    teil_oben = et_wahl is not None
             if et_wahl is not None:
                 kat = kategorie_fuer(et_wahl, text[et_wahl.start:et_wahl.ende], wert)
             else:
                 kat = None if kurz else _ohne_etikett(wert)
-            if kurz and (kat is None or not _kurz_passt(kat, wert)):
+            if teil_oben and kat != "geburt":
+                continue                              # Teil eines Datums nur unter einem Geburtsdatum
+            if kurz and (kat is None or not (_kurz_passt(kat, wert) or (teil_oben and wert.isdigit()))):
                 continue                              # kurzer Wert nur als Hausnummer bzw. Name hinter Feldnamen
             if kat is None or (kontext.aktive and kat not in kontext.aktive):
                 continue
@@ -414,9 +570,51 @@ def _etikett_unscharf(seite, s: int, e: int):
     return Etikett(s, e, frozenset({art}), kategorie, eintrag, True), eintrag
 
 
+# Arten eines übergeordneten Feldnamens, die die Teile darunter (Tag, Monat, Jahr) zu Personenangaben machen
+_PERSONEN_ARTEN = frozenset({"person", "datum_geburt", "adresse", "kontakt", "kennung"})
+
+
+def uebergeordnetes_etikett(seite, feld, ets: list, felder: list = (), teilname: str = ""):
+    """Etikett vor einem Feld mit Teil-Feldnamen (Tag, Monat, Jahr …; kammraster.teil_etikett): das nächste Etikett
+    links in derselben Zeile außerhalb der Felder ("Geburtsdatum ⇥ Tag [..] Monat [..] Jahr [....]"), sonst eines in den
+    beiden Zeilen darüber über dem Feld bzw. links davon – oder None (Abnahme 4 AB4-01). teilname "Datum"
+    (kammraster.teil_ohne_datum falsch): nur ein Geburts-Feldname zählt – "Datum" unter "Name" ist das Datum der
+    Unterschrift."""
+    et = _uebergeordnet(seite, feld, ets, felder)
+    if et is not None and teilname and not kammraster.teil_ohne_datum(teilname) and "datum_geburt" not in et.arten:
+        return None
+    return et
+
+
+def _uebergeordnet(seite, feld, ets: list, felder: list = ()):
+    x0, y0, x1, y1 = kammraster.kopfkasten(feld)
+    hoehe = max(y1 - y0, 4.0)
+    beste, beste_x = None, None
+    for et in ets:
+        b = _box(seite, et.start, et.ende)
+        if b is None or any(kammraster.im_feld(f, (b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0) for f in felder):
+            continue
+        mitte = (b[1] + b[3]) / 2.0
+        if y0 - 0.3 * hoehe <= mitte <= y1 + 0.3 * hoehe and b[2] <= x0 + FELD_RAND_PT:
+            if beste_x is None or b[2] > beste_x:
+                beste, beste_x = et, b[2]
+    if beste is not None:
+        return beste
+    oben = []
+    for et in ets:
+        b = _box(seite, et.start, et.ende)
+        if b is None or not (b[3] <= y0 + FELD_RAND_PT and y0 - b[3] <= 3.0 * hoehe and b[0] <= x0 + hoehe):
+            continue
+        oben.append((y0 - b[3], -b[2], et))
+    return min(oben, key=lambda t: (t[0], t[1]))[2] if oben else None
+
+
 @detektor(QUELLE_SCAN, ALLE_KATEGORIEN, ALLE_PROFILE)
 def kammfeld_scan(dok, kontext):
-    """Inhalt gefüllter Kammfelder auf Scans (Lage aus dem Bild) mit der Kategorie ihres Feldnamens."""
+    """Inhalt gefüllter Kammfelder auf Scans (Lage aus dem Bild) mit der Kategorie ihres Feldnamens. Ein Teil-Feldname
+    (Tag, Monat, Jahr) gilt mit dem übergeordneten Feldnamen ("Geburtsdatum"; AB4-01); ein kurzer Wert (bis zwei
+    Zeichen) nur als Hausnummer oder Name aus zwei Buchstaben – sonst meldet ihn die Selbstkontrolle –, ein Kreuzchen
+    oder Ausfüllhinweis nie (AB4U-02/03)."""
     treffer = []
     for nr, seite in enumerate(dok.seiten):
         felder = [f for f in (getattr(seite, "kammfelder", None) or []) if any(f.get("gefuellt") or ())]
@@ -428,13 +626,23 @@ def kammfeld_scan(dok, kontext):
             if not spannen:
                 continue
             wert = " ".join(seite.text[a:b] for a, b in spannen)
+            if kammraster.ausfuellhinweis(wert):
+                continue                              # "TTMMJJJJ" im leeren Feld, Kreuzchen im Ankreuzraster
             et, etikett_text = etikett_zum_feld(seite, feld, ets, felder)
+            if et is None:
+                s_, e_, _ = etikett_text_zum_feld(seite, feld, felder)
+                if s_ >= 0 and kammraster.teil_etikett(seite.text[s_:e_]):
+                    et = uebergeordnetes_etikett(seite, feld, ets, felder, seite.text[s_:e_])
+                    etikett_text = seite.text[et.start:et.ende] if et is not None else ""
             if et is not None:
                 kat = kategorie_fuer(et, etikett_text, wert)
             else:
                 kat = _ohne_etikett(wert)
             if kat is None or (kontext.aktive and kat not in kontext.aktive):
                 continue
+            kompakt = re.sub(r"[\s|]+", "", wert)
+            if _kurz_scan(feld, kompakt) and kat != "geburt" and not _kurz_passt_scan(kat, kompakt):
+                continue                              # "DE" hinter "Staatsangehörigkeit": gemeldet (restrisiko)
             for a, b in spannen:
                 treffer.append(Treffer(dok.global_(nr, a), dok.global_(nr, b), kat, QUELLE_SCAN,
                                        0.8 if et is not None else 0.9))
@@ -447,6 +655,7 @@ def freie_werte(dok) -> list:
     aus = []
     for nr, seite in enumerate(dok.seiten):
         felder = [f for f in (getattr(seite, "kammfelder", None) or []) if any(f.get("gefuellt") or ())]
+        ets = None
         for feld in felder:
             spannen = spannen_im_feld(seite, feld)
             if not spannen:
@@ -456,7 +665,33 @@ def freie_werte(dok) -> list:
                 continue
             wert = "".join(seite.text[a:b] for a, b in spannen)
             if kammraster.wert_ohne_personenbezug(seite.text[s:e], wert):
+                if kammraster.teil_etikett(seite.text[s:e]):
+                    # "Geburt ⇥ Datum [..]": der übergeordnete Feldname macht das Datum zur Personenangabe (AB4-01)
+                    if ets is None:
+                        ets = [et for et in etiketten(seite) if et.arten]
+                    ueber = uebergeordnetes_etikett(seite, feld, ets, felder, seite.text[s:e])
+                    if ueber is not None and ueber.arten & _PERSONEN_ARTEN:
+                        continue
                 aus += [(dok.global_(nr, a), dok.global_(nr, b)) for a, b in spannen]
+    return aus
+
+
+def teilfelder_mit_bezug(dok) -> list:
+    """[(start, ende)] (global) der Werte gefüllter Kammfelder mit Teil-Feldnamen (Tag, Monat, Jahr) hinter einem
+    übergeordneten Feldnamen für Personenangaben ("Geburtsdatum") – für die Selbstkontrolle und Tests."""
+    aus = []
+    for nr, seite in enumerate(dok.seiten):
+        felder = [f for f in (getattr(seite, "kammfelder", None) or []) if any(f.get("gefuellt") or ())]
+        if not felder:
+            continue
+        ets = [et for et in etiketten(seite) if et.arten]
+        for feld in felder:
+            s, e, _ = etikett_text_zum_feld(seite, feld, felder)
+            if s < 0 or not kammraster.teil_etikett(seite.text[s:e]):
+                continue
+            et = uebergeordnetes_etikett(seite, feld, ets, felder, seite.text[s:e])
+            if et is not None and et.arten & _PERSONEN_ARTEN:
+                aus += [(dok.global_(nr, a), dok.global_(nr, b)) for a, b in spannen_im_feld(seite, feld)]
     return aus
 
 

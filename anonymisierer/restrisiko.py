@@ -389,7 +389,9 @@ _VERB_ARTIKEL_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:am[ \t]+steuer|sa�
                                     # dieselben Verben als Partizip mit Hilfsverb ("Gefahren ist der Huberbauer.")
                                     r"(?:gesessen|gefahren|gelenkt|gesteuert|gesagt|gemeint|gerufen|erzählt|erzaehlt|"
                                     r"behauptet|erklärt|erklaert|bestätigt|bestaetigt|geschildert|gemeldet|verursacht|"
-                                    r"beschädigt|beschaedigt|gerammt|übersehen|uebersehen|beobachtet|bemerkt|entdeckt)"
+                                    r"beschädigt|beschaedigt|gerammt|übersehen|uebersehen|beobachtet|bemerkt|entdeckt|"
+                                    # "Gesehen hat es der Hintermaier." (Abnahme 4 AB4-12)
+                                    r"gesehen|angerufen|angezeigt)"
                                     r"[ \t]+(?:ist|war|hat|hatte|wurde))"
                                     # bis zu drei Zwischenwörter ("saß wohl der …", "Gefahren ist laut Polizei die …",
                                     # "Erzählt hat es die …", "saß zum Unfallzeitpunkt der …"; Abnahme 2 V5)
@@ -405,6 +407,37 @@ _VERB_ARTIKEL_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:am[ \t]+steuer|sa�
                                     r"eines))?[ \t]+[^\W\d_][\wäöüß\-]{1,30}(?:[ \t]+(?:der|des)[ \t]+"
                                     r"[^\W\d_][\wäöüß\-]{1,30}(?=[ \t]+(?:der|die)[ \t]))?){0,3}"
                                     r"[ \t]+(?:der|die)[ \t]+$")
+# "hat der Wimmer beschädigt": Hilfsverb und Artikel vor dem Wort, ein Partizip direkt dahinter (Abnahme 4 AB4-12)
+_HAT_ARTIKEL_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:hat|hatte)[ \t]+(?:es[ \t]+)?(?:der|die)[ \t]+$")
+_PARTIZIP_DIREKT_RE = re.compile(r"(?i)[ \t]+(?:gefahren|gelenkt|gesteuert|gesagt|erzählt|behauptet|erklärt|bestätigt|"
+                                 r"telefoniert|angerufen|gemeldet|verursacht|beschädigt|beschaedigt|gerammt|"
+                                 r"übersehen|uebersehen|beobachtet|bemerkt|entdeckt|angezeigt|gesehen)(?![\wäöüß])")
+# "… hat der Wimmer beschädigt": ein Wort mit "der" direkt vor dem Partizip ist der Täter, nicht das Wort vor "hat"
+_SUBJEKT_VOR_PARTIZIP_RE = re.compile(r"[ \t]der[ \t]+[A-ZÄÖÜ][\wäöüß\-]*[ \t]+[^\s.,;:!?]+$")
+# "Der Saugroboter beschädigte die Stehlampe.", "Er bemerkte die Vitrine.": steht vor dem Verb am Satzanfang ein
+# Subjekt im Nominativ ("Der" mit einem Hauptwort, auch mit Beiwort oder Genitiv dahinter, ein Personalpronomen), ist
+# "die X" hinter dem Verb sein Objekt – das Verb belegt dann keine Person (Abnahme 4, Über-Probe s11). "Die …", "Das …",
+# "Mein …" und "Sie" können auch das Objekt sein ("Den Zaun beschädigte die …" ist eindeutig, "Die Scheibe beschädigte
+# die …" nicht): dort bleibt die Meldung
+_SUBJEKT_VORFELD_RE = re.compile(r"(?:Der(?:[ \t]+[a-zäöüß][\wäöüß\-]*){0,2}[ \t]+[A-ZÄÖÜ][\wäöüß\-]*"
+                                 r"(?:[ \t]+(?:des|der|vom|von)(?:[ \t]+[a-zäöüß][\wäöüß\-]*)?[ \t]+[A-ZÄÖÜ][\wäöüß\-]*)?"
+                                 r"|Er|Ich|Wir|Du|Man)[ \t]+")
+# Abkürzungen aus vier Buchstaben mit Selbstlaut ("Ziff.", "Gebr.") – kein Satzende
+_ABK_VIER = frozenset(("ziff", "gebr", "ausg", "aufl", "verl", "verw", "vers", "best", "bzgl", "anst", "betr", "bspw",
+                       "insb", "tlw", "zzgl", "inkl", "evtl", "allg", "ehem", "geb", "kath", "evang", "verh", "verw"))
+# "Der Grebl hat den Wagen gefahren.": mit einem Objekt im Akkusativ fährt eine Person, nicht das Fahrzeug
+_AKKUSATIV_OBJEKT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:den|einen|seinen|ihren|unseren|meinen)[ \t]+[A-ZÄÖÜ]")
+_BEWEGUNG_VERB_RE = re.compile(r"(?i)(?<![\wäöüß])(?:fuhr|gefahren|rammte|gerammt)(?![\wäöüß])")
+_PERSONEN_TAT_RE = re.compile(
+    r"(?i)[ \t]+(?:sagt|sagte|meinte|meint|behauptet|behauptete|erzählt|erzählte|erklärt|erklärte|rief|telefonierte|"
+    r"meldete|schrieb|bestätigte|bestaetigte)(?![\wäöüß])"
+    r"|(?i:[ \t]+(?:hat|hatte)(?:[ \t]+[^\s.,;:!?]+){0,4}?[ \t]+(?:gesagt|erzählt|behauptet|erklärt|bestätigt|"
+    r"bestaetigt|telefoniert|angerufen|gerufen|gemeldet|angezeigt|gesehen|geschrieben|unterschrieben))(?![\wäöüß])")
+_PERSONEN_TAT_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:sagte|meinte|rief|erzählte|erzaehlte|behauptete|erklärte|"
+                                    r"erklaerte|bestätigte|bestaetigte|schilderte|meldete|bemerkte|entdeckte|"
+                                    r"(?:gesagt|gemeldet|gesehen|angerufen|angezeigt|bemerkt|entdeckt|erzählt|"
+                                    r"bestätigt)[ \t]+(?:hat|hatte)(?:[ \t]+(?:es|das|den[ \t]+schaden))?)"
+                                    r"[ \t]+(?:der|die)[ \t]+$")
 # Endungen von Rollen-, Fahrzeug- und Gerätewörtern auf "-er", die in den Wortlisten fehlen können ("Anwohner",
 # "Radfahrer", "Täter", "Schwager", "Bagger", "Laster", "Hubschrauber"): hinter "fuhr der", "rief der" kein
 # Familienname mit Artikel, auch nicht mit Namensgestalt ("Anwohner", "Mitbewohner" auf "-ner")
@@ -417,12 +450,29 @@ _ER_SACHWORT_ENDUNGEN = (
     "wecker", "schalter", "becher", "teller", "messer", "zähler", "zaehler", "ordner", "rechner", "router", "server",
     "leser", "hörer", "hoerer", "drucker", "computer", "monitor", "tresor", "treiber", "käufer", "kaeufer", "werber",
     "empfänger", "empfaenger")
+# Sachen unter diesen Grundwörtern (keine Rollen): allein mit Artikel und einem Verb, das nur eine Person tut, ein
+# Familienname ("Der Becher hat angerufen.", "Die Teller hat den Schaden gemeldet."; Abnahme 4 AB4-12)
+_ER_SACHE_ALLEIN = frozenset(("becher", "teller", "messer", "wecker", "schalter", "zähler", "zaehler", "ordner",
+                              "rechner", "drucker", "bagger", "laster", "trecker", "kipper", "lader", "roller",
+                              "dampfer", "flieger", "schrauber", "sprinter", "schlepper", "scooter"))
+_ER_FAHRZEUG_ALLEIN = frozenset(("bagger", "laster", "trecker", "kipper", "lader", "roller", "dampfer", "flieger",
+                                 "schrauber", "sprinter", "schlepper", "scooter"))
 # Vorsilben, mit denen aus einem dieser Grundwörter ein Rollenwort wird ("Anwohner", "Bewohner", "Mitbewohner",
 # "Aufsteiger", "Untermieter", "Vorbesitzer") – nicht "Hoch-", "Ober-", "Kirch-", "Hof-" eines Hausnamens
 # ("Hochsteiger", "Oberhalter", "Kirchsteiger", "Hofsteiger"; Abnahme 2 R2)
 _ER_VORSILBEN_RE = re.compile(r"(?:mit|an|ab|auf|aus|be|bei|ein|nach|um|unter|über|ueber|vor|zu|ver|er|ent|zer|"
                               r"durch|gegen|neben|quer|wider|weg|zurück|zurueck){1,2}")
 _ER_ABLEITUNG_RE = re.compile(r"(.{3,}?)s?(?:mitbe|be|ver|an|mit|unter|ein|auf|ab|vor)")
+
+
+# Grundwörter von Geräten, Maschinen, Tieren und Rollen auf "-er", die mit beliebigem Bestimmungswort ein Sachwort bleiben
+# ("Hochdruckreiniger", "Kondenstrockner", "Heizlüfter", "Gabelstapler", "Spaziergänger", "Marder"; Abnahme 4 AB4U-04)
+_ER_GERAET_GRUNDWORT = ("reiniger", "trockner", "lüfter", "luefter", "stapler", "gänger", "gaenger", "strahler",
+                        "kocher", "sauger", "spüler", "spueler", "trimmer", "mäher", "maeher", "toaster", "marder",
+                        "enthärter", "enthaerter", "boiler", "kühler", "kuehler", "verteiler", "zünder", "zuender",
+                        "erhitzer", "wärmer", "waermer", "fräser", "fraeser", "bohrer", "rasierer", "föhner",
+                        "foehner", "mixer", "kompressor", "generator", "regler", "melder", "sender", "empfänger",
+                        "lautsprecher", "verstärker", "verstaerker", "akkuschrauber", "hamster")
 
 
 def _sachwort_er(w: str) -> bool:
@@ -438,7 +488,7 @@ def _sachwort_er(w: str) -> bool:
             rest = k[:-len(endung)]
             if not rest or _ER_VORSILBEN_RE.fullmatch(rest) or _ER_ABLEITUNG_RE.fullmatch(rest):
                 return True
-    return False
+    return k.endswith(_ER_GERAET_GRUNDWORT)
 
 
 # Beruf hinter "als" in einem Satz über eine Person ("Sie ist als Hebamme bei der Klinik in Traunstein.", "Er hilft am
@@ -465,7 +515,7 @@ _WORT_RE = re.compile(r"\S+")
 # Paketdienst.", "Sie hilft im Altenheim als Betreuerin aus.", "Er ist als Vertreter für Landmaschinen unterwegs.") und
 # nicht von einem Vorgang oder einer Vertretung ("als Fahrer am Unfall beteiligt", "als Betreuer seiner Mutter",
 # "als Zeugin geladen"; Abnahme 2 V3)
-_ROLLE_ARBEIT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:tätig|beschäftigt|angestellt|arbeitet\w{0,2}|gearbeitet|"
+_ROLLE_ARBEIT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:tätig|beschäftigt|angestellt|arbeite\w{0,3}|arbeiten|gearbeitet|"
                               r"verdient\w{0,2}|jobbt|aushilf\w{0,4}|nebenjob\w{0,2}|hauptberuflich|nebenberuflich|"
                               r"unterwegs|hilft|half|für[ \t]+(?:einen|eine|ein)[ \t]+[A-ZÄÖÜ]\w+|"
                               r"bei[ \t]+(?:einer|einem|der|dem)[ \t]+[A-ZÄÖÜ]\w+|"
@@ -482,6 +532,9 @@ _ROLLE_VORGANG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:unfall\w{0,6}|beteiligt
 # höfliches "Sie" mitten im Satz spricht den Leser an, keine Person, von der der Satz handelt ("Als Handwerker
 # benötigen Sie …"; Abnahme 2 A2-03)
 _SIE_IM_SATZ_RE = re.compile(r"(?<=[^\s.!?;:\n])[ \t]+Sie(?![\wäöüß])")
+# Einstufung der angeschriebenen Person nach ihrem Beruf ("Berufsgruppenrabatt", "Rabatt", "Nachlass", "eingestuft")
+_EINSTUFUNG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:[\wäöüß]*rabatt\w{0,2}|[\wäöüß]*nachlass\w{0,2}|"
+                            r"berufsgruppe\w{0,8}|eingestuft|einstufung\w{0,2}|sondertarif\w{0,2})(?![\wäöüß])")
 _SATZTEIL_HINTER_ETIKETT_RE = re.compile(r"[ ]+(?:der|des|dem|den|die|das|eines|einer|einem|im|in|bei|beim|zum|zur|"
                                          r"seit|für|fuer)[ ]")
 _EINHEIT_RE = re.compile(
@@ -673,6 +726,9 @@ _PLUS_CC_RE = re.compile(r"(?<![\w+])\+\s?\d{1,3}[\s(/\-]{0,3}\d")
 _NAMENSWORT_RE = re.compile(r"[^\W\d_](?:[^\W\d_]|['’](?=[^\W\d_]))*(?:-[^\W\d_](?:[^\W\d_]|['’](?=[^\W\d_]))*)*")
 _PLATZHALTER_RE = re.compile(r"\[[A-ZÄÖÜẞ0-9][A-ZÄÖÜẞ0-9 .,/&+\-]{0,38}\]")
 _PERSONEN_PLATZHALTER_RE = re.compile(r"\[(?:PERSON|P|FAMILIE|F|NAME)\b")
+# Personen-Platzhalter, wie die Kontroll-OCR ihn im grauen Rechteck verliest (Klammern als I, | oder l, P als R, ohne
+# Leerzeichen): nur zusammen mit dem Schwärzungsrechteck um das Wort ein Platzhalter (_ocr_personen_platzhalter_neben)
+_OCR_PERSONEN_PLATZHALTER_RE = re.compile(r"\S*(?:[PR]ERSON|ERSON[ ]?[A-Z]|FAMILI|NAME)\S*")
 _NUR_PLATZHALTER_RE = re.compile(r"(?:\[[A-ZÄÖÜ0-9][A-ZÄÖÜ0-9 \-]{0,24}\][\s,;.]*)+")
 _PERSON_PLATZHALTER_GANZ_RE = re.compile(r"\[(?:PERSON|P|FAMILIE|F|NAME|NAMEN)\b[^\]\n]{0,12}\]")
 # ein Datum als eigene Zelle bzw. in einer Zeile (Personenreihe der Selbstkontrolle, Nachprüfung NP-09)
@@ -1038,6 +1094,30 @@ def _personenzeile(zeile: str, ms: int, me: int) -> tuple:
     return 0, False
 
 
+# OCR: ein „l“ bzw. „I“ am Wortende als Ausrufezeichen gelesen ("Vom Kalt! kam der Anruf", 300 dpi JPEG) – ein echtes
+# Ausrufezeichen beendet den Satz, das Wort danach beginnt groß. Für die Regeln gilt es als „l“ (gleiche Länge, die Lage
+# bleibt), nur auf Zeichen der Texterkennung (Abnahme 4 AB4-15)
+_OCR_AUSRUFE_L_RE = re.compile(r"(?<=[A-Za-zÄÖÜäöüß]{2})!(?=[ \t]+[a-zäöüß])")
+
+
+def _pruef_text(m) -> str:
+    """Text einer Seite für die Regeln: m.text, auf Zeichen der Texterkennung mit _OCR_AUSRUFE_L_RE gelesen."""
+    text = m.text
+    if "!" not in text:
+        return text
+    teile = None
+    abbildung, zeichen = getattr(m, "abbildung", None) or (), getattr(m, "zeichen", None) or ()
+    for t in _OCR_AUSRUFE_L_RE.finditer(text):
+        i = t.start()
+        z = abbildung[i] if i < len(abbildung) else -1
+        if z < 0 or z >= len(zeichen) or getattr(zeichen[z], "quelle", "text") == "text":
+            continue
+        if teile is None:
+            teile = list(text)
+        teile[i] = "l"
+    return "".join(teile) if teile is not None else text
+
+
 class _Seitenpruefung:
     """Alle Regeln für EINE Seite des Seitenmodells der Ausgabe."""
 
@@ -1046,7 +1126,7 @@ class _Seitenpruefung:
         self.m = m
         self.aktive = set(aktive) if aktive is not None else None
         self.schwaerzungen = [fitz.Rect(r) for r in schwaerzungen or ()]
-        self.text = m.text
+        self.text = _pruef_text(m)
         self.w = wissen
         self.profil = profil
         self.kandidaten: list = []
@@ -1062,6 +1142,7 @@ class _Seitenpruefung:
         self._ph_laengste = 0
         self._ph_box_index = None              # Rechtecke der Platzhalter nach x0 und x1 sortiert
         self._freie_schwaerzungen: list = []
+        self.personen_schwaerzungen: list = []  # Schwärzungen mit verlesenem Personen-Platzhalter (Kontroll-OCR)
         self._ausrichtung = ausrichtung        # (Winkel, Schräglage) der OCR-Wörter, falls bekannt
         self._ocr_lage = None
         self._quelle_block = {b.id: b.quelle for b in getattr(m, "bloecke", None) or ()}
@@ -1188,17 +1269,56 @@ class _Seitenpruefung:
             if 0 <= ps - e <= 2 and set(text[e:ps]) <= {" ", "-", ","}:
                 return ps, pe
         boxen = self.platzhalter_boxen()
-        if not boxen:
+        personen = nur is _PERSONEN_PLATZHALTER_RE
+        if not boxen and not (personen and (self._freie_schwaerzungen or self.personen_schwaerzungen)):
             return None
         b = self.box(s, e)
         if b is None:
             return None
-        for j in self._boxen_waagerecht_nah(b, 0.8):
+        for j in (self._boxen_waagerecht_nah(b, 0.8) if boxen else ()):
             ps, pe, rand = boxen[j]
             if (nur is None or nur.match(text[ps:pe])) and self._benachbart(b, rand, 0.8) \
                     and self._nichts_dazwischen(s, e, b, rand):
                 return ps, pe
+        return self._ocr_personen_platzhalter_neben(s, e, b) if personen else None
+
+    def _ocr_personen_platzhalter_neben(self, s: int, e: int, b):
+        """Auf einer OCR-Seite: ein graues Schwärzungsrechteck direkt neben der Stelle, in dem die Kontroll-OCR einen
+        verlesenen Personen-Platzhalter liest ("IPERSON A]", "IRERSONAI": die eckigen Klammern als I, | oder l, die
+        Schrift im Grau) – (start, ende) dieses Worts oder None (Abnahme 4 AB4-14, Scans)."""
+        if self._quelle(s) == "text" or b is None:
+            return None
+        for r in self.personen_schwaerzungen:
+            if self._benachbart(b, (r.x0, r.y0, r.x1, r.y1), 0.8):
+                # das Rechteck links bzw. rechts der Stelle: ein Platzhalter ohne eigenen Text (s, s) bzw. (e, e)
+                return (s, s) if (r.x0 + r.x1) / 2 < (b.x0 + b.x1) / 2 else (e, e)
+        self.platzhalter_boxen()
+        nah = [fitz.Rect(r) for r in self._freie_schwaerzungen if self._benachbart(b, r, 0.8)]
+        z = self.zeile(s) if nah else None
+        if z is None:
+            return None
+        for m in _OCR_PERSONEN_PLATZHALTER_RE.finditer(self.text, z.start, z.ende):
+            wb = self.box(m.start(), m.end())
+            if wb is not None and any(r.contains(fitz.Point((wb.x0 + wb.x1) / 2, (wb.y0 + wb.y1) / 2)) for r in nah):
+                return m.start(), m.end()
         return None
+
+    def platzhalter_rechts(self, s: int, e: int, ph) -> bool:
+        """Steht der benachbarte Platzhalter ph (start, ende; neben_platzhalter) rechts der Stelle? Im Text nach seiner
+        Lage im Text, sonst nach seinem Rechteck auf der Seite: der Platzhalter einer Textebene steht am Ende des
+        Seitentexts, auch wenn sein Rechteck links vor dem Wort liegt ("[PERSON A] Bauer-Hinterseer hat angerufen.";
+        Abnahme 4 AB4-14)."""
+        ps, pe = ph
+        text = self.text
+        if 0 <= ps - e <= 2 and set(text[e:ps]) <= {" ", "-", ","}:
+            return True
+        if 0 <= s - pe <= 2 and set(text[pe:s]) <= {" ", "-"}:
+            return False
+        b = self.box(s, e)
+        rand = next((r for a, z, r in self.platzhalter_boxen() if (a, z) == (ps, pe)), None)
+        if b is None or rand is None:
+            return ps >= e
+        return (rand[0] + rand[2]) / 2 >= (b.x0 + b.x1) / 2
 
     def _boxen_waagerecht_nah(self, b, faktor: float) -> list:
         """Nummern der Platzhalter-Rechtecke (platzhalter_boxen), die waagerecht nah genug an der Box b liegen, um
@@ -1275,6 +1395,11 @@ class _Seitenpruefung:
 
     def zeile(self, pos: int):
         return self.m.zeile_von(pos)
+
+    def _ueber_zeilen(self, s: int, e: int) -> bool:
+        """Reicht die Stelle über einen Zeilenumbruch (ein am Zeilenende getrenntes Wort, im Seitenmodell verbunden)?"""
+        a, b = self.zeile(s), self.zeile(max(s, e - 1))
+        return a is not None and b is not None and a.id != b.id
 
     def zeilen_text(self, z) -> str:
         t = self._zeilen_text.get(z.id)
@@ -2136,7 +2261,25 @@ class _Seitenpruefung:
         self._seitenformen()
         self._beruf_hinter_als()
         self._personenwort_namen()
+        self._teil_datum()
         return self.kandidaten
+
+    def _teil_datum(self):
+        """Teile eines Geburtsdatums in Feldern für Tag, Monat und Jahr hinter ihrem Teil-Feldnamen ("Geburtsdatum ⇥⇥
+        Tag 2 5 ⇥⇥ Monat 0 4 ⇥⇥ Jahr 2 0 1 6"), die die Ausgabe noch zeigt – dieselbe Regel wie die Erkennung
+        (detektoren/kammfelder.py), auf OCR-Seiten mit dem Feldnamen links in derselben Reihe (Abnahme 4 AB4-01)."""
+        from .detektoren import kammfelder, struktur
+        if not kammfelder._TEIL_WERT_RE.search(self.text) and not re.search(r"(?im)^[ \t]*(?:tag|monat|jahr|tt|mm)\b",
+                                                                            self.text):
+            return
+        try:
+            ets = [et for et in struktur.etiketten(self.m) if et.arten]
+            teile = kammfelder._geteiltes_datum(self.m, ets)
+        except Exception:  # pragma: no cover - Seitenmodell ohne Lage (Attrappe)
+            return
+        for s, e, _ in teile:
+            if not (self.ist_platzhalter_bei(s, e) or self.ist_gesperrt(s, e)):
+                self.neu(s, e, "Teil eines Geburtsdatums (Tag, Monat oder Jahr)", "form")
 
     def _personenwort_namen(self):
         """Wort direkt hinter einem Personenwort ("Nachbar Zettl hat …", "Monteur Grohe kam …", "beim Mieter
@@ -2148,8 +2291,9 @@ class _Seitenpruefung:
             return
         for s, e, begleiter, beleg in personenkontext.personenwort_kandidaten(self.text, self.w.modul,
                                                                                 beruf_nachname=True):
-            if begleiter and not beleg:
-                continue                                # "dem Nachbarn Wasser": ein Substantiv
+            # auch hinter einem Begleiter ohne eigenen Namensbeleg ("Wir haben mit dem Onkel Grebl telefoniert.",
+            # "… mit dem Kunden Leser …"; Abnahme 4 AB4-11): ein unbekanntes Wort kann der Name sein (Grundsatz P1) –
+            # ausgenommen bleiben nur Wörter, die die Wissensbasis als gewöhnliche Wörter kennt (_personenwort_wort)
             if self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e):
                 continue
             if personenkontext.medizinisch(self.text[s:e], self.text, s, self.w.modul):
@@ -2157,11 +2301,18 @@ class _Seitenpruefung:
             self.neu(s, e, "möglicher Name hinter einem Personenwort (Nachbar, Monteur, Zeuge …)", "name")
         # Berufswort am Satzanfang mit Verb einer Person dahinter: "Handwerker Grohe kam am Montag." (die Erkennung
         # schwärzt dort nur Wörter mit Namensbeleg)
-        for s, e in personenkontext.berufswort_namen(self.text, self.w.modul, alle=True):
+        for s, e in personenkontext.berufswort_namen(self.text, self.w.modul, alle=True, beruf_nachname=True,
+                                                     beleg_ohne_verb=True):
             if self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e) \
                     or personenkontext.medizinisch(self.text[s:e], self.text, s, self.w.modul):
                 continue
-            self.neu(s, e, "möglicher Name hinter einem Berufswort mit Verb einer Person", "name")
+            self.neu(s, e, "möglicher Name hinter einem Berufswort (Maler, Monteur, Glaser …)", "name")
+        # Haus- oder Familienname hinter "beim"/"vom"/"zum" mit Ereignis- oder Personenkontext ("Vom Kaltl kam der
+        # Anruf …"; Abnahme 4 AB4-15)
+        if "eim " in self.text or "om " in self.text or "um " in self.text:
+            for s, e in personenkontext.hofnamen_kandidaten(self.text, self.w.modul):
+                if not (self.ist_gesperrt(s, e) or self.ist_platzhalter_bei(s, e)):
+                    self.neu(s, e, "möglicher Hausname hinter beim/vom/zum", "name")
 
     def _beruf_hinter_als(self):
         """Beruf der Wissensbasis hinter "als" in einem Satz mit einer Person (Pronomen, Personen-Etikett oder
@@ -2189,14 +2340,23 @@ class _Seitenpruefung:
                                                                 "ist_anrede_titel")) \
                         or self.w.ist_etikett(wort) or _NOMEN_ENDUNG.search(wort):
                     continue
-            rolle = wort.casefold() in _ALS_ROLLE or wort.casefold().endswith(wissen_kontext._ROLLE_ENDUNGEN)
+            rolle = wort.casefold() in _ALS_ROLLE or wissen_kontext.rolle_allein(wort)
             if rolle and not (_ROLLE_ARBEIT_RE.search(text, satz_anfang, satz_ende)
                               and not _ROLLE_VORGANG_RE.search(text, satz_anfang, satz_ende)):
                 continue                                # Rolle im Vorgang oder in einer Vertretung
-            if wissen_kontext._EHRENAMT_RE.search(text, satz_anfang, satz_ende) or \
-                    wissen_kontext.org_satz(text, satz_anfang, m.start()):
-                continue                                # Ehrenamt, Satz einer Organisation oder "wir"
-            if any(not (p.group(0) == "Sie" and _SIE_IM_SATZ_RE.match(text, p.start() - 1))
+            if (rolle and wissen_kontext._EHRENAMT_RE.search(text, satz_anfang, satz_ende)) or \
+                    (wissen_kontext.org_satz(text, satz_anfang, m.start())
+                     and not wissen_kontext._PERSON_OBJEKT_RE.search(text, satz_anfang + 1, m.start())):
+                continue                                # Ehrenamt einer Rolle, Satz einer Organisation oder "wir"
+            # das höfliche "Sie" ist die angeschriebene Person, wenn der Satz von ihrer Arbeit oder einer Einstufung
+            # nach dem Beruf spricht ("da Sie als Krankenschwester im Schichtdienst arbeiten", "Als Bäcker haben Sie
+            # Anspruch auf den Berufsgruppenrabatt") oder die weibliche Form nennt ("Als Lehrerin haben Sie …";
+            # Abnahme 4 AB4-06) – nicht in allgemeinen Sätzen ("Als Beamter haben Sie Anspruch auf Beihilfe.")
+            sie_person = bool(_ROLLE_ARBEIT_RE.search(text, satz_anfang, satz_ende)
+                              or _EINSTUFUNG_RE.search(text, satz_anfang, satz_ende)
+                              or (wort.endswith("in") and not wort.endswith(("ein", "ain")) and len(wort) >= 6))
+            if any(not (p.group(0) == "Sie" and _SIE_IM_SATZ_RE.match(text, p.start() - 1)) or
+                   (p.group(0) == "Sie" and sie_person)
                    for p in list(_PERSON_IM_SATZ_RE.finditer(text, satz_anfang, m.start()))
                    + list(_PERSON_IM_SATZ_RE.finditer(text, e, satz_ende))):
                 self.neu(s, e, "Beruf hinter „als“ im Satz über eine Person", "form")
@@ -2532,6 +2692,9 @@ class _Seitenpruefung:
             for s, e in funktion(zeile):
                 if self.ist_platzhalter_bei(o + s, o + e):
                     continue
+                if funktion is kennungsformen.zugangscode_verdacht \
+                        and kennungsformen.jahr_unter_spaltenkopf(self.text, o + s, o + e):
+                    continue                         # Baujahr in einer Tabelle ("Baujahr" als Spaltenkopf; AB4U-05)
                 if art == "kontakt" and self.org_kontext(o + s):
                     continue                         # Auftritt der Organisation (Briefkopf, Fußzeile)
                 self.neu(o + s, o + e, grund, art)
@@ -3282,6 +3445,13 @@ class _Seitenpruefung:
         if fortsetzung is not None:
             self.neu(fortsetzung[0], fortsetzung[1], f"Angabe hinter Etikett »{etikett}«", "anschrift")
 
+    def _satzende_kurzname(self, wort: str, text: str, ende: int) -> bool:
+        """Ein unbekanntes Wort aus vier Buchstaben mit Selbstlaut vor dem Punkt am Zeilen- oder Textende ("Gesehen hat
+        es der Hafl.", "… der Daxl."): das Ende des Satzes, keine Abkürzung ("Abs. 2", "Ziff. 3"; Abnahme 4 AB4-12)."""
+        return (len(wort) == 4 and wort[:1].isupper() and wort[1:].islower() and wort.isalpha()
+                and re.search(r"[aeiouyäöü]", wort[1:]) is not None and wort.lower() not in _ABK_VIER
+                and re.match(r"[ \t]*(?:\n|$)", text[ende:ende + 4]) is not None and not any(self.w.art(wort)))
+
     # Namen
     def _namen(self):
         text = self.text
@@ -3297,7 +3467,8 @@ class _Seitenpruefung:
                 stueck_art.append("titel")
             elif kern.endswith(".") and ohne_punkt.lower().replace("-", "").replace(".", "") in _AKADEMISCH:
                 stueck_art.append("akademisch")
-            elif kern.endswith(".") and (len(ohne_punkt) <= 4 or re.fullmatch(r"(?:[A-ZÄÖÜ]\.-?)+", kern)):
+            elif kern.endswith(".") and (len(ohne_punkt) <= 4 or re.fullmatch(r"(?:[A-ZÄÖÜ]\.-?)+", kern)) \
+                    and not self._satzende_kurzname(ohne_punkt, text, e):
                 stueck_art.append("abk")
             elif kern and self.w.art(kern)[7]:
                 stueck_art.append("partikel")
@@ -3699,7 +3870,17 @@ class _Seitenpruefung:
                 self.neu(s, e, "Name in einer Organisations-Spalte (Personenhinweis)", "name")
                 continue
             verb_davor = artikel_davor(i) and _VERB_ARTIKEL_DAVOR_RE.search(text, max(0, s - 90), s)
+            # "Der Saugroboter beschädigte die Stehlampe.": das Wort ist das Objekt des Verbs – für die Regeln der
+            # Abnahme 4 (AB4-12, unten) kein Beleg einer Person; die älteren Regeln (bekannter Familienname,
+            # Namensgestalt) bleiben unverändert
+            objekt = bool(verb_davor) and woerter[i - 1][2] == "die" and self._objekt_hinter_verb(verb_davor.start())
             verb_dahinter = artikel_davor(i) and _ARTIKEL_NAME_VERB_RE.match(text, e)
+            if verb_dahinter and _SUBJEKT_VOR_PARTIZIP_RE.search(verb_dahinter.group(0)):
+                # "Die Scheibe hat der Wimmer beschädigt.": Täter ist "der Wimmer" direkt vor dem Partizip, das Wort
+                # davor ist das Objekt (Abnahme 4 AB4-12)
+                verb_dahinter = None
+            if artikel_davor(i) and not verb_dahinter and _HAT_ARTIKEL_DAVOR_RE.search(text, max(0, s - 20), s):
+                verb_dahinter = _PARTIZIP_DIREKT_RE.match(text, e)     # "hat der Wimmer beschädigt"
             familienname = artikel_davor(i) and not (vn or aw or allow) and (
                 nn and not nnm or personenkontext.namensgestalt(w, self.w.modul) and not _sachwort_er(w))
             # "Der Lackner hat den Wagen gefahren.": am Satzanfang nur ein Familienname der Wissensbasis bzw. mit
@@ -3707,6 +3888,46 @@ class _Seitenpruefung:
             # auch die weibliche Form auf "-erin" eines Familiennamens ("Die Wimmerin hat angerufen.", "Die Moserin hat den
             # Wagen gefahren."; Abnahme 3 AB3-05) und ein unbekanntes Wort auf "-er" ("Der Mooshammer hat angerufen.";
             # Abnahme 3, Probe gen3) – nicht ein bekanntes Wort ("Der Vater", "Der Absender", "Der Fahrer")
+            # mit einem Verb, das nur eine Person tut ("Der Kumpfl hat den Schaden gemeldet.", "Den Hinweis gab der
+            # Pfnürl", "Der Koch hat angerufen."): auch ein unbekanntes Wort ohne "-er" und ein mehrdeutiger Familienname
+            # (Abnahme 4 AB4-12) – mit Schadenverben nicht ("Der Hagel hat den Schaden verursacht.")
+            tat_davor = artikel_davor(i) and _PERSONEN_TAT_DAVOR_RE.search(text, max(0, s - 60), s)
+            person_tat = artikel_davor(i) and (_PERSONEN_TAT_RE.match(text, e) is not None or (
+                tat_davor is not None and not (woerter[i - 1][2] == "die"
+                                               and self._objekt_hinter_verb(tat_davor.start()))))
+            verb_davor_tat = None if objekt else verb_davor
+            schadentat = artikel_davor(i) and (verb_davor_tat or verb_dahinter)
+            # fahren und rammen tut auch ein Fahrzeug ("Gefahren ist nach Angaben der Polizei der Wagen."): für ein
+            # unbekanntes Wort ohne Namensgestalt zählen nur die übrigen Verben
+            schadentat_wort = artikel_davor(i) and any(
+                v and (not _BEWEGUNG_VERB_RE.search(v.group(0)) or _AKKUSATIV_OBJEKT_RE.search(v.group(0)))
+                for v in (verb_davor_tat, verb_dahinter))
+            # ein Tier, eine Marke oder ein Modell der Wissensbasis (sachnamen: "Der Hund beschädigte die Couch.",
+            # "Die Katze hat den Vorhang beschädigt.") verursacht einen Schaden selbst – nur ein Verb, das nur eine
+            # Person tut, macht daraus einen Namen
+            sachnamen = self.w.index("sachnamen") if schadentat_wort else None
+            if sachnamen is not None and sachnamen.finde(w) \
+                    and not (self.w.frage("ist_nachname", w) or self.w.frage("ist_vorname", w)):
+                schadentat_wort = False
+            # ein Sach-Grundwort auf "-er" allein tut nichts, was nur eine Person tut ("Der Becher hat angerufen.")
+            # – auch keine Schadentat, außer es ist ein Gegenstand, der keinen Unfall verursacht ("Der Becher hat den
+            # Unfall verursacht."; Abnahme 4 AB4-12); Fahrzeuge und Maschinen ("Der Bagger hat die Leitung
+            # beschädigt.") nur mit einem Verb, das nur eine Person tut
+            sache_er = w.lower() in _ER_SACHE_ALLEIN and (
+                person_tat or (schadentat_wort and w.lower() not in _ER_FAHRZEUG_ALLEIN))
+            # die weibliche Form eines solchen Grundworts ("die Becherin") ist keine Sache: ein Familienname
+            sache_in = w.lower().endswith("in") and w.lower()[:-2] in _ER_SACHE_ALLEIN \
+                and (person_tat or schadentat or verb_davor or verb_dahinter)
+            unbekannt = not (vn or aw or allow) and len(w) >= 4 and w.isalpha() and not w.isupper() \
+                and (sache_er or (not _sachwort_er(w) and not self._rollen_kompositum(w))) \
+                and not _NOMEN_ENDUNG.search(w) \
+                and not any(self.w.frage(f, w) for f in ("ist_beruf", "ist_ort", "ist_anrede_titel")) \
+                and not self.w.ist_etikett(w) and not personenkontext.PERSONENWORT_DAVOR_RE.search(w + " ") \
+                and not self._kompositum(w)
+            if sache_in or (unbekannt and not nn and (person_tat or (schadentat_wort and not self._wort_harmlos(w)))) \
+                    or (nnm and not aw and (person_tat or (schadentat and self.w.frage("ist_beruf", w)))):
+                self.neu(s, e, "Familienname mit Artikel (mundartlich)", "name")
+                continue
             satzanfang = artikel_davor(i) and woerter[i - 1][2] in ("Der", "Die") and verb_dahinter \
                 and (familienname or (not (vn or aw or allow) and self._name_auf_er(w)))
             if artikel_davor(i) and (woerter[i - 1][2] in ("der", "die") or satzanfang) and not (vn or aw or allow) \
@@ -3731,8 +3952,12 @@ class _Seitenpruefung:
             gruss = (z_wort is not None and z_wort.id in gruss_zeilen and not w.isupper()
                      and not self._org_zeile(z_wort) and not self._wort_harmlos(w)
                      # Organisationseinheit unter dem Gruß ("Kundenservice Traunstein"; Abnahme 2 A2-06) – ein
-                     # bekannter Name daneben bleibt ein Unterzeichner
-                     and not (not (vn or nn) and personenkontext.ORG_EINHEIT_RE.search(self.zeilen_text(z_wort))))
+                     # bekannter Name daneben bleibt ein Unterzeichner; ein unbekanntes Wort neben dem
+                     # Organisationswort ("Agentur Moik", "Team Holzwohner") ist Firma oder Familienname und wird
+                     # gemeldet (Abnahme 4 AB4-09) – nur das Organisationswort selbst und ein Ort nicht
+                     and not (not (vn or nn) and personenkontext.ORG_EINHEIT_RE.search(self.zeilen_text(z_wort))
+                              and (personenkontext.ORG_EINHEIT_RE.fullmatch(w) or self.w.frage("ist_ort", w)
+                                   or self.w.frage("ist_allerweltswort", w))))
             geboren = geburtsname(i)
             rolle = s in wohn_starts or partei(i) or name_amt(i)
             # ein Name der Wissensbasis direkt hinter "laut"/"gemäß" ("laut Vorwerk war der Keller trocken"): die Quelle
@@ -3755,8 +3980,11 @@ class _Seitenpruefung:
             if artikel_davor(i) and not titel and self.w.frage("ist_beruf", w):
                 continue                                # "Der Glaser [PERSON C] hat …": Beruf, kein Name
             if platzhalter and not (vn or nn or titel) and self.w.frage("ist_beruf", w) \
-                    and self.neben_platzhalter(s, e, _PERSONEN_PLATZHALTER_RE)[0] >= e:
-                continue                                # "Monteur [PERSON A] kam …": Beruf vor dem Namen, kein Name
+                    and ("-" not in w or self.w.frage("ist_beruf", w.rsplit("-", 1)[1])) \
+                    and self.platzhalter_rechts(s, e, self.neben_platzhalter(s, e, _PERSONEN_PLATZHALTER_RE)):
+                # "Monteur [PERSON A] kam …": Beruf vor dem Namen, kein Name – nicht ein Doppelname mit einem
+                # Berufsteil vorn ("[PERSON A] Bauer-Hinterseer hat angerufen."; Abnahme 4 AB4-14)
+                continue
             if not (titel or platzhalter or etikett or rolle) and (vn or nn) and organisation(i):
                 continue                                # "Adam Riese", "Versicherer" ⏎ "Roland": ein Versicherer
             if vorname_stark(i) or nachname_stark(i) or doppelname(i):
@@ -3808,6 +4036,15 @@ class _Seitenpruefung:
                 self.neu(woerter[i - 1][0], woerter[i - 1][1], "Vorname vor einem Familiennamen (nach Gestalt)", "name")
                 self.neu(s, e, "Familienname nach Gestalt hinter einem Vornamen", "name")
                 continue
+            if aw and not allow and k > 0 and stuecke[k - 1][2] in ("Herr", "Herrn", "Frau") \
+                    and re.fullmatch(r"[ ]{1,2}", text[stuecke[k - 1][1]:s] or "x") \
+                    and not self.w.frage("ist_beruf", w) and not personenkontext.PERSONENWORT_DAVOR_RE.search(w + " ") \
+                    and not text[e:e + 2].lstrip(")").startswith(":") and not self._ueber_zeilen(s, e):
+                # ein Allerweltswort direkt hinter "Herr"/"Frau" ("Fahrzeug gehört Herrn Halter"): als Familienname
+                # gemeldet – die Erkennung schwärzt dort nur Namen (Abnahme 4 AB4-13); nicht ein am Zeilenende
+                # getrenntes Wort ("Herr Versiche-" ⏎ "rer hat geschrieben.": Silbentrennung eines gewöhnlichen Worts)
+                self.neu(s, e, "Familienname hinter Herr/Frau (zugleich gewöhnliches Wort)", "name")
+                continue
             if aw or allow or len(w) < 4 or _NOMEN_ENDUNG.search(w) or self.w.ist_etikett(w) or firma_danach(i) \
                     or w.casefold() in kennungsformen.KEIN_NAMENSWERT:
                 continue                                # "Geburtsname: Entfällt": ein leeres Feld
@@ -3817,13 +4054,15 @@ class _Seitenpruefung:
             if re.search(r"(?i)" + _STRASSEN_ENDUNG + r"$", w):
                 continue                                # "Hauptstr" – Anschrift, nicht Name
             ocr_wort = self._quelle(s) != "text"
-            if ocr_wort and not (5 <= len(w) <= 14):
+            # die Länge eines Doppelnamens je Teil ("Bauer-Hinterseer"; Abnahme 4 AB4-14)
+            teil_laenge = max(len(t) for t in w.split("-"))
+            if ocr_wort and not (5 <= len(w) and teil_laenge <= 14):
                 continue                                # OCR-Bruchstücke ("Fran", "Versicherurigsnehmer")
-            if titel or (platzhalter and len(w) <= 14) or (etikett and not ocr_wort) or (rolle and not ocr_wort):
+            if titel or (platzhalter and teil_laenge <= 14) or (etikett and not ocr_wort) or (rolle and not ocr_wort):
                 self.neu(s, e, "unbekannter Eigenname im Personenkontext", "name")
             elif geboren:
                 self.neu(s, e, "möglicher Geburtsname (hinter »geb.«)", "name")
-            elif gruss and len(w) <= 14:
+            elif gruss and teil_laenge <= 14:
                 self.neu(s, e, "möglicher Name im Unterschriftsblock", "name")
 
     def _unterschriftszeilen(self) -> set:
@@ -4083,6 +4322,13 @@ class _Seitenpruefung:
             return False                                # Name der Wissensbasis – hier steht eine Person
         return bool(tit or part or aw or allow or self.w.ist_etikett(wort))
 
+    def _objekt_hinter_verb(self, verb_start: int) -> bool:
+        """Steht vor dem Verb bei verb_start am Satz- bzw. Zeilenanfang ein Subjekt im Nominativ (_SUBJEKT_VORFELD_RE:
+        "Der Saugroboter", "Der neue Hund des Nachbarn", "Er")? Dann ist "die X" hinter dem Verb sein Objekt."""
+        anfang = max(self.text.rfind(c, 0, verb_start) for c in ".!?;:\n") + 1
+        vorfeld = self.text[anfang:verb_start].lstrip(" \t\"„“»«")
+        return bool(vorfeld) and _SUBJEKT_VORFELD_RE.fullmatch(vorfeld) is not None
+
     def _wort_harmlos(self, wort: str) -> bool:
         """Einzelwort ohne Ziffern: kein möglicher Name (siehe lesung_harmlos)? Bekanntes Wort, sonst – wenn es kein
         Name der Wissensbasis ist – kleingeschrieben, Hauptwort-Endung, Beruf oder Wort einer Berufsangabe ("Leiter",
@@ -4227,13 +4473,16 @@ def _felder_pruefen(pruefung: _Seitenpruefung, felder) -> None:
 
 
 def _seite_pruefen(m, wissen: _Wissen, platzhalter=(), nie=(), abgewaehlt=(), profil="hoch", felder=(),
-                   schwaerzungen=(), scan_seite=None, ausrichtung=None, aktive=None, kammfelder=()) -> list:
+                   schwaerzungen=(), scan_seite=None, ausrichtung=None, aktive=None, kammfelder=(),
+                   personen_schwaerzungen=()) -> list:
     """Alle Regeln einer Seite. scan_seite: die PDF-Seite einer Scan-Seite (OCR der ganzen Seite) – dann zusätzlich
     die Tinte in Unterschriftsblöcken und neben Personenangaben (_unterschrift_pruefen; deren Verdacht steht vorn)
     und gefüllte Kammfelder (_kammfelder_pruefen; kammfelder: die des Originals, falls bekannt);
-    ausrichtung: (Winkel, Schräglage) der OCR-Wörter, falls bekannt (10-Tupel)."""
+    ausrichtung: (Winkel, Schräglage) der OCR-Wörter, falls bekannt (10-Tupel); personen_schwaerzungen: die
+    Schwärzungsrechtecke, in denen die Kontroll-OCR einen verlesenen Personen-Platzhalter las."""
     pruefung = _Seitenpruefung(m, wissen, platzhalter, nie, abgewaehlt, profil, schwaerzungen, ausrichtung=ausrichtung,
                                aktive=aktive)
+    pruefung.personen_schwaerzungen = [fitz.Rect(r) for r in personen_schwaerzungen or ()]
     pruefung.pruefen()
     _felder_pruefen(pruefung, felder)
     aus = [Verdacht(m.nr, s, e, m.text[s:e], grund, _rechtecke(m, s, e)) for s, e, grund in _zusammenfassen(pruefung)]
@@ -5168,6 +5417,29 @@ def _kamm_etikett(woerter: list, feld: dict, felder: list) -> str:
     return " ".join(w[4] for w in zeile)
 
 
+def _kamm_uebergeordnet(woerter: list, feld: dict, felder: list) -> str:
+    """Text vor einem Feld mit Teil-Feldnamen (Tag, Monat, Jahr; kammraster.teil_etikett): alle Wörter links in
+    derselben Zeile außerhalb der Felder ("Geburtsdatum Tag Monat Jahr"), sonst die beiden Zeilen darüber – der
+    übergeordnete Feldname bestimmt, ob die Teile Personenangaben sind (Abnahme 4 AB4-01)."""
+    x0, y0, _, y1 = kammraster.kopfkasten(feld)
+    hoehe = max(y1 - y0, 4.0)
+    frei = [w for w in woerter if not any(kammraster.im_feld(f, (w[0] + w[2]) / 2, (w[1] + w[3]) / 2) for f in felder)]
+    links = sorted((w for w in frei if y0 - 0.3 * hoehe <= (w[1] + w[3]) / 2 <= y1 + 0.3 * hoehe
+                    and w[2] <= x0 + 1.5), key=lambda w: w[0])
+    oben = sorted((w for w in frei if w[3] <= y0 + 1.5 and y0 - w[3] <= 3.0 * hoehe and w[0] <= x0 + hoehe),
+                  key=lambda w: (w[1], w[0]))
+    return " ".join(w[4] for w in links + oben)
+
+
+# Feldname mit einer Einheit oder Summe ("Wohnfläche (m²)", "Progression in %", "Unfallrente monatlich",
+# "Invaliditätsgrundsumme"): ein reiner Zahlen- oder Betragswert darin ist keine Personenangabe (Abnahme 4 AB4U-07)
+_KAMM_MENGE_ETIKETT_RE = re.compile(r"(?i)m²|m2\b|qm\b|%|prozent|progression|\beur\b|€|summe|betrag|rente\b|"
+                                    r"rente[ \t]|beitrag|fläche|flaeche|anzahl|menge|monatlich|jährlich|jaehrlich|"
+                                    r"stück|stueck|leistung|kw\b|ps\b")
+_KAMM_GEBURT_RE = re.compile(r"(?i)geb(?:urt|\.|\b)")
+_KAMM_ZAHLENWERT_RE = re.compile(r"\d{1,3}(?:[.]?\d{3}){0,2}(?:[,.]\d{1,2})?%?|\d{1,6}")
+
+
 def _kammfelder_pruefen(seite, m, schwaerzungen, pruefung, gemeldet=(), original=(), frei=None) -> list:
     """Gefüllte Kammfelder der Ausgabe, deren Inhalt nicht geschwärzt ist (kammraster.py, eigenes Rendering mit
     KAMM_DPI): Verdacht, wenn der Feldname nach Personenangaben aussieht (Person, Anschrift, Kontakt, Kennung,
@@ -5232,12 +5504,26 @@ def _kammfelder_pruefen(seite, m, schwaerzungen, pruefung, gemeldet=(), original
             continue
         etikett = _kamm_etikett(woerter, feld, seiten_felder)
         art = _kamm_etikett_art(pruefung.w, etikett)
+        if art != "person" and kammraster.teil_etikett(etikett):
+            # "Geburtsdatum ⇥ Tag [..] Monat [..] Jahr [....]": der übergeordnete Feldname zählt (AB4-01); "Datum"
+            # allein nur unter einem Geburts-Feldnamen ("Geburt ⇥ Datum [..] Ort [..]", nicht "Name … Datum")
+            ueber = _kamm_uebergeordnet(woerter, feld, seiten_felder)
+            if _kamm_etikett_art(pruefung.w, ueber) == "person" and (kammraster.teil_ohne_datum(etikett)
+                                                                     or _KAMM_GEBURT_RE.search(ueber)):
+                art = "person"
         gelesen = all(any(min(r.x1, w[2]) - max(r.x0, w[0]) >= 0.4 * r.width
                           and min(r.y1, w[3]) - max(r.y0, w[1]) >= 0.3 * r.height for w in woerter) for r in sichtbar)
         wert = "".join(w[4] for w in woerter
                        if kammraster.im_feld(feld, (w[0] + w[2]) / 2, (w[1] + w[3]) / 2))
+        if gelesen and kammraster.ausfuellhinweis(wert):
+            continue                                  # vorgedruckter Hinweis ("TTMMJJJJ") oder Kreuzchen (AB4U-02/03)
         if art == "person":
             grund = GRUND_KAMMFELD
+        elif art is None and gelesen and _KAMM_MENGE_ETIKETT_RE.search(etikett) \
+                and _KAMM_ZAHLENWERT_RE.fullmatch(re.sub(r"[\s|]+", "", wert)):
+            if frei is not None:
+                frei.append(feld)                     # frei wie ein Wert in Form seines Feldnamens: auch die
+            continue                                  # Textregeln melden "Wohnfläche (m²)" mit "120" nicht (AB4U-07)
         elif kammraster.wert_ohne_personenbezug(etikett, wert):
             if frei is not None:
                 frei.append(feld)
@@ -5295,6 +5581,19 @@ def _lesung_unplausibel(woerter) -> bool:
     können, liest die Prüfung sonst denselben Salat, und keine Regel greift verlässlich."""
     bewertung = _ocr._lesung_bewerten([w[4] for w in woerter])
     return bewertung["tokens"] >= _ocr.MIN_TOKENS_WARNUNG and not _ocr._plausibel(bewertung)
+
+
+def _personen_schwaerzungen(woerter: list, schwaerzungen: list) -> list:
+    """Schwärzungsrechtecke, in denen die Kontroll-OCR einen (verlesenen) Personen-Platzhalter liest ("IPERSONAI",
+    "|PERSON A|") – vor _ohne_platzhalter, das diese Wörter entfernt (Abnahme 4 AB4-14)."""
+    aus = []
+    for r in schwaerzungen:
+        for w in woerter:
+            mx, my = (w[0] + w[2]) / 2, (w[1] + w[3]) / 2
+            if r.x0 <= mx <= r.x1 and r.y0 <= my <= r.y1 and _OCR_PERSONEN_PLATZHALTER_RE.search(str(w[4])):
+                aus.append(fitz.Rect(r))
+                break
+    return aus
 
 
 def _ohne_platzhalter(woerter: list, boxen: list) -> list:
@@ -5382,8 +5681,10 @@ def restrisiko_pruefen(ausgabe_pfad, ocr=None, platzhalter=None, profil: str = "
                         for bereich in bereiche:
                             woerter += _ocr_woerter_holen(ocr, pfad, nr, clip=fitz.Rect(bereich))
             schwaerzungen = _schwaerzungsrechtecke(seite)
+            personen_schwaerzungen = []
             if modus in ("seite", "bilder"):
                 if woerter:
+                    personen_schwaerzungen = _personen_schwaerzungen(woerter, schwaerzungen)
                     woerter = _ohne_platzhalter(woerter, _platzhalter_boxen(seite, nr, platzhalter) + schwaerzungen)
                 if modus == "seite" and len(woerter or []) < SCAN_MIN_WOERTER:
                     # (fast) nichts gelesen – auch ganz ohne OCR (woerter None): Verdacht, außer die Seite ist
@@ -5401,7 +5702,8 @@ def restrisiko_pruefen(ausgabe_pfad, ocr=None, platzhalter=None, profil: str = "
             verdacht += _seite_pruefen(m, w, platzhalter or (), nie or (), abgewaehlt_je_seite.get(nr, ()), profil,
                                        felder_je_seite.get(nr, ()), schwaerzungen,
                                        scan_seite=seite if modus == "seite" else None, ausrichtung=ausrichtung,
-                                       aktive=aktive, kammfelder=(kammfelder or {}).get(nr) or ())
+                                       aktive=aktive, kammfelder=(kammfelder or {}).get(nr) or (),
+                                       personen_schwaerzungen=personen_schwaerzungen)
     finally:
         doc.close()
     return verdacht

@@ -6234,6 +6234,7 @@ Regelsatz
 Regelung
 Regelungen
 Regelversorgung
+Regen
 Regenfälle
 Regenschutz
 Regierungsbeteiligung
@@ -8833,6 +8834,7 @@ Wäscheservice
 Wäschetrockner
 Waschküche
 Waschmaschine
+Wasser
 Wasseraustritt
 Wasserbehörde
 Wasserfall

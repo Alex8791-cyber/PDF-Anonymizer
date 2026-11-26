@@ -2147,6 +2147,24 @@ def _kontroll_woerter(lauf: _Lauf, ausgabe: Path, nr: int, rects: list):
     return [w for w in woerter if not _innerhalb(fitz.Rect(w[:4]), rects)]
 
 
+def _kammsuche_vorgeben(lauf: _Lauf, ausgabe: Path, seiten) -> None:
+    """Kontroll-OCR ohne Kammfeld-Suche für die Seiten, auf denen die OCR des Originals nachweislich kein Kammfeld
+    fand (Abnahme 4 AB4U-08: die Suche kostete jede Scan-Seite ein zweites Mal). Unbekannt (Seite nicht im
+    Zwischenspeicher des Dienstes) heißt: suchen wie bisher. Die Prüfung sucht in der Ausgabe weiter selbst
+    (restrisiko._kammfelder_pruefen)."""
+    vorgeben = getattr(lauf.ocr, "kammsuche_vorgeben", None)
+    bekannt = getattr(lauf.ocr, "kammfelder_falls_bekannt", None)
+    if vorgeben is None or bekannt is None or not getattr(lauf, "pdf_pfad", None):
+        return
+    for nr in seiten:
+        try:
+            felder = bekannt(lauf.pdf_pfad, nr, OCR_DPI)
+            if felder is not None:
+                vorgeben(ausgabe, nr, bool(felder))
+        except Exception:
+            continue
+
+
 def _selbstkontrolle(lauf: _Lauf, ausgabe: Path) -> list:
     """Sucht alle angehakten Funde in der AUSGABE – mit demselben Seitenmodell und demselben Vergleicher
     wie Analyse und Schwärzung (alle Schreibweisen, Ganzwort; Scan-Seiten per Kontroll-OCR). Platzhalter
@@ -2163,6 +2181,7 @@ def _selbstkontrolle(lauf: _Lauf, ausgabe: Path) -> list:
         seiten = [nr for nr, modus in lauf.ocr_modus.items()
                   if modus == "seite" and (lauf.rects_je_seite.get(nr) or lauf.kategorien_je_seite.get(nr))]
         if seiten:
+            _kammsuche_vorgeben(lauf, ausgabe, seiten)
             try:
                 vorab(ausgabe, seiten, OCR_DPI, winkel={nr: lauf.winkel(nr) for nr in seiten})
             except Exception:

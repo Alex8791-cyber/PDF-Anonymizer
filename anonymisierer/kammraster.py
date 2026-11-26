@@ -15,11 +15,13 @@ Erkennung (numpy, auf einem Bild mit ERKENNUNG_DPI, Minimum je Pixelblock – d�
   3. Kästchen: Folgen von Wänden gleicher Teilung (TEILUNG_MIN_MM bis TEILUNG_MAX_MM, ±TEILUNG_TOLERANZ) und
      ähnlicher Höhe; Gruppenlücken (IBAN in Vierergruppen) erlaubt. Bruchstücke derselben Zeile (Ober- und
      Unterkante, unterbrochene Linien und Wände) werden verbunden, fehlende Kästchen auf dem Raster ergänzt; ein Feld
-     hat mindestens MIN_KAESTEN Kästchen.
+     hat mindestens MIN_KAESTEN Kästchen – zwei nur mit einem Feld derselben Bauart in seiner Zeile (geteiltes Datum
+     „Tag [..] Monat [..] Jahr [....]“, Hausnummer neben der Straße).
   4. Gegenkante (geschlossene Kästchen): erkannte Linie in der erwarteten Lage oder Tinte entlang der Kante.
   5. Ohne durchgehende Linie (Fax 204 x 98 dpi: dünne Linien kommen nur stückweise an): Wände ab WAND_MIN_MM, gleich
      hoch und in regelmäßiger Teilung, je Kästchen Tinte an Ober- oder Unterkante (_wandfelder).
-Nicht erkannt (bewusst): einzelne Kästchen und Paare (Ankreuzfelder), unregelmäßige Tabellen, Raster ohne Linie.
+Nicht erkannt (bewusst): einzelne Kästchen und Paare ohne gleichartiges Feld daneben (Ankreuzfelder), unregelmäßige
+Tabellen, Raster ohne Linie.
 
 Öffentliche Schnittstelle:
     kammfelder_finden(grau, dpi) -> [Kammfeld]          Pixel des Bilds (2D uint8, Schrift dunkel)
@@ -71,7 +73,9 @@ TEILUNG_MAX_MM = 12.0
 TEILUNG_TOLERANZ = 0.15      # Abweichung der Kästchenbreiten von ihrem Median
 HOEHE_TOLERANZ = 0.30        # Abweichung benachbarter Wandhöhen
 MIN_KAESTEN = 3              # ein Feld hat mindestens drei Kästchen …
-MIN_TEIL = 2                 # … Bruchstücke ab zwei Kästchen zählen nur, wenn sie sich zu einem Feld verbinden
+MIN_TEIL = 2                 # … Bruchstücke ab zwei Kästchen zählen nur, wenn sie sich zu einem Feld verbinden oder
+                             # ein Feld derselben Bauart in ihrer Zeile steht (_zeilen_geschwister)
+ZWEIER_TOLERANZ = 0.2        # Teilung und Kästchenhöhe eines Zweierfelds und seines Nachbarn: höchstens so verschieden
 KURZ_ANTEIL = 0.8            # Wände kürzer als 0,8 x Teilung: Kamm (offene Seite, die Zeichen ragen hinaus)
 TINTE_ABSTAND = 45           # Tinte: so viel dunkler als das Papier (75. Perzentil) …
 TINTE_MAX = 185              # … und höchstens so hell
@@ -115,11 +119,34 @@ def verfuegbar() -> bool:
 
 
 def _verkleinern(np, grau, faktor: int):
+    """Minimum je Block faktor x faktor. Über versetzte Teilbilder statt reshape(...).min(axis=(1, 3)) – das Ergebnis
+    ist dasselbe, die Laufzeit bei 300 dpi ein Zehntel (Abnahme 4 AB4U-08: die Hälfte der Suche)."""
     if faktor <= 1:
         return grau
     h, w = grau.shape
     h2, w2 = h // faktor, w // faktor
-    return grau[:h2 * faktor, :w2 * faktor].reshape(h2, faktor, w2, faktor).min(axis=(1, 3))
+    g = grau[:h2 * faktor, :w2 * faktor]
+    aus = np.array(g[0::faktor, 0::faktor])
+    for i in range(faktor):
+        for j in range(faktor):
+            if i or j:
+                np.minimum(aus, g[i::faktor, j::faktor], out=aus)
+    return aus
+
+
+def _perzentil_75(np, bild) -> float:
+    """np.percentile(bild, 75) (lineare Interpolation) für ein uint8-Bild über das Histogramm – ohne Sortieren."""
+    if bild.dtype != np.uint8:
+        return float(np.percentile(bild, 75))
+    zaehlung = np.cumsum(np.bincount(bild.ravel(), minlength=256))
+    n = int(zaehlung[-1])
+    if n == 0:
+        return 0.0
+    pos = 0.75 * (n - 1)
+    k = int(pos)
+    unten = int(np.searchsorted(zaehlung, k, side="right"))
+    oben = int(np.searchsorted(zaehlung, min(k + 1, n - 1), side="right"))
+    return float(unten + (pos - k) * (oben - unten))
 
 
 def _laeufe(np, maske):
@@ -134,10 +161,10 @@ def _laeufe(np, maske):
 
 
 def _waagerecht_schliessen(np, maske, luecke: int):
-    """Lücken bis `luecke` Pixel in waagerechten Läufen füllen."""
+    """Lücken bis `luecke` Pixel in waagerechten Läufen füllen (ein Bild schmaler als die Lücke bleibt, wie es ist)."""
     aus = maske.copy()
     w = maske.shape[1]
-    for k in range(2, luecke + 2):           # k = Abstand zweier Tintenpixel über die Lücke
+    for k in range(2, min(luecke + 2, w)):   # k = Abstand zweier Tintenpixel über die Lücke
         beide = np.zeros_like(maske)
         beide[:, :w - k] = maske[:, :w - k] & maske[:, k:]
         for j in range(1, k):
@@ -444,7 +471,9 @@ def kammfelder_finden(grau, dpi: float) -> list:
     faktor = max(1, int(round(dpi / ERKENNUNG_DPI)))
     klein = _verkleinern(np, grau, faktor)
     px_mm = dpi / faktor / 25.4
-    papier = float(np.percentile(klein, 75))
+    if klein.ndim != 2 or min(klein.shape) < 2 or klein.shape[1] < LINIE_MIN_MM * px_mm:
+        return []                                 # kleiner als eine Linie: kein Kammfeld (Abnahme 4 AB4U-10)
+    papier = _perzentil_75(np, klein)
     tinte = klein < min(TINTE_MAX, papier - TINTE_ABSTAND)
     linien = _linien(np, tinte, px_mm)
     kandidaten = []
@@ -509,9 +538,32 @@ def kammfelder_finden(grau, dpi: float) -> list:
         felder.append(Kammfeld(kaesten_f, rahmen, [], waende_f, linien_f, ""))
     verbunden = _felder_verbinden(sorted(felder, key=lambda k: (k.rahmen[0], k.rahmen[1])))
     verbunden = _felder_verbinden([_verlaengern(np, tinte, k, f) for k in verbunden])
-    return [k for k in verbunden if len(k.kaesten) >= MIN_KAESTEN
-            and (_wandbeleg(k) >= WAND_BELEG_ANTEIL or (k.zwei_linien and _geschwaerzt(np, grau, k)))
-            and (k.zwei_linien or k.offen or len(k.kaesten) >= MIN_KAESTEN_WAND)]
+    gueltig = [k for k in verbunden if len(k.kaesten) >= MIN_TEIL
+               and (_wandbeleg(k) >= WAND_BELEG_ANTEIL or (k.zwei_linien and _geschwaerzt(np, grau, k)))
+               and (k.zwei_linien or k.offen or len(k.kaesten) >= MIN_KAESTEN_WAND)]
+    return [k for k in gueltig if len(k.kaesten) >= MIN_KAESTEN or _zeilen_geschwister(k, gueltig)]
+
+
+def _zeilen_geschwister(feld, felder: list) -> bool:
+    """Steht in derselben Zeile ein anderes Feld derselben Bauart (Teilung, Kästchenhöhe, offen/zwei Linien)? Dann zählt
+    auch ein Feld aus zwei Kästchen – die Teile eines geteilten Datums („Tag [..] Monat [..] Jahr [....]“) oder eine
+    Hausnummer neben der Straße (Abnahme 4 AB4-01: zwei Kästchen „Tag“ und „Monat“ blieben ungelesen und still)."""
+    t = _teilung(feld)
+    y0, y1 = _hoehe(feld)
+    h = y1 - y0
+    if t <= 0 or h <= 0:
+        return False
+    for g in felder:
+        if g is feld or g.offen != feld.offen or g.zwei_linien != feld.zwei_linien:
+            continue
+        tg = _teilung(g)
+        g0, g1 = _hoehe(g)
+        hg = g1 - g0
+        if tg <= 0 or hg <= 0 or abs(tg - t) > ZWEIER_TOLERANZ * t or abs(hg - h) > ZWEIER_TOLERANZ * h:
+            continue
+        if min(y1, g1) - max(y0, g0) >= 0.6 * min(h, hg):
+            return True
+    return False
 
 
 def _geschwaerzt(np, grau, feld) -> bool:
@@ -722,7 +774,7 @@ def fuellung_bestimmen(grau, felder, dpi: float) -> list:
     np = _np()
     if np is None or not felder:
         return felder
-    papier = float(np.percentile(grau, 75))
+    papier = _perzentil_75(np, grau)
     schwelle = min(TINTE_MAX, papier - TINTE_ABSTAND)
     px_mm = dpi / 25.4
     aus = []
@@ -802,6 +854,50 @@ _OHNE_PERSONENBEZUG = (
 )
 _PERSONEN_WORT = re.compile(r"(?i)geburt|geb\.|name|anschrift|straße|strasse|telefon|mail|iban|konto|kennzeichen|"
                             r"versicherungsn|vertragsn|steuer|ausweis|führerschein|fuhrerschein|ort\b|plz")
+# Feldname eines Teils einer Angabe, die erst der übergeordnete Feldname bestimmt: ein Datum in Feldern für Tag, Monat
+# und Jahr ("Geburtsdatum ⇥ Tag [2|5] Monat [0|4] Jahr [2|0|1|6]"; Abnahme 4 AB4-01) – "Jahr" allein ist kein Baujahr
+_TEIL_ETIKETT_RE = re.compile(r"(?i)^(?:tag|monat|jahr|tt|mm|jj|jjjj|datum)\.?$")
+# ein Teil ohne eigenes Datum ("Jahr" mit "2016"): ohne übergeordneten Feldnamen nie frei; "Datum" allein ("Ort ⇥ Datum")
+# ist ein Datum wie "Antragsdatum" – nur unter einem Geburts-Feldnamen eine Personenangabe (AB4-01)
+_TEIL_OHNE_DATUM_RE = re.compile(r"(?i)^(?:tag|monat|jahr|tt|mm|jj|jjjj)\.?$")
+# vorgedruckter Ausfüllhinweis in einem leeren Feld ("TTMMJJJJ", "TT.MM.JJJJ", "MM/JJ"): kein Wert (AB4U-03)
+_AUSFUELLHINWEIS_RE = re.compile(r"(?i)^(?:t{1,2}[.\-/]?m{1,2}[.\-/]?(?:j{2}|j{4}|y{2}|y{4})|m{1,2}[.\-/]?(?:j{2}|j{4})|"
+                                 r"(?:j{2}|j{4}|y{2}|y{4})|t{1,2}[.\-/]?m{1,2}|d{1,2}[.\-/]?m{1,2}[.\-/]?(?:y{2}|y{4}))$")
+# … mit Jahresteil (TTMMJJJJ, MMJJ, JJJJ): nur so darf ein Rest einer Kästchenwand dazwischen stehen ("TTMMJJJIJ" bei
+# 300 dpi JPEG) – ein Name wie „TIM“ wird ohne sein „I“ nicht zum Hinweis „TM“
+_AUSFUELLHINWEIS_JAHR_RE = re.compile(r"(?i)^(?:t{1,2}[.\-/]?m{1,2}[.\-/]?(?:j{2}|j{4}|y{2}|y{4})|m{1,2}[.\-/]?(?:j{2}|j{4})|"
+                                      r"j{4}|y{4}|d{1,2}[.\-/]?m{1,2}[.\-/]?(?:y{2}|y{4}))$")
+_WANDREST_RE = re.compile(r"[Il1!]")
+# ein Kreuzchen ist ein Ankreuzwert, kein Feldinhalt (AB4U-02)
+_KREUZCHEN = frozenset("x X ✓ ✔ ✗ ✘ ☒ ☑ ⊠".split())
+
+
+def teil_etikett(feldname: str) -> bool:
+    """Ist der Feldname nur der Teil einer Angabe (Tag, Monat, Jahr, TT, MM, JJJJ, Datum) – die Art bestimmt dann der
+    übergeordnete Feldname davor bzw. darüber ("Geburtsdatum ⇥ Tag … Monat … Jahr …")?"""
+    name = " ".join(re.sub(r"[(\[{][^()\[\]{}]{0,40}[)\]}]?", " ", feldname or "").replace(":", " ").split())
+    return bool(_TEIL_ETIKETT_RE.match(name))
+
+
+def teil_ohne_datum(feldname: str) -> bool:
+    """Teil-Feldname ohne eigenes Datum (Tag, Monat, Jahr, TT, MM, JJJJ – nicht „Datum“): jeder übergeordnete
+    Feldname für Personenangaben macht ihn zur Personenangabe; „Datum“ nur ein Geburts-Feldname (AB4-01)."""
+    name = " ".join(re.sub(r"[(\[{][^()\[\]{}]{0,40}[)\]}]?", " ", feldname or "").replace(":", " ").split())
+    return bool(_TEIL_OHNE_DATUM_RE.match(name))
+
+
+def ausfuellhinweis(wert: str) -> bool:
+    """Ist der gelesene Inhalt eines Felds ein vorgedruckter Ausfüllhinweis ("TTMMJJJJ", "TT.MM.JJJJ") oder ein
+    Kreuzchen – kein Wert, den es zu schwärzen oder zu melden gibt?"""
+    kompakt = re.sub(r"[\s|]+", "", wert or "")
+    if not kompakt:
+        return False
+    if kompakt in _KREUZCHEN or _AUSFUELLHINWEIS_RE.match(kompakt):
+        return True
+    # die Texterkennung liest Reste der Kästchenwände als I, l, 1 oder ! mit ("TTMMJJJIJ")
+    bereinigt = _WANDREST_RE.sub("", kompakt)
+    return 1 <= len(kompakt) - len(bereinigt) <= 2 and len(bereinigt) >= 4 \
+        and bool(_AUSFUELLHINWEIS_JAHR_RE.match(bereinigt))
 
 
 def wert_ohne_personenbezug(feldname: str, wert: str) -> bool:
@@ -809,8 +905,8 @@ def wert_ohne_personenbezug(feldname: str, wert: str) -> bool:
     Tarifgruppe, Baujahr …, nicht „Geburtsdatum“ oder „Name“) UND der Wert hat genau dessen Form?"""
     name = " ".join(re.sub(r"[(\[{][^()\[\]{}]{0,40}[)\]}]?", " ", feldname or "").replace(":", " ").split())
     kompakt = re.sub(r"[\s|]+", "", wert or "")
-    if not name or not kompakt or _PERSONEN_WORT.search(name):
-        return False
+    if not name or not kompakt or _PERSONEN_WORT.search(name) or _TEIL_OHNE_DATUM_RE.match(name):
+        return False                              # "Jahr" allein: erst der Feldname davor sagt, wessen Jahr
     for etikett, form in _OHNE_PERSONENBEZUG:
         if etikett.search(name):
             if re.fullmatch(form, kompakt) is None:

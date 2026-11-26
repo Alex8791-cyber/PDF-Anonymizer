@@ -2770,6 +2770,51 @@ _NACH_REGEL_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:richte\w{0,2}[ \t]+s
                                   r"einstufung|rückstufung|eingestuft|berechnung|berechnet|bewertung|bewertet|haftung|"
                                   r"anspruch|verweist|geregelt|bestimmt|vorgesehen|entschädigung|ersatz)"
                                   r"(?![\wäöüß])[^\n.;:]{0,40}$")
+# Verweis auf ein Dokument vor dem Quadrat ("laut Liste in", "gemäß Lageplan", "siehe Plan", "Stand:"): mit einem Wohnwort
+# oder einer Person im Satz ("Herr Gruber wohnt laut Liste in S 2, 3.", "Die Wohnung liegt laut Lageplan in H 7, 21.")
+# bzw. einer Wohnlage dahinter ("Stand: U 1, 7, 2. OG links") kein Gegenbeleg (Abnahme 4 AB4-07)
+_QUADRAT_VERWEIS_DAVOR_RE = re.compile(
+    r"(?i)(?<![\wäöüß])(?:insbesondere|gemäß|gem\.|laut|lt\.|siehe|vgl\.|stand|liste|katalog|skizze|lageskizze|"
+    r"lageplan|plan|grundriss)[ \t.:]*(?:(?:die|der|den|dem|des|in|im|nr\.?)[ \t]+)*$")
+_QUADRAT_WOHNSATZ_RE = re.compile(r"(?i)(?<![\wäöüß])(?:wohn\w{0,6}|leb(?:t|en|te|ten)|gemeldet|zieh\w{0,3}|zog|"
+                                  r"gezogen|umzug|anschrift|adresse)(?![\wäöüß])")
+_QUADRAT_LAGE_DAHINTER_RE = re.compile(r"[ \t]*,?[ \t]*(?:\d{1,2}\.[ \t]*)?(?:OG|EG|DG|UG|Obergeschoss|Erdgeschoss|"
+                                       r"Dachgeschoss|Stock|Etage)(?![\wäöüß])")
+# Bewegung zu einem Ziel zwischen Regelwort und "nach" ("Die Entschädigung senden wir per Post nach K 1, 5.", "Die
+# Erstattung geht an Frau Hiebl nach U 1, 7."): "nach" ist dann ein Ziel, keine Regel – gemeldet (AB4-07)
+_QUADRAT_BEWEGUNG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:send\w{0,3}|schick\w{0,3}|geh(?:t|en)|ging(?:en)?|zieh\w{0,3}|"
+                                  r"zog|bring\w{0,3}|liefer\w{0,3}|post|zugestellt|zustell\w{0,4}|verschick\w{0,3}|"
+                                  r"adressiert|richte[nt]?[ \t]+an)(?![\wäöüß])")
+
+
+# OCR: die Präposition „nach“ ohne Leerzeichen an das Wort davor gelesen ("per Postnach K1, 5", 300 dpi JPEG; Abnahme 4
+# AB4-07) – nicht die Adverbien demnach, hernach, hiernach, darnach (danach, wonach sind kürzer)
+_NACH_ANGEKLEBT_RE = re.compile(r"(?<![\wäöüß])([A-Za-zÄÖÜäöüß]{3,})nach[ \t]+$")
+_NACH_ADVERB_VORN = frozenset({"dem", "her", "hier", "dar"})
+
+
+def _nach_davor(davor: str) -> bool:
+    """Steht „nach“ direkt vor dem Quadrat – als Wort oder angeklebt (_NACH_ANGEKLEBT_RE)?"""
+    if re.search(r"(?i)(?<![\wäöüß])nach[ \t]+$", davor):
+        return True
+    m = _NACH_ANGEKLEBT_RE.search(davor)
+    return m is not None and m.group(1).lower() not in _NACH_ADVERB_VORN
+
+
+def _quadrat_verweis_ohne_gegenbeleg(text: str, davor: str, start: int, ende: int) -> bool:
+    """Steht vor dem Quadrat nur ein Verweis auf ein Dokument (_QUADRAT_VERWEIS_DAVOR_RE) und spricht der Satz vom Wohnen
+    oder einer Person bzw. steht eine Wohnlage dahinter – dann gilt der Verweis nicht als Gegenbeleg."""
+    if not _QUADRAT_VERWEIS_DAVOR_RE.search(davor[-40:]):
+        return False
+    if _QUADRAT_LAGE_DAHINTER_RE.match(text, ende):
+        return True
+    satz_anfang = satzanfang_vor(text, start)
+    hinten = re.search(r"[.!?;\n]", text[ende:ende + 120])
+    satz_ende = ende + (hinten.start() if hinten else min(120, len(text) - ende))
+    return bool(_QUADRAT_WOHNSATZ_RE.search(text, satz_anfang, satz_ende)
+                or _PERSON_IM_QUADRAT_SATZ_RE.search(text, satz_anfang, satz_ende))
+
+
 # Aufzählung und Strecke ("A 1, 2 und B 3, 4", "von Halle A 1, 2 nach B 2, 4": ein Gegenbeleg gilt für alle)
 _QUADRAT_VERBINDER_RE = re.compile(r"[ \t]*(?:,|und|sowie|oder|bis|nach|u\.|&)[ \t]*$")
 
@@ -2798,7 +2843,8 @@ def quadrat_stellen(text: str, verdacht: bool = False) -> list:
         erster, letzter = gruppe[0], gruppe[-1]
         zeilenanfang = text.rfind("\n", max(0, erster.start() - 120), erster.start()) + 1
         vorn = text[max(zeilenanfang, erster.start() - 100):erster.start()]
-        gegen = bool(_QUADRAT_KEIN_DAVOR_RE.search(vorn[-40:]) or
+        verweis = _quadrat_verweis_ohne_gegenbeleg(text, vorn, erster.start(), letzter.end())
+        gegen = bool((_QUADRAT_KEIN_DAVOR_RE.search(vorn[-40:]) and not verweis) or
                      _QUADRAT_KEIN_DAHINTER_RE.match(text, letzter.end(), letzter.end() + 40))
         for m in gruppe:
             a = text.rfind("\n", max(0, m.start() - 120), m.start()) + 1
@@ -2806,7 +2852,10 @@ def quadrat_stellen(text: str, verdacht: bool = False) -> list:
             if _MANNHEIM_DAHINTER_RE.match(text, m.end(), m.end() + 120) or _MANNHEIM_DAVOR_RE.search(davor[-60:]):
                 aus.append((m.start(), m.end()))
                 continue
-            if gegen or _QUADRAT_KEIN_DAVOR_RE.search(davor[-40:]):
+            if gegen or (_QUADRAT_KEIN_DAVOR_RE.search(davor[-40:]) and not verweis):
+                continue
+            if verweis and _QUADRAT_LAGE_DAHINTER_RE.match(text, m.end()):
+                aus.append((m.start(), m.end()))     # "Stand: U 1, 7, 2. OG links": eine Wohnlage
                 continue
             wohnen_davor = _QUADRAT_WOHNEN_DAVOR_RE.search(davor[-80:])
             wohnen_dahinter = _QUADRAT_PRAEP_DAVOR_RE.search(davor[-12:]) \
@@ -2818,8 +2867,10 @@ def quadrat_stellen(text: str, verdacht: bool = False) -> list:
             if _QUADRAT_ETIKETT_DAVOR_RE.search(davor[-80:]) or wohnen is not None or _quadrat_hinter_name(davor[-60:]):
                 aus.append((m.start(), m.end()))
             elif verdacht and ((re.search(r"(?i)(?<![\wäöüß])(?:in|im|bei|an)[ \t]+$", davor)
-                                or (re.search(r"(?i)(?<![\wäöüß])nach[ \t]+$", davor)
-                                    and not _NACH_REGEL_DAVOR_RE.search(davor[:-4].rstrip())
+                                or (_nach_davor(davor)
+                                    and not (_NACH_REGEL_DAVOR_RE.search(davor[:-4].rstrip())
+                                             and not _QUADRAT_BEWEGUNG_RE.search(davor)
+                                             and not _quadrat_person_im_satz(text, erster.start(), letzter.end()))
                                     and not re.match(r"[ \t]+hin(?![\wäöüß])", text[letzter.end():letzter.end() + 8])))
                                or re.search(r"[\wäöüß)][ \t]*:", davor[-80:])):
                 aus.append((m.start(), m.end()))
@@ -3138,11 +3189,11 @@ _GEHEIMNIS = (r"(?i:(?:[a-zäöüß0-9]{1,20}-)?[a-zäöüß0-9]{0,20}?(?:kennwo
               r"geheimnummer|geheimcode))"
               r"|(?:[A-Za-zÄÖÜäöüß0-9]{1,20}-)?(?:PIN|Pin|PUK)(?:-?(?:Nr\.?|Nummer|Code))?"
               # nicht der Code einer Meldung oder Störung ("Fehlalarmcode A-12", "Feueralarmcode 3"; Abnahme 2 A2-01)
-              r"|(?i:(?:[a-zäöüß0-9]{1,20}-)?(?:(?!fehl|feuer|brand|rauch|stör|stoer|probe)"
-              r"[a-zäöüß]{0,15}?(?:tresor|alarm|alarmanlagen|tür|tuer|garagen|garage|"
-              r"schloss|safe|briefkasten)|(?:hof|einfahrts|grundstücks|grundstuecks|haus|garten|garagen|hallen|"
-              r"roll|eingangs|schiebe)?tor|zahlen|entsperr|schließ|schliess|plaketten|"
-              r"sperr|geräte|geraete|handy|sim|router|wlan|wifi|wpa2?|netzwerk)-?code)")
+              r"|(?i:(?:[a-zäöüß0-9]{1,20}-)?(?:[a-zäöüß]{0,15}?(?:tresor|tür|tuer|garagen|garage|"
+              r"schloss|safe|briefkasten)|(?!fehl|feuer|brand|rauch|stör|stoer|probe)[a-zäöüß]{0,15}?"
+              r"(?:alarm|alarmanlagen)|(?:hof|einfahrts|grundstücks|grundstuecks|haus|garten|garagen|hallen|"
+              r"roll|eingangs|schiebe)?tor|[a-zäöüß]{4,15}(?<![aeiouyäöükp])(?<![aeiouäöü]s)tor|zahlen|entsperr|"
+              r"schließ|schliess|plaketten|sperr|geräte|geraete|handy|sim|router|wlan|wifi|wpa2?|netzwerk)-?code)")
 _ZUGANG_ETIKETT_RE = re.compile(
     r"(?<![\wäöüß\-./])(?:"
     r"(?i:benutzer(?:name|kennung|konto|-?id)?|nutzerkennung|anmelde(?:name|kennung)|"
@@ -3171,17 +3222,31 @@ _CODE_ETIKETT_RE = re.compile(r"(?<![\wäöüß./])(?<![\wäöüß]-)(?:Code|Zah
 # "Scheune", "Heustadel", "Pferdestall", "Carport", "Wallbox", "Paketbox", "Spind", "Waffenschrank", "Fahrradkeller";
 # Abnahme 3 AB3-01) – "Haus" nur als Grundwort am Wortende, nicht am Anfang ("Hausrat", "Haushalt")
 _SCHLOSS_GEBAEUDE = (r"[\wäöüß]{1,25}(?:haus|häuschen|haeuschen)|[\wäöüß]{0,25}(?:hütte|huette|schuppen|scheune|"
-                     r"stadel|stadl|stall|carport|box|spind|schrank|keller(?:raum|abteil|räume)?)")
+                     r"stadel|stadl|stall|carport|box|spind|schrank|keller(?:raum|abteil|räume)?)|"
+                     # Hallen als Grundwort ("Lagerhalle", "Bootshalle"; Abnahme 4 AB4-03)
+                     r"[\wäöüß]{2,25}hallen?")
+# Grundwort statt Liste (Abnahme 4 AB4-03): jede Garage ("Doppelgarage", "Fertiggarage"), jede Pforte, ein Alarm, der
+# kein Ereignis ist ("Hausalarm", "Funkalarm"; nicht "Fehlalarm", "Feueralarm", "Probealarm"), ein Tor mit deutschem
+# Bestimmungswort ("Zauntor", "Haupttor", "Gittertor", "Hintertor", "Seitentor": mindestens vier Buchstaben davor, kein
+# Selbstlaut, kein "k"/"p" und kein Selbstlaut mit "s" direkt vor "tor" – so bleiben Motor, Monitor, Rotor, Autor,
+# Generator, Inspektor, Sektor, Direktor, Rezeptor, Investor außen vor), Türöffner und Türsprechanlage
 _SCHLOSS_WORT = (r"(?:" + _SCHLOSS_GEBAEUDE + r"|"
                  r"[\wäöüß]{0,25}(?:tresor\w{0,12}|safe|schloss|schlösser|schloesser|t(?:ü|ue)r(?:e|en)?|"
-                 r"schlie(?:ß|ss)(?:fach|fächer|faecher|anlage|system|zylinder)\w{0,6}|briefkasten\w{0,4}|briefkästen|"
-                 r"schl(?:ü|ue)ssel(?:box|boxen|kasten|kästen|safe|tresor|depot))|"
+                 r"schlie(?:ß|ss)(?:fach|fächer|faecher|anlage|system|zylinder)\w{0,6}|"
+                 r"briefkasten(?:anlage\w{0,2}|\w{0,4})|briefkästen|"
+                 r"schl(?:ü|ue)ssel(?:box|boxen|kasten|kästen|safe|tresor|depot)|pforten?|"
+                 r"t(?:ü|ue)r(?:öffner|oeffner)\w{0,4}|(?:t(?:ü|ue)r|gegen)sprechanlage\w{0,4})|"
                  r"(?:alarm|einbruchmelde|einbruchsmelde)(?:anlage\w{0,4}|system\w{0,4}|zentrale\w{0,4})?|"
-                 r"[\wäöüß]{1,20}alarmanlage\w{0,4}|(?:tief|sammel)?garage(?:n|ntor\w{0,10}|nzufahrt|neinfahrt)?|"
+                 r"[\wäöüß]{1,20}alarmanlage\w{0,4}|"
+                 r"(?!fehl|feuer|brand|rauch|stör|stoer|probe)[\wäöüß]{1,20}alarm(?:system\w{0,4}|zentrale\w{0,4})?|"
+                 r"[\wäöüß]{0,25}garage(?:n|ntor\w{0,10}|nzufahrt|neinfahrt)?|"
                  r"(?:garagen|hof|einfahrts?|grundstücks|grundstuecks|haus|garten|roll|eingangs|schiebe|hallen|"
                  r"keller|scheunen|werks|fabrik|flügel|fluegel|sektional|kipp|stall|stadl|zufahrts)?"
                  r"tor(?:öffner\w{0,4}|oeffner\w{0,4}|es|e|en)?|"
+                 r"[\wäöüß]{4,25}(?<![aeiouyäöükp])(?<![aeiouäöü]s)tor(?:es|e|en)?|"
                  r"(?:haupt|neben|seiten|hinter|hof|garagen|tiefgaragen|haus)?(?:eingang|einfahrt|zufahrt)(?:s|es)?)")
+_CODE_FUER_SCHLOSS_RE = re.compile(r"(?i)[ \t]+f(?:ü|ue)r[ \t]+(?:(?:die|den|das|dem|unsere?n?|ihre?n?)[ \t]+)?"
+                                   r"(?:" + _SCHLOSS_WORT + r")(?![\wäöüß]|-[\wäöüß])")
 _CODE_GEGENSTAND_RE = re.compile(r"(?i)(?<![\wäöüß])(?:" + _SCHLOSS_WORT + r"|haus|wohnung\w{0,12}|handy|smartphone|"
                                  r"tablet|laptop|computer|router|wlan|sim|app|portal|konto|zugang|plakette|stempel)"
                                  r"(?![\wäöüß]|-[\wäöüß])")
@@ -3192,6 +3257,29 @@ _CODE_FEHLER_RE = re.compile(r"(?i)(?<![\wäöüß])(?:[\wäöüß]*fehler[\wä�
                              r"defekt\w*|meld(?:et|ete|eten)|zeig(?:t|te|ten)|display|"
                              r"blink\w*|leucht(?:et|ete)|ausgelesen|auslesen|error|warnung\w*|warn(?:t|te)|"
                              r"ausfall\w*|ausgefallen)(?![\wäöüß])")
+# Ein Melde- oder Anzeigewort im Satz macht "Code" nur dann zum Fehler- oder Anzeigecode eines Geräts, wenn der Satz
+# den Code nicht als Zugang benutzt (Abnahme 4 AB4-05): eingeben, nutzen, verwenden ("Am Display der Garage den Code
+# 2240 eingeben."), ein neuer Code ("Der Vermieter meldete den neuen Code der Kellertür: 8034"), jemand zeigt einer
+# Person etwas ("Herr Brandl zeigte uns die Garage, Code 4711."), ein Code für ein Schloss ("… den Code 9269 für die
+# Haustür")
+_CODE_NUTZUNG_RE = re.compile(r"(?i)(?<![\wäöüß])(?:ein(?:geben|gegeben|gibt|zugeben|tippen|getippt|tippt)|"
+                              r"tipp(?:en|t)|(?:be)?nutz(?:en|t|te|ten)|verwend(?:en|et|ete)|"
+                              r"(?:auf|frei|ent)?schalt(?:en|et)|öffnen|oeffnen)(?![\wäöüß])")
+_CODE_NEU_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])neu(?:e|en|er|es|em)?[ \t]+$")
+_ZEIGEN_PERSON_RE = re.compile(r"(?i)(?<![\wäöüß])zeig(?:t|te|ten)[ \t]+(?:uns|mir|ihm|ihr|ihnen|dir|euch)"
+                               r"(?![\wäöüß])")
+
+
+def _fehler_aufgehoben(text: str, satz_anfang: int, code_start: int, satz_ende: int) -> bool:
+    """Benutzt der Satz um "Code" den Code als Zugang – trotz eines Melde- oder Anzeigeworts davor (_CODE_FEHLER_RE)?"""
+    satz = text[satz_anfang:satz_ende]
+    if _CODE_NUTZUNG_RE.search(satz) or _ZEIGEN_PERSON_RE.search(satz):
+        return True
+    if _CODE_NEU_DAVOR_RE.search(text, max(satz_anfang, code_start - 12), code_start):
+        return True
+    return bool(_CODE_FUER_SCHLOSS_RE.search(text, code_start, satz_ende))
+
+
 _ZUGANG_WERT_RE = re.compile(r"[^\s,;\"„“”«»<>|]{3,64}")
 _ZUGANG_FUELLWORT = frozenset("""
 wird werden wurde ist sind siehe s. vgl. folgt folgen separat gesondert per bitte nicht kein keine keinen unbekannt
@@ -3378,6 +3466,22 @@ def _pin_form(wert: str) -> bool:
     return bool(_PIN_FORM_RE.fullmatch(kern)) and sum(c.isdigit() for c in kern) >= 3
 
 
+# Gestalt eines Fehler- oder Statuscodes eines Geräts: Buchstaben vorn und höchstens drei Ziffern ("E-04", "F21",
+# "ERR-41", "E125"), ein OBD-Code ("P0300", "U0100") oder eine Hexzahl ("0x12AB")
+_FEHLERCODE_GESTALT_RE = re.compile(r"(?i)[a-z]{1,3}[-‑ ]?\d{1,3}|[pbcu]\d{4}|0x[0-9a-f]+")
+
+
+def _code_form(wert: str) -> bool:
+    """Wertform eines Zugangscodes hinter einem sicheren Schloss: Ziffern (_pin_form) oder Ziffern und Buchstaben
+    gemischt ("7A3B", "K2580", "A1B2C3", "B7-22", "Hx97k"; Abnahme 4 AB4-04) – nicht in der Gestalt eines Fehler- oder
+    Statuscodes ("E-04", "P0300", "0x12AB"), keine Mengen- oder Längenangabe ("3x", "4-stellig")."""
+    if _pin_form(wert):
+        return True
+    kern = wert.rstrip(".,;:!?)")
+    return _geheimnis_form(kern) and any(c.isdigit() for c in kern) and any(c.isalpha() for c in kern) \
+        and not _FEHLERCODE_GESTALT_RE.fullmatch(kern) and len(kern) <= 12
+
+
 def _satzteil_vor(text: str, zeilenanfang: int, code_start: int) -> str:
     """Der Satz vor "Code" im Fenster CODE_GEGENSTAND_FENSTER, ab dem letzten Satzende bzw. Zeilenanfang."""
     fenster = max(zeilenanfang, code_start - CODE_GEGENSTAND_FENSTER)
@@ -3451,24 +3555,50 @@ def _code_mit_gegenstand(text: str, zeilenanfang: int, code_start: int, e: int, 
         return None
     # 1. Schloss oder Gerät im Satzteil davor, direkt vor "Code" ein kleingeschriebenes Wort
     if w is not None and vor is not None and vor[:1].islower() and ":" not in text[w.start():w.start(1)] \
-            and _pin_form(w.group(1)) and _CODE_SCHLOSS_RE.search(davor):
+            and _code_form(w.group(1)) and any(not _moebel_ohne_schloss(x.group(0), text, zeilenanfang, zeilenende)
+                                               for x in _CODE_SCHLOSS_RE.finditer(davor)):
         return _zugang_wert(text, w.start(1), zeilenende)
     # 2. Gegenstand direkt hinter "Code", dann der Wert (mit Doppelpunkt in jeder Form)
     g = _CODE_GEGENSTAND_DAHINTER_RE.match(text, e, zeilenende)
-    if g is not None and _CODE_SCHLOSS_RE.fullmatch(g.group(1)) and not _CODE_KEIN_GEHEIMNIS_RE.search(g.group(0)):
+    if g is not None and _CODE_SCHLOSS_RE.fullmatch(g.group(1)) and not _CODE_KEIN_GEHEIMNIS_RE.search(g.group(0)) \
+            and not _moebel_ohne_schloss(g.group(1), text, zeilenanfang, zeilenende):
         if g.group(2):
             return _zugang_wert(text, g.end(), zeilenende)
         w2 = _ZUGANG_WERT_RE.match(text, g.end(), zeilenende) if g.end() > g.end(1) else None
-        if w2 is not None and _pin_form(w2.group(0)):
+        if w2 is not None and _code_form(w2.group(0)):
             return _zugang_wert(text, w2.start(), zeilenende)
     # 3. Wert direkt hinter "Code", dahinter der Gegenstand
-    if w is not None and ":" not in text[w.start():w.start(1)] and _pin_form(w.group(1)):
+    if w is not None and ":" not in text[w.start():w.start(1)] and _code_form(w.group(1)):
         sp = _zugang_wert(text, w.start(1), zeilenende)
         if sp is not None:
             h = _CODE_GEGENSTAND_HINTER_WERT_RE.match(text, sp[1], zeilenende)
-            if h is not None and _CODE_SCHLOSS_RE.fullmatch(h.group(1).rstrip(")")):
+            if h is not None and _CODE_SCHLOSS_RE.fullmatch(h.group(1).rstrip(")")) \
+                    and not _moebel_ohne_schloss(h.group(1).rstrip(")"), text, zeilenanfang, zeilenende):
                 return sp
     return None
+
+
+# Schränke, die ein Möbel sind und kein Schloss haben müssen ("Kleiderschrank", "Küchenschrank", "Badschrank"): als
+# Gegenstand eines Codes nur mit einem Verb der Bedienung im Satz ("Der Schrank ist mit dem Code 4471 gesichert.") –
+# sonst ist der Code oft ein Artikel- oder Produktcode (Abnahme 4 AB4U-05); die Selbstkontrolle meldet ihn. Schränke mit
+# Schloss ("Waffenschrank", "Schlüsselschrank", "Tresorschrank", "Wertschrank", "Panzerschrank", "Giftschrank",
+# "Medikamentenschrank", "Sicherheitsschrank") und der Spind bleiben Schlösser.
+_SCHRANK_RE = re.compile(r"(?i)[\wäöüß]*schr(?:a|ä)nk(?:e|en)?")
+_SCHRANK_MIT_SCHLOSS_RE = re.compile(r"(?i)(?:waffen|schl(?:ü|ue)ssel|tresor|wert|panzer|gift|medikamenten|"
+                                     r"sicherheits|geld|bargeld|munitions|akten|stahl)schr(?:a|ä)nk(?:e|en)?")
+
+
+def _moebel_ohne_schloss(wort: str, text: str, anfang: int, ende: int) -> bool:
+    """Ist das Schloss-Wort ein Möbelschrank ohne Schloss und steht kein Verb der Bedienung in der Zeile?"""
+    if not _SCHRANK_RE.fullmatch(wort or "") or _SCHRANK_MIT_SCHLOSS_RE.fullmatch(wort or ""):
+        return False
+    return not _BEDIENVERB_RE.search(text, anfang, ende)
+
+
+def _satz_ende(text: str, pos: int, zeilenende: int) -> int:
+    """Ende des Satzes ab pos (Satzzeichen oder Zeilenende, höchstens 120 Zeichen weiter)."""
+    m = re.search(r"[.!?;]", text[pos:min(zeilenende, pos + 120)])
+    return pos + m.start() if m else min(zeilenende, pos + 120)
 
 
 def zugangsdaten(text: str) -> list:
@@ -3517,12 +3647,16 @@ def zugangsdaten(text: str) -> list:
             # N1): wie ein Geheimnis-Etikett ohne Trennzeichen
             # Zeilenanfang nur im Umkreis des Fensters (weiter zurück zählt er für die Regeln nicht)
             zeilenanfang = text.rfind("\n", max(0, m.start() - 4 * CODE_GEGENSTAND_FENSTER), m.start()) + 1
-            if _CODE_FEHLER_RE.search(_satzteil_vor(text, zeilenanfang, m.start())):
+            satzteil = _satzteil_vor(text, zeilenanfang, m.start())
+            if _CODE_FEHLER_RE.search(satzteil) and not _fehler_aufgehoben(
+                    text, m.start() - len(satzteil), m.start(), _satz_ende(text, e, zeilenende)):
                 continue                                # Fehler- oder Anzeigecode eines Geräts (Abnahme 2 A2-01)
             vor, gegenstand = _gegenstand_vor_code(text, zeilenanfang, m.start())
+            if gegenstand is not None and _moebel_ohne_schloss(gegenstand, text, zeilenanfang, zeilenende):
+                gegenstand = None                       # "Kleiderschrank … Code 66130": ein Möbel (AB4U-05)
             w = _CODE_WERT_DAHINTER_RE.match(text, e, zeilenende)
             if gegenstand is not None and w is not None \
-                    and (":" in text[w.start():w.start(1)] or _pin_form(w.group(1))):
+                    and (":" in text[w.start():w.start(1)] or _code_form(w.group(1))):
                 sp = _zugang_wert(text, w.start(1), zeilenende)
                 if sp is not None:
                     aus.append(sp)
@@ -3549,10 +3683,14 @@ def zugangsdaten(text: str) -> list:
                 break                                   # das nächste Etikett ("Benutzername ⇥ Kennwort: …")
             a = _ZUGANG_ANKUENDIGUNG_RE.match(satz, wort.start())
             doppelpunkt = wort.group(0).endswith(":") and k > 0 or (wort.group(0) == ":" and k > 0)
+            if k == 0 and not nur_code and wort.group(0).endswith(":") and wort.group(0)[:1].isupper() \
+                    and _gegenstand_wort(wort.group(0).rstrip(":")) and not etikettwort(wort.group(0).rstrip(":")):
+                doppelpunkt = True                      # "PIN Wohnungstür: 9632": Gegenstand des Geheimnisses
             if (a is not None and a.end() > wort.start()) or doppelpunkt:
                 if nur_code and (not _CODE_GEGENSTAND_RE.search(satz[:wort.end()])
                                  or _CODE_KEIN_GEHEIMNIS_RE.search(satz[:wort.end()])
-                                 or _CODE_FEHLER_RE.search(satz[:wort.end()])):
+                                 or (_CODE_FEHLER_RE.search(satz[:wort.end()])
+                                     and not _fehler_aufgehoben(text, m.start(), m.start(), e + len(satz)))):
                     break
                 start = e + (a.end() if a is not None and a.end() > wort.start() else wort.end())
                 sp = _zugang_wert(text, start, zeilenende)
@@ -3563,7 +3701,18 @@ def zugangsdaten(text: str) -> list:
         aus += _zugang_spalten(text)
     if "mit" in text:
         aus += _zugang_mit_ziffern(text)
+    if "ugang" in text:
+        for m in _ZUGANG_GEGENSTAND_RE.finditer(text):
+            if _CODE_SCHLOSS_RE.fullmatch(m.group(1)) and _code_form(m.group(2)) \
+                    and not _moebel_ohne_schloss(m.group(1), text, m.start(), m.end()):
+                aus.append(m.span(2))
     return sorted(set(aus))
+
+
+# "Zugang <Gegenstand>: <Wert>" ("Zugang Tiefgarage: 4096", "Zugang zum Treppenhaus: 1222"; Abnahme 4 AB4-16)
+_ZUGANG_GEGENSTAND_RE = re.compile(r"(?<![\wäöüß\-])Zugang(?:[ \t]+(?:zum|zur|zu[ \t]+(?:den|der|dem)))?[ \t]+"
+                                   r"([A-ZÄÖÜ][\wäöüß\-]{2,39})[ \t]*:[ \t]*([^\s,;\"„“”«»<>|]{3,20}?)"
+                                   r"(?=[.,;)]?(?:[ \t]|$))", re.MULTILINE)
 
 
 # Bedienung eines Schlosses mit einer Ziffernfolge ohne "Code" davor: "Die Alarmanlage im Flur schaltet man mit 6482
@@ -3576,7 +3725,10 @@ _MIT_ZIFFERN_RE = re.compile(r"(?<![\wäöüß])mit[ \t]+(?:(?:dem|der|einem|ein
 _BEDIENVERB_RE = re.compile(r"(?i)(?<![\wäöüß])(?:(?:aus|ein|ab|auf|frei|scharf|unscharf|zu)?schalt\w{0,4}|"
                             r"(?:auf|zu|ab)?(?:schließ|schliess)\w{0,4}|(?:ent|auf|ab|zu)?sperr\w{0,4}|öffn\w{0,4}|"
                             r"oeffn\w{0,4}|entschärf\w{0,4}|entschaerf\w{0,4}|(?:de)?aktivier\w{0,4}|"
-                            r"entriegel\w{0,4}|freischalt\w{0,4}|(?:auf|zu)(?:geh|mach)\w{0,4})(?![\wäöüß])")
+                            r"entriegel\w{0,4}|freischalt\w{0,4}|(?:auf|zu)(?:geh|mach)\w{0,4}|"
+                            # Zustand eines Schlosses ("Die Scheune ist mit 2604 gesichert."; Abnahme 4 AB4-16)
+                            r"(?:ab)?gesichert|verschlossen|abgeschlossen|verriegelt|gesperrt|zugang|zutritt)"
+                            r"(?![\wäöüß])")
 # trennbare Verben der Bedienung: "geht … auf", "macht man … zu" ("Das Hoftor geht mit 2601 auf."; Abnahme 3 AB3-07)
 _BEDIEN_GEHEN_RE = re.compile(r"(?i)(?<![\wäöüß])(?:geh(?:t|en)|ging(?:en)?|mach(?:t|en)|machte[n]?)(?![\wäöüß])")
 _PARTIKEL_ENDE_RE = re.compile(r"(?i)(?<![\wäöüß])(?:auf|zu)[ \t]*[.!?]?[ \t]*$")
@@ -3584,7 +3736,13 @@ _MENGE_DAHINTER_RE = re.compile(r"[ \t]*(?:€|euro|eur|cent|%|prozent|m|km|cm|m
                                 r"jahre?n?|monate?n?|tage?n?|stunden?|minuten?|sekunden?|kg|g|l|liter\w*|ps|kw|"
                                 r"watt|volt|grad|°|m²|m2|qm|quadratmeter\w*)(?![\wäöüß])"
                                 # ein gezähltes Substantiv dahinter ("mit 120 Stellplätzen", "mit 300 Kisten"): eine Menge
-                                r"|[ \t]+(?-i:[A-ZÄÖÜ][a-zäöüß]{2,})", re.IGNORECASE)
+                                # – nicht "Zugang", "Zutritt", "Code" ("Die Garage: mit 2084 Zugang"; AB4-16)
+                                r"|[ \t]+(?-i:(?!Zugang|Zutritt|Code|PIN)[A-ZÄÖÜ][a-zäöüß]{2,})"
+                                # ein Maß ("mit 2400 x 3000 mm") oder eine Jahreszahl vor einem Partizip ("mit 2021
+                                # erneuerter Heizung", "mit 1890 gebautem Dachstuhl"; AB4U-05)
+                                r"|[ \t]*[x×][ \t]*\d", re.IGNORECASE)
+_JAHR_VOR_PARTIZIP_RE = re.compile(r"(?:1[5-9]|20)\d{2}[ \t]+(?:ge|er|be|ver|re|um|aus|ein|neu|an|auf)[a-zäöüß]{2,}"
+                                   r"(?:t|n)(?:e|em|en|er|es)?(?![\wäöüß])")
 
 
 def _zugang_mit_ziffern(text: str, ohne_verb: list | None = None) -> list:
@@ -3593,7 +3751,7 @@ def _zugang_mit_ziffern(text: str, ohne_verb: list | None = None) -> list:
     Selbstkontrolle (Abnahme 3 AB3-07)."""
     aus = []
     for m in _MIT_ZIFFERN_RE.finditer(text):
-        if _MENGE_DAHINTER_RE.match(text, m.end()):
+        if _MENGE_DAHINTER_RE.match(text, m.end()) or _JAHR_VOR_PARTIZIP_RE.match(text, m.start(1)):
             continue
         anfang = max(0, m.start() - CODE_GEGENSTAND_FENSTER)
         vorn = text[anfang:m.start()]
@@ -3601,12 +3759,21 @@ def _zugang_mit_ziffern(text: str, ohne_verb: list | None = None) -> list:
         hinten = re.search(r"[.!?;\n]", text[m.end():m.end() + 60])
         satz_ende = m.end() + (hinten.start() if hinten else min(60, len(text) - m.end()))
         satz = text[satz_anfang:satz_ende]
-        if not _CODE_SCHLOSS_RE.search(satz) or _CODE_FEHLER_RE.search(satz) or _CODE_KEIN_GEHEIMNIS_RE.search(satz):
+        # Einordnung nur im Satzteil der Ziffern ("Zum Schaden in der Ferienwohnung: Die Tiefgarage ist mit 9063
+        # gesichert."; AB4-16)
+        kern = text[satz_anfang + max(satz[:m.start() - satz_anfang].rfind(":"), -1) + 1:satz_ende]
+        schloss = _CODE_SCHLOSS_RE.search(satz) is not None and not all(
+            _moebel_ohne_schloss(x.group(0), text, satz_anfang, satz_ende) for x in _CODE_SCHLOSS_RE.finditer(satz))
+        raum = not schloss and any(_raum_wort(w) for w in re.findall(r"[A-ZÄÖÜ][\wäöüß\-]{2,39}", satz))
+        if not (schloss or raum) or _CODE_FEHLER_RE.search(satz) or _CODE_KEIN_GEHEIMNIS_RE.search(satz):
             continue
-        if not _BEDIENVERB_RE.search(text, satz_anfang, m.start()) and not _BEDIENVERB_RE.search(text, m.end(), satz_ende) \
-                and not (_BEDIEN_GEHEN_RE.search(text, satz_anfang, m.start())
-                         and _PARTIKEL_ENDE_RE.search(text[m.end():satz_ende])):
-            if ohne_verb is not None and not _CODE_EINORDNUNG_RE.search(satz):
+        bedient = _BEDIENVERB_RE.search(text, satz_anfang, m.start()) or _BEDIENVERB_RE.search(text, m.end(), satz_ende) \
+            or (_BEDIEN_GEHEN_RE.search(text, satz_anfang, m.start())
+                and _PARTIKEL_ENDE_RE.search(text[m.end():satz_ende]))
+        if raum or not bedient:
+            # ein Raum nach seinem Grundwort ("Kellerverschlag öffnet man mit 5534."; AB4-03) bzw. ein Schloss ohne
+            # Verb der Bedienung: gemeldet, nicht geschwärzt
+            if ohne_verb is not None and not _CODE_EINORDNUNG_RE.search(kern) and (bedient or not raum):
                 ohne_verb.append(m.span(1))
             continue
         aus.append(m.span(1))
@@ -3672,9 +3839,15 @@ def _schloss_im_satz_davor(text: str, zeilenanfang: int, code_start: int, satz: 
         davor = _satzteil_vor(text, vz, ende_vz)
     else:
         return False
-    return bool(davor.strip()) and _CODE_SCHLOSS_RE.search(davor) is not None \
-        and not (_CODE_FEHLER_RE.search(davor) or _CODE_KEIN_GEHEIMNIS_RE.search(davor)
-                 or _CODE_EINORDNUNG_RE.search(davor))
+    if not davor.strip():
+        return False
+    # ein Schloss oder – für die Selbstkontrolle – ein Raum nach seinem Grundwort ("Bitte den Hobbyraum benutzen." ⏎
+    # "Code 3797"; Abnahme 4 AB4-03); ein Melde- oder Anzeigewort zählt nicht, wenn jemand einer Person etwas zeigt
+    # ("Frau Gaßner zeigte mir die Haustür. Code 2349"; AB4-05)
+    gegenstand = _CODE_SCHLOSS_RE.search(davor) is not None or any(
+        _raum_wort(w) for w in re.findall(r"[A-ZÄÖÜ][\wäöüß\-]{2,39}", davor))
+    fehler = _CODE_FEHLER_RE.search(davor) and not (_ZEIGEN_PERSON_RE.search(davor) or _CODE_NUTZUNG_RE.search(davor))
+    return gegenstand and not (fehler or _CODE_KEIN_GEHEIMNIS_RE.search(davor) or _CODE_EINORDNUNG_RE.search(davor))
 
 
 def _code_wort_davor(satz: str) -> bool:
@@ -3739,6 +3912,108 @@ def _code_bezug_gegenstand(text: str, zeilenanfang: int, code_start: int, wert_e
     return m is not None and _gegenstand_wort(m.group(1))
 
 
+# Räume, Gebäude, Behälter und Schlösser nach ihrem Grundwort – für die Selbstkontrolle in Formen, in denen auch ein
+# Gerät oder eine Person stehen könnte ("Hobbyraum (Code 7334)", "Code 2556 (Werkraum)", "Postfach (Code 2429)",
+# "Bitte den Wohnwagen benutzen. ⏎ Code 4219"; Abnahme 4 AB4-03) – nicht "Inspektor (Code 2207)", "Monitor (Code …)"
+_RAUM_GRUNDWORT_RE = re.compile(r"(?i)[\wäöüß]*(?:raum|räume|raeume|boden|keller|fach|fächer|faecher|kammer|lager|"
+                                r"halle|hütte|huette|haus|häuschen|schuppen|verschlag|abteil|abgang|zimmer|kabine|"
+                                r"box|schrank|spind|station|wagen|anhänger|anhaenger|container|garage|stall|scheune|"
+                                r"stadel|stadl|carport|pforte|schranke|tür|tuer|türe|eingang|einfahrt|zufahrt|aufzug|"
+                                r"lift|gebäude|gebaeude|gelände|gelaende|grundstück|grundstueck|anlage|lege|safe|"
+                                r"tresor|kasten|wohnung|büro|buero|praxis|werkstatt|laden)(?:s|es|n|en|e)?")
+# Einordnung als Grundwort ("Typklasse", "Gebührenordnung", "Kostenstelle", "Kfz-Haftpflicht", "Sparte", "Auftrag"):
+# ohne Schloss im Satz kein Zugangscode (Abnahme 4 AB4U-06) – mit Schloss gilt das Schloss
+_CODE_EINORDNUNG_WORT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:[\wäöüß\-]*klasse\w{0,2}|gebühren\w{0,2}ordnung\w{0,2}|"
+                                      r"gebuehren\w{0,2}ordnung\w{0,2}|honorarordnung\w{0,2}|kostenstelle\w{0,2}|"
+                                      r"[\wäöüß\-]*haftpflicht\w{0,2}|[\wäöüß\-]*sparte\w{0,2}|auftrag\w{0,4}|"
+                                      r"typenschild\w{0,2})(?![\wäöüß])")
+# nur ein Schadenwort (ohne Katalog, Schlüssel, Ziffer): mit Schloss im Satz trotzdem gemeldet ("Schadenort Gartenhaus,
+# Code 3141"; AB4-16)
+_CODE_NUR_SCHADEN_RE = re.compile(r"(?i)(?<![\wäöüß])[\wäöüß]{0,20}schaden\w{0,6}(?![\wäöüß])")
+_WORT_KLAMMER_VOR_CODE_RE = re.compile(r"(?<![\wäöüß\-])([A-ZÄÖÜ][\wäöüß\-]{2,39})[ \t]*\([ \t]*$")
+_PLATZHALTER_VOR_CODE_RE = re.compile(r"\[[A-ZÄÖÜ][A-ZÄÖÜ0-9 _\-]{0,30}\][ \t]*(?:[:/=>\-–—]{1,3}[ \t]*)?$")
+
+
+# ein Schadenwort in einer Wendung mit Präposition ("Zum Schaden in der Ferienwohnung: …", "wegen des Schadens") ist der
+# Anlass des Schreibens, keine Einordnung des Codes ("Schadencode", "Code laut Schadenkatalog")
+_SCHADEN_PRAEP_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:zum|zur|im|beim|vom|wegen|nach|seit|bei|mit|zu|am|in|an)"
+                                     r"(?:[ \t]+(?:dem|der|den|des|einem|einer|diesem|unserem|ihrem|ihres|unseres))?"
+                                     r"[ \t]+$")
+
+
+def _einordnung_suchen(text: str, anfang: int = 0, ende=None):
+    """Erste Einordnung des Codes (_CODE_EINORDNUNG_RE) in text[anfang:ende] – ohne ein bloßes Schadenwort hinter einer
+    Präposition (Abnahme 4, Differenztest: "Zum Schaden in der Ferienwohnung: Treppenhaus⏎Code 0940")."""
+    for m in _CODE_EINORDNUNG_RE.finditer(text, anfang, len(text) if ende is None else ende):
+        if _CODE_NUR_SCHADEN_RE.fullmatch(m.group(0)) \
+                and _SCHADEN_PRAEP_DAVOR_RE.search(text, max(anfang, m.start() - 30), m.start()):
+            continue
+        return m
+    return None
+
+
+def _raum_wort(wort: str) -> bool:
+    """Ein Raum, Gebäude, Behälter oder Schloss nach seinem Grundwort – kein Beruf, keine Person, kein Gerät auf -tor?"""
+    w = (wort or "").strip("()„“”\"'»«‚‘’:")
+    if not w or not _gegenstand_wort(w):
+        return False
+    return bool(_CODE_SCHLOSS_RE.fullmatch(w) or (_RAUM_GRUNDWORT_RE.fullmatch(w) and not w.casefold().endswith("tor")))
+
+
+def _verschliessbar(wort: str) -> bool:
+    """Ein Raum, Gebäude, Behälter oder Schloss nach seinem Grundwort (_raum_wort) oder ein Gerät bzw. Zugang mit Code
+    (_CODE_GEGENSTAND_RE: Haus, Wohnung, Handy, Konto, App, Portal …)?"""
+    w = (wort or "").strip("()„“”\"'»«‚‘’:")
+    return _raum_wort(w) or _CODE_GEGENSTAND_RE.fullmatch(w) is not None
+
+
+# Ein Jahr in der Spalte "Baujahr" einer Tabelle ("Gebäude ⇥⇥ Baujahr ⇥⇥ Bauart" ⏎ "Wohnhaus: ⇥⇥ 1974 ⇥⇥ Massiv") ist
+# kein Zugangscode hinter einem Gebäude als Feldname (Abnahme 4 AB4U-05)
+_JAHR_KOPF_RE = re.compile(r"(?i)(?:[\wäöüß\-]*jahr(?:e|es|s)?|bj\.?|erbaut|errichtet|gebaut)")
+_JAHR_WERT_RE = re.compile(r"(?:1[6-9]|20)\d{2}")
+_JAHR_KOPF_ZEILEN = 40
+
+
+def _jahr_unter_spaltenkopf(text: str, start: int, ende: int) -> bool:
+    """Ist der Wert (start, ende) eine Jahreszahl, die als ganze Zelle in der Spalte eines Spaltenkopfs "…jahr"
+    (Baujahr, Anschaffungsjahr) bzw. "erbaut" steht – in einer Zeile mit gleich vielen Zellen darüber, ohne Leerzeile
+    dazwischen (höchstens _JAHR_KOPF_ZEILEN Zeilen)?"""
+    if not _JAHR_WERT_RE.fullmatch(text[start:ende]):
+        return False
+    z_anf = text.rfind("\n", 0, start) + 1
+    z_end = text.find("\n", ende)
+    zeile = text[z_anf:len(text) if z_end < 0 else z_end]
+    if "\t" not in zeile:
+        return False
+    zellen = [m for m in re.finditer(r"[^\t]+", zeile) if m.group(0).strip()]
+    spalte = next((k for k, m in enumerate(zellen) if z_anf + m.start() <= start and ende <= z_anf + m.end()), None)
+    if spalte is None or zellen[spalte].group(0).strip() != text[start:ende]:
+        return False
+    pos = z_anf
+    for _ in range(_JAHR_KOPF_ZEILEN):
+        if pos <= 0:
+            return False
+        v_anf = text.rfind("\n", 0, pos - 1) + 1
+        vorzeile = text[v_anf:pos - 1]
+        pos = v_anf
+        if not vorzeile.strip():
+            return False                                # Leerzeile: die Tabelle ist zu Ende
+        kopf = [m for m in re.finditer(r"[^\t]+", vorzeile) if m.group(0).strip()]
+        if len(kopf) == len(zellen) and _JAHR_KOPF_RE.fullmatch(kopf[spalte].group(0).strip()):
+            return True
+    return False
+
+
+def jahr_unter_spaltenkopf(text: str, start: int, ende: int) -> bool:
+    """Öffentlich für die zeilenweise Selbstkontrolle (restrisiko): der ganze Seitentext mit den Stellen darin."""
+    return _jahr_unter_spaltenkopf(text, start, ende)
+
+
+def _einordnung_ohne_schloss(text: str, anfang: int, ende: int) -> bool:
+    """Steht im Satz eine Einordnung als Grundwort (Typklasse, Gebührenordnung, Kostenstelle …) und kein Schloss?"""
+    return bool(_CODE_EINORDNUNG_WORT_RE.search(text, anfang, ende)) and not _CODE_SCHLOSS_RE.search(text, anfang, ende)
+
+
 def zugangscode_verdacht(text: str) -> list:
     """(start, ende) der Ziffernfolgen hinter "Code", die ein Zugangscode sein können (siehe oben), auch mit "ist" oder
     "lautet" dazwischen ("Der Hausmeister öffnet die Tür, Code ist 4711."), und hinter einem Schloss als Feldname
@@ -3746,19 +4021,29 @@ def zugangscode_verdacht(text: str) -> list:
     "Code ist/lautet <Ziffern>" ("Code lautet 5656.", "Der Code ist 7878."), ein Gegenstand oder Feldname direkt vor
     "Code" ("Waschküche: Code 6161") und ein Gegenstand (Haus, Wohnung, Konto, App …) im Satz davor, dazu Ziffern hinter
     "mit" in einem Satz mit Schloss ohne Verb der Bedienung (Abnahme 3 AB3-01, AB3-07) – jeweils ohne Meldung, Störung
-    oder Einordnung im Satz."""
+    oder Einordnung im Satz. Abnahme 4 (AB4-03, AB4-05, AB4-16): ein Raum oder Schloss nach seinem Grundwort in den
+    Formen "Code X: N", "X (Code N)", "Code N (X)", "Der Code für das X lautet N", im Satz oder in der Zeile davor; eine
+    Ziffernfolge hinter "Zugang X:"; ein Melde- oder Anzeigewort hebt den Verdacht nicht auf, wenn der Satz den Code
+    benutzt (_fehler_aufgehoben), ein Schadenwort nicht, wenn ein Schloss im Satz steht."""
     if "ode" not in text and ":" not in text and "mit" not in text:
         return []
     sicher = set(zugangsdaten(text))
     aus = []
     for m in _SCHLOSS_FELD_RE.finditer(text):
         sp = (m.start("wert"), m.end("wert"))
-        if sp not in sicher and not _CODE_FEHLER_RE.search(text, max(0, m.start() - 60), m.start()):
+        if sp not in sicher and not _CODE_FEHLER_RE.search(text, max(0, m.start() - 60), m.start()) \
+                and not _kein_code_wert(m.group("wert"), text, m.end("wert")) \
+                and not _jahr_unter_spaltenkopf(text, *sp):
             aus.append(sp)
     if "mit" in text:
         ohne_verb: list = []
         _zugang_mit_ziffern(text, ohne_verb)
         aus += [sp for sp in ohne_verb if sp not in sicher and sp not in aus]
+    if "ugang" in text:
+        for m in _ZUGANG_GEGENSTAND_RE.finditer(text):
+            if m.span(2) not in sicher and m.span(2) not in aus and _gegenstand_wort(m.group(1)) \
+                    and _pin_form(m.group(2)):
+                aus.append(m.span(2))
     for m in _CODE_ETIKETT_RE.finditer(text):
         if m.group(0) != "Code":
             continue
@@ -3769,32 +4054,81 @@ def zugangscode_verdacht(text: str) -> list:
         nach = ankuendigung.end() - 1 if angekuendigt else m.end()
         w = _CODE_WERT_DAHINTER_RE.match(text, nach, zeilenende)
         fuer = None
+        wort_dahinter = None
         if (w is None or not _pin_form(w.group(1))) and not angekuendigt:
             fuer = _CODE_FUER_WORT_RE.match(text, m.end(), zeilenende)        # "Code für den Fahrradraum: 6807"
             if fuer is not None and _gegenstand_wort(fuer.group(1)):
                 w = _CODE_FUER_WERT_RE.match(text, fuer.end(), zeilenende)
+                if w is None and _verschliessbar(fuer.group(1)):             # "… für das Postfach lautet 2798."
+                    # nur ein Raum, Schloss oder Zugang ("Haupttor", "Postfach", "Wohnung", "Konto") – nicht "Der Code
+                    # für den Prospekt lautet 3344." (Abnahme 4, Über-Probe k02)
+                    a2 = _ZUGANG_ANKUENDIGUNG_RE.match(text, fuer.end(), zeilenende)
+                    if a2 is not None and a2.end() > fuer.end():
+                        w = _CODE_WERT_DAHINTER_RE.match(text, a2.end() - 1, zeilenende)
             else:
                 fuer = None
+            if fuer is None:                                                 # "Code Werkraum: 1380"
+                g = _CODE_GEGENSTAND_DAHINTER_RE.match(text, m.end(), zeilenende)
+                if g is not None and g.group(2) and g.group(1)[:1].isupper() and _gegenstand_wort(g.group(1)):
+                    w = _CODE_FUER_WERT_RE.match(text, g.end() - 1, zeilenende) or \
+                        _CODE_WERT_DAHINTER_RE.match(text, g.end(), zeilenende)
+                    wort_dahinter = g.group(1)
         if w is None or not _pin_form(w.group(1)):
             continue
         zeilenanfang = text.rfind("\n", max(0, m.start() - 4 * CODE_GEGENSTAND_FENSTER), m.start()) + 1
         satz = _satzteil_vor(text, zeilenanfang, m.start())
-        if _CODE_FEHLER_RE.search(satz) or _CODE_KEIN_GEHEIMNIS_RE.search(satz):
+        satz_ende = _satz_ende(text, w.end(), zeilenende)
+        if _CODE_FEHLER_RE.search(satz) and not _fehler_aufgehoben(text, m.start() - len(satz), m.start(), satz_ende):
+            continue
+        if _CODE_KEIN_GEHEIMNIS_RE.search(satz):
             continue
         doppelpunkt = ":" in text[w.start():w.start(1)]
+        klammer = _WORT_KLAMMER_VOR_CODE_RE.search(satz)
+        hinter = _CODE_GEGENSTAND_HINTER_WERT_RE.match(text, w.end(), zeilenende)
         if not (_CODE_SCHLOSS_RE.search(satz) or (doppelpunkt and _CODE_ANFANG_DAVOR_RE.search(satz))
-                or angekuendigt or fuer is not None or _CODE_GEGENSTAND_RE.search(satz) or _code_wort_davor(satz)
+                or angekuendigt or fuer is not None or wort_dahinter is not None
+                or _CODE_GEGENSTAND_RE.search(satz) or _code_wort_davor(satz)
+                or (klammer is not None and _raum_wort(klammer.group(1)))
+                or (hinter is not None and text[w.end():hinter.start(1)].strip().startswith("(")
+                    and _raum_wort(hinter.group(1)))
+                or _PLATZHALTER_VOR_CODE_RE.search(satz)
                 or _schloss_im_satz_davor(text, zeilenanfang, m.start(), satz)
                 or _code_bezug_gegenstand(text, zeilenanfang, m.start(), w.end(), zeilenende, satz)):
             continue
         hinten = re.search(r"[.!?;]", text[w.end():min(zeilenende, w.end() + 60)] + ".")
-        if _CODE_EINORDNUNG_RE.search(satz) or _CODE_EINORDNUNG_RE.search(text, w.end(), w.end() + hinten.start()) \
-                or _CODE_KEIN_GEHEIMNIS_RE.search(text, w.end(), w.end() + hinten.start()):
+        schloss_im_satz = bool(_CODE_SCHLOSS_RE.search(satz) or _CODE_SCHLOSS_RE.search(text, w.end(), satz_ende))
+        # ein Raum oder Gegenstand, für den der Code gilt ("Code 9245 (Werkraum)", "Code für den Fahrradraum: 6807",
+        # "Code Werkraum: 1380"): wie ein Schloss im Satz – ein Schadenwort davor ordnet den Code nicht ein ("Zum Schaden
+        # in der Ferienwohnung: Code 9245 (Werkraum)"; Abnahme 4, Differenztest)
+        raum_bezug = fuer is not None or wort_dahinter is not None \
+            or (klammer is not None and _raum_wort(klammer.group(1))) \
+            or (hinter is not None and text[w.end():hinter.start(1)].strip().startswith("(")
+                and _raum_wort(hinter.group(1)))
+        einordnung = _einordnung_suchen(satz) or _einordnung_suchen(text, w.end(), w.end() + hinten.start())
+        if einordnung and not ((schloss_im_satz or raum_bezug) and _CODE_NUR_SCHADEN_RE.fullmatch(einordnung.group(0))
+                               and not _einordnung_suchen(text, w.end(), w.end() + hinten.start())):
+            continue
+        if _CODE_KEIN_GEHEIMNIS_RE.search(text, w.end(), w.end() + hinten.start()) \
+                or _einordnung_ohne_schloss(text, m.start() - len(satz), satz_ende):
             continue
         sp = _zugang_wert(text, w.start(1), zeilenende)
         if sp is not None and sp not in sicher and sp not in aus:
             aus.append(sp)
     return aus
+
+
+# Betrag mit Tausenderpunkt oder Währung ("450.000 EUR") und eine Liste von Jahreszahlen ("1974/1911/1987"): kein
+# Zugangscode hinter einem Gebäude als Feldname (Abnahme 4 AB4U-05)
+_BETRAG_WERT_RE = re.compile(r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?")
+_JAHRESLISTE_RE = re.compile(r"(?:19|20)\d{2}(?:[/–-](?:19|20)\d{2})+")
+
+
+def _kein_code_wert(wert: str, text: str, ende: int) -> bool:
+    """Ist der Wert hinter einem Schloss als Feldname ein Betrag ("450.000", auch mit EUR dahinter) oder eine Liste von
+    Jahreszahlen (Baujahre)?"""
+    if _BETRAG_WERT_RE.fullmatch(wert) or _JAHRESLISTE_RE.fullmatch(wert):
+        return True
+    return bool(re.match(r"[ \t]*(?:€|eur\b|euro\b)", text[ende:ende + 8], re.IGNORECASE))
 
 
 # -- Profil- und Kontonamen -------------------------------------------------------------------------------------------

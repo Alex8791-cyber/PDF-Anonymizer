@@ -324,6 +324,8 @@ _BERUF_VOR_RE = re.compile(
     r"|(?<![\wäöüß])(?:übt|übte|üben|übten|ausübt|ausübte)(?:[ \t]+[^\s.,;:!?]+){0,3}?[ \t]+(?:den|einen|seinen|ihren)"
     r"[ \t]+Beruf[ \t]+"
     r"(?:der|des|eines|einer|als)[ \t]+"
+    # "Er hat den Beruf des Bäckers erlernt.", "Sie lernt den Beruf der Floristin." (Abnahme 4 AB4-18)
+    r"|(?<![\wäöüß])(?:den|einen|seinen|ihren)[ \t]+Beruf[ \t]+(?:des|der|eines|einer)[ \t]+"
     r"|(?<![\wäöüß])(?:(?:[Hh]aupt|[Nn]eben)beruflich|[Nn]ebenbei|[Nn]ebenher)(?:[ \t]+als)?[ \t]+"
     # Lebensunterhalt ("Sie verdient ihr Geld als Hebamme"; Abnahme N3)
     r"|(?<![\wäöüß])(?:verdient(?:e)?|verdienen|bestreitet|bestritt)[ \t]+(?:ihr(?:en)?|sein(?:en)?|das|den)[ \t]+"
@@ -390,20 +392,41 @@ def satz_anfang(text: str, pos: int, fenster: int = 200) -> int:
     return anfang
 
 
+# Der Beruf direkt hinter "ist"/"war"/"von Beruf"/"hauptberuflich" ("Er ist Fitnesstrainer in Rosenheim.", "Sie ist von
+# Beruf Versicherungsmaklerin.", "Sie ist hauptberuflich Kinderbetreuerin."): eine Berufsangabe, auch mit Rollen-Endung
+# (Abnahme 4 AB4-06, AB4-18)
+_BERUF_DIREKT_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:(?:ist|war|bin|sind|wird|wurde)[ \t]+(?:von[ \t]+Beruf[ \t]+)?|"
+                                    r"von[ \t]+Beruf[ \t]+|(?:haupt|neben)beruflich[ \t]+)$")
+# Person als Objekt im Satz einer Organisation ("Die Firma hat sie 2019 als Hebamme eingestellt.", "Die Stadt
+# beschäftigt ihn seit 2015 als Schreiner."): der Beruf dieser Person (AB4-06)
+_PERSON_OBJEKT_RE = re.compile(r"(?<![\wäöüß])(?:ihn|sie|ihm|ihr|Herrn|Frau|Herr)(?![\wäöüß])")
+
+
+def rolle_allein(wort: str) -> bool:
+    """Ist das Wort eine Rolle der Liste _ROLLE_ENDUNGEN ohne Bestimmungswort ("Trainer", "Betreuerin", "Verwalter")?
+    Ein Kompositum mit Rollen-Endung ist eine Berufsbezeichnung ("Fitnesstrainer", "Kinderbetreuerin",
+    "Vermögensverwalterin", "Insolvenzverwalter", "Immobilienmakler"; Abnahme 4 AB4-06)."""
+    return (wort or "").casefold() in _ROLLE_ENDUNGEN
+
+
 def beruf_satz_ausgenommen(text: str, start: int, ende: int) -> bool:
     """Ist der Beruf text[start:ende] in seinem Satz eine Rolle statt des Berufs einer Person: eine Rolle der Liste
-    _ROLLE_ENDUNGEN, ein Ehrenamt oder der Satz einer Organisation bzw. des Schreibers ("Wir sind als
-    Versicherungsmakler für Sie tätig")? Für die Sätze der Erkennung (nicht hinter einem Etikett) und die
+    _ROLLE_ENDUNGEN ohne Bestimmungswort (rolle_allein) – außer direkt hinter "ist", "von Beruf", "hauptberuflich" –,
+    ein Ehrenamt ("ist ehrenamtlich als Kassiererin im Verein tätig"; die Selbstkontrolle meldet ihn, wenn der Satz von
+    einer Person spricht) oder der Satz einer Organisation bzw. des
+    Schreibers ("Wir sind als Versicherungsmakler für Sie tätig") ohne Person als Objekt ("Die Firma hat sie als
+    Hebamme eingestellt" ist der Beruf dieser Person)? Für die Sätze der Erkennung (nicht hinter einem Etikett) und die
     Selbstkontrolle."""
-    wort = text[start:ende].casefold()
-    if wort.endswith(_ROLLE_ENDUNGEN):
+    wort = text[start:ende]
+    direkt = bool(_BERUF_DIREKT_DAVOR_RE.search(text, max(0, start - 40), start))
+    if rolle_allein(wort) and not direkt:
         return True
     satz_anfang_ = satz_anfang(text, start)
     hinten = re.search(r"[.!?;\n]", text[ende:ende + 200])
     satz_ende = ende + (hinten.start() if hinten else min(200, len(text) - ende))
     if _EHRENAMT_RE.search(text, satz_anfang_, satz_ende):
-        return True
-    return org_satz(text, satz_anfang_, start)
+        return True                             # Ehrenamt: die Selbstkontrolle meldet den Beruf einer Person (AB4-06)
+    return org_satz(text, satz_anfang_, start) and not _PERSON_OBJEKT_RE.search(text, satz_anfang_ + 1, start)
 
 
 def org_satz(text: str, satz_anfang_: int, bis: int) -> bool:
@@ -435,6 +458,23 @@ def _beruf_gebeugt_stelle(text: str, p: int, ende_zelle: int):
     return None
 
 
+# Satzgegenstand aus Artikel und Hauptwort ("Die Software arbeitet als Eingabehilfe …"): ist das Hauptwort kein
+# Personen-, Berufs- oder Namenswort, beschreibt der Satz eine Sache – eine Tätigkeit nach ihrem Grundwort ("-hilfe",
+# "-kraft") ist dann kein Beruf (Abnahme 4, Altbefund AB3-06)
+_SACH_SUBJEKT_RE = re.compile(r"[ \t]*(?:Der|Die|Das|Dieser|Diese|Dieses|Unser|Unsere|Ihr|Ihre)[ \t]+"
+                              r"([A-ZÄÖÜ][\wäöüß\-]{2,40})[ \t]")
+
+
+def _sache_als_subjekt(text: str, pos: int) -> bool:
+    """Beginnt der Satz vor pos mit Artikel und einem Hauptwort, das keine Person ist ("Die Software …")?"""
+    m = _SACH_SUBJEKT_RE.match(text, satz_anfang(text, pos), pos)
+    if m is None:
+        return False
+    w = m.group(1)
+    return not (personenkontext.ist_personenwort(w) or wissen.ist_beruf(w) or wissen.ist_nachname(w)
+                or wissen.ist_vorname(w))
+
+
 def _beruf_wert(text: str, pos: int, etikett: bool, grundwort: bool = False):
     """(start, ende) eines Berufs ab pos (Adjektive davor erlaubt) oder None. Hinter einem Etikett zählt auch ein
     unbekannter Beruf (Wert der Zelle), im Satz nur ein Eintrag der Wissensbasis – auch gebeugt ("des Schreiners") –
@@ -451,7 +491,8 @@ def _beruf_wert(text: str, pos: int, etikett: bool, grundwort: bool = False):
             return gebeugt
         if grundwort:
             g = _TAETIGKEIT_GRUNDWORT_RE.match(text, p, ende_zelle)
-            if g is not None and not wissen.ist_vorname(g.group(0)) and not wissen.ist_nachname(g.group(0)):
+            if g is not None and not wissen.ist_vorname(g.group(0)) and not wissen.ist_nachname(g.group(0)) \
+                    and not _sache_als_subjekt(text, pos):
                 return g.span()
     if treffer:
         v = min(treffer, key=lambda v: v.start)

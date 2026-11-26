@@ -342,12 +342,21 @@ def _kartenpruefnummer(kategorie: str, text: str, davor: str | None = None) -> b
     return davor is None or not _KARTENNUMMER_DAVOR_RE.search(davor)
 
 
+_HAUSNUMMER_KURZ_RE = re.compile(r"\d{1,3}[ ]?[A-Za-z]?")
+
+
 def _nur_am_etikett(kategorie: str, text: str) -> bool:
     """Kurzer Wert, der nur hinter seinem Etikett gilt und weder im Dokument noch in andere Dokumente weitergegeben
     wird (wie die Kartenprüfnummer): eine PIN oder ein kurzer Code der Zugangsdaten (bis sechs Zeichen: "4711" ist
-    anderswo ein Betrag oder eine Seitenzahl) und ein Kirchensteuermerkmal ("rk", "ev": anderswo ein Kürzel)."""
+    anderswo ein Betrag oder eine Seitenzahl), ein Kirchensteuermerkmal ("rk", "ev": anderswo ein Kürzel), eine
+    Hausnummer allein ("8", "13a" im Feld „Hausnummer“: anderswo Seitenzahl, Menge oder Halle 8; Abnahme 4 AB4U-12)
+    und jeder Wert aus höchstens zwei Zeichen außer einem Namen ("DE" hinter „Staatsangehörigkeit“, "x": anderswo ein
+    Länderkürzel oder ein Maßzeichen; AB4U-02) – von einem Namen ein einzelner Buchstabe (das „L“ eines Kammfelds,
+    dessen zweiten Buchstaben die Texterkennung verloren hat: anderswo eine Größe oder ein Kürzel)."""
     n = sum(c.isalnum() for c in text or "")
-    return (kategorie == "zugangsdaten" and n <= 6) or (kategorie == "religion" and n <= 4)
+    return (kategorie == "zugangsdaten" and n <= 6) or (kategorie == "religion" and n <= 4) \
+        or (kategorie == "strasse" and bool(_HAUSNUMMER_KURZ_RE.fullmatch((text or "").strip()))) \
+        or (kategorie not in ("namen", "begriff") and n <= 2) or (kategorie == "namen" and n <= 1)
 
 
 def _kontext_davor(fund: dict) -> str | None:

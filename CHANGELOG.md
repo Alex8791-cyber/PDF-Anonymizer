@@ -256,17 +256,20 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - **Ausgefüllte Kammfelder auf Scans** (Kästchen „je Kästchen ein Zeichen“, Block- und Handschrift): Die
   Texterkennung las sie meist nicht – die Kästchen galten ihr als Grafik, Werte und oft auch die Feldnamen daneben
   fehlten, die Werte blieben unbemerkt lesbar. Jetzt sucht die OCR Kästchenreihen im Bild (geschlossen, als Kamm mit
-  kurzen Wänden, unten offen; auch schräg, mit Gruppenlücken wie bei der IBAN und als Fax mit unterbrochenen oder
-  fehlenden Linien), übermalt nur deren Linien und liest die Felder ein zweites Mal für sich. In der Stufe „Hoch“
+  kurzen Wänden, unten offen; auch schräg, mit Gruppenlücken wie bei der IBAN und als Fax mit unterbrochenen Linien –
+  ein Raster ganz ohne Linien, dessen Wände an Ober- und Unterkante keine Tinte tragen, wird nicht erkannt), übermalt
+  nur deren Linien und liest die Felder ein zweites Mal für sich. In der Stufe „Hoch“
   wird der Inhalt eines Felds hinter einem Feldnamen für Personenangaben geschwärzt (Name, Anschrift, Telefon,
   Geburtsdatum, Kennungen – auch verlesene Feldnamen). Felder mit einem Feldnamen ohne Personenbezug und einem Wert
-  in dessen Form (Antragsdatum der letzten 30 Jahre, Anzahl, Betrag, Kilometerstand, Tarifgruppe) und leere Felder
-  bleiben lesbar und ohne Verdacht. Was in der Ausgabe in einem gefüllten Kästchen noch zu sehen ist – hinter einem
-  Personen-Feldnamen, ohne erkennbaren Feldnamen oder unlesbar –, meldet die Restrisiko-Prüfung an dieser Stelle
-  (Ausgabe `_PRUEFEN`); dafür bekommt sie Lage und Füllung der Felder aus dem Original. Textzeilen, Schreiblinien
-  mit Handschrift darauf und Tabellen gelten nicht als Kammfeld. Gemessen auf neun Kammfeld-Scans der
-  Entwicklungskorpora: Kernwerte entfernt 29 → 92 von 106, stille Lecks 0; auf eigenen und neu erzeugten
-  Formularen siehe Abschnitt „Für Entwickler“.
+  in dessen Form (Antragsdatum der letzten 30 Jahre, Anzahl, Betrag, Kilometerstand, Tarifgruppe) und leere Felder –
+  auch mit vorgedrucktem Ausfüllhinweis („TTMMJJJJ“) oder einem Kreuzchen – bleiben lesbar und ohne Verdacht; Teile
+  eines Datums („Tag“, „Monat“, „Jahr“) gelten mit dem Feldnamen davor bzw. darüber („Geburtsdatum“). Was in der
+  Ausgabe in einem gefüllten Kästchen noch zu sehen ist – hinter einem Personen-Feldnamen, ohne erkennbaren Feldnamen
+  oder unlesbar –, meldet die Restrisiko-Prüfung an dieser Stelle (Ausgabe `_PRUEFEN`); dafür bekommt sie Lage und
+  Füllung der Felder aus dem Original. Textzeilen und Schreiblinien mit Handschrift darauf gelten nicht als Kammfeld;
+  eine Tabelle mit gleich breiten schmalen Zellen (bis 12 mm) kann als Kammfeld gelten – ihr Inhalt wird dann wie der
+  eines Kammfelds behandelt (meist gemeldet). Gemessen auf neun Kammfeld-Scans der Entwicklungskorpora: Kernwerte
+  entfernt 29 → 92 von 106, stille Lecks 0; auf eigenen und neu erzeugten Formularen siehe Abschnitt „Für Entwickler“.
 - **Kurze Werte in Kammfeldern der Textebene und Kundenblöcke von EDV-Ausdrucken:** Eine Hausnummer mit ein oder
   zwei Zeichen allein in ihrem Kammfeld („1 3“ unter „Hausnr.“) blieb lesbar – gesperrte Folgen zählten erst ab drei
   Zeichen. Jetzt wird ein so kurzer Wert hinter einem Feldnamen geschwärzt, wenn er als Hausnummer (Ziffer, ggf.
@@ -523,7 +526,8 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     einem Berufswort am Satzanfang mit einem Verb einer Person oder einer Kontaktangabe: eine bekannte Marke oder ein
     Name ist der Name („Elektriker Miele kam am Montag.“, „Der Installateur Vaillant hat …“; auf fbd755b und 818990e
     still), ein anderes Wort wird gemeldet („Handwerker Grohe kam am Montag.“). „ist“ und „war“ zählen nicht als Beleg
-    („Chef Sekretariat ist ab 9 Uhr besetzt“ bleibt stehen, „Monteur Grohe war vor Ort“ wird gemeldet). Die
+    („Chef Sekretariat ist ab 9 Uhr besetzt“ wird nicht geschwärzt, nur gemeldet; ebenso „Monteur Grohe war vor
+    Ort“). Die
     Selbstkontrolle meldet jedes Wort hinter einem Personenwort, das ein Name sein kann und in der Ausgabe noch lesbar
     ist – auf Scans ohne die bisherige Längengrenze und auch ohne Rollen-Etikett („Nachbar Wudy hat …“ auf Scan 200 dpi
     war still), auch ein Berufswort, das zugleich ein Familienname ist („Wir waren beim Nachbarn Koch zu Besuch.“ war
@@ -555,6 +559,78 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     statt über alle Platzhalter je Wort; eine Zeile mit 600 Platzhaltern (58 600 Zeichen) braucht 3,7 s statt 14,6 s
     bei gleichem Ergebnis, und ein Wachstumstest (75 gegen 600 Platzhalter) wird rot, wenn die Abfrage wieder über alle
     läuft.
+- **Vierte Abnahme der Zusammenführung (Runde 5, sechste Nachbesserung):** Der Kammfeld-Strang ließ ein auf Felder
+  „Tag“, „Monat“, „Jahr“ verteiltes Geburtsdatum still durch und schwärzte Kreuzchen, Ausfüllhinweise und kurze Werte
+  an allen gleichen Stellen des Dokuments; mehrere Verengungen früherer Runden ließen Werte ohne Meldung stehen, die
+  fbd755b noch geschwärzt hatte. Je Befund mit Abwandlungen und Gegenproben in `tests/test_abnahme4_r7.py`:
+  - Kammfelder: Teil-Feldnamen („Tag“, „Monat“, „Jahr“, „TT“, „JJJJ“) gelten nie für sich als Feldname ohne
+    Personenbezug – es zählt der Feldname davor in der Zeile bzw. darüber („Geburtsdatum ⇥ Tag [..] Monat [..] Jahr
+    [....]“), auf Scans und auf der Textebene; unter einem Geburts-Feldnamen werden die Teile geschwärzt, sonst
+    bleiben sie lesbar („Antragsdatum“, „Versicherungsbeginn“). „Datum“ allein bleibt ein Datum wie „Antragsdatum“.
+    Die Selbstkontrolle meldet die Teile auch dann, wenn die Kästchen nicht als Kammfeld gelten. Liest die
+    Texterkennung bei Schräglage „Geburtsdatum ⇥ Tag“ und den Rest der Reihe als eigene Zeile („2,35, ⇥ Monat 0.4 ⇥
+    Jahr ⇥ 2016“), gilt das kurze Stück vor dem ersten Teil-Feldnamen als Wert des Tags; verlesene Ziffern in Kästchen
+    („O 1“, „0.4“) zählen als Teil-Wert. Auf Scans gilt ein Feld aus zwei Kästchen als Kammfeld, wenn in seiner Zeile
+    ein Feld derselben Bauart steht („Tag [..] Monat [..] Jahr [....]“, „TT [..] MM [..] JJ [..]“ – vorher blieben
+    „03“ und „02“ ungelesen und still); ein Ankreuzpaar allein bleibt keines. Kurze Werte mit Tabulatoren zwischen den
+    Kästchen der Textebene („Hausnr. ⇥ 1 ⇥ 3“, „Vorname ⇥ L ⇥ I“) werden geschwärzt. Kreuzchen und vorgedruckte
+    Ausfüllhinweise („TTMMJJJJ“, auch mit einem als „I“ gelesenen Wandrest: „TTMMJJJIJ“) sind keine Werte, kurze
+    Kammfeld-Werte (bis zwei Zeichen) werden nur als Hausnummer oder Name geschwärzt und nie an andere Stellen
+    weitergegeben – auch eine kurze Hausnummer hinter „Hausnummer:“ nicht mehr an „Halle 8“, „Tor 8“, „Seite 1 von 8“.
+    Auf Scans zählt dabei die Zahl der gefüllten Kästchen mit: Liest die Texterkennung weniger Zeichen, als Kästchen
+    gefüllt sind („LI“ als „L“ bei 300 dpi JPEG, eine Telefonnummer als „08“), gilt der Wert als so lang wie seine
+    Kästchen und wird geschwärzt; ein einzelner gelesener Buchstabe eines Namens wird nicht weitergegeben
+    („Konfektionsgröße L“ bleibt). Mengen- und Betragsfelder („Wohnfläche (m²)“, „Progression in %“, „Unfallrente
+    monatlich“, „Jahresfahrleistung“) mit einer Zahl darin meldet die Prüfung nicht mehr – auch nicht als
+    „Ziffernfolge“ über die Textregeln. Kleinstbilder (1–3 Pixel breit) lösen keine Ausnahme mehr aus.
+  - Zugangscodes: Ein Schloss wird an seinem Grundwort erkannt („Feuerschutztür-Code“, „Code Doppelgarage“,
+    „Hintertor (Code …)“, „Türsprechanlage“, „Gittertor:⏎6312“), der Vorgriff auf ein Fehlerwort gilt nur vor „alarm“
+    (Fehlalarmcode bleibt frei); bei sicherem Schloss auch ein Code aus Buchstaben und Ziffern („Kellertür – Code
+    7A3B“), nicht in Fehlercode-Gestalt („P0300“). Melde- und Anzeigewörter heben den Code an einem Schloss nicht mehr
+    auf („Der Vermieter meldete den neuen Code der Kellertür: 8034“, „Am Display der Garage den Code 2240 eingeben.“);
+    „PIN/Zugang/Zahlencode + Schloss:“ und ein Raum nach seinem Grundwort werden geschwärzt bzw. gemeldet, ein bloßes
+    Schadenwort davor („Zum Schaden in der Ferienwohnung: …“) ordnet den Code nicht ein. „Der Code für das Postfach
+    lautet …“ wird gemeldet, wenn das Wort hinter „für“ ein Raum, Schloss oder Zugang ist (nicht „Der Code für den
+    Prospekt lautet 3344.“). Frei bleiben Beträge, Baujahre (auch in der Spalte „Baujahr“ einer Tabelle: „Wohnhaus: ⇥
+    1974 ⇥ Massiv“) und Jahreszahlen vor einem Partizip in Gebäudeangaben („mit 1890 gebautem Dachstuhl“), Möbelcodes
+    ohne Bedienung, Tarif-, Typklassen-, Gebührenordnungs- und Kostenstellencodes (auch als Grundwort).
+  - Namen: Wörter hinter einem Personenwort, die die Wissensbasis als gewöhnliche Wörter kennt oder die ohne Beleg
+    hinter einem Begleiter stehen („Zeugin Ledig“, „mit dem Onkel Grebl“), werden gemeldet; ein Titel- oder Berufswort,
+    das zugleich Familienname ist („Maler Kaplan“, „Onkel Kaplan“), ein Allerweltswort hinter Herr/Frau („Herrn
+    Halter“), ein Doppelname mit gewöhnlichem Teil („Zeugin Bauer-Kaltl“: geschwärzt), ein Familienname mit Artikel und
+    einem Satzteil einer Person (auch ohne „-er“: „Gesehen hat es der Hafl.“, „Die Scheibe hat der Wimmer beschädigt.“,
+    „Die Becherin hat angerufen.“), ein Wort mit Namensbeleg hinter einem Berufswort auch ohne Verb („Glaser Frost ist
+    erst nächste Woche frei.“, „Laut Klempner Dyson …“), ein Hausname mit Besuchs- oder Ereigniskontext („Vom Kaltl
+    kam der Anruf …“, „Wir waren beim Pfnürl zum Essen.“) und ein Organisationswort mit unbekanntem Wort unter einem
+    Gruß („Agentur Moik“) werden gemeldet. Ein bekannter Familienname hinter beim/vom/zum wird wieder geschwärzt
+    („Wir waren beim Brandl zum Essen.“). Abteilungs-, Orts- und Firmenwörter hinter einem Personenwort
+    („Kollege Außendienst“, „Nachbar Gegenüber“, „Techniker Wasserversorger“) werden nicht mehr geschwärzt, nur
+    gemeldet; Geräte, Tiere und Fahrzeuge in Schadensätzen („Der Marder beschädigte …“, „Der Hund beschädigte die
+    Couch.“, „Gefahren ist der Wagen.“) sind keine Familiennamen, ebenso wenig das Objekt hinter dem Verb, wenn davor
+    ein Subjekt im Nominativ steht („Der Saugroboter beschädigte die Stehlampe.“, „Er bemerkte die Gardine.“; nach
+    „Die …“ oder „Das …“ bleibt die Meldung, dort kann das Wort auch das Subjekt sein).
+  - Beruf: Ein Beruf mit Rollen-Endung hinter „ist“, „von Beruf“, „hauptberuflich“ („Er ist Fitnesstrainer“), der
+    Beruf einer Person im Satz einer Organisation („Die Firma hat sie als Hebamme eingestellt.“) und „den Beruf des
+    Bäckers erlernt“ werden geschwärzt; im Ehrenamt („ehrenamtlich als Erzieherin tätig“), beim höflichen „Sie“ mit
+    Arbeit oder Einstufung („da Sie als Krankenschwester im Schichtdienst arbeiten“) meldet die Selbstkontrolle den
+    Beruf. Eine Tätigkeit nach ihrem Grundwort gilt nicht für eine Sache als Satzgegenstand („Die Software arbeitet als
+    Eingabehilfe …“). Quadrate (Mannheim) mit Wohnwort oder Person im Satz werden geschwärzt bzw. gemeldet.
+  - Texterkennung: Die Selbstkontrolle liest auf Scans ein Ausrufezeichen am Wortende vor einem klein geschriebenen
+    Wort als „l“ („Vom Kalt! kam der Anruf“ bei 300 dpi JPEG: der Hausname wird gemeldet) und ein an das Wort davor
+    angeklebtes „nach“ vor einem Quadrat als Präposition („per Postnach K1, 5“; nicht demnach, hernach, hiernach).
+    Liegt der Platzhalter eines Namens links vor einem Wort, sein Text aber am Ende der Textebene (so schreibt die
+    Schwärzung), gilt er als links („[PERSON A] Bauer-Hinterseer hat angerufen.“ war kein „Beruf vor dem Namen“); auf
+    Scans zählt auch ein Schwärzungsrechteck, in dem die Kontroll-OCR den Platzhalter verliest („IPERSONAI“), und die
+    Längengrenze für OCR-Wörter gilt je Teil eines Doppelnamens. „Wasser“ und „Regen“ stehen als gewöhnliche Wörter in
+    der Wissensbasis („dem Nachbarn Wasser abgegraben“ wird nicht gemeldet); ein am Zeilenende getrenntes Wort hinter
+    „Herr“ („Herr Versiche-“ ⏎ „rer“) ist kein Familienname.
+  - Laufzeit: Die Kontroll-OCR liest eine Scan-Seite, deren Original kein Kammfeld hatte, ohne Kammfeld-Suche; die
+    Suche selbst verkleinert das Bild über versetzte Teilbilder und bestimmt die Papierhelligkeit über das Histogramm
+    (gleiches Ergebnis, bei 300 dpi 0,22 s → 0,11 s je Seite). Neue Wachstumstests (8 000 gegen 64 000 Zeichen ohne
+    Zeilenumbruch für „mit + Ziffern“, Personenwort + Verb und Berufswort + Verb; 600 gegen 2 400 Platzhalter).
+    Gemessen (CPU-Zeit je Scan-Seite einschließlich Texterkennung, Oberflächen-Weg, je zwei Runden, 14 Textscans mit
+    200 dpi und 16 Kammfeld-Formulare): ohne Kammfeld 6,46 s gegen 6,04 s auf 818990e (+7 %) und 6,65 s auf 0230782;
+    mit Kammfeldern 5,27 s gegen 3,67 s auf 818990e (+44 %) und 5,53 s auf 0230782.
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene
@@ -743,8 +819,11 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   Handschrift, 150/200/300 dpi, Schräglage bis 1,8°, JPEG, Rauschen, Fax) 38 → 150 von 162, still 12 → 0; neu
   erzeugte Formulare des Generators (Seed 4711 und 9090) 151 → 219 von 251, still 3 → 0. Sieben Werte gehen von
   geschwärzt auf gemeldet zurück (drei in Seed 31, je einer in Seed 4711 und 9090, zwei in s3x): Der Feldname direkt
-  über einem Feld wird auf dem bereinigten Bild nicht immer gelesen. Laufzeit (gepaart gemessen auf d23f173):
-  Scan-Seiten mit Kammfeldern etwa +90 % (Linien entfernen, zweiter Lauf), übrige Scan-Seiten etwa +9 %.
+  über einem Feld wird auf dem bereinigten Bild nicht immer gelesen. Laufzeit: Die Angabe „Scan-Seiten mit
+  Kammfeldern etwa +90 %, übrige Scan-Seiten etwa +9 %“ (gepaart gemessen auf d23f173) war für die übrigen Seiten nicht
+  nachvollziehbar; die vierte Abnahme maß auf 0230782 gegen 818990e (CPU je Scan-Seite einschließlich Texterkennung)
+  etwa +100 % auf Kammfeld-Seiten und +27 % auf übrigen Scan-Seiten (+16 % nur für die Analyse). Den Stand nach der
+  sechsten Nachbesserung nennt deren Eintrag oben.
 - Neuer Aufbau: ein Seitenmodell für Analyse, Schwärzung und Selbstkontrolle (`seitenmodell.py`),
   Erkennungsregeln als Module mit Register und Rückfallliste für die EXE (`anonymisierer/detektoren/`),
   Wissensbasis (`wissen.py`, 23 Wortlisten in `anonymisierer/daten/`), dazu `kundenliste.py`,

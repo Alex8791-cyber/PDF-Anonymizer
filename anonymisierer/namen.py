@@ -317,6 +317,12 @@ def _ist_sachwort(wort: str) -> bool:
             return True
         if _wissen_art(teil)[1]:
             return True
+    # Kompositum aus zwei Allerweltswörtern der Wissensbasis ("Schadenkatalog": "laut Schadenkatalog" ist kein Name;
+    # Abnahme 4, Gegenprobe der Zugangscodes)
+    if "-" not in w and len(w) >= 9:
+        for i in range(4, len(w) - 4):
+            if _wissen_art(w[:i].capitalize())[1] and _wissen_art(w[i:].capitalize())[1]:
+                return True
     # Kein Abgleich mit verlesenen Etiketten: _ist_sachwort gilt für jeden Text, auch für die Textebene eines PDFs,
     # und ein unbekannter Nachname ("Ehmann", "Wohnert") liegt oft nur einen Buchstaben neben einem Feldbezeichner
     # ("Ehemann", "Wohnort"). Verlesene Etiketten prüft verlesenes_etikett_statt_name – nur für OCR-Text.
@@ -1672,6 +1678,12 @@ def finde_personen(text: str) -> list:
                 continue
             vorher = len(kandidaten)
             if not _kandidat(kandidaten, text, start, ende):
+                continue
+            # "Beim Schwager Schimmel …": "Schwager" ist die Rolle (auch wenn es ein Familienname ist), der Name steht
+            # dahinter und folgt den Regeln für Personenwörter (Abnahme 4)
+            kandidaten[vorher:] = [x for x in kandidaten[vorher:] if not personenkontext.personenwort_vor_name(
+                text, x["start"], x["ende"], _wissen_modul())]
+            if len(kandidaten) == vorher:
                 continue
             if nur_meldung:
                 kandidaten[vorher:] = [x for x in kandidaten[vorher:] if (x["start"], x["ende"]) not in nur_meldung]
