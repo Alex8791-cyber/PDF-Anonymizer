@@ -580,6 +580,9 @@ class Seite:
         self.ocr_winkel = None                # erkannte Ausrichtung der Scan-Seite (Kontroll-OCR)
         self.ocr_schraeg = 0.0                # geschätzte, von der OCR nicht herausgedrehte Schräglage (Grad)
         self.ocr_woerter: int = 0             # Anzahl OCR-Wörter
+        self.kammfelder: list = []            # Kammfelder des Scans (ocr.py/kammraster.py): {"rahmen", "kaesten",
+                                              # "gefuellt", "offen"} in Seitenkoordinaten (aus der OCR-Lesung bzw.
+                                              # dem Zwischenspeicher des OCR-Dienstes)
         self.felder: list = []
         # Durchsuchbarer Scan (unsichtbare Textebene + OCR derselben Bildstelle), siehe _textebene_verknuepfen:
         self.bildstelle: dict = {}            # Glyphe der Textebene -> Bildbereich (verknüpfte OCR-Wörter)
@@ -2038,6 +2041,31 @@ def _ocr_holen(dienst, pfad, nr, clip=None):
     return list(woerter or []), warnung, None, None, None
 
 
+def _ocr_kammfelder(dienst, pfad, nr, clip=None, nur_bekannt: bool = False) -> list:
+    """Kammfelder der OCR-Lesung (im Zwischenspeicher des Dienstes, kein neuer Lauf): [] ohne vollständiges Ergebnis.
+    nur_bekannt: Wörter aus dem Zwischenspeicher der Analyse (ocr_cache) – dann nur, was der Dienst schon gelesen hat
+    (kammfelder_falls_bekannt, startet keine OCR)."""
+    if pfad is None:
+        return []
+    if nur_bekannt:
+        bekannt = getattr(dienst, "kammfelder_falls_bekannt", None)
+        if bekannt is None:
+            return []
+        try:
+            felder = bekannt(pfad, nr, OCR_DPI, clip) if clip is not None else bekannt(pfad, nr, OCR_DPI)
+        except Exception:
+            return []
+        return list(felder or [])
+    ergebnis_fn = getattr(dienst, "ergebnis", None)
+    if ergebnis_fn is None:
+        return []
+    try:
+        e = ergebnis_fn(pfad, nr, OCR_DPI, clip) if clip is not None else ergebnis_fn(pfad, nr, OCR_DPI)
+    except Exception:
+        return []
+    return list(e.get("kammfelder") or []) if isinstance(e, dict) else []
+
+
 def _ocr_schraeg(dienst, pfad, nr) -> float:
     """Geschätzte Schräglage (Grad, Vorzeichen wie ocr.schraeglage_schaetzen) einer per OCR gelesenen Scan-Seite,
     die die OCR NICHT gerade gerückt gelesen hat (unter ocr.SCHRAEG_KORREKTUR_AB: die Wortkästen sind dann die
@@ -2152,6 +2180,7 @@ def _dokument_aufbauen(doc, pfad, ocr, ocr_cache, melde, fortschritt, abbruch, w
         bilder = bildbereiche(seite) if modus != "nein" else []
         woerter, winkel, quelle = None, None, "ocr"
         ocr_gelaufen, ocr_warnung = False, False
+        kammfelder: list = []
         if modus in ("seite", "bilder"):
             quelle = "ocr" if modus == "seite" else "bild"
             if nr in ocr_cache:
@@ -2162,6 +2191,12 @@ def _dokument_aufbauen(doc, pfad, ocr, ocr_cache, melde, fortschritt, abbruch, w
                         winkel = bekannt(pfad, nr, OCR_DPI)
                     except Exception:
                         winkel = None
+                # Kammfelder derselben Lesung (für die Restrisiko-Prüfung der Ausgabe), nur aus dem Zwischenspeicher
+                if modus == "seite":
+                    kammfelder = _ocr_kammfelder(ocr, pfad, nr, nur_bekannt=True)
+                else:
+                    for bereich in bilder:
+                        kammfelder.extend(_ocr_kammfelder(ocr, pfad, nr, clip=bereich, nur_bekannt=True))
             elif ocr is None:
                 if not ocr_fehlt_gemeldet:
                     _melden(warnungen, meldungen, "warnung", "BILDER_UNGEPRUEFT",
@@ -2176,6 +2211,7 @@ def _dokument_aufbauen(doc, pfad, ocr, ocr_cache, melde, fortschritt, abbruch, w
                         melde(f"   OCR läuft: {pfad.name if pfad else ''}, Seite {nr + 1}/{gesamt} …")
                     w, warnung, winkel, plausibel, dienst_meldungen = _ocr_holen(ocr, pfad, nr)
                     woerter = w
+                    kammfelder = _ocr_kammfelder(ocr, pfad, nr)
                     if warnung == "Abgebrochen" and abbruch is not None and abbruch.is_set():
                         raise Abgebrochen()
                     if warnung or dienst_meldungen:
@@ -2187,6 +2223,7 @@ def _dokument_aufbauen(doc, pfad, ocr, ocr_cache, melde, fortschritt, abbruch, w
                             raise Abgebrochen()
                         w, warnung, _, plausibel, dienst_meldungen = _ocr_holen(ocr, pfad, nr, clip=bereich)
                         woerter.extend(w)
+                        kammfelder.extend(_ocr_kammfelder(ocr, pfad, nr, clip=bereich))
                         if warnung == "Abgebrochen" and abbruch is not None and abbruch.is_set():
                             raise Abgebrochen()
                         if warnung or dienst_meldungen:
@@ -2199,6 +2236,7 @@ def _dokument_aufbauen(doc, pfad, ocr, ocr_cache, melde, fortschritt, abbruch, w
         m.ocr_modus = modus
         m.ocr_winkel = winkel
         m.ocr_woerter = len(woerter or [])
+        m.kammfelder = kammfelder
         if modus == "seite" and woerter:
             m.ocr_schraeg = _ocr_schraeg(ocr, pfad, nr)
         if analyse_meldungen and modus == "seite" and woerter is not None:

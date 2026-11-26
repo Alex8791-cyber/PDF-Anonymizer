@@ -705,7 +705,8 @@ Tesseract** – nur den entpackten Ordner. Auch die Visual-C++-Laufzeit liegt da
   `schwaerzung.py`, `seitenmodell.py`, `detektoren/`, `muster.py` (Kategorien, Muster,
   Schutzstufen), `kennungsformen.py`, `personenkontext.py`, `namen.py` (spaCy), `wissen.py` +
   `daten/`, `kundenliste.py`,
-  `restrisiko.py`, `ocr.py`, `fotos.py`, `bilder.py`, `nebenkanaele.py`, `vorschau.py`,
+  `restrisiko.py`, `ocr.py`, `kammraster.py` (Kästchenfelder auf Scans), `fotos.py`, `bilder.py`,
+  `nebenkanaele.py`, `vorschau.py`,
   `vorschau_fenster.py`, `gui.py`, `gui_attrappen.py`, `auftrag.py` (welche Funde und Stellen
   die Oberfläche an die Schwärzung gibt), `dateien.py`; Startskript `pdf_anonymisierer.py`.
 - Kommentare im Code verweisen teils auf interne Entwicklerunterlagen („Vertrag Abschnitt …“,

@@ -253,6 +253,29 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   entpacken“ statt `Installieren.bat`.
 
 ### Behoben
+- **Ausgefüllte Kammfelder auf Scans** (Kästchen „je Kästchen ein Zeichen“, Block- und Handschrift): Die
+  Texterkennung las sie meist nicht – die Kästchen galten ihr als Grafik, Werte und oft auch die Feldnamen daneben
+  fehlten, die Werte blieben unbemerkt lesbar. Jetzt sucht die OCR Kästchenreihen im Bild (geschlossen, als Kamm mit
+  kurzen Wänden, unten offen; auch schräg, mit Gruppenlücken wie bei der IBAN und als Fax mit unterbrochenen oder
+  fehlenden Linien), übermalt nur deren Linien und liest die Felder ein zweites Mal für sich. In der Stufe „Hoch“
+  wird der Inhalt eines Felds hinter einem Feldnamen für Personenangaben geschwärzt (Name, Anschrift, Telefon,
+  Geburtsdatum, Kennungen – auch verlesene Feldnamen). Felder mit einem Feldnamen ohne Personenbezug und einem Wert
+  in dessen Form (Antragsdatum der letzten 30 Jahre, Anzahl, Betrag, Kilometerstand, Tarifgruppe) und leere Felder
+  bleiben lesbar und ohne Verdacht. Was in der Ausgabe in einem gefüllten Kästchen noch zu sehen ist – hinter einem
+  Personen-Feldnamen, ohne erkennbaren Feldnamen oder unlesbar –, meldet die Restrisiko-Prüfung an dieser Stelle
+  (Ausgabe `_PRUEFEN`); dafür bekommt sie Lage und Füllung der Felder aus dem Original. Textzeilen, Schreiblinien
+  mit Handschrift darauf und Tabellen gelten nicht als Kammfeld. Gemessen auf neun Kammfeld-Scans der
+  Entwicklungskorpora: Kernwerte entfernt 29 → 92 von 106, stille Lecks 0; auf eigenen und neu erzeugten
+  Formularen siehe Abschnitt „Für Entwickler“.
+- **Kurze Werte in Kammfeldern der Textebene und Kundenblöcke von EDV-Ausdrucken:** Eine Hausnummer mit ein oder
+  zwei Zeichen allein in ihrem Kammfeld („1 3“ unter „Hausnr.“) blieb lesbar – gesperrte Folgen zählten erst ab drei
+  Zeichen. Jetzt wird ein so kurzer Wert hinter einem Feldnamen geschwärzt, wenn er als Hausnummer (Ziffer, ggf.
+  mit Buchstabe) bzw. als Name aus zwei Buchstaben passt; Zählfelder, Kürzel und Kreuzchen bleiben lesbar. Stehen
+  über einem Kammfeld mehrere Feldnamen derselben Art („Straße, Hausnr.“ über Straßen- und Hausnummernfeld), gilt
+  die Zeile als Feldname (vorher: mehrdeutig, Wert ungeschwärzt). Auf gescannten EDV-Ausdrucken galt die
+  Kundenanschrift als Firmenanschrift, wenn die OCR den Namen hinter „VERSICHERUNGSNEHMER“ in zwei Zellen las
+  („NWOSU, ⇥ TESFAY“) und im Block „BANKVERBINDUNG“ stand; breite Lücken im Namen zählen jetzt wie ein Leerzeichen.
+  Mitarbeiterzeilen („Ansprechpartner“) und Briefköpfe mit Registerangaben behalten ihre Firmenanschrift.
 - **Gegenprüfung der Zusammenführung (Runde 5):** Was die zwei Prüfer am zusammengeführten Stand fanden, ist allgemein
   behoben – je Befund mit Abwandlungen und Gegenproben in `tests/test_gegenpruefung_r7.py`:
   - Verluste der Zusammenführung: der Ort hinter der Person eines Personen-Etiketts („Einweisender Arzt: Dr. …,
@@ -701,6 +724,27 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   vollständig darin, und Dateinamen enthalten oft Kundennamen – `fehler.log` vor dem Weiterleiten ansehen.
 
 ### Für Entwickler (Tests, CI, Messwerkzeuge)
+- **Kammfelder:** neues Modul `anonymisierer/kammraster.py` (Kästchenreihen im Bild finden, Linien entfernen,
+  Füllung je Kästchen, `wert_ohne_personenbezug`), `ocr.py` (Linien vor der Erkennung entfernen, zweiter Lauf nur
+  über die Felder, `ergebnis()["kammfelder"]`, `OcrDienst.kammfelder_falls_bekannt`), `Seite.kammfelder` im
+  Seitenmodell, Erkennungsregel `struktur.kammfeld_scan` (`detektoren/kammfelder.py`), Restrisiko
+  `_kammfelder_pruefen` (Parameter `kammfelder` von `restrisiko_pruefen`). Tests in
+  `tests/test_kammfelder_scan.py`: Stile, Kästchenbreiten 4–8 mm, 150/200/300 dpi, Schräglage, IBAN-Gruppen, Fax
+  (unterbrochene und fehlende Linien), Feldname links/oben; Gegenproben: leere Felder, Felder ohne Personenbezug,
+  Tabellen, Ankreuzkästchen, Unterschriftslinie, Fließtext, Schreibmaschinenzeilen, Schrift auf Schreiblinien.
+  Kammfelder der Textebene (`struktur.kammfeld`): kurze Werte (`_kurzer_lauf`, `_kurz_passt`) und mehrere
+  Feldnamen derselben Kategorie darüber (`_etikett_darueber`); Kundenzeilen mit OCR-Zellen
+  (`struktur_adresse.personen_formzeile`). Tests in `tests/test_kammfelder_textebene.py` mit Gegenproben
+  (Zählfelder, Kürzel, Initialen, Ziffern unter Namensfeldern, Feldnamen verschiedener Art, Mitarbeiterzeile,
+  Briefkopf mit Registerangaben). Gemessen je Kernwert (entfernt von allen, stille Lecks), vorher 818990e, bei den
+  neun Kammfeld-Scans der Entwicklungskorpora 8aecade: Kammfeld-Scans 29 → 92 von 106, still 16 → 0; eigene
+  Formulare Seed 7 (zum Abstimmen benutzt) 30 → 151 von 155, still 37 → 1 (Bewertungsartefakt); eigene Formulare
+  Seed 31 (nicht abgestimmt: Kästchen 4–8 mm, zu, als Kamm oder unten offen, Feldname links oder darüber, Block- und
+  Handschrift, 150/200/300 dpi, Schräglage bis 1,8°, JPEG, Rauschen, Fax) 38 → 150 von 162, still 12 → 0; neu
+  erzeugte Formulare des Generators (Seed 4711 und 9090) 151 → 219 von 251, still 3 → 0. Sieben Werte gehen von
+  geschwärzt auf gemeldet zurück (drei in Seed 31, je einer in Seed 4711 und 9090, zwei in s3x): Der Feldname direkt
+  über einem Feld wird auf dem bereinigten Bild nicht immer gelesen. Laufzeit (gepaart gemessen auf d23f173):
+  Scan-Seiten mit Kammfeldern etwa +90 % (Linien entfernen, zweiter Lauf), übrige Scan-Seiten etwa +9 %.
 - Neuer Aufbau: ein Seitenmodell für Analyse, Schwärzung und Selbstkontrolle (`seitenmodell.py`),
   Erkennungsregeln als Module mit Register und Rückfallliste für die EXE (`anonymisierer/detektoren/`),
   Wissensbasis (`wissen.py`, 23 Wortlisten in `anonymisierer/daten/`), dazu `kundenliste.py`,

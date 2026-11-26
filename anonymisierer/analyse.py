@@ -72,6 +72,7 @@ except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
     import fitz
 
 from . import detektoren
+from .detektoren import kammfelder as _kammfelder
 from . import muster as _muster
 from . import nebenkanaele as _nebenkanaele
 from . import ocr as _ocr
@@ -1205,6 +1206,7 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
                       kundenliste=kundenliste, lauf=lauf)
     fehler: list = []
     treffer = detektoren.alle_treffer(dok, kontext, fehler)
+    treffer = _kammfelder.ohne_personenbezug(dok, treffer)     # Kammfeld-Werte ohne Personenbezug (Scans)
     for f in list(detektoren.LADEFEHLER) + fehler:
         _melde(meldungen, warnungen, "warnung", "ERKENNUNG_FEHLER",
                f"{f} – diese Regel hat nichts erkannt, Ergebnis bitte besonders sorgfältig prüfen!")

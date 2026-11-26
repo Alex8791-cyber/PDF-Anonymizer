@@ -2970,8 +2970,10 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
                                  | set(lauf.abgekuerzt) | {PLATZHALTER_BEREICH})
             # Was die Prüfung über die Seiten wissen darf, ohne die Erkennung zu teilen: Art und Ausrichtung der OCR
             # je Seite (die Kontroll-OCR der Selbstkontrolle liegt damit schon im Zwischenspeicher – kein zweiter
-            # OCR-Lauf), die OCR-Wörter unveränderter Seiten (aus der Analyse), die Formularfelder des Originals und
-            # die bewusst abgewählten Stellen (Entscheidung der Nutzerin, kein Verdacht).
+            # OCR-Lauf), die OCR-Wörter unveränderter Seiten (aus der Analyse), die Formularfelder des Originals, die
+            # Kammfelder der Scans im Original (Lage und Füllung der Kästchen: in der Ausgabe verdecken die
+            # Schwärzungen die Linien, dort findet die Prüfung ein Feld nicht immer selbst) und die bewusst
+            # abgewählten Stellen (Entscheidung der Nutzerin, kein Verdacht).
             ocr_modus = dict(lauf.ocr_modus)
             zusatz = {"ocr_modus": ocr_modus,
                       "winkel": {nr: lauf.winkel(nr) for nr, art in ocr_modus.items()
@@ -2980,6 +2982,9 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
                       "ocr_woerter": {nr: list(lauf.ocr_cache[nr]) for nr in ocr_modus
                                       if nr in lauf.ocr_cache and not lauf.rects_je_seite.get(nr)},
                       "felder": list(getattr(lauf.modell, "felder", None) or []),
+                      "kammfelder": {nr: list(s.kammfelder) for nr, s in
+                                     enumerate(getattr(lauf.modell, "seiten", None) or [])
+                                     if getattr(s, "kammfelder", None)},
                       "abgewaehlt": [(st.get("seite"), st.get("text") or f.get("text", "")) for f in lauf.funde
                                      for st in (f.get("stellen") or []) if not st.get("an", True)],
                       "abbruch": lauf.abbruch}

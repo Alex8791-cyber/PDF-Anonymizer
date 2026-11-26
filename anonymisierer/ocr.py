@@ -26,9 +26,16 @@
                                             Ordner mit traineddata-Kopie samt Tesseract-Einstellungen
     schraeglage_schaetzen(grau), hintergrund_ungleichmaessig(grau), hintergrund_herausrechnen(grau)
     class OcrDienst                         OCR im Prozess-Pool (Start-Methode "spawn"):
-        woerter / ergebnis / text / winkel / winkel_falls_bekannt / vorab / selbsttest /
-        abbrechen / zuruecksetzen / schliessen (Context-Manager)
+        woerter / ergebnis / text / winkel / winkel_falls_bekannt / kammfelder_falls_bekannt / vorab /
+        selbsttest / abbrechen / zuruecksetzen / schliessen (Context-Manager)
 Kompatibilität für ältere Aufrufer: ist_scan_seite(seite), ocr_textpage(seite).
+
+Kammfelder (Kästchen „je Kästchen ein Zeichen“, kammraster.py): Vor jeder vollen Lesung sucht die OCR Kästchenreihen
+im Rendering, übermalt ihre Linien und Wände weiß (sonst hält die Seitenaufteilung die Kästchen für Grafik und
+verwirft Werte samt Feldnamen) und liest die Felder ein zweites Mal für sich (KAMM_PSM); je Feld zählt die bessere
+Lesung. ergebnis()["kammfelder"] gibt die Felder in Seitenkoordinaten weiter ({"rahmen", "kaesten", "gefuellt",
+"offen"}) – an das Seitenmodell (Seite.kammfelder, Erkennung struktur.kammfeld_scan) und über die Schwärzung an die
+Restrisiko-Prüfung der Ausgabe.
 
 Koordinaten: Alle Wörter (x0, y0, x1, y1, text[, block, zeile, wort, winkel, schraeg]) beziehen sich auf die
 Seite NACH drehung_entfernen() (= Koordinaten der gedrehten Ansicht, wie get_text sie auf der Originalseite
@@ -79,6 +86,8 @@ try:
     import pymupdf as fitz
 except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
     import fitz
+
+from . import kammraster as _kammraster
 
 Wort = tuple  # (x0, y0, x1, y1, text) bzw. (x0, y0, x1, y1, text, block, zeile, wort)
 
@@ -251,6 +260,20 @@ HINTERGRUND_SPANNE = 40       # Grauwert-Spanne des Hintergrunds (5.-95. Perzent
                               # ist (Schatten, Fotos, Kopierränder) und vor der OCR herausgerechnet wird.
                               # Gleichmäßiges Papier bleibt unverändert (gemessen: dort kein Gewinn).
 HINTERGRUND_STREIFEN_PIXEL = 2_000_000  # Bildrechnungen in Streifen dieser Größe (Spitzenspeicher, Befund R-06)
+# Kammfelder (kammraster.py): vor jeder vollen Lesung werden Kästchenreihen gesucht und ihre Linien weiß übermalt –
+# Kästchen hält die Seitenaufteilung sonst für Grafik und verwirft Werte samt Feldnamen. Ein zweiter Lauf liest nur die
+# Felder mit KAMM_PSM ("ein einheitlicher Textblock"); je Feld zählt die Lesung, die mehr gefüllte Kästchen mit Wörtern
+# überdeckt und besser ein Zeichen je gefülltem Kästchen liefert (gemessen auf neun Kammfeld-Scans: Hauptlauf 753,
+# zweiter Lauf 771, Wahl 779 von 779 gefüllten Kästchen überdeckt; 70 von 92 Werten genau). Seiten ohne Kammfeld
+# werden unverändert gelesen.
+KAMM_PSM = 6
+KAMM_HAUPTLAUF_BEREINIGT = True  # auch der Hauptlauf liest das bereinigte Rendering (neun Kammfeld-Scans: Kern 92 statt
+                              # 71 von 106 Werten – die Feldnamen neben den Kästchen gehen sonst mit verloren). Weil
+                              # schon wenige weiß übermalte Pixel die Seitenaufteilung der ganzen Seite ändern, muss ein
+                              # Feld sicher eins sein: kammraster verwirft Schreiblinien mit Handschrift und Textzeilen
+                              # (KAMM_MAX_DICKE_MM, WAND_FREI_ANTEIL)
+KAMM_MAX_PIXEL = 15_000_000   # größere Renderings (A3 und größer bei 300 dpi) ohne Kammfeld-Suche (Speicher)
+KAMM_RAND_PT = 1.5            # Wörter mit der Mitte bis so weit außerhalb eines Felds gehören zu ihm
 # Speicher großer Aufträge (Befund R-06, Runde 2): Bis zu drei Arbeiter lasen gleichzeitig je bis zu 40 MP – mit
 # Schattenentfernung je rund 1 GB, zusammen 3,5-3,8 GB. Aufträge ab GROSS_AUFTRAG_PIXEL laufen deshalb nacheinander
 # (eine Sperre für alle Arbeiter eines Dienstes), ihr OCR-PDF wird komprimiert erzeugt (gemessen 40 MP: 530 ->
@@ -1911,10 +1934,12 @@ def _woerter_aus_ocr_pdf(ocr_bytes, dpi, pix_x, pix_y, matrix, pix=None, zaehler
         ocr_doc.close()
 
 
-def _ocr_durchlauf(seite, dpi, clip, winkel, sprache, tessdata, hintergrund=False, zaehler=None):
+def _ocr_durchlauf(seite, dpi, clip, winkel, sprache, tessdata, hintergrund=False, zaehler=None, kamm=None):
     """Rendert die Seite (oder den Ausschnitt) um `winkel` gedreht, lässt Tesseract laufen und
     liefert die Wörter in Seitenkoordinaten (Drehung herausgerechnet). hintergrund: ungleichmäßigen
-    Papierhintergrund (Schatten) vorher herausrechnen. zaehler: siehe _woerter_aus_ocr_pdf."""
+    Papierhintergrund (Schatten) vorher herausrechnen. zaehler: siehe _woerter_aus_ocr_pdf.
+    kamm (dict, nur volle Lesungen): Kammfelder suchen, ihre Linien vor der Erkennung entfernen, die Felder ein
+    zweites Mal lesen (_kammfelder_lesen); kamm["felder"] erhält die Felder in Seitenkoordinaten."""
     matrix = fitz.Matrix(dpi / 72.0, dpi / 72.0).prerotate(winkel)
     pix = None
     if hintergrund and _numpy() is not None:
@@ -1939,9 +1964,149 @@ def _ocr_durchlauf(seite, dpi, clip, winkel, sprache, tessdata, hintergrund=Fals
         # RGB ist Pflicht: mit Graustufen-Pixmaps liefert pdfocr_tobytes keine Wörter (MuPDF 1.28)
         pix = seite.get_pixmap(matrix=matrix, clip=clip, colorspace=fitz.csRGB, alpha=False)
     pix.set_dpi(dpi, dpi)
+    felder, sauber = [], None
+    if kamm is not None:
+        bereinigt, felder, sauber = _kammfelder_vorbereiten(pix, dpi)
+        if KAMM_HAUPTLAUF_BEREINIGT:
+            pix = bereinigt
+        del bereinigt
     gross = pix.width * pix.height >= GROSS_AUFTRAG_PIXEL      # unkomprimiert läge das Bild ein zweites Mal im Speicher
     ocr_bytes = pix.pdfocr_tobytes(compress=gross, language=sprache, tessdata=tessdata)
-    return _woerter_aus_ocr_pdf(ocr_bytes, dpi, pix.x, pix.y, matrix, pix, zaehler)
+    woerter = _woerter_aus_ocr_pdf(ocr_bytes, dpi, pix.x, pix.y, matrix, pix, zaehler)
+    if felder:
+        woerter = _kammfelder_lesen(woerter, felder, sauber, pix, dpi, matrix, sprache, tessdata, kamm)
+    return woerter
+
+
+def _kammfelder_vorbereiten(pix, dpi):
+    """(Pixmap, Felder, bereinigtes Graubild): Kammfelder im Rendering suchen und ihre Linien weiß übermalen. Ohne
+    Kammfeld (oder ohne numpy, bei Riesenseiten, bei einem Fehler) bleibt das Rendering unverändert: ([], None)."""
+    if _numpy() is None or pix.width * pix.height > KAMM_MAX_PIXEL:
+        return pix, [], None
+    try:
+        grau = _grauwerte(pix)
+        felder = _kammraster.kammfelder_finden(grau, dpi)
+        if not felder:
+            return pix, [], None
+        vorher = grau.copy()
+        _kammraster.linien_entfernen(grau, felder)
+        felder = _kammraster.fuellung_bestimmen(grau, felder, dpi)
+        # nur die übermalten Pixel ändern sich, Farbe und alles andere bleiben wie im Rendering
+        np = _numpy()
+        daten = getattr(pix, "samples_mv", None)
+        bild = np.frombuffer(daten if daten is not None else pix.samples, dtype=np.uint8)
+        bild = bild.reshape(pix.height, pix.width, pix.n).copy()
+        bild[grau != vorher] = 255
+        del vorher
+        neu = fitz.Pixmap(pix.colorspace, pix.width, pix.height, bild.tobytes(), False)
+        del bild
+        neu.set_origin(pix.x, pix.y)
+        neu.set_dpi(dpi, dpi)
+        return neu, felder, grau
+    except Exception as e:
+        if _speicherfehler(e):
+            raise
+        _protokollieren(e)
+        return pix, [], None
+
+
+def _px_rechteck(r, pix_x, pix_y, rueck) -> list:
+    q = fitz.Rect(r[0] + pix_x, r[1] + pix_y, r[2] + pix_x, r[3] + pix_y) * rueck
+    q.normalize()
+    return [round(q.x0, 2), round(q.y0, 2), round(q.x1, 2), round(q.y1, 2)]
+
+
+def _feld_auf_seite(feld, pix_x, pix_y, rueck) -> dict:
+    """Kammfeld (Pixel des Renderings) in Seitenkoordinaten: {"rahmen", "kaesten", "gefuellt", "offen"}."""
+    return {"rahmen": _px_rechteck(_kammraster.feld_bereich(feld), pix_x, pix_y, rueck),
+            "kaesten": [_px_rechteck(k, pix_x, pix_y, rueck) for k in feld.kaesten],
+            "gefuellt": [bool(g) for g in feld.gefuellt], "offen": feld.offen}
+
+
+def _im_feld(w, feld, rand: float = KAMM_RAND_PT) -> bool:
+    """Steht das Wort im Feld (Mitte in einem Kästchen samt Wand)? Nicht der Rahmen: siehe kammraster.im_feld."""
+    return _kammraster.im_feld(feld, (w[0] + w[2]) / 2.0, (w[1] + w[3]) / 2.0, rand_x=rand + 0.5, rand_y=rand)
+
+
+def kaesten_bedeckt(feld, woerter) -> list:
+    """Je Kästchen eines Felds (Seitenkoordinaten): überdeckt ein Wort es (mindestens 40 % seiner Breite und 30 %
+    seiner Höhe)? Ein Zeichen ist schmaler als sein Kästchen."""
+    aus = []
+    for k in feld["kaesten"]:
+        b, h = max(k[2] - k[0], 0.1), max(k[3] - k[1], 0.1)
+        aus.append(any(min(k[2], w[2]) - max(k[0], w[0]) >= 0.4 * b and min(k[3], w[3]) - max(k[1], w[1]) >= 0.3 * h
+                       for w in woerter))
+    return aus
+
+
+def _lesung_guete(feld, woerter) -> tuple:
+    """(gefüllte Kästchen mit Wort, -Abweichung der Zeichenzahl von den gefüllten Kästchen) – größer ist besser."""
+    bedeckt = kaesten_bedeckt(feld, woerter)
+    n = sum(1 for g in feld["gefuellt"] if g)
+    treffer = sum(1 for g, b in zip(feld["gefuellt"], bedeckt) if g and b)
+    zeichen = sum(1 for w in woerter for c in str(w[4]) if c.isalnum())
+    return treffer, -abs(zeichen - n)
+
+
+def _kammfelder_lesen(woerter, felder, sauber, pix, dpi, matrix, sprache, tessdata, kamm) -> list:
+    """Zweiter Lauf nur über die Kammfelder (kammraster.nur_felder, KAMM_PSM) und Wahl der besseren Lesung je Feld
+    (_lesung_guete). Die Wörter des zweiten Laufs stehen an der Stelle der ersetzten (Lesefolge, Block und Zeile der
+    OCR) bzw. hinter dem Feldnamen derselben Zeile."""
+    rueck = ~matrix
+    seiten_felder = [_feld_auf_seite(f, pix.x, pix.y, rueck) for f in felder]
+    kamm["felder"] = seiten_felder
+    if not any(any(f["gefuellt"]) for f in seiten_felder):
+        return woerter
+    try:
+        bild = _kammraster.nur_felder(sauber, felder)
+        p2 = fitz.Pixmap(fitz.csRGB, fitz.Pixmap(fitz.csGRAY, bild.shape[1], bild.shape[0], bild.tobytes(), False))
+        p2.set_origin(pix.x, pix.y)
+        p2.set_dpi(dpi, dpi)
+        td = tessdata_mit_einstellungen(tessdata, sprache, {"tessedit_pageseg_mode": str(KAMM_PSM)}) or tessdata
+        zweit = _woerter_aus_ocr_pdf(p2.pdfocr_tobytes(language=sprache, tessdata=td), dpi, p2.x, p2.y, matrix)
+    except Exception as e:
+        if _speicherfehler(e):
+            raise
+        _protokollieren(e)
+        return woerter
+    aus = list(woerter)
+    gewaehlt = 0
+    for feld in seiten_felder:
+        if not any(feld["gefuellt"]):
+            continue
+        haupt = [i for i, w in enumerate(aus) if _im_feld(w, feld)]
+        neu = sorted((w for w in zweit if _im_feld(w, feld)), key=lambda w: w[0])
+        if not neu or _lesung_guete(feld, neu) <= _lesung_guete(feld, [aus[i] for i in haupt]):
+            continue
+        gewaehlt += 1
+        aus = _woerter_ersetzen(aus, haupt, neu, feld)
+    kamm["zweiter_lauf"] = gewaehlt
+    return aus
+
+
+def _woerter_ersetzen(woerter, alt: list, neu: list, feld) -> list:
+    """Wörter mit den Indizes `alt` durch `neu` ersetzen. Ohne alte Wörter stehen die neuen hinter dem Wort derselben
+    Zeile links vom Feld (Feldname: gleiche OCR-Zeile) oder hinter dem letzten Wort über dem Feld (eigene Zeile)."""
+    if alt:
+        pos = alt[0]
+        block, zeile, nr = woerter[pos][5:8] if len(woerter[pos]) >= 8 else (0, 0, 0)
+    else:
+        x0, y0, x1, y1 = _kammraster.kopfkasten(feld)
+        links = [i for i, w in enumerate(woerter) if y0 <= (w[1] + w[3]) / 2.0 <= y1 and w[2] <= x0 + KAMM_RAND_PT]
+        if links:
+            i = max(links, key=lambda i: woerter[i][2])
+            pos = i + 1
+            block, zeile, nr = (woerter[i][5], woerter[i][6], woerter[i][7] + 1) if len(woerter[i]) >= 8 else (0, 0, 0)
+        else:
+            ueber = [i for i, w in enumerate(woerter) if (w[1] + w[3]) / 2.0 < y0]
+            pos = max(ueber) + 1 if ueber else 0
+            block = 1 + max([w[5] for w in woerter if len(w) >= 8] or [0])
+            zeile, nr = 0, 0
+    eingefuegt = [tuple(w[:5]) + (block, zeile, nr + k) for k, w in enumerate(neu)]
+    weg = set(alt)
+    vorher = [w for i, w in enumerate(woerter[:pos]) if i not in weg]
+    nachher = [w for i, w in enumerate(woerter[pos:], pos) if i not in weg]
+    return vorher + eingefuegt + nachher
 
 
 def _normwort(text: str) -> str:
@@ -2032,7 +2197,8 @@ def _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pr
                (ungleichmäßiger Hintergrund herausgerechnet), "seitenaufteilung": PSM der vollen Lesung,
                "plausibel": 0..1, "wortquote": Anteil starker Wörter, "treffer", "tokens",
                "laeufe": Anzahl OCR-Durchläufe, "lesungen": [{winkel, dpi, quote, treffer, tokens, dauer}],
-               "unplausibel": bool, "aufloesung": tatsächlich gelesene dpi}. Koordinaten beziehen sich auf die
+               "unplausibel": bool, "aufloesung": tatsächlich gelesene dpi, "kammfelder": Kammfelder der
+               gewählten Lesung in Seitenkoordinaten (siehe Modulkopf)}. Koordinaten beziehen sich auf die
     Seite nach drehung_entfernen().
     Ablauf: 0° bei voller Auflösung; ist das klar plausibel, fertig (Normalfall, ein Lauf). Sonst
     Ausrichtungsproben bei PROBE_DPI (0°, 180°, ggf. 90°/270° nach _naechster_winkel) und – falls eine
@@ -2087,32 +2253,37 @@ def _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pr
             s = float(schraeg_je_lage[lage] or 0.0)  # (180° ändert die Steigung der Zeilen nicht)
             return s if abs(s) >= SCHRAEG_KORREKTUR_AB else 0.0
 
+        kamm_je_winkel: dict = {}           # volle Lesung je Ausrichtung -> Kammfelder (Seitenkoordinaten)
+
         def lesen(winkel, aufloesung, probe=False, aufteilung=False):
             t0 = time.perf_counter()
             zaehler: dict = {}
+            kamm = None if probe else {}
             if probe and aufteilung and seitenaufteilung["psm"] != 6:
                 korr = 0.0                          # Probe mit Seitenaufteilung (zweite Probenstufe)
                 woerter = _ocr_durchlauf(seite, aufloesung, clip_rect, winkel, sprache, tessdata_voll, False, zaehler)
             elif probe or seitenaufteilung["psm"] == 6:
                 korr = 0.0 if probe else korrektur(winkel)
                 woerter = _ocr_durchlauf(seite, aufloesung, clip_rect, winkel - korr, sprache, tessdata,
-                                         analyse["hintergrund"] and not probe, zaehler)
+                                         analyse["hintergrund"] and not probe, zaehler, kamm)
             else:
                 korr = korrektur(winkel)
                 try:
                     woerter = _ocr_durchlauf(seite, aufloesung, clip_rect, winkel - korr, sprache, tessdata_voll,
-                                             analyse["hintergrund"], zaehler)
+                                             analyse["hintergrund"], zaehler, kamm)
                 except Exception as e:     # abgeleitete Sprachdatei unbrauchbar: Voreinstellung
                     if _speicherfehler(e):
                         raise                # Speichermangel: halbe Auflösung (_ocr_worker), nicht dieselbe noch mal
                     _protokollieren(e)
                     seitenaufteilung["psm"] = 6
                     zaehler = {}
+                    kamm = {}
                     woerter = _ocr_durchlauf(seite, aufloesung, clip_rect, winkel - korr, sprache, tessdata,
-                                             analyse["hintergrund"], zaehler)
+                                             analyse["hintergrund"], zaehler, kamm)
             if not probe:
                 seitenaufteilung["entartet"] = zaehler
                 seitenaufteilung["korrektur"] = korr
+                kamm_je_winkel[winkel % 360] = kamm.get("felder") or []
             bewertung = _lesung_bewerten([w[4] for w in woerter])
             protokoll.append(dict(bewertung, winkel=winkel, dpi=aufloesung,
                                   dauer=round(time.perf_counter() - t0, 2)))
@@ -2196,6 +2367,7 @@ def _ocr_lesen(pdf_pfad, seite_nr0, dpi, clip, sprache, tessdata, ausrichtung_pr
         unplausibel = (winkel_fest is None and not plausibel_gelesen and tokens_max >= MIN_TOKENS_WARNUNG)
         entartet = seitenaufteilung.get("entartet") or {}
         return {"woerter": woerter, "winkel": winkel, "schraeg": schraeg, "korrektur": korr,
+                "kammfelder": kamm_je_winkel.get(winkel % 360, []),
                 "hintergrund": analyse["hintergrund"], "seitenaufteilung": seitenaufteilung["psm"],
                 "zeilen_repariert": entartet.get("entartet_repariert", 0),
                 "zeilen_unsicher": entartet.get("entartet_offen", 0),
@@ -2701,7 +2873,7 @@ class OcrDienst:
             if hinweis not in self.hinweise:
                 self.hinweise.append(hinweis)
         return {"woerter": roh.get("woerter", []), "winkel": gedreht, "schraeg": float(roh.get("schraeg") or 0.0),
-                "korrektur": float(roh.get("korrektur") or 0.0),
+                "korrektur": float(roh.get("korrektur") or 0.0), "kammfelder": list(roh.get("kammfelder") or []),
                 "hintergrund": bool(roh.get("hintergrund")), "seitenaufteilung": roh.get("seitenaufteilung"),
                 "plausibel": roh.get("plausibel", 0.0),
                 "wortquote": roh.get("wortquote", 0.0), "laeufe": roh.get("laeufe", 1),
@@ -2738,6 +2910,15 @@ class OcrDienst:
         if eintrag is None or eintrag.get("fehler"):
             return None
         return float(eintrag.get("schraeg") or 0.0), float(eintrag.get("korrektur") or 0.0)
+
+    def kammfelder_falls_bekannt(self, pdf_pfad, seite_nr0: int, dpi: int = OCR_DPI, clip=None):
+        """Kammfelder der Lesung (kammraster.py, Seitenkoordinaten) aus dem Zwischenspeicher – startet KEINE OCR;
+        None, wenn die Seite noch nicht gelesen wurde."""
+        with self._lock:
+            eintrag = self._cache.get(self._schluessel(pdf_pfad, seite_nr0, dpi, clip, None))
+        if eintrag is None or eintrag.get("fehler"):
+            return None
+        return list(eintrag.get("kammfelder") or [])
 
     def text(self, pdf_pfad, seite_nr0: int, dpi: int = OCR_DPI, winkel=None, clip=None) -> str:
         """OCR-Text einer Seite (Kontroll-OCR), zeilenweise in Lesefolge. winkel: Ausrichtung des Originals
