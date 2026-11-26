@@ -26,6 +26,7 @@ selbst ausweist. Was die OCR in einem gefüllten Feld gar nicht liest, meldet di
 from __future__ import annotations
 
 import bisect
+import difflib
 import re
 
 from . import ALLE_PROFILE, Treffer, detektor
@@ -105,15 +106,24 @@ def _kurze_laeufe(text: str, start: int, ende: int, laeufe: list) -> list:
     aus = []
     ende_lauf = max((e for _, e, _ in laeufe), default=start)
     k = _kurzer_lauf(text, ende_lauf, ende)
-    if k is not None and (not laeufe or text[ende_lauf:k[0]].strip()):
+    if k is not None and (not laeufe or text[ende_lauf:k[0]].strip()) and not _parteibuchstaben(text, k[0], k[1]):
         aus.append((*k, bool(laeufe)))
     for m in _KURZ_VOR_FELD_RE.finditer(text, start, ende):
         e = m.end(2) if m.group(2) else m.end(1)
         if any(s0 < e and m.start(1) < e0 for s0, e0, _ in laeufe) \
-                or any(a < e and m.start(1) < b for a, b, _, _ in aus):
+                or any(a < e and m.start(1) < b for a, b, _, _ in aus) or _parteibuchstaben(text, m.start(1), e):
             continue
         aus.append((m.start(1), e, re.sub(r"\s+", "", text[m.start(1):e]), True))
     return aus
+
+
+def _parteibuchstaben(text: str, s: int, e: int) -> bool:
+    """Sind die zwei Zeichen über einen Spaltentrenner die Buchstaben zweier Parteien oder Fahrzeuge ("Unterschrift der
+    Fahrer ⏎ A ⇥⇥ B", "Versicherungsnehmer ⇥⇥ A ⇥⇥ B" im Unfallbericht; Nachbesserung 8, Abnahme 6 AB6U-09): "A" und "B"
+    in Spalten – kein Name aus zwei Buchstaben. Ein Name in weit gesetzten Kästchen ("L ⇥⇥ I"; Abnahme 4 AB4-17)
+    bleibt ein Wert."""
+    teil = text[s:e]
+    return "\t" in teil and re.sub(r"\s+", "", teil) == "AB"
 
 
 def _kurz_passt(kategorie: str, wert: str) -> bool:
@@ -178,6 +188,23 @@ def _letzte_zwei_davor(ets: list, idx, anfang: int, s: int) -> tuple:
     return (ets[b - 1] if b - 1 >= a else None), (ets[b - 2] if b - 2 >= a else None)
 
 
+def _etikett_gleiche_hoehe(seite, ets: list, idx, text: str, vorige, s: int, e: int):
+    """Feldname am Ende der vorigen Zeile (der Textfolge), der in derselben Höhe links vom Wert steht (senkrecht zu
+    mindestens der Hälfte überlappend, linker Rand links vom Wert) – oder None. Nur die eine vorige Zeile wird geprüft
+    (keine Schleife über alle Feldnamen der Seite)."""
+    if vorige is None:
+        return None
+    et, _ = _letzte_zwei_davor(ets, idx, vorige.start, vorige.ende)
+    if et is None or text[et.ende:vorige.ende].strip(" \t:"):
+        return None
+    b, v = _box(seite, et.start, et.ende), _box(seite, s, e)
+    if b is None or v is None:
+        return None
+    ueberlapp = min(b[3], v[3]) - max(b[1], v[1])
+    hoehe = max(1.0, min(b[3] - b[1], v[3] - v[1]))
+    return et if ueberlapp >= 0.5 * hoehe and b[0] < v[0] else None
+
+
 def _etikett_darueber(lg, ets: list, text: str, s: int, wert: str):
     """Feldname allein in der Zeile direkt über dem Wert. Stehen dort mehrere Feldnamen („Straße, Hausnr.“,
     „PLZ ⇥⇥ Ort“), zählt die Zeile nur, wenn alle dieselbe Kategorie ergeben – dann der waagerecht nächste."""
@@ -227,6 +254,28 @@ def _etikett_darunter(lg, ets: list, text: str, s: int, wert: str):
         if len(kandidaten) > 1 and len(kategorien) == 1 and None not in kategorien:
             return min(kandidaten, key=lambda et: abs(lg.zelle_bei(et.start).x0 - zelle.x0))
     return None
+
+
+_NUR_ARTIKEL_RE = re.compile(r"(?i)[ \t]*(?:(?:des|der|von|vom|zum|zur|für|fuer|eines|einer)[ \t]+)*")
+
+
+def _feldname_des_felds_darueber(lg, et, s: int, wert_zeilen: set) -> bool:
+    """Steht der Feldname über dem Wert bei s deutlich näher an einer Wertzeile darüber – ist er also der Feldname unter
+    dem Feld darüber ("Name" unter [KRAUS], darunter erst [45678] mit "Kilometerstand"; Kamm-Probe 6 a02)? Dieselbe
+    Grenze wie auf Scans (kammraster.UNTER_FAKTOR): Abstand zum Wert bei s größer als UNTER_FAKTOR mal der zur
+    Wertzeile darüber."""
+    za = lg.zelle_bei(et.start)
+    if za is None:
+        return False
+    box = lg.zeilen_box.get(za.zeile)
+    darueber = _zeilen_darueber(lg, za.zeile, za.hoehe)[:1]
+    if box is None or not darueber or darueber[0] not in wert_zeilen:
+        return False
+    b2 = lg.zeilen_box.get(darueber[0])
+    if b2 is None:
+        return False
+    abstand_oben = max(box[1] - b2[3], 0.0)
+    return _zeilen_abstand(lg, et, s) > kammraster.UNTER_FAKTOR * max(abstand_oben, 0.5)
 
 
 def _zeilen_abstand(lg, et, s: int) -> float:
@@ -362,15 +411,24 @@ def _geteiltes_datum(seite, ets: list) -> list:
         return []
     aus = []
     idx = _ets_index(ets)
+    zeilen_index = {id(z): i for i, z in enumerate(seite.zeilen)}
     for z in seite.zeilen:
         teile = [m for m in _TEIL_WERT_RE.finditer(text, z.start, z.ende) if _teil_wert(m)]
         if not teile:
             continue
         # ein Feldname in Klammern ("Geburtsdatum (Fahrer)", "Geb.-Datum (Kind)") ergänzt den Feldnamen davor
         # (Abnahme 5 A5-08)
-        davor = [et for et in _ets_zwischen(ets, idx, z.start, teile[0].start())
-                 if not _in_klammern(text, z.start, et.start)]
-        if davor:
+        alle = _ets_zwischen(ets, idx, z.start, teile[0].start())
+        davor = [et for et in alle if not _in_klammern(text, z.start, et.start)]
+        # ein Feldname für ein Geburtsdatum in der Klammer gilt selbst, wenn davor keiner steht ("Datum (Geburt)",
+        # "Kind (Geburtsdatum)"; Nachbesserung 8 nach Abnahme 6 AB6U-02) – übergangen wird nur ein Zusatz hinter einem
+        # Geburts-Feldnamen ("Geburtsdatum (Fahrer)")
+        klammer = [et for et in alle if "datum_geburt" in et.arten and _in_klammern(text, z.start, et.start)]
+        if klammer and (not davor or ("datum_geburt" not in davor[-1].arten and davor[-1].start < klammer[-1].start)):
+            davor = davor + [klammer[-1]]
+        if _zeilentext_unter_geburt(seite, zeilen_index, z, teile[0].start()):
+            pass                                      # "Kind 1 ⇥ Tag [..] …" unter "Geburtsdaten der Kinder" (A6-14)
+        elif davor:
             zwischen = text[davor[-1].ende:teile[0].start()]
             if "datum_geburt" not in davor[-1].arten \
                     or any(c.isalnum() for c in re.sub(r"\([^()\n]{0,30}\)", "", zwischen)):
@@ -415,6 +473,39 @@ def _geteiltes_datum(seite, ets: list) -> list:
 _TEIL_ALLEIN_RE = re.compile(r"(?i)[ \t]*(?:tag|monat|mon|jahr|tt|mm|jj|jjjj)\.?:?[ \t]*")
 _ZIFFERN_VORN_RE = re.compile(r"(?i)[ \t|]*(\d(?:[ \t|]{0,3}\d){0,3})(?=[ \t|]*$|\t|[ \t|]+(?:tag|monat|mon|jahr|tt|mm|jj|jjjj)"
                               r"(?![\wäöüß]))")
+
+
+# Zeilentext vor den Teil-Feldnamen einer Zeile, der eine Person benennt ("Kind 1", "Partner/in", "1. Person",
+# "Ehegatte", "versicherte Person 2"): höchstens drei Wörter, kein Feldname
+_ZEILENTEXT_PERSON_RE = re.compile(r"(?i)[ \t]*(?:\d{1,2}\.[ \t]*)?(?:kind|kinder|partner(?:/?in)?|partnerin|ehegatte|ehegattin|"
+                                   r"ehepartner(?:/?in)?|lebenspartner(?:/?in)?|person|versicherte[rn]?(?:[ \t]+person)?|"
+                                   r"mitversicherte[rn]?(?:[ \t]+person)?|antragsteller(?:/?in)?|sohn|tochter|"
+                                   r"elternteil|vater|mutter)(?:[ \t]+\d{1,2})?[ \t]*")
+
+
+# Überschrift über Zeilen mit Teil-Feldnamen: Geburtsdaten ("Geburtsdaten der mitversicherten Kinder", "Geb.-Datum der
+# Versicherten", "Geburtstag")
+_GEBURT_KOPF_RE = re.compile(r"(?i)(?<![\wäöüß])(?:geburtsdat\w*|geb\.?[ \t]?-?[ \t]?dat\w*|geburtstag\w*)")
+
+
+def _zeilentext_unter_geburt(seite, zeilen_index: dict, z, pos: int) -> bool:
+    """Steht vor den Teil-Feldnamen nur ein Zeilentext für eine Person ("Kind 1", "Partner/in") und über der Zeile –
+    über weiteren solchen Zeilen hinweg, höchstens sechs – eine Überschrift mit einem Geburtsdatum ("Geburtsdaten der
+    mitversicherten Kinder")? Nachbesserung 8 (Abnahme 6 A6-14, AB5U-03)."""
+    text = seite.text
+    if not _ZEILENTEXT_PERSON_RE.fullmatch(text, z.start, pos):
+        return False
+    i = zeilen_index.get(id(z))
+    if i is None:
+        return False
+    for k in range(i - 1, max(-1, i - 7), -1):
+        zk = seite.zeilen[k]
+        if not text[zk.start:zk.ende].strip():
+            continue
+        if _TEIL_WERT_RE.search(text, zk.start, zk.ende):
+            continue                                  # weitere Zeile "Kind 2 ⇥ Tag …" darüber
+        return _GEBURT_KOPF_RE.search(text, zk.start, zk.ende) is not None
+    return False
 
 
 def _geburt_links(seite, ets: list, pos: int) -> bool:
@@ -466,28 +557,54 @@ def kammfeld(dok, kontext):
         lg = lage(seite)
         ets = [et for et in etiketten(seite) if et.arten]
         idx = _ets_index(ets)
+        vorige = {id(z): seite.zeilen[i - 1] for i, z in enumerate(seite.zeilen) if i}
+        wert_zeilen = set()
+        for _z, ws, *_rest in laeufe_je_zeile:
+            zelle_w = lg.zelle_bei(ws)
+            if zelle_w is not None:
+                wert_zeilen.add(zelle_w.zeile)
         for z, s, e, wert, zellen, kurz in laeufe_je_zeile:
             # Feldname: links in derselben Zeile (das nächste davor) oder allein in einer Zeile darüber
             et_wahl, vorher = _letzte_zwei_davor(ets, idx, z.start, s)
             if et_wahl is not None and vorher is not None and kammraster.teil_etikett(text[et_wahl.start:et_wahl.ende]) \
                     and not any(c.isalnum() for c in text[vorher.ende:et_wahl.start]):
                 et_wahl = vorher                      # "Geburt ⇥⇥ Datum ⇥⇥ 2 5 0 4 …": der übergeordnete Feldname
+            ende_wahl = et_wahl.ende if et_wahl is not None else 0
+            if et_wahl is not None and vorher is not None and "datum_geburt" in vorher.arten \
+                    and not et_wahl.arten & {"datum_geburt", "adresse", "kontakt", "kennung"} \
+                    and _NUR_ARTIKEL_RE.fullmatch(text, vorher.ende, et_wahl.start):
+                # "Geburtsdatum Antragsteller ⇥⇥ 1 2 0 5 1 9 7 9", "Geburtsdatum der versicherten Person": die Person
+                # ergänzt den Feldnamen des Geburtsdatums (Nachbesserung 8, Abnahme 6 A6-14)
+                et_wahl = vorher
             if et_wahl is not None:
-                zwischen = re.sub(r"\([^()\n]{0,30}\)", "", text[et_wahl.ende:s])     # "(TTMMJJJJ)", "(n)"
+                zwischen = re.sub(r"\([^()\n]{0,30}\)", "", text[max(et_wahl.ende, ende_wahl):s])  # "(TTMMJJJJ)", "(n)"
                 # ein Teil-Feldname dazwischen gehört zum Feldnamen ("Geburt ⇥⇥ Datum ⇥⇥ 2 5 0 4 …"; AB4-01)
                 zwischen = " ".join(w for w in zwischen.split() if not kammraster.teil_etikett(w))
                 if any(c.isalnum() for c in zwischen):
                     et_wahl = None                    # zwischen Feldname und Wert steht noch etwas anderes
             teil_oben = False
             if et_wahl is None and not text[z.start:s].strip():
+                # Feldname links in derselben Höhe, den die Zeilenbildung in eine eigene Zeile gelegt hat (ein langer
+                # Feldname reicht bis an den Wert: "Name des Versicherungsnehmers ⇥⇥ K R A U S"; Nachbesserung 8,
+                # Abnahme 6 AB6U-15) – vor dem Feldnamen der Zeile darüber
+                et_wahl = _etikett_gleiche_hoehe(seite, ets, idx, text, vorige.get(id(z)), s, e)
+            if et_wahl is None and not text[z.start:s].strip():
                 et_wahl = _etikett_darueber(lg, ets, text, s, wert)
+                if et_wahl is not None and _feldname_des_felds_darueber(lg, et_wahl, s, wert_zeilen):
+                    et_wahl = None                    # Feldname unter dem Feld darüber (Kamm-Probe 6 a02; AB6U-16)
                 # Feldname unter dem Feld ("Hausnr." unter den Kästchen, darüber der Feldname des Felds darüber): der
-                # nähere zählt, ein Feldname ohne Personen- oder Anschriftart darüber nicht (Abnahme 5 A5-08, A5-07)
+                # nähere zählt, ein Feldname ohne Personen- oder Anschriftart darüber nicht (Abnahme 5 A5-08, A5-07);
+                # einer mit Personenbezug darüber nur gegen einen näheren mit Personenbezug darunter – nicht gegen einen
+                # Hinweis oder den Feldnamen des nächsten Felds ("Geburtsdatum des Kindes" über, "Datum im Format
+                # TTMMJJJJ" oder "Versicherungsbeginn" unter dem Feld; Nachbesserung 8, Abnahme 6 A6-07, A6-08)
                 unten = _etikett_darunter(lg, ets, text, s, wert)
-                if unten is not None and (
-                        et_wahl is None or kategorie_fuer(et_wahl, text[et_wahl.start:et_wahl.ende], wert) is None
-                        or _zeilen_abstand(lg, unten, s) < _zeilen_abstand(lg, et_wahl, s)):
-                    et_wahl = unten
+                if unten is not None:
+                    kat_oben = kategorie_fuer(et_wahl, text[et_wahl.start:et_wahl.ende], wert) \
+                        if et_wahl is not None else None
+                    if et_wahl is None or kat_oben is None or (
+                            kategorie_fuer(unten, text[unten.start:unten.ende], wert) is not None
+                            and _zeilen_abstand(lg, unten, s) < _zeilen_abstand(lg, et_wahl, s)):
+                        et_wahl = unten
                 if et_wahl is None:
                     # Teil-Feldname darüber ("Tag" ⏎ "2 5"): der übergeordnete Feldname in der Zeile des Werts links
                     # oder in der Zeile darüber ("Geburtsdatum")
@@ -676,23 +793,53 @@ def etikett_text_zum_feld(seite, feld, felder: list) -> tuple:
         return gruppe[0][0], gruppe[-1][1], "links"
     oben = [w for w in woerter if w[5] <= y0 + FELD_RAND_PT and y0 - w[5] <= ETIKETT_OBEN_HOEHEN * hoehe
             and x0 - 10.0 <= w[2] <= x0 + 0.5 * (x1 - x0)]
-    # Feldname unter dem Feld ("[ 7 4 ]" ⏎ "Hausnr."): steht darunter Text näher am Feld als darüber, gehört er zum Feld
-    # – der Text darüber ist dann der Feldname des Felds davor (Abnahme 5 A5-07)
+    # Feldname unter dem Feld ("[ 7 4 ]" ⏎ "Hausnr."): steht darunter Text deutlich näher am Feld als darüber, gehört er
+    # zum Feld – der Text darüber ist dann der Feldname des Felds davor (Abnahme 5 A5-07). Nachbesserung 8 (Abnahme 6
+    # A6-07, A6-08): bei (fast) gleichem Abstand gilt der Feldname darüber; ein Text, unter dem ein weiteres Kammfeld
+    # beginnt, gehört zu diesem; und ein Feldname darüber mit Personenbezug ("Geburtsdatum des Kindes") geht einem
+    # Text darunter ohne Personenbezug ("Datum im Format TTMMJJJJ") vor.
     unten = [w for w in woerter if w[3] >= y1 - FELD_RAND_PT and w[3] - y1 <= ETIKETT_OBEN_HOEHEN * hoehe
              and x0 - 10.0 <= w[2] <= x0 + 0.5 * (x1 - x0)]
-    if unten and (not oben or min(w[3] for w in unten) - y1 < y0 - max(w[5] for w in oben)) \
+    oben_zeile = None
+    if oben:
+        naechstes = max(oben, key=lambda w: w[5])
+        oben_zeile = sorted((w for w in woerter if abs(w[5] - naechstes[5]) <= 0.5 * max(w[5] - w[3], 4.0)
+                             and x0 - 10.0 <= w[2] <= x1), key=lambda w: w[2])
+    # der Text darüber ist der Feldname unter dem Feld darüber (Feldnamen unter den Kästchen; Kamm-Probe 6 a02): er
+    # zählt nicht gegen den Feldnamen darunter
+    oben_fremd = bool(oben_zeile) and kammraster.gehoert_zum_feld_darueber(
+        feld, felder, min(w[3] for w in oben_zeile), max(w[5] for w in oben_zeile))
+    if unten and (not oben or oben_fremd
+                  or min(w[3] for w in unten) - y1 < UNTEN_NAEHER * (y0 - max(w[5] for w in oben))) \
             and not kammraster.gehoert_zum_feld_darunter(feld, felder, min(w[3] for w in unten),
                                                          max(w[5] for w in unten)):
         naechstes = min(unten, key=lambda w: w[3])
         zeile = sorted((w for w in woerter if abs(w[3] - naechstes[3]) <= 0.5 * max(w[5] - w[3], 4.0)
                         and x0 - 10.0 <= w[2] <= x1), key=lambda w: w[2])
-        return zeile[0][0], zeile[-1][1], "unten"
+        # ein Hinweis in Klammern unter dem Feld ("(wie im Ausweis)", "(TT MM JJJJ)") ist kein Feldname – er zählt nicht
+        # gegen den Feldnamen darüber (Abnahme 6 A6-07, eigen606: Hausnummer unter "(wie im Ausweis)")
+        hinweis = bool(oben_zeile) and _KLAMMER_HINWEIS_RE.fullmatch(seite.text, zeile[0][0], zeile[-1][1]) is not None
+        if not hinweis and (oben_fremd or not (
+                oben_zeile and _text_personenbezug(seite, oben_zeile[0][0], oben_zeile[-1][1])
+                and not _text_personenbezug(seite, zeile[0][0], zeile[-1][1]))):
+            return zeile[0][0], zeile[-1][1], "unten"
     if not oben:
         return -1, -1, ""
-    naechstes = max(oben, key=lambda w: w[5])
-    zeile = sorted((w for w in woerter if abs(w[5] - naechstes[5]) <= 0.5 * max(w[5] - w[3], 4.0)
-                    and x0 - 10.0 <= w[2] <= x1), key=lambda w: w[2])
-    return zeile[0][0], zeile[-1][1], "oben"
+    return oben_zeile[0][0], oben_zeile[-1][1], "oben"
+
+
+UNTEN_NAEHER = 0.8      # Feldname darunter gilt nur, wenn er klar näher am Feld steht als der darüber
+# ein ganzer Text in Klammern (auch von der Texterkennung verlesene Klammern: "|", "[", "{", "1")
+_KLAMMER_HINWEIS_RE = re.compile(r"[ \t]*[(\[{|][^()\[\]{}\n]{1,60}[)\]}|1][ \t.:]*")
+
+
+def _text_personenbezug(seite, s: int, e: int) -> bool:
+    """Steht im Text [s, e) ein Feldname für Personenangaben (Person, Geburtsdatum, Anschrift, Kontakt, Kennung) – als
+    Etikett der Seite oder verlesen (feldname_unscharf)?"""
+    if any(et.start >= s and et.ende <= e and et.arten & _PERSONEN_ARTEN for et in etiketten(seite)):
+        return True
+    gefunden = feldname_unscharf(seite.text[s:e])
+    return gefunden is not None and gefunden[0] in _PERSONEN_ARTEN
 
 
 # Verlesene Feldnamen neben einem Kammfeld ("Vornameln)", "Versicherunesschein-Nr."): die Lage am Feld belegt, dass dort
@@ -875,6 +1022,38 @@ _HAUSNUMMER_ETIKETT_RE = re.compile(r"(?i)haus|nr|nummer|\bno\b")
 _KEINE_HAUSNUMMER_RE = re.compile(r"(?i)etage|stock|geschoss|geschoß|zimmer|raum|lage|appartement|apartment|whg")
 
 
+# Nachbesserung 8 (Abnahme 6 AB6U-06): ein lesbarer eigener Feldname ohne Personenbezug ("Fahrzeughalter ⇥ Marke [OPEL]
+# ⇥ Modell [ASTRA]", "Kontoinhaber ⇥ Bank [SPARKASSE]", "Tarif [KOMFORT]", "Farbe [SILBER]") – der Wert erbt dann nicht den
+# Personen-Feldnamen der Zeile; nur ein unlesbarer eigener Feldname ("See" für "Straße") erbt
+_SACH_FELDNAME_RE = re.compile(r"(?i)^(?:marke|modell|typ|typenbezeichnung|hersteller|fabrikat|farbe|lackierung|"
+                               r"tarif\w*|bank|kreditinstitut|geldinstitut|institut|sparkasse|währung|waehrung|betrag|"
+                               r"summe|anzahl|art|sparte|produkt|baujahr|leistung|hubraum|kraftstoff|getriebe|"
+                               r"ausstattung|zahlweise|zahlungsweise|laufzeit|versicherer|gesellschaft|police|"
+                               r"selbstbeteiligung|deckung\w*|kilometerstand|fahrleistung|nutzung|verwendung|"
+                               r"bauart|aufbau|klasse|stufe|gruppe|tarifgruppe|beitrag|prämie|praemie)\.?:?$")
+
+
+_NAMENSTEILE = ("name", "vorname", "vornamen", "nachname", "familienname", "geburtsname", "rufname", "zuname", "titel",
+                "anrede", "geburtsdatum", "geburtsort", "geb.-datum", "geb.-ort")
+
+
+def _wie_namensteil(text: str) -> bool:
+    """Sieht ein (verlesener) eigener Feldname wie ein Teil eines Namens oder Geburtsangaben aus ("Vomame", "Nanne",
+    "Geburtsnarne")? Ähnlichkeit (difflib) mindestens 0,6 zu _NAMENSTEILE, Länge bis 4 Zeichen anders."""
+    t = " ".join(text.split()).strip(" ;,.:()").casefold()
+    if len(t) < 3:
+        return False
+    for teil in _NAMENSTEILE:
+        if abs(len(teil) - len(t)) <= 4 and difflib.SequenceMatcher(None, t, teil).ratio() >= 0.6:
+            return True
+    return False
+
+
+def _sach_feldname(text: str) -> bool:
+    """Ist der eigene Feldname lesbar und ohne Personenbezug (_SACH_FELDNAME_RE)?"""
+    return bool(_SACH_FELDNAME_RE.match(" ".join(text.split()).strip(" ;,()")))
+
+
 @detektor(QUELLE_SCAN, ALLE_KATEGORIEN, ALLE_PROFILE)
 def kammfeld_scan(dok, kontext):
     """Inhalt gefüllter Kammfelder auf Scans (Lage aus dem Bild) mit der Kategorie ihres Feldnamens. Ein Teil-Feldname
@@ -900,12 +1079,16 @@ def kammfeld_scan(dok, kontext):
                 if s_ >= 0 and kammraster.teil_etikett(seite.text[s_:e_]):
                     et = uebergeordnetes_etikett(seite, feld, ets, felder, seite.text[s_:e_])
                     etikett_text = seite.text[et.start:et.ende] if et is not None else ""
-                elif sum(c.isalpha() for c in wert) >= 3:
+                elif sum(c.isalpha() for c in wert) >= 3 and not (s_ >= 0 and _sach_feldname(seite.text[s_:e_])):
                     # eigener Feldname unlesbar ("Straße" als "See" gelesen) unter einem Feldnamen der Zeile für
                     # Personenangaben ("Anschrift ⇥ Straße [LINDENWEG] ⇥ Hausnr. [14]"): ein Wert mit Buchstaben gilt mit
-                    # ihm (auf 0230782 über den Rohwert geschwärzt; Kammfeld-Probe der Abnahme 5, k04)
+                    # ihm (auf 0230782 über den Rohwert geschwärzt; Kammfeld-Probe der Abnahme 5, k04). Unter einem
+                    # Feldnamen für eine Person ohne Anschrift ("Fahrzeughalter ⇥ Marke [OPEL]", auf dem Scan "Make" oder
+                    # "Fate" gelesen) nur, wenn der eigene fehlt oder wie ein Teil eines Namens aussieht ("Vomame") – sonst
+                    # meldet die Selbstkontrolle das Feld (Nachbesserung 8, Abnahme 6 AB6U-06)
                     ueber = _uebergeordnet(seite, feld, ets, felder)
-                    if ueber is not None and ueber.arten & _PERSONEN_ARTEN:
+                    if ueber is not None and ueber.arten & _PERSONEN_ARTEN \
+                            and ("adresse" in ueber.arten or s_ < 0 or _wie_namensteil(seite.text[s_:e_])):
                         et, etikett_text = ueber, seite.text[ueber.start:ueber.ende]
             if et is not None:
                 kat = kategorie_fuer(et, etikett_text, wert)

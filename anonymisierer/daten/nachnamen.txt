@@ -893,6 +893,7 @@ Bohn
 Bohnert
 Böhnisch
 Böhnke
+Bohrer
 Bojko
 Böker
 Boldt
@@ -2788,6 +2789,7 @@ Hammoud
 Hamo
 Hamoud
 Hampel
+Hamster
 Hamza
 Han
 Hancı
@@ -3882,6 +3884,7 @@ Kocaman
 Kocatürk
 Koçer
 Koch
+Kocher
 Kock
 Köck
 Kocsis
@@ -4163,6 +4166,7 @@ Kugler
 Kuhar
 Kuhl
 Kühl
+Kühler
 Kuhlmann
 Kuhn
 Kühn
@@ -6156,6 +6160,7 @@ Reese
 Reetz
 Regan
 Regehr
+Regler
 Rehbein
 Rehberg
 Rehder
@@ -6864,6 +6869,7 @@ Semmler
 Sen
 Şen
 Senanayake
+Sender
 Şener
 Seneviratne
 Sengler
@@ -7257,6 +7263,7 @@ Storm
 Stoyanov
 Stoyanova
 Strack
+Strahler
 Strand
 Stransky
 Strasser

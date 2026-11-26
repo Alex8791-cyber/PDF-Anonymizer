@@ -677,28 +677,30 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     nur gemeldet. Ein Betrag hinter einem Gebäude als Feldname meldet auch die zeilenweise Prüfung nicht mehr
     („Wohnhaus: ⇥ 450.000 ⇥ EUR“); Jahreszahlen hinter Gebäuden ohne Spaltenkopf „Baujahr“ („Wohnhaus: ⇥ 1974“,
     „Carport: ⇥ 2021“) bleiben gemeldet – ohne Kopf kann es auch ein Code sein (P2).
-  - Kammfelder: Steht ein Feldname unter dem Feld und näher als der Text darüber (der Feldname des Felds davor), gilt
-    er – in der Erkennung und in der Selbstkontrolle („Vorname“ unter „T H E K L A“, darüber „Wohnfläche (m²)“); der
-    eigene Feldname der Zeile geht dem Feldnamen darüber vor („Letzte Hauptuntersuchung ⇥ Jahr [2024]“ unter
-    „Fahrzeughalter (Name, Vorname)“ bleibt lesbar). Auf der Textebene werden geschwärzt: „Mon.“ als Teil-Feldname, ein
-    Teil-Datum hinter einem Feldnamen mit Klammerzusatz („Geburtsdatum (Fahrer) ⇥⇥ Tag 1 9 …“), ein kurzer Wert hinter
-    einer gesperrten Folge am Zeilenende („Straße ⇥⇥ B I R K E N W E G ⇥⇥ Nr. ⇥⇥ 6 ⇥⇥ 4“) und vor dem nächsten
-    Feldnamen („Name ⇥⇥ R ⇥⇥ E ⇥⇥ Vorname ⇥⇥ A N N A“), Initialen („Initialen ⇥⇥ K H“) und ein Geburtsort aus zwei
-    Buchstaben („Geburtsort ⇥⇥ A U“); „Nr.“ ohne Straße in der Zeile ist eine Positionsnummer, „Etage ⇥⇥ 1 ⇥⇥ 2“ bleibt
-    lesbar. Diese Regeln brauchen die Zellgrenzen der Kästchen: liest die Textebene einer PDF die Kästchen ohne sie
-    („Initialen K H“, „Name L ⏎ I“), bleiben zwei Buchstaben und Datumsteile unter einem fremden Feldnamen weiter
-    lesbar ohne Meldung (wie auf 5efcc0c und 0230782; Ende-zu-Ende-Proben der fünften Abnahme). Auf Scans nimmt ein
-    unlesbarer Teil-Feldname („Srae“ oder „See“ statt „Straße“) den Feldnamen der Zeile („Anschrift“: geschwärzt wie
-    auf 0230782), ein kurzer Wert im Anschriftfeld unter dem Feldnamen eines Teils der Wohnung ist keine Hausnummer
-    („Wohnung ⇥ Etage [3]“, „Zimmer [4]“ werden nicht geschwärzt; „Anschrift [14]“ ohne eigenen Feldnamen bleibt wie
-    auf 5efcc0c und 0230782 geschwärzt), unter dem Feldnamen einer Hausnummer gilt er auch verlesen, wenn er eine
-    Ziffer enthält („Hausnr.“ unter „2&1“ statt „27“; auf 0230782 geschwärzt, auf 5efcc0c gemeldet) –, und ein kurzer
-    Datumsteil ohne Trennzeichen („Monat [0 4]“ unter „Geburtsdatum“) gilt nur an seiner Stelle – der gleiche Monat im
-    Versicherungsbeginn wird nicht mehr mitgeschwärzt. Damit gilt die Angabe der sechsten Nachbesserung, dass Teile
-    eines Datums unter einem Feldnamen ohne Personenbezug lesbar bleiben, auch auf Scans: in der Kammfeld-Probe der
-    fünften Abnahme wird keines der Teil-Felder unter „Versicherungsbeginn“ und „Hauptuntersuchung“ mehr entfernt (auf
-    5efcc0c 3); gemeldet werden 9 davon (0230782: 8), wenn die Texterkennung den Inhalt oder den Feldnamen nicht lesen
-    kann.
+  - Kammfelder: Steht ein Feldname unter dem Feld und näher als der Text darüber (der Feldname des Felds davor), gilt er
+    – in der Erkennung und in der Selbstkontrolle („Vorname“ unter „T H E K L A“, darüber „Wohnfläche (m²)“); der eigene
+    Feldname der Zeile geht dem Feldnamen darüber vor („Letzte Hauptuntersuchung ⇥ Jahr [2024]“ unter „Fahrzeughalter
+    (Name, Vorname)“ bleibt lesbar). Auf der Textebene werden geschwärzt: „Mon.“ als Teil-Feldname, ein Teil-Datum
+    hinter einem Feldnamen mit Klammerzusatz („Geburtsdatum (Fahrer) ⇥⇥ Tag 1 9 …“), ein kurzer Wert hinter einer
+    gesperrten Folge am Zeilenende („Straße ⇥⇥ B I R K E N W E G ⇥⇥ Nr. ⇥⇥ 6 ⇥⇥ 4“) und vor dem nächsten Feldnamen
+    („Name ⇥⇥ R ⇥⇥ E ⇥⇥ Vorname ⇥⇥ A N N A“), Initialen („Initialen ⇥⇥ K H“) und ein Geburtsort aus zwei Buchstaben
+    („Geburtsort ⇥⇥ A U“); „Nr.“ ohne Straße in der Zeile ist eine Positionsnummer, „Etage ⇥⇥ 1 ⇥⇥ 2“ bleibt lesbar.
+    Diese Regeln brauchen die Zellgrenzen der Kästchen: liest die Textebene einer PDF die Kästchen ohne sie („Initialen
+    K H“, „Name L ⏎ I“), bleiben zwei Buchstaben und Datumsteile unter einem fremden Feldnamen weiter lesbar ohne
+    Meldung (wie auf 5efcc0c und 0230782; Ende-zu-Ende-Proben der fünften Abnahme). Auf Scans nimmt ein unlesbarer
+    Teil-Feldname („Srae“ oder „See“ statt „Straße“) den Feldnamen der Zeile („Anschrift“: geschwärzt wie auf 0230782) –
+    ein lesbarer eigener Feldname ohne Personenbezug („Marke“, „Modell“, „Bank“, „Farbe“, „Tarif“) nimmt ihn seit der
+    achten Nachbesserung nicht mehr (Abnahme 6 AB6U-06) –, ein kurzer Wert im Anschriftfeld unter dem Feldnamen eines
+    Teils der Wohnung ist für die Kammfeld-Regel keine Hausnummer („Wohnung ⇥ Etage [3]“, „Zimmer [4]“; die Regel
+    Feldname + Wert schwärzte „Lage der Wohnung ⇥ Etage [3]“ auf Scans bis zur achten Nachbesserung als Anschrift –
+    Kamm-Probe der fünften Abnahme, k04; „Anschrift [14]“ ohne eigenen Feldnamen bleibt wie auf 5efcc0c und 0230782
+    geschwärzt), unter dem Feldnamen einer Hausnummer gilt er auch verlesen, wenn er eine Ziffer enthält („Hausnr.“
+    unter „2&1“ statt „27“; auf 0230782 geschwärzt, auf 5efcc0c gemeldet) –, und ein kurzer Datumsteil ohne Trennzeichen
+    („Monat [0 4]“ unter „Geburtsdatum“) gilt nur an seiner Stelle – der gleiche Monat im Versicherungsbeginn wird nicht
+    mehr mitgeschwärzt. Damit gilt die Angabe der sechsten Nachbesserung, dass Teile eines Datums unter einem Feldnamen
+    ohne Personenbezug lesbar bleiben, auch auf Scans: in der Kammfeld-Probe der fünften Abnahme wird keines der
+    Teil-Felder unter „Versicherungsbeginn“ und „Hauptuntersuchung“ mehr entfernt (auf 5efcc0c 3); gemeldet werden 9
+    davon (0230782: 8), wenn die Texterkennung den Inhalt oder den Feldnamen nicht lesen kann.
   - Namen: Ein Geräte-Grundwort allein („Kocher“, „Bohrer“, „Regler“, „Sender“, „Melder“) mit Artikel und einem Verb
     einer Person wird gemeldet („Der Kocher hat angerufen.“); ein Gerät als Kompositum („Hochdruckreiniger“,
     „Gabelstapler“), ein Gerät mit Geräteschaden und Maschinen auf „-e“ („Die Fräse beschädigte das Erdkabel.“) bleiben
@@ -794,6 +796,148 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Namensgestalt im Personenkontext („Fichtelgebirge Feuerkasse VVaG“ hinter „Zahlungsempfänger“). In der Endmessung
     von 98a3957 (320 Dokumente der Entwicklungskorpora) sind dadurch vier Dokumente `_PRUEFEN` statt fertig; keines
     ist schlechter geschwärzt.
+- **Sechste Abnahme der Zusammenführung (Runde 5, achte Nachbesserung):** Einige Ausnahmen der siebten Nachbesserung
+  ließen Werte ohne Meldung stehen, die 5efcc0c oder 0230782 noch geschwärzt oder gemeldet hatten (ein Zugangscode in
+  Jahresform vor einem finiten Verb, Familiennamen hinter beim/vom/zum mit der Endung eines Infinitivs oder vor einem
+  Ausrufezeichen, ein Familienname hinter Präposition und Artikel, eine Rolle hinter „von Beruf“, der Beruf im schwachen
+  Genitiv, Kammfeld-Werte unter einem fremden Feldnamen). Dafür wurden andere Wörter zu oft geschwärzt oder gemeldet. Je
+  Befund mit Abwandlungen und Gegenproben in `tests/test_abnahme6_r7.py` (458 Fälle; auf 6c0c464 260 rot):
+  - Zugangscodes: Eine Zahl in Jahresform hinter „mit“ bleibt nur vor einem eindeutigen gebeugten Partizip mit einem
+    Hauptwort ohne Person frei („mit 2019 eingebauten Rolltoren“); vor einem finiten Verb („Die Kellertür mit 1990
+    öffnen Sie …“, „Mit 2016 bedienen Mieter das Rolltor.“) wird sie geschwärzt, mit einem Wort zwischen Zahl und
+    Partizip („mit 2021 neu installierter Alarmanlage“) gemeldet (wie auf 0230782). „Der Kellercode lautet 1120.“ wird
+    geschwärzt (vorher auf allen Ständen lesbar). Säle und der Genitiv eines zusammengesetzten Hauses gelten
+    als Gebäude („Der Code des Gemeindesaals für den Belegungsplan lautet 7718.“: gemeldet; ein bloßes „des Hauses“
+    oder „des Vereinsheims“ noch nicht). Ein kurzer Code aus Buchstaben und Ziffern an einem
+    Schloss („Garagentor: Code DH2“, „Gartenhaus-Code DG453“, „Die Hintertür hat den Code ZT 77.“ mit dem Leerzeichen
+    der Texterkennung) wird gemeldet (vorher auf allen Ständen ohne Meldung; „Code Kellertür AG8“ ohne
+    Doppelpunkt noch nicht), ein Code an einem Schloss mit Anzeigewort
+    ohne Wort einer Störung („Das Garagentor zeigte den Code 3017“) ebenso. Kein Zugangscode mehr: ein Fehler- oder
+    Anzeigecode, wenn ein Gerät ihn „uns“ meldet oder zeigt („Das Garagentor meldete uns den Code 3017, der Monteur
+    kommt morgen.“ – nur eine Person, die einen Code meldet, macht ihn zum Zugangscode: „Der Vermieter meldete uns den
+    Code der Haustür: 2827“), die Gestalt eines Fehlercodes mit einem Wort der Störung oder Ursache („Das Rolltor hat
+    den Code E125, laut Hersteller Überlast am Motor.“: gemeldet), ein Alarmcode, wenn „schaltete … ab“ ein anderes Ding
+    betrifft oder „nur für“ keine Person nennt („Nach dem Rauchalarmcode 4471 schaltete die Feuerwehr die Lüftung ab.“:
+    gemeldet), ein Ereignis-Alarmcode mit Auslösung, Protokoll oder Ursache im Satz („Fehlalarmcode 7310 laut Protokoll
+    der Brandmeldeanlage, Ursache Wasserdampf.“: frei), ein Möbelcode mit Produkt- oder Schadenwort („Farbe“,
+    „Aufbauanleitung“, „beim Umzug beschädigt“, „Glasfront gesprungen“: gemeldet) und ein Raumcode mit Bezug auf einen
+    Plan, eine Liste, ein Buch oder eine Abrechnung ohne Doppelpunkt, „lautet“ oder „ist“ davor („Raumcode 2017 laut
+    Raumbuch“, „Hallencode 0302 im Lageplan“: frei wie auf 5efcc0c, 0230782 und 818990e; „Der Kellercode lautet 1120.“,
+    „Lagerhallecode: 9444“ weiter geschwärzt); Listenzeilen „Gebäudecode 1101 (Wohngebäude), …“ unter einer Gebäude-,
+    Raum- oder Inventarliste werden nicht mehr geschwärzt, die zeilenweise Selbstkontrolle meldet sie (bis zwölf Zeilen
+    unter der Überschrift; unter einer Code-, Schlüssel- oder Mieterliste weiter geschwärzt). „Zum Abschalten des
+    Feueralarms: 3401“, „Zugangscode Kellerabteil 5512“, „PIN für Waschküche 2290“ und „Hinterhofcode 4471“ werden
+    geschwärzt (vorher auf allen Ständen lesbar). Eine Brandmeldeanlage, -zentrale oder ein Brandmelder gilt als
+    Feueralarm („Brandmeldeanlagecode 6881 (nur für den Hausmeister)“: geschwärzt, „Brandmeldeanlagecode: 6881“:
+    gemeldet), der Code eines Schranks mit Artikelnummer in Klammern davor wird gemeldet („Code für den Spiegelschrank
+    (Artikel 7731): 3074“) – beide vorher auf allen Ständen lesbar. Ein Code am Bedienteil, Display oder an einer
+    Zentrale mit einer Bedienung im selben Satz hinter dem Code wird gemeldet („Das Bedienteil zeigte Code 0811 an,
+    anschließend ihn am Bedienteil eingeben.“; vorher auf allen Ständen lesbar), nicht mit einem Wort der Störung oder
+    Ursache im Satz.
+  - Namen: Hinter beim/vom/zum gilt nur ein Verb oder Ereignis aus einem geschlossenen Wortschatz als Gegenbeleg
+    („beim Einkaufen“, „vom Hochwasser“), nicht die Endung eines Infinitivs („beim Sönksen“, „vom Holten“: gemeldet) und
+    nicht ein Ausrufe- oder Fragezeichen („Vom Kalt! kam der Anruf …“: gemeldet; `tests/test_abnahme5_r7.py` und
+    `tests/test_abnahme4_r7.py` verlangten dort bisher keine Meldung). Ein Berufswort, das auch Familienname ist, mit
+    einem Geschäft in der Zeile („Wir gehen nachher zum Fischer, frischen Fisch kaufen.“) wird gemeldet statt
+    geschwärzt; Rollen- und Ortswörter aus gewöhnlichen Teilen („vom Lohnunternehmer“, „vom Nachbarhof“) bleiben frei.
+    Hinter Präposition und Artikel wird ein Wort in Namensgestalt gemeldet („Neben der Kreuzl saß der Fahrer.“).
+    Ein Allerweltswort ist ein Name vor einem Vornamen („Zeuge Wasser Anna hat …“: geschwärzt), hinter Anrede und
+    Amt („Wie Herr Notar Regen sagte“: geschwärzt), mit Artikel vor einem Lenk- oder Schadenverb („Am Steuer saß der
+    Wasser.“: gemeldet) und vor einer Aussage hinter einem Doppelpunkt („Mieter Regen: kein Schaden“: gemeldet; eine
+    Lage im Haus nicht: „Mieter Dachgeschoss: kein Schaden“). Ein gewöhnliches Wort hinter einem Personenwort im
+    Telegrammstil vor einem Partizip oder Infinitiv wird nicht mehr geschwärzt; vor einem Verb des Gebens, Schickens
+    oder Anforderns, direkt oder nur über eine Präpositionalgruppe („Heute Kunde Bescheid gegeben“, „Danach Kunde
+    Unterlagen zur Trocknung zugeschickt.“, „Ich habe Mandant Vollmacht zur Kündigung vorgelegt.“), bleibt es frei wie
+    auf 5efcc0c, 0230782 und 818990e; mit einem weiteren Hauptwort dazwischen oder vor einem Verb, das eine Person zum
+    Gegenstand hat, wird es gemeldet („Heute Kunde Regen Bescheid gegeben.“, „Heute Nachbar Regen angerufen“, „Heute
+    Kunde Kopie der Polizeianzeige erhalten“), vor einem Genitiv-Begleiter gar nicht („Kunden Abschluss einer
+    Versicherung“). Nicht mehr gemeldet werden Anrede und Titel vor einem Namen – auch in der Selbstkontrolle der
+    Ausgabe, in der der Platzhalter nicht im Seitentext steht („Unser Mitarbeiter Herr [PERSON C]“, „Der Gutachter
+    Dipl.-Ing. [PERSON B]“) – und Einrichtungen, Geräte und Anlagen mit Artikel als Satzgegenstand („Die Bank hat
+    angerufen.“, „Der Motor meldete uns den Code P0300.“; ein Familienname der Wissensbasis bleibt gemeldet) – beides
+    nannte der Kehrseiten-Absatz der siebten Nachbesserung. Die KI hält „Brandalarm“ und „des Schreiners“ hinter
+    „Beruf des“ nicht mehr für Namen. Die Wissensbasis führt Kocher, Bohrer, Sender, Regler, Kühler, Strahler und
+    Hamster als mehrdeutige Familiennamen (gemeldet hinter Artikel und Verb einer Person).
+  - Beruf: „von Beruf“, „haupt-“ oder „nebenberuflich“ heben die Ausnahme der Rolle auf („Er ist von Beruf Trainer der
+    F-Jugend.“: geschwärzt), eine Rolle hinter „ist“ mit Zwischenwörtern wird gemeldet („Er ist inzwischen Trainer der
+    F-Jugend.“; nicht „ist als Betreuer seiner Mutter tätig“), „den Beruf des Polizisten anstreben“ ist ein Beruf (auch
+    der schwache Genitiv), „hat“ allein ist kein Verb des Erlernens („Für den Beruf des Dachdeckers hat der Versicherer
+    … festgelegt.“: gemeldet statt geschwärzt; ebenso „Für den Beruf des Architekten gilt die Gefahrengruppe A.“, auf
+    5efcc0c geschwärzt, auf 0230782 und 6c0c464 lesbar). Ein Satzgegenstand auf „-bote“ ist keine Sache mehr („Der
+    Eilbote arbeitet als Lagerhilfe.“: geschwärzt), Rampe, Hebebühne und andere Hilfsmittel sind eine („Die Rampe
+    arbeitet als Einstiegshilfe …“: frei). Eine Rolle hinter „ist“ mit einer Zahl dazwischen („Er ist seit 2016
+    Treuhänder der Seniorengruppe.“) und „vom“, „zum“ oder „im Beruf des“ („Ihr Neffe träumt vom Beruf des Soldaten.“)
+    werden gemeldet (vorher auf allen Ständen lesbar; Kehrseite: auch „Zum Beruf des Dachdeckers gehört
+    Schwindelfreiheit.“).
+  - Kammfelder: Ein Text zwischen zwei Feldern gehört zum Feld darunter, solange er nicht deutlich näher am Feld darüber
+    steht – Abstand zum Feld darunter höchstens das 2,4-Fache des Abstands zum Feld darüber (gemessen: enger
+    Zeilenabstand mit Feldname über dem Feld 1,06–1,95, Feldnamen unter den Kästchen 2,89–4,42); so gilt bei engem
+    Zeilenabstand der Feldname über dem Feld (c023: Wohnort und Postleitzahl geschwärzt) und unter den Kästchen der
+    eigene – ein Feldname über dem Feld, der zum Feld darüber gehört, zählt auf Scans und auf der Textebene nicht
+    („Kilometerstand“, „Betrag in EUR“, „Antragsdatum“ unter dem Feld bleiben frei; Kamm-Probe 6 a02). Von zwei
+    Feldnamen über und unter einem Feld gilt der untere nur, wenn er deutlich näher ist (0,8 des Abstands), und ein
+    Feldname mit Personenbezug geht einem ohne vor – jetzt auch auf der Textebene („Geburtsdatum des Kindes“ über,
+    „Datum im Format TTMMJJJJ“ oder „Versicherungsbeginn“ unter den Kästchen: geschwärzt statt gemeldet); ein Hinweis in
+    Klammern unter dem Feld ist kein Feldname („Hausnummer“ über, „(wie im Ausweis)“ unter den Kästchen: die Hausnummer
+    wird wieder geschwärzt wie auf 5efcc0c). „Geburtsdatum Antragsteller ⇥⇥ 1 2 0 5 1 9 7 9“: die Person ergänzt den
+    Feldnamen des Geburtsdatums (vorher auf allen Ständen lesbar oder nur über andere Werte gemeldet). Ein lesbarer
+    eigener Feldname ohne Personenbezug („Marke“, „Bank“, „Farbe“, „Tarif“) nimmt nicht den Personen-Feldnamen der
+    Zeile; ein unlesbarer nur, wenn die Zeile eine Anschrift ist oder er wie ein Teil eines Namens aussieht („Vomame“) –
+    unter „Fahrzeughalter“ liest die Texterkennung „Marke“ als „Make“ oder „Fate“, das Feld wird dann gemeldet statt
+    geschwärzt. Zeilen „Kind 1 ⇥ Tag [..] Monat [..] Jahr [....]“ unter einer Überschrift mit Geburtsdatum werden als
+    Geburtsdatum geschwärzt (vorher auf allen Ständen lesbar), unter „Versicherungsbeginn“ oder „Antragsdatum“ nicht.
+    Ein Feldname in Klammern („Datum (Geburt) ⇥⇥ Tag 1 9 …“) zählt für das geteilte Datum. Die Buchstaben zweier
+    Parteien über Spaltentrennern („A ⇥⇥ B“ im Unfallbericht) sind kein Name; Initialen in weit gesetzten Kästchen („L
+    ⇥⇥ I“) bleiben einer. Ein gesperrter Wert neben einem langen Feldnamen in derselben Höhe wird geschwärzt („Name des
+    Versicherungsnehmers ⇥⇥ K R A U S“), Sperrschrift ohne zugeordneten Feldnamen gemeldet („…nehmersK R A U S“; nicht
+    „M U S T E R“ und nicht hinter einem Feldnamen ohne Personenbezug: „Marke ⇥⇥ O P E L“).
+  - Anschriften: Eine Lage im Haus als ganzer Wert hinter einem Anschrift-Feldnamen ist keine Straße mehr („Lage der
+    Wohnung ⇥ Etage 3“, „Etage 3, Zimmer 4“, „3. OG links“: frei, „Zimmer 4“ und „Whg. 12“ allein meldet die
+    Selbstkontrolle; Kamm-Probe der fünften Abnahme k04 auf scan200: gemeldet statt entfernt, AB5U-03). Mit Straße oder
+    PLZ im Wert bleibt sie Teil der Anschrift („Etage 3, Hauptstraße 5, 83022 Rosenheim“), Straßennamen wie „Zimmermann
+    4“, „Etagenweg 3“ oder „Mitte 3“ bleiben Straßen.
+  - Laufzeit: Das Grundwort eines Flurnamens wird nur am Wortende gesucht (ein langes Wort hinter „Beim“ wuchs
+    quadratisch), Satzanfänge im Fenster ohne Satzzeichen beginnen am Fensteranfang statt am Textanfang (Alarm-,
+    Raum- und Satzprüfung). Neue Wachstumstests (8 000 gegen 64 000 Zeichen, 2 000 gegen 16 000 für ein langes Wort)
+    werden mit den eingebauten Regressionen E1 bis E7 und E9 bis E14 rot (E11: Anrede vor einem Platzhalter, eigener
+    Test nur für den Rollenwort-Durchlauf); E8 (Fenster vor dem Verb in `_zeigen_person`) bleibt ohne Wirkung, weil
+    die Aufrufer den Satz schon begrenzen. Die Form der Abnahme („Beim A…b ist der Stadel abgebrannt.“) braucht in
+    der Selbstkontrolle bei 2 000/4 000/8 000 Zeichen 0,06/0,10/0,20 s (6c0c464 5,0/17,1/69,0 s). Gemessen auf dem
+    Probensatz der fünften Abnahme (CPU-Zeit je Scan-Seite einschließlich Texterkennung, Oberflächen-Weg, alle drei
+    Stände gleichzeitig; 55 Maklerdokumente als Scan mit 200 dpi, 42 Kammfeld-Scans und ein 30-seitiges Dokument
+    aus 20 Scans und 10 Kammfeld-Scans mit 300 dpi): ohne Kammfeld 1,82 s gegen 1,96 s auf 5efcc0c (−7 %) und
+    1,62 s auf 818990e (+13 %), mit Kammfeldern 3,23 s gegen 3,22 s auf 5efcc0c (drei Runden: +0,03 s, +0,01 s,
+    −0,01 s; im Mittel +0,3 %, weniger als die Schwankung zwischen den Runden von 0,17 s) und 1,94 s auf 818990e
+    (+67 %), 30 Seiten 2,53 s gegen 2,74 s auf 5efcc0c (−8 %) und 1,99 s auf 818990e (+27 %). Gegenüber 818990e
+    bleibt damit der Mehraufwand der Kammfeld-Seiten (Suche und Lesen der Kästchen in der Analyse und in der
+    Kontroll-OCR, Kammfeld-Prüfung der Selbstkontrolle) und auf den übrigen Seiten der Aufwand der Kammfeld-Suche
+    und der neueren Regeln der Selbstkontrolle.
+  - Kehrseiten (nach P2 gemeldet statt still, oder bewusst frei): Gemeldet statt geschwärzt wird gegenüber 6c0c464 neu
+    nur „Für den Beruf des X gilt …“ ohne Person (auf 5efcc0c geschwärzt); alle 451 Werte der Differenzprobe, die der
+    beste Bezugsstand schwärzt und dieser Stand nur meldet, stehen mit Grund in der Tauschliste. Ende zu Ende sind es
+    fünf Fälle (je Text und Scan): Hängeschrank aus dem Katalog, Alarmanlage mit „danach scharf schalten“, „Beruf des
+    Architekten gilt“, Möbelcode mit Lieferschein, „Mitarbeiter Hochstelle“. Mehr Meldungen als vorher: Hof-Kandidaten
+    mit Infinitiv-Endung, „!“ oder „?“, ein Wort in Namensgestalt hinter Präposition und Artikel (K12: 162 gemeldet,
+    5efcc0c 43), eine Rolle hinter „ist“ mit Zwischenwörtern, „Zum Beruf des Dachdeckers gehört …“,
+    Raumcode-Listenzeilen, Sperrschrift ohne Feldnamen und Kammfelder mit verlesenem eigenen Feldnamen; in der
+    Differenzprobe haben 5 213 Texte einen Verdacht (6c0c464 4 465, 5efcc0c 4 068, 0230782 3 003). Bewusst frei
+    (sicherer Gegenbeleg, Gegenfälle in `tests/test_abnahme6_r7.py`): Anrede und Titel vor einem Platzhalter,
+    Einrichtungen als Satzgegenstand, Raumcodes mit Plan- oder Listenbezug ohne „lautet“ oder Doppelpunkt, Codes, die
+    ein Gerät „uns“ meldet, Alarmcodes mit Auslösung, Protokoll oder Ursache, gewöhnliche Wörter im Telegrammstil vor
+    einem Verb des Gebens und eine Lage im Haus als ganzer Anschrift-Wert – ein echter Zugangscode oder Name in genau
+    dieser Form bliebe lesbar. Weiter zu oft geschwärzt (wie auf 6c0c464): „Danach Kundin Formular zur Stehlgutliste
+    gemailt (…)“, „Heute Zeuge Aussage … bestätigt“ und „Gebäudecode 2203 (Lagerhalle), Raumcode 2017
+    (Besprechungsraum)“; Fachwörter wie „DIN 14675“ oder „Invaliditätsgrundsumme“ entfernen alle Stände.
+  - Gemessen (Stand vor dem Commit, Proben der Abnahmen 2 bis 6): Differenzprobe mit 25 032 Texten und 14 021 geheimen
+    Werten weg/gemeldet/lesbar 9 880/3 499/642 (6c0c464 9 566/2 808/1 647, 5efcc0c 8 964/2 380/2 677, 0230782 7 778/1
+    728/4 515); kein Wert schlechter als der beste der fünf Bezugsstände außer 451 Tauschwerten (gemeldet statt
+    geschwärzt, Tauschliste) und fünf gewollten (vier Doku-Beispiele zu Anrede und Einrichtung, ein Zählartefakt);
+    berührte Prüfwörter 258 (5efcc0c 315). Ende zu Ende (29 Probendateien): kein Wert schlechter als auf 5efcc0c oder
+    0230782 außer den fünf gemeldeten Tauschfällen, 26 stille Werte (je Datei höchstens so viele wie dort). Über-Probe
+    der sechsten Abnahme: nicht geheime Wörter entfernt 22 (6c0c464 106, 5efcc0c 30, 0230782 28), der fünften 20
+    (0230782 26). Kammfelder: Kamm-Probe 6 nicht geheim entfernt 6 (0230782 22), eigen606 geheim weg 166 von 216
+    (6c0c464 103, 5efcc0c 159), c023 Wohnort und PLZ geschwärzt; Kamm-Probe 5 k01–k05 nicht geheim entfernt 2 (0230782
+    2, 5efcc0c 7).
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene

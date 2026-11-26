@@ -401,6 +401,7 @@ def satz_anfang(text: str, pos: int, fenster: int = 200) -> int:
 # (Abnahme 4 AB4-06, AB4-18)
 _BERUF_DIREKT_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:(?:ist|war|bin|sind|wird|wurde)[ \t]+(?:von[ \t]+Beruf[ \t]+)?|"
                                     r"von[ \t]+Beruf[ \t]+|(?:haupt|neben)beruflich[ \t]+)$")
+_BERUFLICH_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:von[ \t]+Beruf|(?:haupt|neben)?beruflich)[ \t]+$")
 # Person als Objekt im Satz einer Organisation ("Die Firma hat sie 2019 als Hebamme eingestellt.", "Die Stadt
 # beschäftigt ihn seit 2015 als Schreiner."): der Beruf dieser Person (AB4-06)
 _PERSON_OBJEKT_RE = re.compile(r"(?<![\wäöüß])(?:ihn|sie|ihm|ihr|Herrn|Frau|Herr)(?![\wäöüß])")
@@ -416,10 +417,18 @@ def rolle_allein(wort: str) -> bool:
 # "den Beruf des Bäckers erlernt", "übt den Beruf der Floristin aus": ein Verb des Erlernens oder Ausübens macht "Beruf
 # des X" zum Beruf einer Person; ohne es ist der Satz eine allgemeine Einstufung ("Für den Beruf des Dachdeckers gilt
 # die Gefahrengruppe B."; Abnahme 5 AB5U-07) – die Selbstkontrolle meldet ihn dann (Grundsatz P1)
-_BERUF_DES_RE = re.compile(r"(?i)(?<![\wäöüß])(?:den|einen|seinen|ihren)[ \t]+Beruf[ \t]+(?:des|der|eines|einer)[ \t]+$")
+_BERUF_DES_RE = re.compile(r"(?i)(?<![\wäöüß])(?:den|einen|seinen|ihren|vom|zum|im|dem)[ \t]+Beruf[ \t]+(?:des|der|eines|einer)[ \t]+$")
+# Nachbesserung 8 (Abnahme 6 A6-06, AB6U-10): "hat" allein ist kein Verb des Erlernens ("Für den Beruf des Dachdeckers
+# hat der Versicherer die Gefahrengruppe B festgelegt."); eine Person im Satz macht den Beruf zu ihrem ("Sein Sohn
+# strebt den Beruf des Polizisten an.", "Ihr Sohn bewirbt sich auf den Beruf des Soldaten.")
 _BERUF_LERNEN_RE = re.compile(r"(?i)(?<![\wäöüß])(?:\w*lern\w*|\w*übt\w*|\w*uebt\w*|ausgeübt|ausgeuebt|ergriffen|"
-                              r"ergreift|studiert\w*|absolviert\w*|ausbildung\w*|ausgebildet\w*|gewechselt|wechselt\w*|"
-                              r"hatte|hat|habe|wollte|will|möchte|moechte|ausüben|ausueben)(?![\wäöüß])")
+                              r"ergreift|ergreifen|studiert\w*|absolviert\w*|ausbildung\w*|ausgebildet\w*|gewechselt|"
+                              r"wechselt\w*|wollte|will|möchte|moechte|ausüben|ausueben|strebt\w*|anstreb\w*|"
+                              r"bewirbt|beworben|bewerb\w*|plant|plante|träumt\w*|traeumt\w*|gewählt|gewaehlt|wählt\w*|"
+                              r"waehlt\w*|aufgegeben|aufgibt|beginnt|begonnen|begann|ausgeübt)(?![\wäöüß])")
+_BERUF_DES_PERSON_RE = re.compile(r"(?<![\wäöüß])(?:[Ee]r|[Ss]ie|[Ii]ch|[Ss]ein(?:e|en|em|er|es)?|[Ii]hr(?:e|en|em|er|es)?|"
+                                  r"[Mm]ein(?:e|en|em|er|es)?|Herr|Herrn|Frau|Sohn|Tochter|Ehemann|Ehefrau|Enkel|Enkelin|"
+                                  r"Neffe|Nichte|Kind|Bruder|Schwester|Vater|Mutter)(?![\wäöüß])")
 # Rolle direkt hinter "ist"/"war" mit einer Ergänzung im Genitiv oder mit Possessiv ("Er ist Trainer der F-Jugend.",
 # "Sie ist Betreuerin ihrer Mutter."): ein Ehrenamt oder eine familiäre Rolle – gemeldet, nicht geschwärzt (AB5U-07)
 _ROLLE_ERGAENZUNG_RE = re.compile(r"[ \t]+(?:der|des|ihrer|ihres|seiner|seines|meiner|meines|unserer|unseres|deren|"
@@ -432,7 +441,11 @@ def beruf_des_ohne_person(text: str, m, start: int) -> bool:
         return False
     a = satz_anfang(text, start)
     hinten = re.search(r"[.!?;\n]", text[start:start + 200])
-    return _BERUF_LERNEN_RE.search(text, a, start + (hinten.start() if hinten else min(200, len(text) - start))) is None
+    ende = start + (hinten.start() if hinten else min(200, len(text) - start))
+    if _BERUF_LERNEN_RE.search(text, a, ende) is not None:
+        return False
+    return _BERUF_DES_PERSON_RE.search(text, a, ende) is None and not any(
+        personenkontext.ist_personenwort(w) for w in re.findall(r"[A-ZÄÖÜ][a-zäöüß]+", text[a:ende]))
 
 
 def rolle_mit_ergaenzung(text: str, start: int, ende: int) -> bool:
@@ -450,7 +463,10 @@ def beruf_satz_ausgenommen(text: str, start: int, ende: int) -> bool:
     Selbstkontrolle."""
     wort = text[start:ende]
     direkt = bool(_BERUF_DIREKT_DAVOR_RE.search(text, max(0, start - 40), start))
-    if rolle_allein(wort) and (not direkt or rolle_mit_ergaenzung(text, start, ende)):
+    # "von Beruf" bzw. "haupt-/nebenberuflich" direkt davor: die Rolle ist der Beruf einer Person, auch mit Ergänzung
+    # ("Er ist von Beruf Trainer der F-Jugend."; Nachbesserung 8 nach Abnahme 6 A6-05)
+    beruflich = bool(_BERUFLICH_DAVOR_RE.search(text, max(0, start - 40), start))
+    if rolle_allein(wort) and (not direkt or (rolle_mit_ergaenzung(text, start, ende) and not beruflich)):
         return True
     satz_anfang_ = satz_anfang(text, start)
     hinten = re.search(r"[.!?;\n]", text[ende:ende + 200])
@@ -496,11 +512,18 @@ def _beruf_gebeugt_stelle(text: str, p: int, ende_zelle: int):
 # Bürokraft.", "Der Beifahrer …"; Abnahme 5 A5-03)
 _SACH_SUBJEKT_RE = re.compile(r"[ \t]*(?:Der|Die|Das|Dieser|Diese|Dieses|Unser|Unsere|Ihr|Ihre)[ \t]+"
                               r"([A-ZÄÖÜ][\wäöüß\-]{2,40})[ \t]")
+# "bot" nur als Programm ("Chatbot", "Bots") – nicht "-bote" ("Der Eilbote arbeitet als Lagerhilfe."; Abnahme 6 A6-09)
 _SACH_SUBJEKT_GRUNDWORT_RE = re.compile(r"(?i)[\wäöüß\-]*(?:software|programm|app|anwendung|tool|system|modul|"
                                         r"funktion|plattform|gerät|geraet|maschine|anlage|roboter|automat|sensor|"
-                                        r"steuerung|computer|rechner|server|algorithmus|chatbot|bot|schnittstelle|"
+                                        r"steuerung|computer|rechner|server|algorithmus|schnittstelle|"
                                         r"technik|lösung|loesung|datenbank|maske|oberfläche|oberflaeche|"
-                                        r"vorlage|formular)(?:e|en|s|n)?")
+                                        r"vorlage|formular|"
+                                        # Hilfsmittel und Hebezeuge ("Die Rampe arbeitet als Einstiegshilfe …", "Die
+                                        # Hebebühne arbeitet als Montagehilfe …"; Abnahme 6 AB6U-10 b)
+                                        r"rampe|hebebühne|hebebuehne|bühne|buehne|lift|aufzug|kran|stapler|rollator|"
+                                        r"rollstuhl|treppenlift|gerüst|geruest|vorrichtung|halterung|schiene|"
+                                        r"hilfsmittel|werkzeug|fahrzeug|pumpe|kamera|drohne)(?:e|en|s|n)?|"
+                                        r"[\wäöüß\-]*bots?")
 
 
 def _sache_als_subjekt(text: str, pos: int) -> bool:

@@ -228,6 +228,9 @@ _SACHWORT_ENDUNGEN = (
     # "Meerblick", "Gasgrill", "Krankenzusatz")
     "bogen", "jahr", "plakette", "bericht", "konto", "lohn", "zimmer", "flug", "blick", "schilderung", "grill",
     "grafie", "graphie", "vermietung",
+    # Alarme ("Brandalarm, Code 2594": die KI hielt "Brandalarm" am Zeilenanfang vor einem Komma für einen Namen, der
+    # Code dahinter blieb ungemeldet; Nachbesserung 8, Differenztest a6_code_alarm)
+    "alarm",
 )
 # Adjektiv-/Partizipstämme, die großgeschrieben vor Rollenwörtern stehen ("Betreuender Vermittler",
 # "Mitversichertes Kind", "Fälliger Beitrag", "Erstattungsfähig")
@@ -612,6 +615,8 @@ def _stuecke(text: str):
 # riesige Lücken aus Leerraum: dort steht kein Name, der Tokenizer von spaCy braucht dafür aber quadratisch viel Zeit
 # (Gegenprüfung L3) – die NER liest nur die Teile dazwischen, mit ihrem Versatz im Stück
 _NER_LUECKE_RE = re.compile(r"[^\s]{100,}|\s{50,}")
+# "Beruf des"/"Beruf der"/"Berufs des" direkt vor dem Wort (AB6U-16)
+_BERUF_DES_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])berufs?[ \t]+(?:des|der|eines|einer)[ \t]+$")
 
 
 def _ner_teile(stueck: str):
@@ -1093,6 +1098,9 @@ def _plausibel(text: str, start: int, ende: int, regel: bool = False) -> bool:
             return False                      # "Hergang:", "Unfallschilderung:" am Zeilenanfang: ein Feldbezeichner
         if _ner_sachtreffer(text, start, ende, teile):
             return False                      # Marke, Modell, Tierrasse, Firma, Fachwort, Partizip, Dateiname
+        if len(teile) == 1 and _BERUF_DES_DAVOR_RE.search(text, max(0, start - 24), start) \
+                and any(_wissen_wort("ist_beruf", teile[0][:len(teile[0]) - n]) for n in (0, 1, 2) if n < len(teile[0])):
+            return False                      # "der Beruf des Schreiners": ein Beruf im Genitiv (Abnahme 6 AB6U-16)
         if len(teile) == 1 and teile[0].isupper() and len(teile[0]) <= 4:
             return False                      # Kürzel wie RLV, BU, KFZ (Versalien-Namen kommen über die Regeln)
         zeilenanfang = text.rfind("\n", 0, start) + 1

@@ -512,6 +512,26 @@ _ANREDE_NAME_RE = re.compile(
     rf"(?:[ \t]+[{_GROSS}][{_KLEIN}{_GROSS}'’]*(?:-[{_GROSS}][{_KLEIN}{_GROSS}'’]*)*)?)")
 
 
+# Partizip oder Infinitiv direkt hinter dem Wort ("Herrn Notar Bescheid gegeben", "Frau Doktor Unterlagen geschickt"):
+# das Wort ist das Objekt, kein Name – die Selbstkontrolle meldet es (restrisiko: Familienname hinter Herr/Frau)
+_OBJEKT_PARTIZIP_DAHINTER_RE = re.compile(r"[ \t]+(?:ge[a-zäöüß]{2,}(?:t|en)|[a-zäöüß]{2,}iert|[a-zäöüß]{3,}en)"
+                                          r"(?![\wäöüß])")
+
+
+def _name_hinter_amt(wort: str, text: str, ende: int) -> bool:
+    """Ist das Wort hinter Anrede + Titel, Amtsbezeichnung, Beruf oder Personenwort ("Herr Notar Regen", "Frau
+    Pfarrerin Wasser") der Name – auch ein Allerweltswort oder unbekanntes Wort (wie direkt hinter der Anrede)? Nicht ein
+    Funktions-, Personen-, Berufs- oder Titelwort, ein Ort, ein Kompositum der Erkennung und kein Objekt eines
+    Partizips oder Infinitivs dahinter (Nachbesserung 8 nach Abnahme 6 A6-10)."""
+    w = wort.rstrip(".,;:")
+    if len(w) < 3 or not _ist_gross(w) or _versal(w) or not w.isalpha() or w.casefold() in _KEIN_NAME:
+        return False
+    if _art(w)[5] or personenkontext.ist_personenwort(w) or wissen.ist_anrede_titel(w) or wissen.ist_beruf(w) \
+            or wissen.ist_ort(w) or w in ("Sie", "Ihnen", "Ihr", "Ihre"):
+        return False
+    return _OBJEKT_PARTIZIP_DAHINTER_RE.match(text, ende) is None
+
+
 def _anrede_namen(text: str) -> list:
     aus = []
     for m in _ANREDE_NAME_RE.finditer(text):
@@ -523,14 +543,17 @@ def _anrede_namen(text: str) -> list:
         # ein Personenwort oder eine Amtsbezeichnung vor dem Namen gehört nicht zum Namen ("Wie Herr Kollege Maier
         # sagte" -> "Maier"; Abnahme 5 AB5U-12)
         versatz = 0
+        # auch ein Beruf der Wissensbasis ("Wie Herr Notar Regen sagte", "Frau Rechtsanwältin Morgen"; Nachbesserung 8
+        # nach Abnahme 6 A6-10)
         while len(kern) >= 2 and not _art(kern[0])[2] and (personenkontext.ist_personenwort(kern[0])
-                                                            or wissen.ist_anrede_titel(kern[0])):
+                                                            or wissen.ist_anrede_titel(kern[0])
+                                                            or wissen.ist_beruf(kern[0])):
             versatz = name.index(kern[1], name.index(kern[0]) + len(kern[0]))
             kern = kern[1:]
         if versatz:
             ende_wort = m.start("name") + versatz + len(kern[0])
-            if not _art(kern[0])[2] and not _art(kern[0])[0]:
-                continue                                     # dahinter kein Name der Wissensbasis: die übrigen Regeln
+            if not _art(kern[0])[2] and not _art(kern[0])[0] and not _name_hinter_amt(kern[0], text, ende_wort):
+                continue                                     # dahinter kein Name: die übrigen Regeln (gemeldet)
             aus.append(_treffer(m.start("name") + versatz, ende_wort, text, 0.75))
             continue
 

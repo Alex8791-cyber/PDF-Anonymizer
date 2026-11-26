@@ -942,6 +942,41 @@ def _felder_nach_oberkante(felder) -> tuple:
     return idx
 
 
+UNTER_FAKTOR = 2.4
+
+# die zuletzt gefragte Feldliste mit ihren Feldern nach der Unterkante des ersten Kästchens (gehoert_zum_feld_darueber)
+_FELDER_UNTERKANTE = None
+
+
+def _felder_nach_unterkante(felder) -> tuple:
+    """(Unterkanten, Felder) nach der Unterkante des ersten Kästchens (kopfkasten) sortiert – einmal je Feldliste."""
+    global _FELDER_UNTERKANTE
+    zw = _FELDER_UNTERKANTE
+    if zw is not None and zw[0] is felder and zw[1] == len(felder):
+        return zw[2]
+    paare = sorted(((kopfkasten(f)[3], i) for i, f in enumerate(felder)), key=lambda p: p[0])
+    idx = ([p[0] for p in paare], [felder[p[1]] for p in paare])
+    _FELDER_UNTERKANTE = (felder, len(felder), idx)
+    return idx
+
+
+def gehoert_zum_feld_darueber(feld, felder: list, oberkante: float, unterkante: float) -> bool:
+    """Steht der Text über einem Feld (oberkante/unterkante) unter einem anderen Feld und gehört er nach
+    gehoert_zum_feld_darunter zu diesem – ist er also dessen Feldname unter den Kästchen, nicht der Feldname dieses Felds
+    ("Name" unter [KRAUS], darunter mit Abstand [45678] mit "Kilometerstand" darunter; Kamm-Probe 6 a02)? Gesucht wird
+    das nächste Feld darüber, dessen Unterkante höchstens zwei Kästchenhöhen über dem Text liegt (bisect)."""
+    x0, y0, _, y1 = kopfkasten(feld)
+    x1 = feld["rahmen"][2]
+    hoehe = max(y1 - y0, 4.0)
+    unten_y, sortiert = _felder_nach_unterkante(felder)
+    beste = None
+    for f in sortiert[bisect.bisect_left(unten_y, oberkante - 2.0 * hoehe):bisect.bisect_right(unten_y, oberkante + 1.0)]:
+        if f is not feld and min(x1, f["rahmen"][2]) - max(x0, kopfkasten(f)[0]) > -10.0:
+            if beste is None or kopfkasten(f)[3] > kopfkasten(beste)[3]:
+                beste = f
+    return beste is not None and not gehoert_zum_feld_darunter(beste, felder, oberkante, unterkante)
+
+
 def gehoert_zum_feld_darunter(feld, felder: list, oberkante: float, unterkante: float) -> bool:
     """Steht der Text unter einem Feld (oberkante/unterkante) näher am nächsten Feld darunter als am Feld selbst – dann
     ist er dessen Feldname ("Antragsdatum" über dem nächsten Feld), nicht der Feldname unter diesem (Abnahme 5 A5-07).
@@ -949,7 +984,11 @@ def gehoert_zum_feld_darunter(feld, felder: list, oberkante: float, unterkante: 
     (bisect über die sortierten Oberkanten; je Feld alle Felder der Seite wüchse quadratisch)."""
     x0, _, _, y1 = kopfkasten(feld)
     x1 = feld["rahmen"][2]
-    abstand_eigen = oberkante - y1
+    # Nachbesserung 8 (Abnahme 6 A6-08, AB6U-16): der Text gehört zum Feld darunter, solange er nicht deutlich näher am
+    # Feld darüber steht – Abstand zum Feld darunter höchstens UNTER_FAKTOR mal der zum Feld darüber. Gemessen
+    # (n8_arbeit/skripte/kamm_abstand.py): enger Zeilenabstand mit Feldname über dem Feld 1,06–1,95 (eigen606_eng,
+    # auch c023), Feldname unter dem Feld 2,89–4,42 (Kamm-Probe 6 a02 auf Scans)
+    abstand_eigen = max(oberkante - y1, UNTER_FAKTOR * (oberkante - y1))
     oben, sortiert = _felder_nach_oberkante(felder)
     for f in sortiert[bisect.bisect_left(oben, unterkante - 1.0):bisect.bisect_right(oben, unterkante + abstand_eigen)]:
         if f is not feld and min(x1, f["rahmen"][2]) - max(x0, kopfkasten(f)[0]) > -10.0:

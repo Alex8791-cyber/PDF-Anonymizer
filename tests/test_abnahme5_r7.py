@@ -656,10 +656,16 @@ def test_a5_14_gegenproben_nicht_geschwaerzt(text, wort):
     ("Beim Grillen fing die Markise Feuer.", "Grillen"),
     ("Beim Rangieren touchierte er den Pfosten.", "Rangieren"),
     ("Beim Einkaufen wurde das Rad gestohlen.", "Einkaufen"),
-    ("Vom Kalt! kam der Anruf wegen des Hagelschadens.", "Kalt"),
 ])
 def test_ab5u_02_gegenbeleg_frei(text, wort):
     assert _zustand(text, wort) == "frei", _verdacht(text)
+
+
+def test_ab5u_02_ausrufezeichen_kein_gegenbeleg():
+    """Nachbesserung 8 (Abnahme 6 A6-03, AB6U-01): ein Ausrufe- oder Fragezeichen hinter dem Wort ist kein Gegenbeleg –
+    "Vom Kalt! kam der Anruf …" wird wie auf 5efcc0c gemeldet (vorher hier frei verlangt; Zielkonflikt nach P1 zum
+    Melden entschieden)."""
+    assert _zustand("Vom Kalt! kam der Anruf wegen des Hagelschadens.", "Kalt") == "gemeldet"
 
 
 @pytest.mark.parametrize("text, name", [
@@ -1064,10 +1070,13 @@ def _eigener_direkt(seite, feld, felder) -> bool:
 def _darunter_direkt(feld, felder, oberkante, unterkante) -> bool:
     from anonymisierer import kammraster
     x0, _, _, y1 = kammraster.kopfkasten(feld)
+    # Abstand zum Feld darunter höchstens UNTER_FAKTOR mal der zum eigenen Feld (Nachbesserung 8, Abnahme 6 A6-08:
+    # enger Zeilenabstand) – dieselbe Regel wie kammraster.gehoert_zum_feld_darunter, hier ohne Index über alle Felder
+    abstand_eigen = max(oberkante - y1, kammraster.UNTER_FAKTOR * (oberkante - y1))
     for f in felder:
         fx0, fy0, _, _ = kammraster.kopfkasten(f)
         if f is not feld and fy0 >= unterkante - 1.0 and min(feld["rahmen"][2], f["rahmen"][2]) - max(x0, fx0) > -10.0 \
-                and fy0 - unterkante <= oberkante - y1:
+                and fy0 - unterkante <= abstand_eigen:
             return True
     return False
 

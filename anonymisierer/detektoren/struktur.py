@@ -1560,6 +1560,14 @@ _NICHT_ADRESSE_RE = re.compile(r"land|staat|bundesland|kreis|bezirk|kanton|natio
 _STRASSENKLASSE_WERT_RE = re.compile(r"[ \t]*(?:(?i:auf|an|über|ueber)[ \t]+(?i:der|die|dem|den)[ \t]+)?"
                                      + kennungsformen.STRASSENKLASSE + r"(?![\wäöüß])")
 
+# der ganze Wert ist eine Lage im Haus mit Nummer ("Lage der Wohnung ⇥ Etage 3", "Zimmer 4", "3. OG", "Whg. 12"): ein
+# Adresszusatz ohne Straße und Ort ist keine Anschrift und kein Straßenname (Abnahme 5 AB5U-03, Kamm-Probe k04;
+# Nachbesserung 8) – geschlossener Wortschatz der Lage im Haus, keine Namen ("c/o", "z. Hd." bleiben Anschrift)
+_LAGE_IM_HAUS_TEIL = (r"(?:(?:\d{1,2}\.?[ ]?)?(?:etage|stock(?:werk)?|geschoss|ebene|og|eg|dg|ug|kg|obergeschoss|"
+                      r"untergeschoss|dachgeschoss|erdgeschoss|kellergeschoss|zimmer|zi\.|raum|wohnung(?:s-?nr\.?)?|"
+                      r"whg\.?|app\.?|appartement|apartment)(?:[ ]?(?:nr\.?[ ]?)?\d{1,3}[a-z]?)?|links|rechts|mitte)")
+_LAGE_IM_HAUS_WERT_RE = re.compile(r"(?i)" + _LAGE_IM_HAUS_TEIL + r"(?:[ ]*[,;/]?[ ]*" + _LAGE_IM_HAUS_TEIL + r"){0,3}")
+
 
 def _hinter_ortsgattung(text: str, k: int, e: int):
     """Beginnt die Ortsangabe ab k mit Gattungswörtern ("Skigebiet Sudelfeld", "Turnhalle der Mittelschule Erding"),
@@ -1577,6 +1585,9 @@ def _hinter_ortsgattung(text: str, k: int, e: int):
     return k + woerter[n].start()
 
 
+_ZUGANGSWORT_IM_WERT_RE = re.compile(r"(?i)(?<![\wäöüß\-])(?:code|pin|zugangscode|kennwort|passwort)(?![\wäöüß\-])")
+
+
 def _adress_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> list:
     v = _vergleichsform(et.eintrag)
     if _NICHT_ADRESSE_RE.search(v) and not _ANSCHRIFT_ETIKETT_RE.search(v):
@@ -1589,6 +1600,8 @@ def _adress_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
         aus.append(Wert(a, b, "plzort"))
     # Straße (am Anfang oder hinter einem Komma vor der PLZ)
     sp = strasse_spanne(text, i, e)
+    if sp and not aus and _LAGE_IM_HAUS_WERT_RE.fullmatch(text[i:e].strip()):
+        sp = None                       # "Lage der Wohnung ⇥ Etage 3": eine Lage im Haus, keine Straße
     if sp and (mit_trenner or _muster is not None and _muster.finde_strasse(text[sp[0]:sp[1]])):
         if not any(a <= sp[0] < b for a, b, _, _ in aus):
             aus.append(Wert(sp[0], sp[1], "strasse"))
@@ -1616,6 +1629,11 @@ def _adress_werte(text: str, i: int, e: int, et: Etikett, mit_trenner: bool) -> 
             return [Wert(i, i + m.end(), "plzort")]
         return []
     if _ORT_ETIKETT_RE.search(v):
+        # ein Zugangswort im Wert beendet die Ortsangabe ("Schadenort: Heizungsraum, Code 5207": "Code" ist kein Ort,
+        # die Ziffern sind ein Zugangscode; Abnahme 6 A6-13)
+        zw = _ZUGANGSWORT_IM_WERT_RE.search(text, i, e)
+        if zw is not None:
+            e = zw.start()
         m = re.match(r"(?:(?:D|DE|A|CH)[-\s])?\d{4,5}[ ]+", text[i:e])
         k = i + (m.end() if m else 0)
         if not m:

@@ -688,8 +688,11 @@ def test_ab4_15_ocr_ausrufezeichen_gegenprobe(tmp_path):
     """Ein echtes Ausrufezeichen (das Wort danach groß) bleibt eines; auf der Textebene gilt die Lesart nicht."""
     v = _ocr_verdacht(tmp_path, ["Achtung! Der Keller ist nass.", "Vorsicht! Das Wasser steht hoch."])
     assert not any("Achtungl" in t or "Vorsichtl" in t for t, _ in v), v
-    assert not any("Kalt" in t for t, _ in _verdacht("Vom Kalt! kam der Anruf wegen des Hagelschadens.")), \
-        _verdacht("Vom Kalt! kam der Anruf wegen des Hagelschadens.")
+    # die OCR-Lesart "Kaltl" gilt auf der Textebene nicht; "Kalt" selbst meldet die Selbstkontrolle seit der achten
+    # Nachbesserung als möglichen Hausnamen (Abnahme 6 A6-03/AB6U-01: das Ausrufezeichen ist kein Gegenbeleg)
+    v_text = _verdacht("Vom Kalt! kam der Anruf wegen des Hagelschadens.")
+    assert not any("Kaltl" in t for t, _ in v_text), v_text
+    assert all("Hausname" in g for t, g in v_text if "Kalt" in t), v_text
 
 
 # ----------------------------------------------------------------------
