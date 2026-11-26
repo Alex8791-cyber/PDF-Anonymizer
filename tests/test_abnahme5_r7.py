@@ -118,10 +118,21 @@ def test_a5_02_geraete_grundwort_als_name_gemeldet(text, name):
     ("Der Hochdruckreiniger hat die Fassadendämmung beschädigt.", "Hochdruckreiniger"),
     ("Der Toaster verursachte den Küchenbrand am Morgen.", "Toaster"),
     ("Der Marder beschädigte die Zündkabel im Motorraum.", "Marder"),
-    ("Vom Gabelstapler kam der Anruf wegen des Hagelschadens.", "Gabelstapler"),
 ])
 def test_a5_02_geraet_und_tier_frei(text, wort):
     assert _zustand(text, wort) == "frei", _verdacht(text)
+
+
+@pytest.mark.parametrize("text, wort", [
+    ("Vom Gabelstapler kam der Anruf wegen des Hagelschadens.", "Gabelstapler"),
+    ("Vom Steinkocher kam der Anruf wegen des Hagelschadens.", "Steinkocher"),
+    ("Beim Steinkocher ist der Stadel abgebrannt.", "Steinkocher"),
+])
+def test_n7_geraete_kompositum_hinter_vom_gemeldet(text, wort):
+    """Selbstprüfung P1 (Nachbesserung 7): ein Geräte-Kompositum hinter "beim"/"vom"/"zum" schwärzt hofnamen nicht
+    (Gabelstapler blieb auf 5efcc0c ungeschwärzt), ist aber kein sicherer Gegenbeleg gegen einen Hausnamen – das
+    Grundwort ("Kocher") ist auch ein Familienname. Gemeldet wie auf 5efcc0c (dort Hofname-Kandidat)."""
+    assert _zustand(text, wort) == "gemeldet", _verdacht(text)
 
 
 def test_a5_02_geraete_kompositum():
@@ -311,6 +322,18 @@ def test_a5_06_moebel_mit_code_geschwaerzt(text, wert):
     assert _zustand(text, wert) == "weg"
 
 
+@pytest.mark.parametrize("text, wert", [
+    ("Der Kleiderschrank aus dem Katalog hat den Code 4471.", "4471"),
+    ("Der Badschrank (Modell Lina) hat den Code 2207.", "2207"),
+    ("Laut Lieferschein hat der Badschrank den Code 2207.", "2207"),
+    ("Laut Rechnung des Möbelhauses trägt der Kleiderschrank den Code 66130.", "66130"),
+])
+def test_n7_moebel_mit_produkt_gemeldet(text, wert):
+    """Selbstprüfung P1 (Nachbesserung 7): ein Möbel mit Kauf oder Produkt im Satz nimmt den Code nur vom Schwärzen aus
+    (AB4U-05) – Produkt- oder Schlosscode, gemeldet (auf 0230782 geschwärzt, auf 5efcc0c bei "Katalog" still)."""
+    assert _zustand(text, wert) == "gemeldet", _verdacht(text)      # Grund bei "Rechnung …": test_ab4u_05_06
+
+
 # ----------------------------------------------------------------------
 # A5-07, AB5U-03, A5-08: Feldnamen in Kammfeldern der Textebene
 # ----------------------------------------------------------------------
@@ -422,6 +445,98 @@ def test_ab4u_05_betrag_hinter_gebaeude_kein_zugangscode():
 ])
 def test_a5_12_beruf_geschwaerzt_oder_gemeldet(text, wert):
     assert _zustand(text, wert) in ("weg", "gemeldet")
+
+
+def test_a5_12_beruf_hinter_geschwaerztem_satzgegenstand_pdf(tmp_path):
+    """Ende-zu-Ende-Fall a5_ab406_schoeffin (Text und drei Scans still auf 5efcc0c und 0230782): unter „Angaben zur
+    Person“ wird das erste Wort der Zeile als Name geschwärzt („Ehrenamtlich“), in der Ausgabe steht der Text des
+    Platzhalters am Ende der Textebene, sein Rechteck aber vor „tätig als Schöffin …“ – der Beruf wird geschwärzt oder
+    gemeldet, nie still."""
+    import pymupdf as fitz
+    from anonymisierer.analyse import analysiere_pdf
+    from anonymisierer.schwaerzung import schwaerze_pdf
+    doc = fitz.open()
+    s = doc.new_page(width=595, height=842)
+    s.insert_text((60, 80), "Angaben zur Person", fontsize=11, fontname="helv")
+    s.insert_text((60, 98.15), "Ehrenamtlich tätig als Schöffin am Amtsgericht.", fontsize=11, fontname="helv")
+    pfad = tmp_path / "schoeffin.pdf"
+    doc.save(pfad)
+    doc.close()
+    erg = analysiere_pdf(pfad, ALLE, [], [], profil="hoch")
+    aus = schwaerze_pdf(pfad, erg["funde"], ziel_ordner=tmp_path / "aus")
+    with fitz.open(aus["ausgabe"]) as d:
+        text = "\n".join(p.get_text() for p in d)
+    verdacht = [(v.text, v.grund) for v in aus.get("verdacht") or []]
+    assert "Schöffin" not in text or any("Schöffin" in t for t, _ in verdacht), (text, verdacht)
+
+
+def _ausgabe_pdf_zeilen(tmp_path, zeilen, ocr_platzhalter=None):
+    """Ausgabe wie die Schwärzung sie schreibt (wie tests/test_abnahme4_r7.py::_ausgabe_pdf): zeilen = [(vorn,
+    geschwärzt, hinten)]; ist geschwärzt wahr, steht zwischen vorn und hinten ein graues Rechteck mit dem Platzhalter
+    „[PERSON A]“ als letztem Text der Seite bzw. auf einer Scan-Seite mit dem Platzhalter als verlesenem OCR-Wort
+    `ocr_platzhalter`. Rückgabe: (Pfad, Zusatz für restrisiko_pruefen)."""
+    import pymupdf as fitz
+    from anonymisierer import restrisiko
+    doc = fitz.open()
+    s = doc.new_page(width=595, height=842)
+    rechtecke, y = [], 80.0
+    for vorn, geschwaerzt, hinten in zeilen:
+        x = 60.0
+        if vorn:
+            s.insert_text((x, y), vorn, fontsize=11, fontname="helv")
+            x += fitz.get_text_length(vorn + " ", fontname="helv", fontsize=11)
+        if geschwaerzt:
+            r = fitz.Rect(x, y - 9.5, x + 70, y + 3)
+            rechtecke.append(r)
+            x = r.x1 + 3
+        if hinten:
+            s.insert_text((x, y), hinten, fontsize=11, fontname="helv")
+        y += 18.15
+    zusatz = {}
+    if ocr_platzhalter is not None:
+        woerter = [tuple(w[:5]) for w in s.get_text("words")]
+        woerter += [(r.x0 + 2, r.y0 + 1, r.x1 - 2, r.y1 - 1, ocr_platzhalter) for r in rechtecke]
+        pix = s.get_pixmap(dpi=200, colorspace=fitz.csGRAY)
+        scan = fitz.open()
+        seite = scan.new_page(width=595, height=842)
+        seite.insert_image(seite.rect, stream=pix.tobytes("png"))
+        doc.close()
+        doc, s = scan, seite
+        zusatz = {"ocr_modus": {0: "seite"}, "ocr_woerter": {0: woerter}}
+    for r in rechtecke:
+        s.draw_rect(r, color=None, fill=restrisiko.FUELLFARBE)
+        if ocr_platzhalter is None:
+            s.insert_text((r.x0 + 2, r.y1 - 3), "[PERSON A]", fontsize=8, fontname="helv")
+    pfad = tmp_path / "ausgabe.pdf"
+    doc.save(pfad)
+    doc.close()
+    return pfad, zusatz
+
+
+@pytest.mark.parametrize("ocr_platzhalter", [None, "IPERSONAI", "|PERSON A|"])
+@pytest.mark.parametrize("vorn, hinten, beruf", [
+    ("", "tätig als Schöffin am Amtsgericht.", "Schöffin"),
+    ("Seit 2019 ist", "als Erzieherin in der Kita tätig.", "Erzieherin"),           # Abwandlung: mitten im Satz
+    ("Als Schöffin am Amtsgericht arbeitet", ".", "Schöffin"),                      # am Satzende vor dem Punkt
+])
+def test_a5_12_beruf_neben_personen_platzhalter_der_ausgabe(tmp_path, ocr_platzhalter, vorn, hinten, beruf):
+    from anonymisierer import restrisiko
+    pfad, zusatz = _ausgabe_pdf_zeilen(tmp_path, [("Angaben zur Person", False, ""), (vorn, True, hinten)],
+                                       ocr_platzhalter)
+    v = [(x.text, x.grund) for x in restrisiko.restrisiko_pruefen(pfad, platzhalter=["[PERSON A]"], **zusatz)]
+    assert any(t == beruf and "Person" in g for t, g in v), v
+
+
+@pytest.mark.parametrize("ocr_platzhalter", [None, "IPERSONAI"])
+def test_a5_12_platzhalter_in_anderem_satz_gegenprobe(tmp_path, ocr_platzhalter):
+    """Gegenprobe: der Personen-Platzhalter steht in einem anderen Satz (Zeile darüber) – „Die Stelle als Schöffin am
+    Amtsgericht ist frei.“ spricht von keiner Person und bleibt ohne Verdacht."""
+    from anonymisierer import restrisiko
+    pfad, zusatz = _ausgabe_pdf_zeilen(tmp_path, [("", True, "hat angerufen."),
+                                                  ("Die Stelle als Schöffin am Amtsgericht ist frei.", False, "")],
+                                       ocr_platzhalter)
+    v = [(x.text, x.grund) for x in restrisiko.restrisiko_pruefen(pfad, platzhalter=["[PERSON A]"], **zusatz)]
+    assert not any(t == "Schöffin" for t, _ in v), v
 
 
 @pytest.mark.parametrize("text, wert", [
@@ -556,6 +671,31 @@ def test_ab5u_02_nie_still(text, name):
     assert _zustand(text, name) in ("weg", "gemeldet")
 
 
+@pytest.mark.parametrize("text, name", [
+    ("Beim Kaltenbrunnen ist der Stadel abgebrannt.", "Kaltenbrunnen"),
+    ("Vom Mitterhofen kam der Anruf wegen des Hagelschadens.", "Mitterhofen"),
+    ("Beim Moosgraben ist der Stadel abgebrannt.", "Moosgraben"),
+    ("Vom Achleiten kam der Anruf wegen des Hagelschadens.", "Achleiten"),
+    ("Beim Untermoosen ist der Stadel abgebrannt.", "Untermoosen"),
+    ("Vom Hinterhuben kam der Anruf wegen des Hagelschadens.", "Hinterhuben"),
+    ("Beim Holzhausen ist der Stadel abgebrannt.", "Holzhausen"),
+])
+def test_n7_flurname_kein_gegenbeleg(text, name):
+    """Selbstprüfung P1 (Nachbesserung 7): ein Flur-, Orts- oder Hofname nach seinem Grundwort ("-brunnen", "-hofen",
+    "-graben", "-leiten", "-moosen", "-huben", "-hausen") ist kein substantiviertes Verb und kein gewöhnliches
+    Kompositum – gemeldet wie auf 5efcc0c (der Gegenbeleg "-en" ließ ihn frei)."""
+    assert _zustand(text, name) in ("weg", "gemeldet"), _verdacht(text)
+
+
+@pytest.mark.parametrize("text, wort", [
+    ("Beim Graben stieß der Bagger auf ein Kabel.", "Graben"),   # Grundwort allein: ein substantiviertes Verb
+    ("Beim Grillen fing die Markise Feuer.", "Grillen"),
+    ("Beim Steinschlag auf der A8 brach die Scheibe.", "Steinschlag"),
+])
+def test_n7_flurname_gegenproben_frei(text, wort):
+    assert _zustand(text, wort) == "frei", _verdacht(text)
+
+
 # ----------------------------------------------------------------------
 # A5-15: Postleitzahl links neben einem geschwärzten Ort
 # ----------------------------------------------------------------------
@@ -567,6 +707,91 @@ def test_a5_15_plz_neben_ort_platzhalter_gemeldet():
 def test_a5_15_gegenprobe_hausnummer_rechts():
     v = _verdacht("Anschrift: [ADRESSE] 12", platzhalter=["[ADRESSE]"])
     assert not any("Postleitzahl" in g for _, g in v), v
+
+
+def _scan_anschrift(tmp_path, plz_wort=None, kritzel=False, rechts=False, etikett="PLZ, Ort:", platzhalter="[ORT]"):
+    """Ausgabe einer Scan-Seite „PLZ, Ort: … [ORT]“ wie die Schwärzung sie schreibt: graues Rechteck mit dem
+    Platzhalter „[ORT]“ auf der Textebene, davor (rechts=True: dahinter) die Postleitzahl als OCR-Wort `plz_wort` – so,
+    wie die Kontroll-OCR sie liest – bzw. als Handschrift, die die OCR nicht liest (kritzel). Kammfeld-Korpus g7717 der
+    Abnahme 5, Dokument 070: handschriftlich „72070“ auf einem Fax, gelesen als „F2O7O“. Rückgabe: (Pfad, Zusatz für
+    restrisiko_pruefen)."""
+    import pymupdf as fitz
+    from anonymisierer import restrisiko
+    vorlage = fitz.open()
+    s = vorlage.new_page()
+    s.insert_text((60, 100), "Antrag auf Leistungen aus der Hausratversicherung", fontsize=12, fontname="helv")
+    if etikett:
+        s.insert_text((60, 140), etikett, fontsize=12, fontname="helv")
+    woerter = [tuple(w[:5]) for w in s.get_text("words")]
+    box = fitz.Rect(120, 128, 180, 143) if rechts else fitz.Rect(190, 128, 250, 143)
+    wort = fitz.Rect(184, 129, 220, 142) if rechts else fitz.Rect(150, 129, 186, 142)
+    if kritzel:
+        form = s.new_shape()
+        for k in range(4):
+            form.draw_bezier((wort.x0 + 2 + 8 * k, 138), (wort.x0 + 4 + 8 * k, 126), (wort.x0 + 7 + 8 * k, 146),
+                             (wort.x0 + 9 + 8 * k, 132))
+        form.finish(color=(0.1, 0.1, 0.4), width=1.3)
+        form.commit()
+    if plz_wort:
+        woerter.append((wort.x0, wort.y0, wort.x1, wort.y1, plz_wort))
+    pix = s.get_pixmap(dpi=150, colorspace=fitz.csGRAY)
+    doc = fitz.open()
+    p = doc.new_page(width=s.rect.width, height=s.rect.height)
+    p.insert_image(p.rect, stream=pix.tobytes("png"))
+    p.draw_rect(box, color=None, fill=restrisiko.FUELLFARBE)
+    p.insert_text((box.x0 + 4, 139), platzhalter, fontsize=8, fontname="helv")
+    vorlage.close()
+    pfad = tmp_path / "anschrift.pdf"
+    doc.save(pfad)
+    doc.close()
+    return pfad, {"ocr_modus": {0: "seite"}, "ocr_woerter": {0: woerter}}
+
+
+@pytest.mark.parametrize("plz_wort", ["72070", "F2O7O", "7Z07O"])
+@pytest.mark.parametrize("etikett", ["PLZ, Ort:", ""])
+def test_a5_15_plz_neben_ort_auf_scan_gemeldet(tmp_path, plz_wort, etikett):
+    """Auf einem Scan steht das OCR-Wort im Seitentext hinter dem Text der Platzhalter – links oder rechts zählt nach
+    der Lage auf der Seite; auch eine verlesene Postleitzahl (Länge einer Postleitzahl, mindestens zwei Ziffern) wird
+    gemeldet, ohne Feldnamen davor (wie im Fax 070) mit dem Grund der Postleitzahl."""
+    from anonymisierer import restrisiko
+    pfad, zusatz = _scan_anschrift(tmp_path, plz_wort, etikett=etikett)
+    v = [(x.text, x.grund) for x in restrisiko.restrisiko_pruefen(pfad, platzhalter=["[ORT]"], **zusatz)]
+    assert any(t == plz_wort for t, _ in v), v
+    if not etikett and not plz_wort.isdigit():
+        assert (plz_wort, "Postleitzahl neben einem geschwärzten Ort") in v, v
+
+
+@pytest.mark.parametrize("plz_wort, rechts", [
+    ("Lehrerin", False),                 # ein Wort ohne Ziffern ist keine Postleitzahl
+    ("F2O7O", True),                     # rechts hinter dem Ort steht keine Postleitzahl
+    ("2O", False),                       # zu kurz für eine Postleitzahl
+])
+def test_a5_15_plz_neben_ort_auf_scan_gegenproben(tmp_path, plz_wort, rechts):
+    from anonymisierer import restrisiko
+    pfad, zusatz = _scan_anschrift(tmp_path, plz_wort, rechts=rechts)
+    v = [(x.text, x.grund) for x in restrisiko.restrisiko_pruefen(pfad, platzhalter=["[ORT]"], **zusatz)]
+    assert not any(g == "Postleitzahl neben einem geschwärzten Ort" for _, g in v), v
+
+
+@pytest.mark.parametrize("platzhalter, rechts", [
+    ("[ORT]", False),                    # Postleitzahl vor dem Ort
+    ("[PLZ ORT]", False),
+    ("[STRASSE]", True),                 # Hausnummer hinter der Straße
+])
+def test_a5_15_handschrift_ohne_lesung_neben_anschrift_gemeldet(tmp_path, platzhalter, rechts):
+    """Liest die OCR die Handschrift neben der geschwärzten Anschrift gar nicht, meldet die Tintenprüfung die Stelle
+    („Schrift neben einer geschwärzten Anschrift …“); ohne Handschrift bleibt die Seite ohne diesen Verdacht."""
+    import pymupdf as fitz
+    from anonymisierer import restrisiko
+    pfad, zusatz = _scan_anschrift(tmp_path, kritzel=True, rechts=rechts, platzhalter=platzhalter)
+    v = [x for x in restrisiko.restrisiko_pruefen(pfad, platzhalter=[platzhalter], **zusatz)
+         if x.grund == restrisiko.GRUND_ANSCHRIFTTINTE]
+    stelle = fitz.Rect(184, 126, 220, 146) if rechts else fitz.Rect(150, 126, 186, 146)
+    assert v and any(fitz.Rect(r).intersects(stelle) for r in v[0].rechtecke), v
+    pfad, zusatz = _scan_anschrift(tmp_path, rechts=rechts, platzhalter=platzhalter)
+    v = [x for x in restrisiko.restrisiko_pruefen(pfad, platzhalter=[platzhalter], **zusatz)
+         if x.grund == restrisiko.GRUND_ANSCHRIFTTINTE]
+    assert not v, v
 
 
 # ----------------------------------------------------------------------
@@ -712,6 +937,61 @@ def test_n7_allerweltswort_als_name_waechst_linear():
     wachstum, _, zeit = _wachstum(lambda: personenkontext.personenwort_namen(klein),
                                   lambda: personenkontext.personenwort_namen(gross), 8, 2.0)
     assert wachstum < 2.0, f"personenwort_namen wächst um {wachstum:.2f} x linear ({zeit:.3f} s)"
+
+
+def test_n7_moebel_code_lange_zeile_waechst_linear():
+    """moebel_code_mehrdeutig sucht Zeile und Satz nur im Fenster um "Code" (Eingriff N12: Zeilenanfang ohne Fenster
+    wächst auf einer langen Zeile quadratisch)."""
+    baustein = "Der Kleiderschrank aus dem Katalog hat den Code 4471 und "
+    klein, gross = _zeile(baustein, 8000), _zeile(baustein, 64000)
+    assert kennungsformen.moebel_code_mehrdeutig(klein)                 # die Regel greift im Baustein
+    wachstum, _, zeit = _wachstum(lambda: kennungsformen.moebel_code_mehrdeutig(klein),
+                                  lambda: kennungsformen.moebel_code_mehrdeutig(gross), 8, 2.0)
+    assert wachstum < 2.0, f"moebel_code_mehrdeutig wächst um {wachstum:.2f} x linear ({zeit:.3f} s)"
+
+
+def _ausgabe_platzhalter_saetze(pfad, mit_platzhalter):
+    """Ausgabe-Seite mit je einem Satz „tätig als Schöffin am Amtsgericht i.“ je Eintrag von mit_platzhalter, 40 Sätze
+    je Zeile; ist der Eintrag wahr, steht davor ein graues Rechteck, der Platzhalter-Text „[PERSON A]“ am Ende der
+    Textebene (wie die Schwärzung sie schreibt)."""
+    import pymupdf as fitz
+    from anonymisierer import restrisiko
+    doc = fitz.open()
+    s = doc.new_page(width=3000, height=40 + 6 * (len(mit_platzhalter) // 40 + 1))
+    rechtecke, x, y = [], 10.0, 20.0
+    for i, ph in enumerate(mit_platzhalter):
+        if i and i % 40 == 0:
+            x, y = 10.0, y + 6
+        if ph:
+            r = fitz.Rect(x, y - 3, x + 14, y + 1)
+            rechtecke.append(r)
+            x = r.x1 + 1.5
+        t = f"tätig als Schöffin am Amtsgericht {i}."
+        s.insert_text((x, y), t, fontsize=3, fontname="helv")
+        x += 2 + fitz.get_text_length(t + " ", fontname="helv", fontsize=3)
+    for r in rechtecke:
+        s.draw_rect(r, color=None, fill=restrisiko.FUELLFARBE)
+        s.insert_text((r.x0 + 0.5, r.y1 - 0.8), "[PERSON A]", fontsize=2, fontname="helv")
+    doc.save(pfad)
+    doc.close()
+
+
+def test_n7_beruf_neben_platzhalter_lange_zeile_waechst_linear(tmp_path):
+    """_personen_platzhalter_im_satz prüft nur die Wörter des Satzes um „als“ (Eingriff N13: alle Wörter vom
+    Seitenanfang an – wächst auf einer langen Zeile, in der nur der letzte Satz einen Platzhalter hat, quadratisch)."""
+    from anonymisierer import restrisiko
+    alle = tmp_path / "alle.pdf"
+    _ausgabe_platzhalter_saetze(alle, [True] * 20)
+    v = restrisiko.restrisiko_pruefen(alle, platzhalter=["[PERSON A]"])
+    assert sum(x.text == "Schöffin" for x in v) == 20, [(x.text, x.grund) for x in v][:5]
+    klein, gross = tmp_path / "klein.pdf", tmp_path / "gross.pdf"
+    _ausgabe_platzhalter_saetze(klein, [False] * 39 + [True])
+    _ausgabe_platzhalter_saetze(gross, [False] * 319 + [True])
+    v = restrisiko.restrisiko_pruefen(klein, platzhalter=["[PERSON A]"])
+    assert sum(x.text == "Schöffin" for x in v) == 1, [(x.text, x.grund) for x in v][:5]
+    wachstum, _, zeit = _wachstum(lambda: restrisiko.restrisiko_pruefen(klein, platzhalter=["[PERSON A]"]),
+                                  lambda: restrisiko.restrisiko_pruefen(gross, platzhalter=["[PERSON A]"]), 8, 2.0)
+    assert wachstum < 2.0, f"Beruf neben Platzhalter wächst um {wachstum:.2f} x linear ({zeit:.3f} s)"
 
 
 def test_n7_alarmcode_lange_zeile_waechst_linear():
@@ -971,6 +1251,22 @@ def test_kamm_hausnummer_verlesen(teil, wert, erwartet):
     Texterkennung ein Zeichen verliest (Kammfeld-Korpus eigen505 der Abnahme 5)."""
     dok = _kamm_ocr_seite([(57, 110, 150, 122, "Anschrift", 0), (200, 110, 250, 122, teil, 0),
                            (274, 111, 292, 121, wert, 0)], [(270, 108, 2, wert)])
+    assert (("strasse", wert) in _kamm_scan_treffer(dok)) is erwartet, _kamm_scan_treffer(dok)
+
+
+@pytest.mark.parametrize("zeile, teil, wert, erwartet", [
+    ("Anschrift", "", "14", True),                   # ohne Teil-Feldnamen: eine Hausnummer (5efcc0c, 0230782)
+    ("Straße und Hausnummer", "", "14", True),
+    ("Wohnanschrift", "Haus-Nr.", "7", True),
+    ("Anschrift", "Etage", "3", False),              # Teil der Wohnung: keine Hausnummer
+    ("Wohnung", "Zimmer", "4", False),
+])
+def test_n7_kurzer_wert_im_anschriftfeld(zeile, teil, wert, erwartet):
+    """Selbstprüfung P1 (Nachbesserung 7): die Ausnahme für kurze Werte im Anschriftfeld gilt nur unter einem
+    Feldnamen für einen Teil der Wohnung (Etage, Zimmer, Stock …), nicht für jeden Wert ohne Hausnummer-Feldnamen."""
+    woerter = [(57, 110, 150, 122, zeile, 0)] + ([(200, 110, 250, 122, teil, 0)] if teil else []) \
+        + [(274, 111, 292, 121, wert, 0)]
+    dok = _kamm_ocr_seite(woerter, [(270, 108, 2, wert)])
     assert (("strasse", wert) in _kamm_scan_treffer(dok)) is erwartet, _kamm_scan_treffer(dok)
 
 

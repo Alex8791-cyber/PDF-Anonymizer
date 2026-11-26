@@ -81,7 +81,8 @@ Was gemeldet wird (jede Regel liefert Stelle + Grund):
     "berlin") bleiben Verdacht.
   * Scan-Seiten: dichte Tinte in Unterschriftsblöcken (unter der Grußformel – auch so, wie die OCR sie liest,
     auch schräg –, über/neben "Unterschrift", über Rollenzeilen wie "Mandant" | "Makler"), neben Personenangaben
-    (hinter "Name:", neben einem Personen-Platzhalter) und hinter Bank- und Kontoangaben ("Kreditinstitut (Name und
+    (hinter "Name:", neben einem Personen-Platzhalter), neben einer geschwärzten Anschrift (die Postleitzahl vor
+    dem Ort) und hinter Bank- und Kontoangaben ("Kreditinstitut (Name und
     BIC):", "IBAN:" – handschriftlich ausgefüllte Mandate), die die OCR nicht VERLÄSSLICH gelesen hat: gar nicht, mit
     einem Wortkasten, der nicht zum Text passt (viel höher als die Schrift: Unterschriftszug, Wort samt Zug; viel
     breiter als die Zeichen: ein Zug, als "Med" oder "az" gelesen), als
@@ -776,6 +777,9 @@ _NEUE_FORMEN = ((kennungsformen.ip_adressen, "IP-Adresse", "form"),
                 # Code eines Alarms als Ereignis ohne Bedienung ("Feueralarmcode 3401"): Ereignis- oder Bediencode
                 # (Abnahme 5 A5-10, Grundsatz P2)
                 (kennungsformen.alarm_code_mehrdeutig, "Code eines Alarms (Ereignis- oder Bediencode?)", "kennung"),
+                # Code an einem Möbelschrank, den der Satz als Produkt belegt ("Der Kleiderschrank aus dem Katalog hat
+                # den Code 4471."): Produkt- oder Schlosscode (Abnahme 5 A5-06, Grundsatz P1)
+                (kennungsformen.moebel_code_mehrdeutig, "Code an einem Möbel (Produkt- oder Schlosscode?)", "kennung"),
                 (kennungsformen.profilnamen, "Profil- bzw. Kontoname", "kontakt"))
 _KREDITKARTE_PLATZHALTER_RE = re.compile(r"\[KREDITKARTE\]")
 # Geburtsname direkt hinter "geb." / "geb:" / "geborene" ("[PERSON A] geb. Quarnstedt", "GEB. QUARNSTEDT") – nicht
@@ -2536,8 +2540,29 @@ class _Seitenpruefung:
             if any(not (p.group(0) == "Sie" and _SIE_IM_SATZ_RE.match(text, p.start() - 1)) or
                    (p.group(0) == "Sie" and sie_person)
                    for p in list(_PERSON_IM_SATZ_RE.finditer(text, satz_anfang, m.start()))
-                   + list(_PERSON_IM_SATZ_RE.finditer(text, e, satz_ende))):
+                   + list(_PERSON_IM_SATZ_RE.finditer(text, e, satz_ende))) \
+                    or self._personen_platzhalter_im_satz(satz_anfang, satz_ende, s, e):
                 self.neu(s, e, "Beruf hinter „als“ im Satz über eine Person", "form")
+
+    def _personen_platzhalter_im_satz(self, a: int, b: int, s: int, e: int) -> bool:
+        """Steht auf der Seite ein Personen-Platzhalter direkt neben einem Wort des Satzes [a, b) (außer der Stelle
+        s–e)? In der Ausgabe steht der Text des Platzhalters am Ende der Textebene, sein graues Rechteck aber im Satz
+        ("[PERSON A] tätig als Schöffin am Amtsgericht." liest sich als " tätig als Schöffin am Amtsgericht.\\n[PERSON
+        A]"); auf Scans liest die Kontroll-OCR ihn im Rechteck (neben_platzhalter). Abnahme 5 A5-12, Ende-zu-Ende-Fall
+        a5_ab406_schoeffin: der Name des Satzgegenstands war geschwärzt, der Beruf blieb still."""
+        if not (self.platzhalter or self.schwaerzungen or self.personen_schwaerzungen):
+            return False
+        satzende = b < len(self.text) and self.text[b] in ".!?;"
+        for w in _WORT_RE.finditer(self.text, a, b):
+            if w.start() < e and w.end() > s:
+                continue
+            ph = self.neben_platzhalter(w.start(), w.end(), _PERSONEN_PLATZHALTER_RE)
+            if ph is None:
+                continue
+            if satzende and w.end() == b and self.platzhalter_rechts(w.start(), w.end(), ph):
+                continue                        # rechts hinter "Amtsgericht." beginnt der nächste Satz
+            return True
+        return False
 
     def _beruf_ohne_schwaerzung(self):
         """Berufe, die die Erkennung nur ausnimmt, weil der Satz sie als Rolle oder Einstufung zeigt (Abnahme 5
@@ -4411,6 +4436,10 @@ class _Seitenpruefung:
             if re.search(r"[·|•/]", vor_stueck + nach_stueck):
                 continue                                # "Innere Medizin · [ADRESSE]" – anderer Eintrag
             ocr_wort = self._quelle(s) != "text"
+            if ocr_wort:
+                # ein OCR-Wort steht im Seitentext hinter dem Text der Platzhalter (Textebene zuerst): links oder rechts
+                # nach der Lage auf der Seite (Abnahme 5 A5-15: „72070 [ORT]“ auf einem Fax galt als rechts)
+                rechts = not self.platzhalter_rechts(s, e, nachbar)
             if kern.isdigit():
                 if len(kern) <= 4 and rechts and not ocr_wort:
                     self.neu(s, e, "Rest neben Platzhalter", "rest")   # Hausnummer
@@ -4418,6 +4447,12 @@ class _Seitenpruefung:
                     # Postleitzahl links neben dem geschwärzten Ort, auch auf einem Scan ("72070 [PLZ ORT]" auf einem
                     # Fax, die Handschrift der Postleitzahl las die Erkennung nicht; Abnahme 5 A5-15)
                     self.neu(s, e, "Postleitzahl neben einem geschwärzten Ort", "rest")
+                continue
+            if ocr_wort and not rechts and 4 <= len(kern) <= 6 and kern.isalnum() \
+                    and sum(c.isdigit() for c in kern) >= 2:
+                # eine verlesene Postleitzahl links neben dem geschwärzten Ort: Länge einer Postleitzahl, mindestens
+                # zwei Ziffern ("F2O7O [ORT]" – handschriftlich „72070“ auf einem Fax; Abnahme 5 A5-15)
+                self.neu(s, e, "Postleitzahl neben einem geschwärzten Ort", "rest")
                 continue
             wort = kern.rstrip(".")
             if len(wort) < 2 or _ocr_unsinn(wort) or wort.lower() in _STOPPWOERTER:
@@ -4845,6 +4880,10 @@ GRUND_UNTERSCHRIFT = "Unterschrift/Name unter der Grußformel nicht lesbar – b
 GRUND_UNTERSCHRIFTSFELD = "Unterschrift/Name am Unterschriftsfeld nicht lesbar – bitte ansehen"
 GRUND_PERSONENTINTE = "Schrift neben einer Personenangabe nicht verlässlich lesbar – bitte ansehen"
 GRUND_BANKTINTE = "Schrift neben einer Bank- oder Kontoangabe nicht verlässlich lesbar – bitte ansehen"
+# Handschrift neben einer geschwärzten Anschrift: die Postleitzahl links vor dem Ort, die Hausnummer rechts hinter
+# der Straße ("72070 [ORT]" auf einem Fax, die Erkennung las die Ziffern nicht; Abnahme 5 A5-15)
+GRUND_ANSCHRIFTTINTE = ("Schrift neben einer geschwärzten Anschrift nicht verlässlich lesbar (Postleitzahl, "
+                        "Hausnummer?) – bitte ansehen")
 GRUND_KENNUNGSTINTE = ("Schrift hinter einem Kennungs-Etikett (eVB, Transferticket, Kartenprüfnummer) nicht "
                        "verlässlich lesbar – bitte ansehen")
 # Etikett einer Kennung, hinter dem ein Wert stehen sollte: Doppelpunkt (auch hinter einer Klammer: "Kartenprüfnummer
@@ -5285,7 +5324,8 @@ def _unterschrift_pruefen(seite, m, schwaerzungen, pruefung=None, gemeldet=(), a
       * über einer Zeile aus Rollen ("Mandant" | "Makler", "Versicherungsnehmer" – zweispaltiger Unterschriftsblock:
         Ort, Datum – Zug – Linie – Name – Rolle), samt der Zeile selbst;
       * rechts hinter einem Personen-Etikett mit Doppelpunkt ("Name:", "Kontoinhaber:");
-      * links und rechts neben einem Personen-Platzhalter.
+      * links und rechts neben einem Personen-Platzhalter;
+      * links und rechts neben einem Anschrift-Platzhalter (Postleitzahl vor dem Ort, Hausnummer hinter der Straße).
     Erklärt ist Tinte unter Schwärzungsrechtecken, der Textebene (Platzhalter), schon gemeldeten Verdachtsstellen
     (`gemeldet`) und unter OCR-Wörtern, deren Lesung sie unverdächtig macht (_Seitenpruefung.lesung_harmlos); ein
     bekanntes Wort in einem hohen Kasten nur, wenn dessen Tinte in EINEM Textband liegt (_Seitenbild.ein_textband).
@@ -5453,6 +5493,17 @@ def _unterschrift_pruefen(seite, m, schwaerzungen, pruefung=None, gemeldet=(), a
         mitte = (t.y0 + t.y1) / 2
         bereiche.append((fitz.Rect(r.x0 - 2.5 * h, mitte - 0.7 * h, r.x0 - 1, mitte + 0.7 * h), GRUND_PERSONENTINTE))
         bereiche.append((fitz.Rect(r.x1 + 1, mitte - 0.7 * h, r.x1 + 2.5 * h, mitte + 0.7 * h), GRUND_PERSONENTINTE))
+    # links und rechts neben einer geschwärzten Anschrift: eine Postleitzahl vor dem Ort, eine Hausnummer hinter der
+    # Straße, die die Erkennung nicht las (Handschrift auf einem Fax; Abnahme 5 A5-15)
+    for s, e, rand in pruefung.platzhalter_boxen():
+        if not _ANSCHRIFT_PLATZHALTER_RE.match(text[s:e]):
+            continue
+        r = _lesekasten(fitz.Rect(rand), winkel, schraeg)
+        t = lesekasten_stelle(s, e) or r
+        h = hoehe(t)
+        mitte = (t.y0 + t.y1) / 2
+        bereiche.append((fitz.Rect(r.x0 - 3 * h, mitte - 0.7 * h, r.x0 - 1, mitte + 0.7 * h), GRUND_ANSCHRIFTTINTE))
+        bereiche.append((fitz.Rect(r.x1 + 1, mitte - 0.7 * h, r.x1 + 2.5 * h, mitte + 0.7 * h), GRUND_ANSCHRIFTTINTE))
     if not bereiche:
         return []
     bild = _Seitenbild(seite)
@@ -5529,7 +5580,8 @@ def _unterschrift_pruefen(seite, m, schwaerzungen, pruefung=None, gemeldet=(), a
         if neu:
             bekannt += neu
             text_v = {GRUND_PERSONENTINTE: "Personenangabe", GRUND_BANKTINTE: "Bankangabe",
-                      GRUND_KENNUNGSTINTE: "Kennungsangabe"}.get(grund, "Unterschriftsbereich")
+                      GRUND_KENNUNGSTINTE: "Kennungsangabe",
+                      GRUND_ANSCHRIFTTINTE: "Anschriftangabe"}.get(grund, "Unterschriftsbereich")
             verdacht.append(Verdacht(m.nr, -1, -1, text_v, grund, neu))
     return verdacht
 

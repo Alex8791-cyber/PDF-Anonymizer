@@ -869,6 +869,10 @@ def _uebergeordnet(seite, feld, ets: list, felder: list = ()):
 # Feldname einer Hausnummer: nur er macht einen kurzen Wert unter einem Anschrift-Feldnamen zur Hausnummer – "Etage",
 # "Stock", "Zimmer" nicht (Kammfeld-Probe der Abnahme 5, k04; wie die Regel der Textebene, "Etage ⇥⇥ 1 ⇥⇥ 2")
 _HAUSNUMMER_ETIKETT_RE = re.compile(r"(?i)haus|nr|nummer|\bno\b")
+# Feldname eines Teils der Wohnung statt der Hausnummer ("Lage der Wohnung ⇥ Etage [3]", "Zimmer [4]"; Kammfeld-Probe
+# der Abnahme 5, k04): nur dort ist ein kurzer Wert im Anschriftfeld keine Hausnummer – ohne ihn ("Anschrift [14]")
+# bleibt er eine (Selbstprüfung P1 der Nachbesserung 7: auf 5efcc0c und 0230782 geschwärzt)
+_KEINE_HAUSNUMMER_RE = re.compile(r"(?i)etage|stock|geschoss|geschoß|zimmer|raum|lage|appartement|apartment|whg")
 
 
 @detektor(QUELLE_SCAN, ALLE_KATEGORIEN, ALLE_PROFILE)
@@ -917,7 +921,8 @@ def kammfeld_scan(dok, kontext):
                 # ein kurzer Wert mit einer Ziffer auch verlesen als Hausnummer ("27" als "2&1"; Kammfeld-Korpus
                 # eigen505 der Abnahme 5, auf 0230782 geschwärzt)
                 continue
-            if _kurz_scan(feld, kompakt) and kat == "strasse" and not hausnummer:
+            if _kurz_scan(feld, kompakt) and kat == "strasse" and not hausnummer \
+                    and _KEINE_HAUSNUMMER_RE.search(etikett_text or ""):
                 continue                              # "Lage der Wohnung ⇥ Etage [3]": keine Hausnummer, gemeldet
             for a, b in spannen:
                 treffer.append(Treffer(dok.global_(nr, a), dok.global_(nr, b), kat, QUELLE_SCAN,

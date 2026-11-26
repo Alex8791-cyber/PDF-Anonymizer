@@ -3642,6 +3642,40 @@ def _moebel_ohne_schloss(wort: str, text: str, anfang: int, ende: int) -> bool:
     return bool(_PRODUKT_KONTEXT_RE.search(text, anfang, ende)) and not _BEDIENVERB_RE.search(text, anfang, ende)
 
 
+# ein Schrank als Möbel ("Kleiderschrank", "Badschränke") – nicht die Schranke ("Lichtschranke", "Bahnschranke")
+_SCHRANK_WORT_RE = re.compile(r"(?i)(?<![\wäöüß])[\wäöüß]*(?:schrank(?:s|es)?|schränke|schränken|schraenke|"
+                              r"schraenken)(?![\wäöüß])")
+
+
+def moebel_code_mehrdeutig(text: str) -> list:
+    """(start, ende) der Werte hinter "Code" in einem Satz mit einem Möbelschrank, den _moebel_ohne_schloss als Produkt
+    belegt ("Der Kleiderschrank aus dem Katalog hat den Code 4471.", "Laut Rechnung des Möbelhauses trägt der
+    Kleiderschrank den Code 66130."): Produkt- oder Schlosscode – die Ausnahme nimmt ihn nur vom Schwärzen aus, die
+    Selbstkontrolle meldet ihn als mehrdeutig (Grundsatz P1; Abnahme 5 A5-06, AB4U-05). Ohne Produkt im Satz schwärzt
+    zugangsdaten den Code ("Code Badschrank: 8815")."""
+    if "chr" not in text or "Code" not in text:
+        return []
+    aus = []
+    for m in _CODE_ETIKETT_RE.finditer(text):
+        if m.group(0) != "Code":
+            continue
+        # Zeile nur im Fenster von 200 Zeichen (eine lange Zeile mit vielen Treffern wüchse sonst quadratisch)
+        lo = max(0, m.start() - 200)
+        za = text.rfind("\n", lo, m.start()) + 1 or lo
+        ze = text.find("\n", m.end(), m.end() + 200)
+        ze = min(len(text), m.end() + 200) if ze < 0 else ze
+        sa, se = max(za, satzanfang_vor(text, m.start())), _satz_ende(text, m.end(), ze)
+        if not any(_moebel_ohne_schloss(x.group(0), text, za, ze) for x in _SCHRANK_WORT_RE.finditer(text, sa, se)):
+            continue
+        w = _CODE_WERT_DAHINTER_RE.match(text, m.end(), ze)
+        if w is None or not _code_form(w.group(1), text, za, ze):
+            continue
+        sp = _zugang_wert(text, w.start(1), ze)
+        if sp is not None:
+            aus.append(sp)
+    return aus
+
+
 def _satz_ende(text: str, pos: int, zeilenende: int) -> int:
     """Ende des Satzes ab pos (Satzzeichen oder Zeilenende, höchstens 120 Zeichen weiter)."""
     m = re.search(r"[.!?;]", text[pos:min(zeilenende, pos + 120)])

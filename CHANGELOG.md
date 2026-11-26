@@ -606,8 +606,9 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Gruß („Agentur Moik“) werden gemeldet. Die Kehrseite nach P2: Gemeldet werden dort auch unbekannte und bekannte
     Wörter, die kein Name sind („brannte es beim Holzhändler in Waging“, „Vom Sturm …“, „Den Traktor lenkte der …“,
     „dem Nachbarn Brot gebracht“; auf 5efcc0c 131 bis 140 von 333 Nomen der Hof-Probe der fünften Abnahme, nach der
-    siebten Nachbesserung 95 bis 97); im Differenztest sind es gegenüber 0230782 159 neue und 65 weggefallene Meldungen nicht geheimer
-    Wörter, 82 der neuen hinter beim/vom/zum. Ein bekannter Familienname hinter beim/vom/zum wird wieder geschwärzt
+    siebten Nachbesserung 97 bis 99); im Differenztest sind es gegenüber 0230782 159 neue und 65 weggefallene
+    Meldungen nicht geheimer Wörter, 82 der neuen hinter beim/vom/zum. Ein bekannter Familienname hinter beim/vom/zum
+    wird wieder geschwärzt
     („Wir waren beim Brandl zum Essen.“). Abteilungs-, Orts- und Firmenwörter hinter einem Personenwort („Kollege
     Außendienst“, „Nachbar Gegenüber“, „Techniker Wasserversorger“) werden nicht mehr geschwärzt, nur gemeldet;
     Geräte, Tiere und Fahrzeuge in Schadensätzen („Der Marder beschädigte …“, „Der Hund beschädigte die Couch.“,
@@ -656,10 +657,12 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     2021 erneuerter Heizung“, „mit 2019 eingebauten Rolltoren“) – erkannt an der Beugungsendung statt an einer Liste
     von Vorsilben. Ein Möbel mit Code ist ein Schloss („Code Badschrank: 8815“, „Küchenschrank (Code 2207)“); nur mit
     einem Wort des Kaufs oder Produkts im Satz und ohne Verb der Bedienung bleibt sein Code beim Melden („Laut Rechnung
-    des Möbelhauses trägt der Kleiderschrank den Code 66130.“). An einem sicheren Schloss ohne Melde- oder Anzeigewort
-    ist auch ein Code in Fehlercode-Gestalt ein Zugangscode („Die Haustür hat den Code KB475.“, „Code Garagentor
-    B4471“, „Der Tresor hat den Code XK42.“); die Schreibweise einer Geräteanzeige mit Bindestrich bleibt mit einem
-    Wort der Reparatur oder Anzeige ein Fehlercode („Garagentor ⏎ Code E-04 blinkt, Elektriker kommt am Montag.“).
+    des Möbelhauses trägt der Kleiderschrank den Code 66130.“, „Der Kleiderschrank aus dem Katalog hat den Code 4471.“:
+    „Code an einem Möbel (Produkt- oder Schlosscode?)“ – auf 5efcc0c blieb dieser Fall ohne Meldung). An einem
+    sicheren Schloss ohne Melde- oder Anzeigewort ist auch ein Code in Fehlercode-Gestalt ein Zugangscode („Die Haustür
+    hat den Code KB475.“, „Code Garagentor B4471“, „Der Tresor hat den Code XK42.“); die Schreibweise einer
+    Geräteanzeige mit Bindestrich bleibt mit einem Wort der Reparatur oder Anzeige ein Fehlercode („Garagentor ⏎ Code
+    E-04 blinkt, Elektriker kommt am Montag.“).
     Der Code eines Alarms als Ereignis (Feuer-, Brand-, Rauch-, Stör-, Probe-, Fehlalarm) wird mit seiner Bedienung
     geschwärzt („Zum Abschalten des Feueralarms den Code 6619 eingeben.“, „Der Feueralarm wird mit dem Code 1412
     quittiert.“), mit „lautet“ oder Doppelpunkt gemeldet, allein („Feueralarmcode 3401“) als mehrdeutig gemeldet.
@@ -682,11 +685,15 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     einer gesperrten Folge am Zeilenende („Straße ⇥⇥ B I R K E N W E G ⇥⇥ Nr. ⇥⇥ 6 ⇥⇥ 4“) und vor dem nächsten
     Feldnamen („Name ⇥⇥ R ⇥⇥ E ⇥⇥ Vorname ⇥⇥ A N N A“), Initialen („Initialen ⇥⇥ K H“) und ein Geburtsort aus zwei
     Buchstaben („Geburtsort ⇥⇥ A U“); „Nr.“ ohne Straße in der Zeile ist eine Positionsnummer, „Etage ⇥⇥ 1 ⇥⇥ 2“ bleibt
-    lesbar. Auf Scans nimmt ein unlesbarer Teil-Feldname („Srae“ oder „See“ statt „Straße“) den Feldnamen der Zeile
-    („Anschrift“: geschwärzt wie auf 0230782), ein kurzer Wert im Anschriftfeld gilt nur unter einem Feldnamen der
-    Hausnummer als Hausnummer („Wohnung ⇥ Etage [3]“ wird nicht geschwärzt) – dort auch verlesen, wenn er eine Ziffer
-    enthält („Hausnr.“ unter „2&1“ statt „27“; auf 0230782 geschwärzt, auf 5efcc0c gemeldet) –, und ein kurzer Datumsteil ohne
-    Trennzeichen („Monat [0 4]“ unter „Geburtsdatum“) gilt nur an seiner Stelle – der gleiche Monat im
+    lesbar. Diese Regeln brauchen die Zellgrenzen der Kästchen: liest die Textebene einer PDF die Kästchen ohne sie
+    („Initialen K H“, „Name L ⏎ I“), bleiben zwei Buchstaben und Datumsteile unter einem fremden Feldnamen weiter
+    lesbar ohne Meldung (wie auf 5efcc0c und 0230782; Ende-zu-Ende-Proben der fünften Abnahme). Auf Scans nimmt ein
+    unlesbarer Teil-Feldname („Srae“ oder „See“ statt „Straße“) den Feldnamen der Zeile („Anschrift“: geschwärzt wie
+    auf 0230782), ein kurzer Wert im Anschriftfeld unter dem Feldnamen eines Teils der Wohnung ist keine Hausnummer
+    („Wohnung ⇥ Etage [3]“, „Zimmer [4]“ werden nicht geschwärzt; „Anschrift [14]“ ohne eigenen Feldnamen bleibt wie
+    auf 5efcc0c und 0230782 geschwärzt), unter dem Feldnamen einer Hausnummer gilt er auch verlesen, wenn er eine
+    Ziffer enthält („Hausnr.“ unter „2&1“ statt „27“; auf 0230782 geschwärzt, auf 5efcc0c gemeldet) –, und ein kurzer
+    Datumsteil ohne Trennzeichen („Monat [0 4]“ unter „Geburtsdatum“) gilt nur an seiner Stelle – der gleiche Monat im
     Versicherungsbeginn wird nicht mehr mitgeschwärzt. Damit gilt die Angabe der sechsten Nachbesserung, dass Teile
     eines Datums unter einem Feldnamen ohne Personenbezug lesbar bleiben, auch auf Scans: in der Kammfeld-Probe der
     fünften Abnahme wird keines der Teil-Felder unter „Versicherungsbeginn“ und „Hauptuntersuchung“ mehr entfernt (auf
@@ -695,8 +702,10 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   - Namen: Ein Geräte-Grundwort allein („Kocher“, „Bohrer“, „Regler“, „Sender“, „Melder“) mit Artikel und einem Verb
     einer Person wird gemeldet („Der Kocher hat angerufen.“); ein Gerät als Kompositum („Hochdruckreiniger“,
     „Gabelstapler“), ein Gerät mit Geräteschaden und Maschinen auf „-e“ („Die Fräse beschädigte das Erdkabel.“) bleiben
-    frei. Ein Allerweltswort wie „Regen“ oder „Wasser“ direkt hinter einem Personenwort ohne Begleiter gilt wieder wie
-    auf 0230782 (dort standen beide noch nicht in der Liste der Allerweltswörter) als Name und wird geschwärzt: am
+    frei; hinter beim/vom/zum wird ein Geräte-Kompositum nicht geschwärzt, aber gemeldet („Vom Gabelstapler kam der
+    Anruf …“, „Vom Steinkocher …“: das Grundwort ist auch ein Familienname). Ein Allerweltswort wie „Regen“ oder
+    „Wasser“ direkt hinter einem Personenwort ohne Begleiter gilt wieder wie auf 0230782 (dort standen beide noch nicht
+    in der Liste der Allerweltswörter) als Name und wird geschwärzt: am
     Satzanfang mit dem Verb oder Zustand einer Person („Nachbar Wasser hat angerufen.“), hinter „laut“ („Laut Nachbarin
     Regen war die Tür offen.“), mit Kontaktangabe oder einem weiteren Personenwort dahinter („Zeugen: Nachbar Wasser und
     Nachbarin Regen“) und mitten im Satz hinter der Grundform der Einzahl („Rücksprache mit Nachbar Wasser am Montag.“,
@@ -723,8 +732,10 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     den Schaden verursacht.“) und Fahrzeuge („Den Zaun rammte der Wagen.“). Ein bekannter Familienname hinter
     beim/vom/zum wird mit Besuch, Entfernung, Weg oder Besitz geschwärzt („Wir waren gestern beim Gruber zum Essen.“,
     „Zum Wimmer sind es nur zwei Kilometer.“, „Der Traktor vom Wimmer …“, „Die Kühe vom Gruber …“), ein unbekannter
-    gemeldet; „Zum Glück“, Infinitive („Beim Grillen“, „Beim Rangieren“, „Beim Einkaufen“) und Geräte-Komposita sind
-    sichere Gegenbelege und bleiben frei, nie aber ein Familienname der Wissensbasis oder ein Wort in Namensgestalt.
+    gemeldet; „Zum Glück“ und Infinitive („Beim Grillen“, „Beim Rangieren“, „Beim Einkaufen“) sind sichere Gegenbelege
+    und bleiben frei, nie aber ein Familienname der Wissensbasis, ein Wort in Namensgestalt oder ein Flur-, Orts- oder
+    Hofname nach seinem Grundwort („Beim Kaltenbrunnen …“, „Vom Mitterhofen …“, „Beim Moosgraben …“: gemeldet wie auf
+    5efcc0c).
     „Herr Kollege Maier“: geschwärzt wird nur „Maier“. Die gebeugten Personenwörter erweitern die Ausnahme für einen
     Familiennamen, der zugleich ein gewöhnliches Wort ist, hinter einem Begleiter (nur gemeldet, „Beim Nachbarn Fuchs
     brannte Licht.“) nicht auf den Genitiv: „Die Kaution des Mandanten Wolf ist offen.“ bleibt geschwärzt.
@@ -732,14 +743,21 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Anlage und kein System ist („Der Verletzte arbeitet als Lagerhilfe.“, „Die Bevollmächtigte arbeitet als
     Bürokraft.“). Zeitangaben und Adverbien zwischen „ist“/„war“ und dem Beruf heben ihn nicht auf („Sie war früher
     Lehrerin an der Grundschule.“, „Er ist seit 2015 Busfahrer bei den Stadtwerken.“), ein Ehrenamt ohne Personenwort
-    wird gemeldet („Seit 2018 ehrenamtlich als Erzieherin in der Kita tätig.“). Eine Rolle mit Ergänzung („Er ist
+    wird gemeldet („Seit 2018 ehrenamtlich als Erzieherin in der Kita tätig.“). Die Selbstkontrolle zählt dabei auch
+    einen Personen-Platzhalter der Ausgabe, dessen Text am Ende der Textebene steht, dessen Rechteck aber im Satz
+    („Angaben zur Person ⏎ [PERSON A] tätig als Schöffin am Amtsgericht.“, das erste Wort unter dem Feldnamen als Name
+    geschwärzt) – dort blieb der Beruf vorher auf der Textebene und auf Scans still. Eine Rolle mit Ergänzung („Er ist
     Trainer der F-Jugend.“, „Sie ist Betreuerin ihrer Mutter.“) und „den Beruf des X“ ohne ein Verb des Erlernens oder
     Ausübens („Für den Beruf des Dachdeckers gilt die Gefahrengruppe B.“) werden nur gemeldet.
   - Weitergabe und Selbstkontrolle: Ein kurzer Wert, der nur hinter seinem Etikett gilt, wird an weitere Stellen
     weitergegeben, wo der Text ihn als Ort hinter einer Präposition des Orts („Geburtsort: Au ⏎ Sie wuchs in Au bei
     Freising auf.“) oder als Hausnummer hinter „Haus“ nennt („Hausnummer: 7 ⏎ Das Haus 7 hat einen Wasserschaden.“);
-    „Halle 8“ und „Tor 8“ werden nicht geschwärzt. Eine Postleitzahl links neben einem geschwärzten Ort meldet die Selbstkontrolle
-    („Wohnort: 72070 [PLZ ORT]“ – auf einem Handschrift-Fax las die Erkennung die Postleitzahl nicht).
+    „Halle 8“ und „Tor 8“ werden nicht geschwärzt. Eine Postleitzahl links neben einem geschwärzten Ort meldet die
+    Selbstkontrolle („Wohnort: 72070 [PLZ ORT]“ – auf einem Handschrift-Fax las die Erkennung die Postleitzahl nicht),
+    auf Scans nach der Lage auf der Seite (dort steht das OCR-Wort im Seitentext hinter den Platzhaltern und galt bisher
+    immer als rechts), auch verlesen („F2O7O [ORT]“: Länge einer Postleitzahl, mindestens zwei Ziffern); liest die
+    Erkennung die Handschrift neben einer geschwärzten Anschrift gar nicht, meldet die Tintenprüfung sie („Schrift
+    neben einer geschwärzten Anschrift nicht verlässlich lesbar“).
   - Scans: Hinter einem Personenwort im Fließtext („Mitarbeiter Vertrieb meldet sich bis Freitag.“, „Nachbar
     Gegenüber sah den Rauch zuerst.“) ist der Satz kein Rohwert eines Formularfelds mehr – vorher wurde er auf allen
     Vorständen ganz geschwärzt; wie auf der Textebene wird ein Name darin über die Personenwort-Regeln geschwärzt, eine
@@ -749,15 +767,16 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     und darunter, die Feldnamen je Zeile und den Feldnamen links vor einem Wert über einen Index (bisect) statt je Wert
     über alle Zeilen bzw. Feldnamen der Seite – auf einer Seite mit 5 120 Kammfeld-Werten 0,9 s statt 28 s auf 5efcc0c.
     Auf Scans suchen der eigene Feldname eines Kammfelds, die Felder eines Worts und das Feld unter einem Feldnamen nur
-    auf ihrer Höhe (Index nach der Höhe statt je Feld über alle Wörter bzw. Felder der Seite). Neue Wachstumstests
-    (8 000 gegen 64 000 Zeichen, 4 000 gegen 64 000 für die Kammfeld-Regel der Textebene, 250 gegen 2 000 Kammfelder
-    auf Scans) werden rot, wenn eine dieser Schleifen wieder je Treffer über alles läuft (eingebaute Regressionen R6,
-    R7 der Abnahme und elf eigene, N1 bis N11). Gemessen auf dem Probensatz der fünften Abnahme (CPU-Zeit je
-    Scan-Seite einschließlich Texterkennung, Oberflächen-Weg, zwei Runden mit allen drei Ständen gleichzeitig;
-    55 Maklerdokumente als Scan mit 200 dpi, 42 Kammfeld-Scans): ohne Kammfeld 2,06 s gegen 2,20 s auf 5efcc0c (−6 %)
-    und 1,85 s auf 818990e (+11 %), mit Kammfeldern 3,55 s gegen 3,53 s auf 5efcc0c (gleich innerhalb der
-    Messstreuung: Runde 1 +0,03 s, Runde 2 ±0) und 2,11 s auf 818990e (+68 %), über alle 97 Seiten 2,70 s gegen
-    2,78 s auf 5efcc0c und 1,96 s auf 818990e. Gegenüber 818990e bleibt damit der Mehraufwand der Kammfeld-Seiten
+    auf ihrer Höhe (Index nach der Höhe statt je Feld über alle Wörter bzw. Felder der Seite); der Personen-Platzhalter
+    neben einem Beruf wird nur unter den Wörtern des Satzes gesucht. Neue Wachstumstests (8 000 gegen 64 000 Zeichen,
+    4 000 gegen 64 000 für die Kammfeld-Regel der Textebene, 250 gegen 2 000 Kammfelder auf Scans, 40 gegen 320 Sätze
+    einer Ausgabe-Seite) werden rot, wenn eine dieser Schleifen wieder je Treffer über alles läuft (eingebaute
+    Regressionen R6, R7 der Abnahme und dreizehn eigene, N1 bis N13). Gemessen auf dem Probensatz der fünften Abnahme
+    (CPU-Zeit je Scan-Seite einschließlich Texterkennung, Oberflächen-Weg, zwei Runden mit allen drei Ständen
+    gleichzeitig; 55 Maklerdokumente als Scan mit 200 dpi, 42 Kammfeld-Scans): ohne Kammfeld 2,15 s gegen 2,35 s auf
+    5efcc0c (−9 %) und 1,94 s auf 818990e (+11 %), mit Kammfeldern 3,69 s gegen 3,69 s auf 5efcc0c (gleich:
+    Runde 1 +0,04 s, Runde 2 −0,04 s) und 2,18 s auf 818990e (+69 %), über alle 97 Seiten 2,82 s gegen 2,93 s auf
+    5efcc0c und 2,04 s auf 818990e. Gegenüber 818990e bleibt damit der Mehraufwand der Kammfeld-Seiten
     (Suche und Lesen der Kästchen in der Analyse und in der Kontroll-OCR, Kammfeld-Prüfung der Selbstkontrolle) und
     auf den übrigen Seiten der Aufwand der Kammfeld-Suche und der neuen Regeln der Selbstkontrolle.
   - Kehrseite nach P2 (gemeldet statt still): Im Differenztest (21 411 Texte, 10 819 geheime Werte) sind gegenüber
@@ -768,7 +787,7 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Alarmcodes ohne Bedienung). Kein geheimer Wert ist mehr lesbar, der auf einem der vier Stände geschwärzt oder
     gemeldet war, und geschwärzt werden 229 statt 245 nicht geheime Prüfwörter. Die Selbstkontrolle meldet dafür mehr
     nicht geheime Wörter; unter den Hof-Kandidaten der Abnahme (333 Nomen hinter beim/vom/zum in drei Satzrahmen) sind
-    es 95 bis 97 statt 131 bis 140.
+    es 97 bis 99 statt 131 bis 140.
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene

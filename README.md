@@ -226,7 +226,8 @@ Bitte vor dem Einsatz lesen – das sind die Grenzen des Werkzeugs:
 - **Unterschriften, Handschrift, Stempel** – werden nicht geschwärzt, auf Scans auch in
   „Maximal“ nicht. Die Texterkennung (OCR) liest Handschrift nicht zuverlässig. Die
   Restrisiko-Prüfung meldet auf Scans nicht gelesene Tinte in Unterschriftsfeldern, neben
-  Personenangaben, hinter Bankangaben und hinter dem Etikett einer eVB-Nummer, eines
+  Personenangaben, neben einer geschwärzten Anschrift (etwa eine handschriftliche Postleitzahl
+  vor dem geschwärzten Ort), hinter Bankangaben und hinter dem Etikett einer eVB-Nummer, eines
   Transfertickets oder einer Kartenprüfnummer (etwa ein Kammfeld mit einer Ziffer je Kästchen)
   als Verdacht; ein Unterschriftszug neben einem schon geschwärzten Namen gilt nicht als
   Verdacht. Als Linien gezeichnete Unterschriften, Stempel oder Logos in digitalen PDFs nennt

@@ -1708,7 +1708,8 @@ def hofnamen(text: str, wissen) -> list:
 
 
 # Sichere Gegenbelege eines Worts hinter "beim"/"vom"/"zum" (Abnahme 5 AB5U-02) – nie für einen Familiennamen der
-# Wissensbasis, nie für die Gestalt eines Familien- oder Hausnamens:
+# Wissensbasis, nie für die Gestalt eines Familien- oder Hausnamens, nie für einen Flur-, Orts- oder Hofnamen nach
+# seinem Grundwort (_FLURNAME_GRUNDWORT_RE) und nie für ein Geräte-Kompositum:
 # - ein substantiviertes Verb: Endung "-ieren" ("beim Rangieren", "beim Renovieren"), "-eln"/"-ern" ("beim Segeln",
 #   "beim Wandern"), eine abtrennbare Vorsilbe vor "-en" ("beim Einkaufen", "beim Ausparken", "beim Aufräumen") oder ein
 #   Bewegungsverb als Grundwort ("beim Skifahren", "beim Spazierengehen")
@@ -1736,13 +1737,23 @@ _HAUS_FAMILIE_GRUNDWORT_RE = re.compile(r"(?i)(?:hof|höfe|hoefe|haus|häusl|hae
                                         r"bauer|bauern|huber|hofer|maier|mayr|meier|mair|moser|müller|mueller|"
                                         r"schuster|berger|bichler|lehner|leitner|reiter|egger|wieser|bacher|hauser|"
                                         r"loher|rainer|stetter|stätter|staetter|eder|auer)$")
+# Grundwort eines Flur-, Orts- oder Hofnamens mit einem Bestimmungswort davor ("Kaltenbrunnen", "Mitterhofen",
+# "Moosgraben", "Achleiten", "Hochfelden", "Untermoosen", "Holzhausen"): hinter "beim"/"vom"/"zum" eher ein Hof- oder
+# Hausname als ein substantiviertes Verb ("-en") oder ein gewöhnliches Kompositum – kein Gegenbeleg, die Selbstkontrolle
+# meldet das Wort wie auf 5efcc0c (Grundsatz P1; Selbstprüfung der Nachbesserung 7). Ein Grundwort allein ("beim
+# Graben", "vom Berg") bleibt ein gewöhnliches Wort.
+_FLURNAME_GRUNDWORT_RE = re.compile(
+    r"(?i)[a-zäöüß]{3,}(?:brunn|brunnen|berg|bergen|bach|graben|wies|wiese|wiesen|moos|moosen|ried|rieden|reut|reuth|"
+    r"reuten|reuthen|kreuth|leit|leite|leiten|eck|egg|feld|felden|hofen|hausen|kirch|kirchen|stett|stetten|weid|"
+    r"weiden|(?<!b)au|(?<!b)auen|öd|oed|holz|hölzl|hoelzl|wald|hub|huben|lehen|bichl|bühel|buehel|bühl|buehl|point|"
+    r"winkel|grub|gruben|tal|thal|stein|wang|wangen|loh|lohe|gries|hart|anger|dorf|ingen|weiher)$")
 
 
 def _hof_gegenbeleg(text: str, start: int, w: str, wissen) -> bool:
-    """Spricht das Wort hinter "beim"/"vom"/"zum" sicher gegen einen Haus- oder Familiennamen (siehe oben)?"""
+    """Spricht das Wort hinter "beim"/"vom"/"zum" sicher gegen einen Haus- oder Familiennamen (siehe oben)? Ein
+    Geräte-Kompositum ("Gabelstapler", "Steinkocher") ist kein Gegenbeleg: das Grundwort ("Kocher") ist auch ein
+    Familienname – hofnamen schwärzt es nicht, die Selbstkontrolle meldet es (Grundsatz P1)."""
     try:
-        if geraete_kompositum(w) and not wissen.ist_nachname(w):
-            return True                                 # "Vom Gabelstapler kam der Anruf" (Abnahme 5 A5-02)
         if wissen.ist_nachname(w) or wissen.ist_vorname(w) or namensgestalt(w, wissen) or _hausname_gestalt(w, wissen):
             return bool(_HOF_WENDUNG_RE.search(text, max(0, start - 5), start + len(w)))   # "zum Glück"
     except Exception:  # pragma: no cover - Wissensbasis beschädigt
@@ -1750,14 +1761,16 @@ def _hof_gegenbeleg(text: str, start: int, w: str, wissen) -> bool:
     if _HOF_WENDUNG_RE.search(text, max(0, start - 5), start + len(w)):
         return True
     k = w.casefold()
+    if k in _HOF_EREIGNIS_WETTER:
+        return True                                     # "vom Blitz" (Familiennamen sind oben ausgeschlossen)
+    if _FLURNAME_GRUNDWORT_RE.search(k):
+        return False                                    # "beim Kaltenbrunnen", "vom Mitterhofen", "zum Moosgraben"
     if _VERB_NOMINAL_RE.search(k) and not _HAUSNAME_BEUGUNG_RE.search(k) and len(k) >= 6:
         return True                                     # "beim Rangieren", "beim Segeln", "beim Wandern"
     if _VERB_VORSILBE_EN_RE.fullmatch(k) or _VERB_GRUNDWORT_EN_RE.fullmatch(k):
         return True                                     # "beim Einkaufen", "beim Skifahren"
     if _VERB_INFINITIV_RE.search(k) and len(k) >= 6:
         return True                                     # "beim Grillen", "beim Schwimmen", "vom Laufen" (kein Name)
-    if k in _HOF_EREIGNIS_WETTER:
-        return True                                     # "vom Blitz" (Familiennamen sind oben ausgeschlossen)
     try:
         from . import namen as namen_modul
         if not _HAUS_FAMILIE_GRUNDWORT_RE.search(k) and namen_modul._ist_sachwort(w):
