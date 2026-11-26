@@ -602,13 +602,18 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     „Die Becherin hat angerufen.“), ein Wort mit Namensbeleg hinter einem Berufswort auch ohne Verb („Glaser Frost ist
     erst nächste Woche frei.“, „Laut Klempner Dyson …“), ein Hausname mit Besuchs- oder Ereigniskontext („Vom Kaltl
     kam der Anruf …“, „Wir waren beim Pfnürl zum Essen.“) und ein Organisationswort mit unbekanntem Wort unter einem
-    Gruß („Agentur Moik“) werden gemeldet. Ein bekannter Familienname hinter beim/vom/zum wird wieder geschwärzt
-    („Wir waren beim Brandl zum Essen.“). Abteilungs-, Orts- und Firmenwörter hinter einem Personenwort
-    („Kollege Außendienst“, „Nachbar Gegenüber“, „Techniker Wasserversorger“) werden nicht mehr geschwärzt, nur
-    gemeldet; Geräte, Tiere und Fahrzeuge in Schadensätzen („Der Marder beschädigte …“, „Der Hund beschädigte die
-    Couch.“, „Gefahren ist der Wagen.“) sind keine Familiennamen, ebenso wenig das Objekt hinter dem Verb, wenn davor
-    ein Subjekt im Nominativ steht („Der Saugroboter beschädigte die Stehlampe.“, „Er bemerkte die Gardine.“; nach
-    „Die …“ oder „Das …“ bleibt die Meldung, dort kann das Wort auch das Subjekt sein).
+    Gruß („Agentur Moik“) werden gemeldet. Die Kehrseite nach P2: Gemeldet werden dort auch unbekannte Wörter, die
+    kein Name sind („brannte es beim Holzhändler in Waging“, „Den Traktor lenkte der …“, „dem Nachbarn Brot
+    gebracht“); im Differenztest sind es gegenüber 0230782 159 neue und 65 weggefallene Meldungen nicht geheimer
+    Wörter, 82 der neuen hinter beim/vom/zum. Ein bekannter Familienname hinter beim/vom/zum wird wieder geschwärzt
+    („Wir waren beim Brandl zum Essen.“). Abteilungs-, Orts- und Firmenwörter hinter einem Personenwort („Kollege
+    Außendienst“, „Nachbar Gegenüber“, „Techniker Wasserversorger“) werden nicht mehr geschwärzt, nur gemeldet;
+    Geräte, Tiere und Fahrzeuge in Schadensätzen („Der Marder beschädigte …“, „Der Hund beschädigte die Couch.“,
+    „Gefahren ist der Wagen.“) sind keine Familiennamen, soweit die Wissensbasis sie als Tier, Marke oder Sachwort
+    kennt oder das Verb „fahren“ oder „rammen“ ist („Der Waschbär beschädigte die Dämmung.“ und „Der Wagen hat den
+    Unfall verursacht.“ werden gemeldet). Ebenso wenig ist es das Objekt hinter dem Verb, wenn davor ein Subjekt im
+    Nominativ steht („Der Saugroboter beschädigte die Stehlampe.“, „Er bemerkte die Gardine.“; nach „Die …“ oder
+    „Das …“ bleibt die Meldung, dort kann das Wort auch das Subjekt sein).
   - Beruf: Ein Beruf mit Rollen-Endung hinter „ist“, „von Beruf“, „hauptberuflich“ („Er ist Fitnesstrainer“), der
     Beruf einer Person im Satz einer Organisation („Die Firma hat sie als Hebamme eingestellt.“) und „den Beruf des
     Bäckers erlernt“ werden geschwärzt; im Ehrenamt („ehrenamtlich als Erzieherin tätig“), beim höflichen „Sie“ mit
@@ -628,9 +633,14 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     Suche selbst verkleinert das Bild über versetzte Teilbilder und bestimmt die Papierhelligkeit über das Histogramm
     (gleiches Ergebnis, bei 300 dpi 0,22 s → 0,11 s je Seite). Neue Wachstumstests (8 000 gegen 64 000 Zeichen ohne
     Zeilenumbruch für „mit + Ziffern“, Personenwort + Verb und Berufswort + Verb; 600 gegen 2 400 Platzhalter).
-    Gemessen (CPU-Zeit je Scan-Seite einschließlich Texterkennung, Oberflächen-Weg, je zwei Runden, 14 Textscans mit
-    200 dpi und 16 Kammfeld-Formulare): ohne Kammfeld 6,46 s gegen 6,04 s auf 818990e (+7 %) und 6,65 s auf 0230782;
-    mit Kammfeldern 5,27 s gegen 3,67 s auf 818990e (+44 %) und 5,53 s auf 0230782.
+    Gemessen auf dem Probensatz der vierten Abnahme (CPU-Zeit je Scan-Seite einschließlich Texterkennung,
+    Oberflächen-Weg, je zwei Runden im Wechsel; 38 Maklerdokumente als Scan mit 200 dpi, 24 Kammfeld-Scans): ohne
+    Kammfeld 2,13 s gegen 1,76 s auf 818990e (+21 %) und 2,27 s auf 0230782, mit Kammfeldern 3,18 s gegen 1,78 s auf
+    818990e (+79 %) und 3,59 s auf 0230782. Gegenüber 818990e bleibt damit ein Mehraufwand: auf Kammfeld-Seiten Suche
+    und Lesen der Kästchen in der Analyse und in der Kontroll-OCR, die mehr Seiten liest, weil mehr geschwärzt wird,
+    dazu die Kammfeld-Prüfung der Selbstkontrolle; auf den übrigen Scan-Seiten die Kammfeld-Suche (etwa 0,1 s je
+    Seite), die Kontroll-OCR der zusätzlich geschwärzten Seiten und die neuen Regeln der Selbstkontrolle (etwa 0,1 s
+    je Datei).
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene
@@ -822,7 +832,7 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   über einem Feld wird auf dem bereinigten Bild nicht immer gelesen. Laufzeit: Die Angabe „Scan-Seiten mit
   Kammfeldern etwa +90 %, übrige Scan-Seiten etwa +9 %“ (gepaart gemessen auf d23f173) war für die übrigen Seiten nicht
   nachvollziehbar; die vierte Abnahme maß auf 0230782 gegen 818990e (CPU je Scan-Seite einschließlich Texterkennung)
-  etwa +100 % auf Kammfeld-Seiten und +27 % auf übrigen Scan-Seiten (+16 % nur für die Analyse). Den Stand nach der
+  etwa +100 % auf Kammfeld-Seiten und +29 % auf übrigen Scan-Seiten (+16 % nur für die Analyse). Den Stand nach der
   sechsten Nachbesserung nennt deren Eintrag oben.
 - Neuer Aufbau: ein Seitenmodell für Analyse, Schwärzung und Selbstkontrolle (`seitenmodell.py`),
   Erkennungsregeln als Module mit Register und Rückfallliste für die EXE (`anonymisierer/detektoren/`),
