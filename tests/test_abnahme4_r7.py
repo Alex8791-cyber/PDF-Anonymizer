@@ -997,8 +997,13 @@ def _wachstum(klein, gross, faktor, schranke):
     return zeitmessung.wachstum_messen(klein, gross, faktor, wiederholungen=1, schranke=schranke)
 
 
-def test_ab4u_09_mit_ziffern_waechst_linear():
-    baustein = "Die Garage ist mit 4433 gesichert und das Tor mit der Nummer 17 versehen. "
+@pytest.mark.parametrize("baustein", [
+    "Die Garage ist mit 4433 gesichert und das Tor mit der Nummer 17 versehen. ",
+    # ohne Satzende: das Fenster nach vorn begrenzt die Suche nach dem Gegenstand – ohne Fenster (Eingriff R4 der
+    # Abnahme) wächst sie quadratisch (8k gegen 64k Zeichen: Faktor 66 statt 8)
+    "der Schuppen mit 5517 und ",
+])
+def test_ab4u_09_mit_ziffern_waechst_linear(baustein):
     klein = baustein * (8000 // len(baustein))
     gross = baustein * (64000 // len(baustein))
     wachstum, _, zeit = _wachstum(lambda: kennungsformen.zugangsdaten(klein),
