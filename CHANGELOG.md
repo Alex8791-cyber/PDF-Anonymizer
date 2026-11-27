@@ -45,6 +45,10 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   sind keine Organe.
 - Nebenbefund behoben: Die Namensliste hinter „Geschäftsführer:“ lief in eine folgende Etikettzeile – „Ansprechpartner“
   galt als Name (wissen.namen R5: eine Etikettzeile beendet die Liste).
+- Prüfdaten angepasst: Der Benchmark-Generator erwartet Vorstands- und Aufsichtsratsnamen in der Fußzeile jetzt als
+  „behalten“ (neue Auszeichnung `lesbar(...)`: gesetzt wie jeder Name, nur die Erwartung ändert sich). Die erzeugten
+  Dokumente bleiben byteidentisch. Eine versehentliche Schwärzung zählt damit als Über-Schwärzung. CI-Korpus
+  (12 Dokumente): alle 21 Organnamen lesbar, 0 stille Lecks, Über-Schwärzung 0/237.
 - Tests: tests/test_organe_lesbar.py (neu); der Test der Versicherer-Fußzeile in tests/test_restrisiko.py erwartet
   die Vorstandsnamen nicht mehr als Verdacht.
 

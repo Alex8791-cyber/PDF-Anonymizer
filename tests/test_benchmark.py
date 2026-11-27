@@ -26,7 +26,7 @@ from conftest import braucht_modell, braucht_ocr
 from werkzeuge.benchmark import bewertung, generator, kennungen
 from werkzeuge.benchmark.bausteine import Dok, stil_waehlen
 from werkzeuge.benchmark.normalisierung import Gefaltet, signifikante_token
-from werkzeuge.benchmark.satz import m
+from werkzeuge.benchmark.satz import lesbar, m
 
 ANZAHL_CI = 12
 SEED_CI = 1
@@ -116,6 +116,20 @@ def test_kollision_mit_klartext_wird_erkannt():
     assert generator.kollisionen(dok) == ["Lange"]
 
 
+def test_lesbarer_name_wird_gesetzt_wie_ein_name_und_erwartet_behalten():
+    """Organnamen in Pflichtangaben (Entscheidung des Maklers Nr. 6): gesetzt wie jeder Name, aber mit der Erwartung
+    „behalten“; die Steuermarke steht weder in der Bemerkung noch auf der Seite."""
+    dok = Dok(random.Random(1), "t", stil=stil_waehlen(random.Random(1), familie="helv"))
+    seite = dok.satz.neue_seite()
+    seite.text(50, 80, "Vorstand: " + lesbar("namen", "Eva Roth", "Fußzeile Vorstand"), dok.stil.normal, 10)
+    (e,) = dok.satz.eintraege
+    assert (e["kategorie"], e["erwartung"], e["bemerkung"]) == ("namen", "behalten", "Fußzeile Vorstand")
+    assert "behalten" not in dok.satz.doc[0].get_text() and "Eva Roth" in dok.satz.doc[0].get_text()
+    # ein zu schwärzender Wert im lesbaren Namen macht die Wahrheit mehrdeutig: Kollision, der Generator würfelt neu
+    seite.text(50, 120, "Sehr geehrter Herr " + m("namen", "Roth", "Anrede"), dok.stil.normal, 10)
+    assert generator.kollisionen(dok) == ["Roth"]
+
+
 @pytest.fixture(scope="module")
 def ci_korpus(tmp_path_factory):
     ordner = tmp_path_factory.mktemp("benchmark") / "korpus"
@@ -141,6 +155,14 @@ def test_korpus_und_wahrheit_sind_schemakonform(ci_korpus):
     assert {"scan", "formular", "tabelle", "silbentrennung", "versalien"} <= merkmale
     kategorien = {e["kategorie"] for w in wahrheiten for e in w["eintraege"]}
     assert {"namen", "strasse", "plzort", "geburt", "telefon", "email", "iban", "vertrag", "kfz"} <= kategorien
+
+
+def test_organe_in_pflichtangaben_bleiben_lesbar_erwartet(ci_korpus):
+    """Vorstand und Aufsichtsrat in der Fußzeile des Versicherers bleiben lesbar (Entscheidung Nr. 6)."""
+    _, wahrheiten = ci_korpus
+    organe = [e for w in wahrheiten for e in w["eintraege"]
+              if e["bemerkung"].startswith(("Fußzeile Vorstand", "Fußzeile Aufsichtsrat"))]
+    assert organe and all(e["kategorie"] == "namen" and e["erwartung"] == "behalten" for e in organe)
 
 
 def test_wahrheit_passt_zum_original(ci_korpus):

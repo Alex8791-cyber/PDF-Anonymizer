@@ -20,7 +20,7 @@ from . import stammdaten as D
 from . import scan as SC
 from .bausteine import (Dok, Fluss, Person, anschriftfeld, datum, datum_lang, faltmarken,
                         infoblock, logo, name_bem, unternehmens_fusszeile)
-from .satz import MM, A4_B, A4_H, Satz, k, m
+from .satz import MM, A4_B, A4_H, Satz, k, lesbar, m
 
 
 # ----------------------------------------------------------------------
@@ -102,14 +102,15 @@ def _gruss(fl: Fluss, dok: Dok, firma: str | None, person: Person | None, rolle:
 
 
 def _vorstand(dok: Dok, n: int = 3) -> tuple:
-    """Vorstands- und Aufsichtsratsnamen (Personennamen in der Fußzeile)."""
+    """Vorstands- und Aufsichtsratsnamen (Personennamen in den Pflichtangaben der Fußzeile). Sie bleiben lesbar
+    (Entscheidung des Maklers vom 27.11., Nr. 6): Erwartung „behalten“, gesetzt wie jeder andere Name."""
     namen = []
     for i in range(n):
         p = dok.person(titel_quote=0.4)
         zusatz = " (Vorsitzender)" if i == 0 and p.geschlecht == "m" else (" (Vorsitzende)" if i == 0 else "")
-        namen.append(m("namen", p.voll(titel=True), name_bem(p, "Fußzeile Vorstand")) + zusatz)
+        namen.append(lesbar("namen", p.voll(titel=True), name_bem(p, "Fußzeile Vorstand")) + zusatz)
     ar = dok.person(titel_quote=0.5)
-    return namen, m("namen", ar.voll(titel=True), name_bem(ar, "Fußzeile Aufsichtsrat"))
+    return namen, lesbar("namen", ar.voll(titel=True), name_bem(ar, "Fußzeile Aufsichtsrat"))
 
 
 def _fusszeile_registrieren(dok: Dok, v: tuple):

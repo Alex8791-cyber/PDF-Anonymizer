@@ -4,6 +4,7 @@ Texte werden mit einer Inline-Auszeichnung geschrieben:
 
     "Sehr geehrte Frau ⟦namen|Groß|Anrede⟧,"      -> Eintrag (Kategorie namen, Bemerkung Anrede)
     "Tarif ⟦kontext|KomfortMed 300⟧"              -> Eintrag mit erwartung=behalten
+    "Vorstand: ⟦namen|Eva Roth|Fußzeile ~behalten⟧" -> Eintrag namen mit erwartung=behalten (lesbar lassen)
 
 Jede Auszeichnung wird beim Setzen zu genau einem Eintrag der Wahrheitsdatei: mit dem Text, wie
 er auf der Seite steht (nach evtl. Transliteration für Base14-Schriften), der Seite und den
@@ -53,6 +54,13 @@ def m(kategorie: str, text, bemerkung: str = "") -> str:
 def k(text) -> str:
     """Kontext-Eintrag (soll erhalten bleiben)."""
     return m(KONTEXT, text)
+
+
+def lesbar(kategorie: str, text, bemerkung: str = "") -> str:
+    """Eintrag einer Kategorie, der lesbar bleiben soll (erwartung=behalten), z. B. Vorstandsnamen in den
+    Pflichtangaben einer Fußzeile. Gesetzt wird er wie jeder Eintrag dieser Kategorie (gleiche Darstellung,
+    auch mit Windows-Sonderzeichen) – nur die Erwartung ist „behalten“."""
+    return m(kategorie, text, (bemerkung + "; " if bemerkung else "") + "~behalten")
 
 
 def ohne_auszeichnung(markup: str) -> str:
@@ -280,8 +288,8 @@ class Satz:
 
     # -- Einträge ------------------------------------------------------
     def eintrag(self, text: str, kategorie: str, seite: int, kanal: str = "text", bemerkung: str = "",
-                woerter=None) -> dict:
-        erwartung = "behalten" if kategorie == KONTEXT else "schwaerzen"
+                woerter=None, erwartung: str | None = None) -> dict:
+        erwartung = erwartung or ("behalten" if kategorie == KONTEXT else "schwaerzen")
         umfang = "erweitert" if kategorie in ERWEITERT else "kern"
         e = {"id": None, "text": text, "kategorie": kategorie, "seite": seite, "erwartung": erwartung,
              "umfang": umfang, "kanal": kanal, "bemerkung": bemerkung, "woerter": list(woerter or [])}
@@ -306,7 +314,9 @@ class Satz:
                 stuecke.append(_Stueck(schrift.darstellbar(markup[pos:mo.start()])))
             kat, text, bem = mo.group(1), mo.group(2), mo.group(3) or ""
             trennen = "~trennen" in bem
-            bem = "; ".join(t.strip() for t in bem.replace("~trennen", "").split(";") if t.strip())
+            behalten = "~behalten" in bem
+            bem = "; ".join(t.strip() for t in bem.replace("~trennen", "").replace("~behalten", "").split(";")
+                            if t.strip())
             dargestellt = schrift.darstellbar(text)
             if dargestellt != text and kat != KONTEXT:
                 bem = (bem + "; " if bem else "") + "transliteriert"
@@ -321,7 +331,8 @@ class Satz:
             if zusatz:
                 bem = (bem + "; " if bem else "") + zusatz
             if not self.messmodus:
-                eintrag = self.eintrag(dargestellt, kat, seite_nr, bemerkung=bem)
+                eintrag = self.eintrag(dargestellt, kat, seite_nr, bemerkung=bem,
+                                       erwartung="behalten" if behalten else None)
             else:
                 eintrag = {"bemerkung": bem, "messung": True}
             if trennen:
