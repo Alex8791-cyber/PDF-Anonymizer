@@ -932,7 +932,23 @@ def test_v7_personenwort_mit_begleiter_eigenname(text, name):
     ("Er schickte dem Sachbearbeiter Fotos.", "Fotos"),
 ])
 def test_v7_personenwort_mit_begleiter_substantiv_bleibt(text, wort):
-    assert not _beruehrt(text, wort), _stellen(_funde(text))
+    """Das Wort hinter dem Personenwort ist kein Name. Gesundheitsdaten („dem Patienten Insulin“) schwärzt „Hoch“ seit
+    der Entscheidung vom 27.11. als Gesundheitsdatum – das prüft test_v7_medikament_beim_patienten_in_hoch."""
+    funde = [f for f in _funde(text) if f["kategorie"] not in muster.GESUNDHEIT]
+    assert not any(wort in s or (len(s) >= 2 and s in wort) for s in _stellen(funde)), _stellen(funde)
+    assert not _beruehrt(text, wort) or any(wort in s for s in _stellen(_funde(text), "medikament"))
+
+
+@braucht_modell
+def test_v7_medikament_beim_patienten_in_hoch():
+    funde = _funde("Dem Patienten Insulin verabreicht.")
+    assert "Insulin" in _stellen(funde, "medikament") and not _stellen(funde, "namen")
+    assert not _beruehrt_in("Dem Patienten Insulin verabreicht.", "Insulin", "ausgewogen")
+
+
+def _beruehrt_in(text, wert, profil) -> bool:
+    funde = analysiere_text(text, set(muster.PROFILE[profil]["aktive"]), [], [], profil=profil)
+    return any(wert in s or (len(s) >= 2 and s in wert) for s in _stellen(funde))
 
 
 # V1: "Code" unter einer Zeile, die nur ein Schloss nennt (Erkennung), und hinter einem Satz bzw. einer Zeile mit dem

@@ -623,7 +623,7 @@ def test_email_ocr_leerzeichen():
 def test_neue_kategorien_und_platzhalter():
     eintraege = {k: (p, an) for k, _, p, _, an in mu.KATEGORIEN}
     assert eintraege["beruf"] == ("[BERUF]", True) and eintraege["arbeitgeber"] == ("[ARBEITGEBER]", True)
-    assert eintraege["diagnose"] == ("[DIAGNOSE]", False) and eintraege["medikament"] == ("[MEDIKAMENT]", False)
+    assert eintraege["diagnose"] == ("[DIAGNOSE]", True) and eintraege["medikament"] == ("[MEDIKAMENT]", True)
     assert eintraege["ort"] == ("[ORT]", True) and eintraege["international"][1] is True
     assert all(len(e) == 5 for e in mu.KATEGORIEN)
 
@@ -633,11 +633,13 @@ def test_profile_vertrag_abschnitt_9():
     standard = {k for k, _, _, _, an in mu.KATEGORIEN if an}
     hoch, ausgewogen, maximal = (set(mu.PROFILE[n]["aktive"]) for n in ("hoch", "ausgewogen", "maximal"))
     assert hoch == standard, "Standard-Häkchen = Schutzstufe „hoch“ (Oberfläche erkennt sonst „benutzerdefiniert“)"
-    assert {"beruf", "arbeitgeber", "international"} <= hoch and not hoch & {"diagnose", "medikament", "datum"}
-    assert ausgewogen < hoch and not ausgewogen & {"beruf", "arbeitgeber", "international"}
-    assert maximal == hoch | {"diagnose", "medikament", "religion"}        # Art. 9 DSGVO (Religion seit Runde 5)
-    assert mu.hinweis_kategorien("hoch", hoch) == {"diagnose", "medikament", "religion"}
-    assert mu.hinweis_kategorien("hoch", hoch | {"diagnose"}) == {"medikament", "religion"}
+    assert {"beruf", "arbeitgeber", "international"} | mu.GESUNDHEIT <= hoch and "datum" not in hoch
+    assert ausgewogen < hoch and not ausgewogen & ({"beruf", "arbeitgeber", "international"} | mu.GESUNDHEIT)
+    assert maximal == hoch | {"religion"}            # Art. 9 DSGVO; Gesundheitsdaten seit 27.11. schon in „hoch“
+    assert mu.hinweis_kategorien("hoch", hoch) == {"religion"}
+    assert mu.hinweis_kategorien("ausgewogen", ausgewogen) == {"diagnose", "medikament", "religion"}
+    assert mu.hinweis_kategorien("ausgewogen", ausgewogen | {"diagnose"}) == {"medikament", "religion"}
+    assert mu.option("hoch", "gesundheit_vermutet_anbieten") and not mu.option("maximal", "gesundheit_vermutet_anbieten")
     assert mu.hinweis_kategorien("maximal", maximal) == set()
     assert mu.option("maximal", "alle_geburtsdaten") and not mu.option("hoch", "alle_geburtsdaten")
     assert all(isinstance(p["beschreibung"], str) for p in mu.PROFILE.values())

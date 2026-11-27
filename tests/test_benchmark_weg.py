@@ -337,7 +337,7 @@ def _mitschnitt(funktion, aufrufe: list):
 
 @pytest.fixture(scope="module")
 def mini_ci_korpus(tmp_path_factory):
-    """Antrag (Formular) und Arztbrief des CI-Korpus (Seed 1): beide mit in „Hoch“ nur angebotenen Gesundheitsdaten."""
+    """Antrag (Formular) und Arztbrief des CI-Korpus (Seed 1): beide mit Gesundheitsdaten (in „Hoch“ geschwärzt)."""
     ordner = tmp_path_factory.mktemp("weg") / "korpus"
     ordner.mkdir()
     plaene = generator.plane_korpus(5, 1)
@@ -363,10 +363,10 @@ def test_echte_engine_weg_engine_unveraendert_weg_oberflaeche_wie_die_oberflaech
     """Weg engine (Standard, ohne Angabe): Analyse mit den standardmäßig angehakten Kategorien, leeren Listen und dem
     OCR-Dienst – sonst nichts; Schwärzung mit genau den Funden der Analyse (dieselben Objekte), ocr, ocr_cache und
     ziel_ordner – sonst nichts; Ergebnis in derselben Form wie vor dem Weg oberflaeche (nur „weg“ kommt hinzu).
-    Weg oberflaeche auf denselben Dokumenten: eigenes LaufWissen je Dokument, die nur angebotenen Gesundheitsdaten
-    fehlen im Auftrag, Seitenmodell/Nebenkanäle der Analyse und die Freigabe gehen mit. Die echte Engine schwärzt nur
-    Stellen mit „an“: die angebotenen Diagnosen bleiben in BEIDEN Wegen lesbar – Recall, Über-Schwärzung und
-    Fehlalarme gleich."""
+    Weg oberflaeche auf denselben Dokumenten: eigenes LaufWissen je Dokument, nur angebotene Funde fehlen im Auftrag,
+    Seitenmodell/Nebenkanäle der Analyse und die Freigabe gehen mit. Gesundheitsdaten mit Personenbezug sind in
+    „Hoch“ seit der Entscheidung vom 27.11. angehakt: die Diagnosen werden in BEIDEN Wegen geschwärzt – Recall,
+    Über-Schwärzung und Fehlalarme gleich."""
     ergebnisse = {}
     for weg in ("engine", "oberflaeche"):
         pipeline = bewertung.Pipeline()
@@ -380,7 +380,10 @@ def test_echte_engine_weg_engine_unveraendert_weg_oberflaeche_wie_die_oberflaech
         for a, s in zip(analysen, schwaerzungen):
             funde = a["ergebnis"]["funde"]
             angeboten = [f for f in funde if f.get("stellen") and not any(st.get("an", True) for st in f["stellen"])]
-            assert any(f["kategorie"] in muster.GESUNDHEIT for f in angeboten), [f["kategorie"] for f in funde]
+            gesundheit = [f for f in funde if f["kategorie"] in muster.GESUNDHEIT]
+            assert gesundheit and all(st.get("an", True) for f in gesundheit for st in f["stellen"]), \
+                [(f["kategorie"], f.get("hinweis")) for f in gesundheit]
+            art9 = sorted({f["kategorie"] for f in angeboten if f["kategorie"] in muster.ART9})
             assert s["args"][0] == a["args"][0]
             if weg == "engine":
                 assert a["args"][1:] == (STANDARD_AN, [], []) and set(a["kwargs"]) == {"ocr"}
@@ -395,12 +398,11 @@ def test_echte_engine_weg_engine_unveraendert_weg_oberflaeche_wie_die_oberflaech
                 ids = [f["id"] for f in s["args"][1]]
                 bilder = [f["id"] for f in angeboten if any("bereich" in st for st in f["stellen"])]
                 assert ids == [f["id"] for f in funde if f not in angeboten] + bilder   # angebotene Texte fehlen
-                # die nur angebotenen Gesundheitsdaten gehen als "art9_abgewaehlt" mit: die Ausgabe nennt sie als Grund
-                # für _PRUEFEN (Nachprüfung A/NP-05: Art.-9-Daten lesbar)
+                # nur angebotene Art.-9-Daten gingen als "art9_abgewaehlt" mit: die Ausgabe nennt sie als Grund für
+                # _PRUEFEN (Nachprüfung A/NP-05: Art.-9-Daten lesbar) – hier ist keine abgewählt
                 assert set(s["kwargs"]) == {"ocr", "ziel_ordner", "ocr_cache", "modell", "nebenkanaele",
-                                            "freigabe_erforderlich", "profil", "art9_abgewaehlt"}
-                assert s["kwargs"]["art9_abgewaehlt"] == sorted({f["kategorie"] for f in angeboten
-                                                                 if f["kategorie"] in muster.ART9})
+                                            "freigabe_erforderlich", "profil"} | ({"art9_abgewaehlt"} if art9 else set())
+                assert s["kwargs"].get("art9_abgewaehlt", []) == art9
                 assert s["kwargs"]["modell"] is a["ergebnis"]["modell"]
                 assert s["kwargs"]["freigabe_erforderlich"] is True and s["kwargs"]["profil"] == "hoch"
                 assert s["ergebnis"]["ausgabe"].name.endswith("_PRUEFEN.pdf")
@@ -418,7 +420,7 @@ def test_echte_engine_weg_engine_unveraendert_weg_oberflaeche_wie_die_oberflaech
         assert e["gesamt"][schluessel] == o["gesamt"][schluessel], schluessel
     diagnosen = [(d["dokument"], x["id"], x["status"]) for d in e["dokumente"] for x in d["eintraege"]
                  if x["kategorie"] in muster.GESUNDHEIT and x["erwartung"] == "schwaerzen"]
-    assert diagnosen and all(status != "entfernt" for _, _, status in diagnosen)       # angeboten: bleibt lesbar
+    assert diagnosen and all(status == "entfernt" for _, _, status in diagnosen), diagnosen   # in „Hoch“ geschwärzt
     assert diagnosen == [(d["dokument"], x["id"], x["status"]) for d in o["dokumente"] for x in d["eintraege"]
                          if x["kategorie"] in muster.GESUNDHEIT and x["erwartung"] == "schwaerzen"]
     assert all(d["status_ausgabe"] == "pruefen" for d in o["dokumente"])               # Freigabe vor Weitergabe
@@ -432,7 +434,8 @@ def test_echte_engine_weg_engine_unveraendert_weg_oberflaeche_wie_die_oberflaech
 @braucht_modell
 @pytest.mark.skipif(KEIN_DISPLAY, reason="kein Display (DISPLAY nicht gesetzt)")
 def test_oberflaeche_und_benchmark_schicken_denselben_auftrag(app, umgebung, dialoge, monkeypatch):
-    """Frisch gestartete Oberfläche (keine gespeicherten Einstellungen), Arztbericht mit angebotenen Gesundheitsdaten:
+    """Frisch gestartete Oberfläche (keine gespeicherten Einstellungen), Arztbericht mit angebotener Konfession (in
+    „Hoch“ nicht angehakt; Gesundheitsdaten sind dort seit 27.11. angehakt):
     Analyse mit denselben Einstellungen wie der Weg oberflaeche, Häkchen der Fundliste = standard_zustand, und beim
     Schwärzen gehen dieselben Funde mit denselben Parametern an die Engine wie im Benchmark (bewerte_dokument, Weg
     oberflaeche) für dasselbe Analyseergebnis."""
@@ -445,7 +448,8 @@ def test_oberflaeche_und_benchmark_schicken_denselben_auftrag(app, umgebung, dia
     assert app._aktive_kategorien() == auftrag.standard_kategorien()
     assert app.basis_profil == app.profil_var.get() == auftrag.STANDARD_PROFIL
     assert app.freigabe_var.get() is auftrag.STANDARD_FREIGABE
-    pdf = pdf_schreiben(Path(umgebung["tmp"]) / "Kunde" / "Arztbericht.pdf", ARZTBERICHT)
+    pdf = pdf_schreiben(Path(umgebung["tmp"]) / "Kunde" / "Arztbericht.pdf",
+                        ARZTBERICHT + "Konfession: römisch-katholisch\n")
     app._pdfs_hinzufuegen([str(pdf)])
     starte_lauf(app, app.analysieren, timeout=120)
     ergebnis = app.analyse_ergebnisse[pdf]
@@ -456,7 +460,7 @@ def test_oberflaeche_und_benchmark_schicken_denselben_auftrag(app, umgebung, dia
     benchmark_auftrag, zustaende = auftrag.standard_auftrag(ergebnis, gui.schwaerze_pdf)
     assert zustaende == [app.fund_zustand(pdf, i) for i in range(len(ergebnis["funde"]))]
     assert zustaende == [app._zustand(f"{pdf}::{i}") for i in range(len(ergebnis["funde"]))]
-    assert "aus" in zustaende and "an" in zustaende                   # angebotene Gesundheitsdaten, IBAN
+    assert "aus" in zustaende and "an" in zustaende                   # angebotene Konfession; Diagnose, IBAN
     gui_auftrag = app._auftrag(pdf)
     for schluessel in ("funde", "ocr_cache", "bereiche", "stellen", "nebenkanaele", "ohne_haken", "gefunden"):
         assert gui_auftrag[schluessel] == benchmark_auftrag[schluessel], schluessel

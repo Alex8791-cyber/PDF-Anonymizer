@@ -221,13 +221,22 @@ def test_np03_marke_laut_wird_gemeldet():
 # ----------------------------------------------------------------------
 # A/NP-05 und V1: abgewählte Art.-9-Daten nennen einen Prüfgrund; Religion nur geprüft, wenn angehakt
 # ----------------------------------------------------------------------
-def test_np05_art9_abgewaehlt_wird_parameter_und_grund(tmp_path):
+@pytest.mark.parametrize("profil", ["ausgewogen", "hoch"])
+def test_np05_art9_abgewaehlt_wird_parameter_und_grund(tmp_path, profil):
+    """In „Ausgewogen“ sind Gesundheitsdaten nur angeboten; in „Hoch“ (seit 27.11. angehakt) hakt die Nutzerin sie
+    selbst ab – beide Male nennt die Ausgabe den Art.-9-Grund."""
     pdf = _pdf(tmp_path / "bu.pdf", [["Antrag Berufsunfähigkeit", "Versicherte Person: Kreszentia Gschwandtner",
                                       "Diagnose: Diabetes mellitus Typ 2 seit 2019"]])
-    e = analysiere_pdf(pdf, ALLE, [], [], profil="hoch")
+    e = analysiere_pdf(pdf, set(muster.PROFILE[profil]["aktive"]), [], [], profil=profil)
+    gesundheit = [f for f in e["funde"] if f["kategorie"] in muster.GESUNDHEIT]
+    assert gesundheit and all(st["an"] == (profil == "hoch") for f in gesundheit for st in f["stellen"])
+    if profil == "hoch":
+        for f in gesundheit:                            # Nutzerin hakt die Diagnose ab
+            for st in f["stellen"]:
+                st["an"] = False
     a, _ = auftrag.standard_auftrag(e, schwaerze_pdf)
     assert a.get("art9_abgewaehlt"), a.get("art9_abgewaehlt")
-    p = auftrag.schwaerz_parameter(a, True, "hoch", schwaerze_pdf)
+    p = auftrag.schwaerz_parameter(a, True, profil, schwaerze_pdf)
     assert p.get("art9_abgewaehlt") == sorted(a["art9_abgewaehlt"])
     s = schwaerze_pdf(pdf, a["funde"], ziel_ordner=tmp_path / "aus", **p)
     assert any("Art. 9" in g for g in s["pruefen_gruende"]), s["pruefen_gruende"]

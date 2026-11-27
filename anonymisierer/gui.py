@@ -29,6 +29,7 @@ from . import __version__, dateien
 from . import analyse as _analyse_modul
 from . import auftrag as _auftrag_modul
 from . import gui_attrappen as attrappen
+from . import ki as _ki
 from . import muster as _muster_modul
 from . import schwaerzung as _schwaerz_modul
 from .analyse import analysiere_pdf
@@ -1359,6 +1360,20 @@ class AnonymisiererApp:
         fk.pack(fill="x", pady=(4, 0))
         self.freigabe_knopf = fk
         self._sperrbar.append(fk)
+
+        # KI-Zweitprüfung: das in LM Studio geladene Sprachmodell liest mit (nur auf diesem Rechner, anonymisierer/ki.py)
+        ki_zeile = tk.Frame(karte1, bg=FARBE_KARTE)
+        ki_zeile.pack(fill="x", pady=(2, 0))
+        self.ki_var = tk.BooleanVar(value=False)
+        kk = tk.Checkbutton(ki_zeile, text="KI-Zweitprüfung mit LM Studio (nur auf diesem Rechner)",
+                            variable=self.ki_var, command=self._ki_umgeschaltet, font=self.f_normal,
+                            bg=FARBE_KARTE, activebackground=FARBE_KARTE, anchor="w")
+        kk.pack(side="left")
+        self.ki_status = tk.Label(ki_zeile, text="", font=self.f_normal, bg=FARBE_KARTE, fg=FARBE_TEXT_GRAU,
+                                  anchor="w", justify="left")
+        self.ki_status.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        self.ki_knopf = kk
+        self._sperrbar.append(kk)
 
     def _baue_karte_kategorien(self, eltern):
         karte2 = tk.Frame(eltern, bg=FARBE_KARTE, padx=14, pady=8,
@@ -3446,8 +3461,13 @@ class AnonymisiererApp:
             return False
         optionen_neu = _profil_wert(PROFILE, neu, "optionen") or {}
         optionen_basis = _profil_wert(PROFILE, basis, "optionen") or {}
-        if any(an and not optionen_neu.get(schluessel) for schluessel, an in dict(optionen_basis).items()):
+        lockernd = getattr(_muster_modul, "LOCKERNDE_OPTIONEN", frozenset())
+        if any(an and not optionen_neu.get(schluessel) for schluessel, an in dict(optionen_basis).items()
+               if schluessel not in lockernd):
             return False
+        if any(an and not optionen_basis.get(schluessel) for schluessel, an in dict(optionen_neu).items()
+               if schluessel in lockernd):
+            return False                                # „neu“ lockert, was die Grundstufe streng hält
         return set(_profil_wert(PROFILE, basis, "hinweis") or ()) <= set(_profil_wert(PROFILE, neu, "hinweis") or ())
 
     def _profil_gewaehlt(self):
@@ -3522,6 +3542,8 @@ class AnonymisiererApp:
                 self.zielordner_var.set(e["zielordner"])
             self.zielordner_aktiv.set(bool(e.get("zielordner_aktiv", False)))
             self.freigabe_var.set(bool(e.get("freigabe_erforderlich", _auftrag_modul.STANDARD_FREIGABE)))
+            self.ki_var.set(bool(e.get("ki_zweitpruefung", False)))
+            self._ki_umgeschaltet(still=True)
         finally:
             self._einstellungen_werden_gesetzt = False
 
@@ -3539,6 +3561,7 @@ class AnonymisiererApp:
             "zielordner": self.zielordner_var.get().strip(),
             "zielordner_aktiv": bool(self.zielordner_aktiv.get()),
             "freigabe_erforderlich": bool(self.freigabe_var.get()),
+            "ki_zweitpruefung": bool(self.ki_var.get()),
             "maximiert": self._ist_maximiert(),
             "hinweis_gelesen": bool(self.hinweis_gelesen),
         })
@@ -3560,6 +3583,36 @@ class AnonymisiererApp:
         if feld.edit_modified():
             feld.edit_modified(False)
             self._einstellung_geaendert()
+
+    def _ki_umgeschaltet(self, still: bool = False):
+        """KI-Zweitprüfung ein/aus: Schalter an das Modul ki weitergeben und im Hintergrund nachsehen, welches Modell
+        LM Studio geladen hat (die Abfrage dauert bis zu einigen Sekunden – die Oberfläche wartet nicht darauf)."""
+        an = bool(self.ki_var.get())
+        _ki.EINSTELLUNG["aktiv"] = an
+        if not an:
+            self.ki_status.config(text="")
+        else:
+            self.ki_status.config(text="prüfe LM Studio …")
+
+            def nachsehen():
+                try:
+                    text = _ki.status()
+                except Exception as e:  # eine Statusanzeige darf nie den Start stören
+                    text = f"KI-Zweitprüfung: Status unbekannt ({type(e).__name__})"
+                self._im_hauptthread(self._ki_status_zeigen, text)
+
+            threading.Thread(target=nachsehen, daemon=True, name="KI-Status").start()
+        if not still:
+            self._einstellung_geaendert()
+
+    def _ki_status_zeigen(self, text: str):
+        if not self.ki_var.get():
+            return
+        kurz = text.replace("KI-Zweitprüfung mit ", "Modell: ").replace("KI-Zweitprüfung: ", "")
+        try:
+            self.ki_status.config(text=kurz)
+        except tk.TclError:
+            pass                                        # Fenster schon geschlossen
 
     def _einstellung_geaendert(self, *_):
         """Stufe, Kategorie, Liste oder Kundenliste geändert: eine vorhandene Analyse passt nicht mehr ->
@@ -4548,7 +4601,7 @@ class AnonymisiererApp:
                             f"angehakt und bleiben deshalb lesbar. Zum Schwärzen bitte die nicht angehakten Zeilen "
                             f"mit {MARKE_GESUNDHEIT.strip()} („Diagnosen …“, „Medikamente …“) anhaken – schneller per "
                             f"Rechtsklick auf eine solche Zeile → „Kategorie … überall anhaken“ – oder die Schutzstufe "
-                            f"„Maximal“ wählen:"]
+                            f"„Hoch“ bzw. „Maximal“ wählen:"]
                            + [f"  • {self._anzeigename(p)}" for p in gesundheit_sicher[:10]])
         if vermutet:
             bloecke.append([f"Möglicherweise Gesundheitsdaten (Art. 9 DSGVO): erkannt wurden nur Fachbegriffe ohne "

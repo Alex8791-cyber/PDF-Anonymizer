@@ -2030,8 +2030,8 @@ KATEGORIEN = [
     ("ort",         "Orte ohne PLZ (Ort-Datum-Zeile, Geburtsort)", "[ORT]",          finde_orte,            True),
     ("beruf",       "Beruf (bei Personen)",                      "[BERUF]",          finde_berufe,          True),
     ("arbeitgeber", "Arbeitgeber (bei Personen)",                "[ARBEITGEBER]",    finde_arbeitgeber,     True),
-    ("diagnose",    "Diagnosen, ICD-Codes (Gesundheitsdaten)",   "[DIAGNOSE]",       finde_diagnosen,       False),
-    ("medikament",  "Medikamente (Gesundheitsdaten)",            "[MEDIKAMENT]",     finde_medikamente,     False),
+    ("diagnose",    "Diagnosen, ICD-Codes (Gesundheitsdaten)",   "[DIAGNOSE]",       finde_diagnosen,       True),
+    ("medikament",  "Medikamente (Gesundheitsdaten)",            "[MEDIKAMENT]",     finde_medikamente,     True),
     ("religion",    "Religion/Konfession (Art. 9 DSGVO)",        "[RELIGION]",       finde_religion,        False),
     ("datum",       "ALLE Datumsangaben (Vorsicht!)",            "[DATUM]",          finde_alle_daten,      False),
 ]
@@ -2049,10 +2049,11 @@ KATEGORIE_PRIORITAET = [
 # ----------------------------------------------------------------------
 # Schutzstufen (Vertrag Abschnitt 9)
 # ----------------------------------------------------------------------
-_KERN = {k for k, _, _, _, an in KATEGORIEN if an} - {"beruf", "arbeitgeber", "international", "ort"}
 GESUNDHEIT = frozenset({"diagnose", "medikament"})
-# besondere Kategorien nach Art. 9 DSGVO: in „ausgewogen“/„hoch“ erkannt, aber nur gemeldet und abgewählt angeboten,
-# in „maximal“ geschwärzt – Gesundheitsdaten und (seit Runde 5) Religion/Konfession
+_KERN = {k for k, _, _, _, an in KATEGORIEN if an} - {"beruf", "arbeitgeber", "international", "ort"} - GESUNDHEIT
+# besondere Kategorien nach Art. 9 DSGVO: in „ausgewogen“ erkannt, aber nur gemeldet und abgewählt angeboten, in
+# „maximal“ geschwärzt – Gesundheitsdaten und (seit Runde 5) Religion/Konfession; in „hoch“ sind die Gesundheitsdaten
+# angehakt, die Konfession bleibt angeboten
 RELIGION = frozenset({"religion"})
 ART9 = GESUNDHEIT | RELIGION
 PROFILE = {
@@ -2064,12 +2065,15 @@ PROFILE = {
         "optionen": {"alle_geburtsdaten": False, "unbekannte_eigennamen": False, "bilder_schwaerzen": False},
     },
     "hoch": {
-        "aktive": frozenset(_KERN | {"beruf", "arbeitgeber", "international", "ort"}),
+        # Gesundheitsdaten angehakt (Entscheidung des Maklers, 27.11.); nur vermutete Fachbegriffe ohne Etikett in
+        # einem Dokument ohne Personenbezug (Tarif- und Leistungsübersicht) bleiben angeboten
+        # (Option gesundheit_vermutet_anbieten, analyse._analysiere_dokument). Konfession bleibt angeboten.
+        "aktive": frozenset(_KERN | {"beruf", "arbeitgeber", "international", "ort"} | GESUNDHEIT),
         "hinweis": ART9,
-        "beschreibung": "Empfohlen. Zusätzlich: Beruf, Arbeitgeber, ausländische Anschriften, Orte. "
-                        "Gesundheitsdaten (Diagnosen, Medikamente) und Konfession werden gemeldet und können "
-                        "angehakt werden.",
-        "optionen": {"alle_geburtsdaten": False, "unbekannte_eigennamen": False, "bilder_schwaerzen": False},
+        "beschreibung": "Empfohlen. Zusätzlich: Beruf, Arbeitgeber, ausländische Anschriften, Orte, Gesundheitsdaten "
+                        "(Diagnosen, Medikamente). Konfession wird gemeldet und kann angehakt werden.",
+        "optionen": {"alle_geburtsdaten": False, "unbekannte_eigennamen": False, "bilder_schwaerzen": False,
+                     "gesundheit_vermutet_anbieten": True},
     },
     "maximal": {
         "aktive": frozenset(_KERN | {"beruf", "arbeitgeber", "international", "ort"} | ART9),
@@ -2096,8 +2100,14 @@ def profil(name: str | None) -> dict:
 
 def hinweis_kategorien(profil_name: str | None, aktive) -> set:
     """Kategorien, die in dieser Schutzstufe erkannt, aber nur gemeldet und abgewählt angeboten werden
-    (Gesundheitsdaten und Konfession in „hoch“/„ausgewogen“) – ohne die, die die Nutzerin selbst angehakt hat."""
+    (Gesundheitsdaten in „ausgewogen“, Konfession in „ausgewogen“ und „hoch“) – ohne die, die die Nutzerin selbst
+    angehakt hat."""
     return set(profil(profil_name).get("hinweis", ())) - set(aktive or ())
+
+
+# Optionen, die eine Stufe LOCKERN statt verschärfen (eine Stufe mit ihr ist schwächer als eine ohne sie): „Hoch“
+# bietet Gesundheits-Fachbegriffe ohne jeden Personenbezug im Dokument nur an, „Maximal“ schwärzt sie
+LOCKERNDE_OPTIONEN = frozenset({"gesundheit_vermutet_anbieten"})
 
 
 def option(profil_name: str | None, schluessel: str) -> bool:

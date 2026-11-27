@@ -82,6 +82,7 @@ except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
 
 from . import analyse as _analyse
 from . import dateien as _dateien
+from . import ki as _ki
 from . import ocr as _ocr
 from . import seitenmodell as sm
 from .ocr import OcrDienst, bild_bereiche, ocr_noetig  # noqa: F401  (Namen bleiben importierbar)
@@ -2504,6 +2505,30 @@ def _nebenkanal_bezug(pfad, nebenkanaele=None, modell=None, profil: str = "hoch"
         doc.close()
 
 
+def _ki_verdacht_filtern(lauf, verdacht: list) -> list:
+    """KI-Zweitprüfung der Verdachtsstellen (Entscheidung vom 27.11.: weniger, aber präzisere Meldungen): Stellen, die
+    das lokale Sprachmodell im Zusammenhang sicher als „kein Personenbezug“ einstuft, werden nicht mehr gemeldet;
+    ganze Seiten und Stellen ohne Text bleiben immer. Was entfällt, nennt das Protokoll – nichts verschwindet still.
+    Jeder Fehler der KI lässt alle Stellen stehen. Zusammenhang: Seitentext des Originals (auch OCR-Text)."""
+    modell = lauf.modell or lauf.analyse_modell
+    seitentexte = {nr: getattr(s, "text", "") for nr, s in enumerate(getattr(modell, "seiten", None) or [])}
+    try:
+        bleibt, entfallen = _ki.verdacht_filtern(verdacht, seitentexte, abbruch=lauf.abbruch)
+    except _ki.KiAbbruch:
+        lauf.abbruch_pruefen()
+        return verdacht
+    except Exception as e:  # die KI ist eine Zugabe: ihr Ausfall ändert nichts an den Meldungen
+        lauf.melden("hinweis", "KI_ZWEITPRUEFUNG", f"KI-Zweitprüfung der Verdachtsstellen ausgefallen ({e}) – alle "
+                                                   f"Stellen bleiben gemeldet.")
+        return verdacht
+    if entfallen:
+        beispiele = ", ".join(f"„{' '.join(str(_verdacht_feld(v, 'text') or '').split())[:40]}“" for v in entfallen[:8])
+        lauf.melden("hinweis", "KI_ZWEITPRUEFUNG",
+                    f"KI-Zweitprüfung: {len(entfallen)} Verdachtsstelle(n) der Selbstkontrolle im Zusammenhang als "
+                    f"unbedenklich eingestuft und nicht mehr gemeldet: {beispiele}{' …' if len(entfallen) > 8 else ''}")
+    return bleibt
+
+
 def _verdacht_feld(v, name, standard=None):
     return v.get(name, standard) if isinstance(v, dict) else getattr(v, name, standard)
 
@@ -3018,6 +3043,8 @@ def _schwaerzen(lauf: _Lauf, ergebnis: dict, bereiche: dict, stellen_manuell: di
             verdacht = []
             lauf.restrisiko_fehler = lauf.restrisiko_ausgefallen = True
         ergebnis["dauer_restrisiko_s"] = round(_zeit.perf_counter() - beginn, 3)
+    if verdacht and _ki.aktiv():
+        verdacht = _ki_verdacht_filtern(lauf, verdacht)
     ergebnis["verdacht"] = verdacht
     if verdacht:
         lauf.melden("warnung", "VERDACHT",

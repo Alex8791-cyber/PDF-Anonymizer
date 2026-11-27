@@ -137,10 +137,10 @@ ERLAEUTERUNG = {
              "Vereins („Wir sind als Versicherungsmakler für Sie tätig“), Vertretungs- und Ehrenämter („als Betreuer "
              "seiner Mutter“, „ehrenamtlich als Trainer“) und Ausfüllhinweise („bitte genau angeben“)",
     "arbeitgeber": "hinter „Arbeitgeber:“ oder im Satz; bekannte Versicherer, Banken und Behörden bleiben stehen",
-    "diagnose": "nur bekannte Begriffe und ICD-Codes mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten "
-                "(⚕, nicht angehakt)",
-    "medikament": "nur bekannte Begriffe mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten "
-                  "(⚕, nicht angehakt)",
+    "diagnose": "nur bekannte Begriffe und ICD-Codes mit Gesundheitsbezug; in „Ausgewogen“ nur angeboten (⚕, nicht angehakt), in „Hoch“ "
+                "nur ohne Personenbezug im Dokument angeboten",
+    "medikament": "nur bekannte Begriffe mit Gesundheitsbezug; in „Ausgewogen“ nur angeboten (⚕, nicht angehakt), in „Hoch“ "
+                  "nur ohne Personenbezug im Dokument angeboten",
     "religion": "Konfession bzw. Kirchensteuermerkmal („rk“, „ev“) hinter ihrem Etikett oder unter einem "
                 "Spaltenkopf „Konf.“; besondere Kategorie nach Art. 9 DSGVO – in „Ausgewogen“ und „Hoch“ nur "
                 "angeboten (nicht angehakt)",

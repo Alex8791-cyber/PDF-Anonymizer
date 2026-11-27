@@ -47,8 +47,8 @@ STANDARD_PROFIL = "hoch"
 BENUTZERDEFINIERT = "benutzerdefiniert"
 PROFIL_ANZEIGE = {"ausgewogen": "Ausgewogen", "hoch": "Hoch (Standard)", "maximal": "Maximal",
                   BENUTZERDEFINIERT: "Benutzerdefiniert"}
-_ZUSATZ_HOCH = ("beruf", "arbeitgeber", "international")
-_ZUSATZ_MAXIMAL = ("diagnose", "medikament")
+_ZUSATZ_HOCH = ("beruf", "arbeitgeber", "international", "diagnose", "medikament")   # Gesundheit: seit 27.11. „Hoch“
+_ZUSATZ_MAXIMAL = ("religion",)
 
 
 def _kategorie_schluessel(kategorien) -> list[str]:
@@ -61,8 +61,8 @@ def _standard_kategorien(kategorien) -> set[str]:
 
 def _profile_aus_kategorien(kategorien) -> dict:
     """Schutzstufen nach Vertrag Abschnitt 9, beschränkt auf die Kategorien, die die Engine kennt:
-    ausgewogen = Standard aus Phase 1, hoch = + Beruf/Arbeitgeber/international, maximal = + Diagnosen/
-    Medikamente. Fehlen diese Kategorien (alte Engine), sind die drei Stufen gleich."""
+    ausgewogen = Standard aus Phase 1, hoch = + Beruf/Arbeitgeber/international/Diagnosen/Medikamente (Entscheidung
+    vom 27.11.), maximal = + Konfession. Fehlen diese Kategorien (alte Engine), sind die drei Stufen gleich."""
     alle = set(_kategorie_schluessel(kategorien))
     ausgewogen = _standard_kategorien(kategorien) - set(_ZUSATZ_HOCH) - set(_ZUSATZ_MAXIMAL)
     hoch = ausgewogen | (set(_ZUSATZ_HOCH) & alle)

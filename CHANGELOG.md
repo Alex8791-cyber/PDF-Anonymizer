@@ -11,6 +11,42 @@ gebaut. Zuerst steht, was sich an der gewohnten Arbeit ändert, danach Neues, we
 Fehlerbehebungen und Sicherheit, dann ein kurzer Teil für Entwickler. Am Ende folgen die Änderungen aus dem
 Review „Auslieferung/Doku“ (AD-01 … AD-08).
 
+### KI-Zweitprüfung mit LM Studio (Entscheidung vom 27.11.)
+
+- **Neuer Schalter „KI-Zweitprüfung mit LM Studio“ (Schritt 1, aus als Vorgabe):** Das Programm nutzt immer das
+  gerade in LM Studio geladene Sprachmodell (neue Schnittstelle `/api/v1/models`, Rückfall `/api/v0/models` und
+  `/v1/models`; Einbettungsmodelle zählen nicht) und zeigt seinen Namen neben dem Schalter.
+- **Zweite Erkennung** (`detektoren/ki_zweitpruefung.py`): Das Modell liest jede Seite (lange Seiten in Teilen mit
+  Überlappung). Übernommen wird nur, was es als eindeutig einstuft und was wörtlich im Text steht – in angehakten
+  Kategorien, an jeder Ganzwort-Stelle. Anrede und Titel gehören nicht zum Namen; ein Alltagswort als Name
+  („Wald“) zählt nur mit Anrede davor („Herr Wald“, nicht „im Wald“); Rollen-, Berufs- und Etikettwörter und
+  Organisationen der Erlaubnisliste sind nie ein Name; Orte ohne Postleitzahl übernimmt die KI nicht. Die Regeln
+  bleiben maßgeblich: die KI nimmt nie eine Schwärzung weg.
+- **Weniger, aber genauere Meldungen** (Entscheidung 7): Verdachtsstellen der Selbstkontrolle beurteilt das Modell
+  im Zusammenhang; nur was es sicher als „kein Personenbezug“ einstuft, wird nicht mehr gemeldet – das Protokoll
+  nennt diese Stellen (Hinweis KI_ZWEITPRUEFUNG). Ganze Seiten und Stellen ohne Text bleiben immer gemeldet; jeder
+  Fehler der KI lässt alle Stellen stehen.
+- Namen von Vorstand, Aufsichtsrat und Geschäftsführung in Fußzeilen soll das Modell nicht nennen (Entscheidung 6).
+- **Datenschutz:** nur der eigene Rechner (127.0.0.1, localhost, ::1), nie über einen Proxy; jede andere Adresse
+  lehnt das Programm ab. Läuft LM Studio nicht oder ist kein Modell geladen, arbeitet das Programm wie ohne KI und
+  sagt das im Protokoll. Fortschritt („KI-Zweitprüfung (Modell): Teil 2 von 5 …“) und Abbrechen wie gewohnt;
+  Antworten werden je Modell und Text zwischengespeichert (eine zweite Analyse fragt nicht erneut).
+- Tests: tests/test_ki.py (nachgebauter LM-Studio-Server: Modellsuche, Schema-Rückfall, Denkteil, Abbruch,
+  Zwischenspeicher, nur wörtliche Werte, nichts wird weggenommen, Verdachtsfilter).
+
+### Gesundheitsdaten in „Hoch“ geschwärzt (Entscheidung vom 27.11.)
+
+- **Schutzstufe „Hoch“ (Standard):** Diagnosen und Medikamente sind jetzt angehakt und werden geschwärzt, bisher
+  waren sie dort nur angeboten (⚕). Ausnahme für die Präzision: Allgemeine Fachbegriffe ohne Etikett in einem
+  Dokument ohne jeden Personenbezug (z. B. „Physiotherapie“, „Zahnersatz“ in einer Tarifübersicht) bleiben
+  angeboten und werden mit „möglicherweise Gesundheitsdaten“ gemeldet. Die Konfession bleibt in „Hoch“ angeboten.
+- „Ausgewogen“ bietet Gesundheitsdaten weiter nur an; „Maximal“ schwärzt sie wie bisher (auch die allgemeinen
+  Fachbegriffe).
+- Tests: tests/test_gesundheit_hoch.py (neu); die bisherigen Tests des Anbietens prüfen dieses jetzt in
+  „Ausgewogen“. README (Schutzstufen, Erkennungstabelle, Grenzen) und Abschlussdialog angepasst.
+- Die Option „Fachbegriffe ohne Personenbezug nur anbieten“ lockert „Hoch“ gegenüber „Maximal“
+  (`muster.LOCKERNDE_OPTIONEN`): „Hoch“ + Konfession wird weiter zu „Maximal“, nie umgekehrt.
+
 ### Nachbesserung 9 (Abschlussrunde nach der siebten Abnahme) – nur Verschärfungen
 Grundsatz dieser Runde: für jeden möglichen geheimen Wert ist das Ergebnis mindestens so schützend wie auf 6f2d08f
 (geschwärzt > gemeldet > frei). Ausnahmen der Nachbesserungen 7 und 8, die einen geheimen Wert still frei ließen,

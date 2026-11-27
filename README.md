@@ -81,15 +81,18 @@ die Wahl wird gespeichert.
 | Schutzstufe | Was angehakt wird |
 |---|---|
 | Ausgewogen | Direkte Kennungen: Namen, Anschriften, Geburtsdaten, IBAN, BIC, E-Mail, Telefon, Vertrags-, Steuer-, Sozialversicherungs-, Krankenversicherten-, Ausweis- und Fahrzeugnummern, Kennzeichen, IP-Adressen, Zugangsdaten, Profilnamen, Standort-Koordinaten … – mehr Zusammenhang für die KI. |
-| **Hoch (Standard, empfohlen)** | Zusätzlich Beruf, Arbeitgeber, ausländische Anschriften und Orte ohne PLZ. |
-| Maximal | Zusätzlich Diagnosen, Medikamente und Konfession, Daten wie „02.09.1983“, die mindestens 14 Jahre zurückliegen (außer kurz hinter Wörtern wie „am“, „vom“ oder „Beginn“), unbekannte Eigennamen bei Personen – und Bilder sowie erkannte Fotos werden abgedeckt (siehe [unten](#bilder-fotos-und-lichtbilder)). Größter Schutz, am wenigsten Zusammenhang für die KI. |
+| **Hoch (Standard, empfohlen)** | Zusätzlich Beruf, Arbeitgeber, ausländische Anschriften, Orte ohne PLZ und Gesundheitsdaten (Diagnosen, Medikamente). |
+| Maximal | Zusätzlich Konfession, Daten wie „02.09.1983“, die mindestens 14 Jahre zurückliegen (außer kurz hinter Wörtern wie „am“, „vom“ oder „Beginn“), unbekannte Eigennamen bei Personen – und Bilder sowie erkannte Fotos werden abgedeckt (siehe [unten](#bilder-fotos-und-lichtbilder)). Größter Schutz, am wenigsten Zusammenhang für die KI. |
 | Benutzerdefiniert | Erscheint, sobald Ihre Häkchen zu keiner Stufe passen, die mindestens so streng ist wie die zuletzt gewählte. Es gelten dann weiter deren Erkennungsregeln – wer in „Maximal“ die Diagnosen abwählt, behält also z. B. das Abdecken der Bilder. |
 
-**Gesundheitsdaten** (Diagnosen, Medikamente) sucht das Programm in jeder Stufe. In
-„Ausgewogen“ und „Hoch“ stehen sie aber **nicht angehakt** in der Fundliste (Zeichen ⚕) und
-bleiben lesbar, solange Sie sie nicht anhaken – der Abschlussdialog der Analyse weist darauf
-hin. In „Maximal“ sind sie angehakt. Ebenso die **Konfession** (Religion, Kirchensteuermerkmal „rk“,
-„ev“ – wie Gesundheitsdaten eine besondere Kategorie nach Art. 9 DSGVO).
+**Gesundheitsdaten** (Diagnosen, Medikamente) sucht das Programm in jeder Stufe. In „Hoch“
+und „Maximal“ sind sie angehakt und werden geschwärzt. In „Hoch“ bleiben nur allgemeine
+Fachbegriffe ohne Etikett in Dokumenten ohne jeden Personenbezug (z. B. „Physiotherapie“ in
+einer Tarifübersicht) nicht angehakt (Zeichen ⚕). In „Ausgewogen“ stehen alle Gesundheitsdaten
+**nicht angehakt** in der Fundliste und bleiben lesbar, solange Sie sie nicht anhaken – der
+Abschlussdialog der Analyse weist darauf hin. Die **Konfession** (Religion, Kirchensteuermerkmal
+„rk“, „ev“ – eine besondere Kategorie nach Art. 9 DSGVO) ist in „Ausgewogen“ und „Hoch“ nur
+angeboten, in „Maximal“ angehakt.
 
 Ändern Sie nach der Analyse die Schutzstufe, ein Häkchen, eine Liste oder die Kundenliste,
 wird die Fundliste zurückgesetzt: Dann bitte erneut analysieren. In der Vorschau gesetzte
@@ -132,8 +135,8 @@ steht unter [Was NICHT erkannt wird](#was-nicht-erkannt-wird).
 | Orte ohne PLZ (Ort-Datum-Zeile, Geburtsort) | Musterstadt, 03.04.2025 | `[ORT]` | Hoch | Ort-Datum-Zeile, „geboren in …“, „wohnhaft in …“ |
 | Beruf (bei Personen) | Beruf: Elektriker | `[BERUF]` | Hoch | hinter „Beruf:“, im Satz („arbeitet als …“, „ist als … tätig“, „verdient ihr Geld als …“, „übt den Beruf der … aus“, auch gebeugt „des Schreiners“, „seit sie Lehrerin ist“, „Ihr Mann, der Polizist ist, …“, Tätigkeiten wie „arbeitet als Putzfrau“), in der Spalte „Beruf“/„Tätigkeit“ einer Personenliste, im Beruf-Feld eines Kastenformulars (Wert unter dem Feldbezeichner, auch unter „Beruf des Ehepartners“) und auf Scans rechts neben dem Feldnamen „Beruf“ – nicht die Rolle des Maklers, einer Firma oder eines Vereins („Wir sind als Versicherungsmakler für Sie tätig“), Vertretungs- und Ehrenämter („als Betreuer seiner Mutter“, „ehrenamtlich als Trainer“) und Ausfüllhinweise („bitte genau angeben“) |
 | Arbeitgeber (bei Personen) | Arbeitgeber: Muster Bau GmbH | `[ARBEITGEBER]` | Hoch | hinter „Arbeitgeber:“ oder im Satz; bekannte Versicherer, Banken und Behörden bleiben stehen |
-| Diagnosen, ICD-Codes (Gesundheitsdaten) | Diagnose: Diabetes mellitus (E11.9) | `[DIAGNOSE]` | Maximal | nur bekannte Begriffe und ICD-Codes mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten (⚕, nicht angehakt) |
-| Medikamente (Gesundheitsdaten) | Medikation: Metformin 500 mg | `[MEDIKAMENT]` | Maximal | nur bekannte Begriffe mit Gesundheitsbezug; in „Ausgewogen“ und „Hoch“ nur angeboten (⚕, nicht angehakt) |
+| Diagnosen, ICD-Codes (Gesundheitsdaten) | Diagnose: Diabetes mellitus (E11.9) | `[DIAGNOSE]` | Hoch | nur bekannte Begriffe und ICD-Codes mit Gesundheitsbezug; in „Ausgewogen“ nur angeboten (⚕, nicht angehakt), in „Hoch“ nur ohne Personenbezug im Dokument angeboten |
+| Medikamente (Gesundheitsdaten) | Medikation: Metformin 500 mg | `[MEDIKAMENT]` | Hoch | nur bekannte Begriffe mit Gesundheitsbezug; in „Ausgewogen“ nur angeboten (⚕, nicht angehakt), in „Hoch“ nur ohne Personenbezug im Dokument angeboten |
 | Religion/Konfession (Art. 9 DSGVO) | Konfession: römisch-katholisch | `[RELIGION]` | Maximal | Konfession bzw. Kirchensteuermerkmal („rk“, „ev“) hinter ihrem Etikett oder unter einem Spaltenkopf „Konf.“; besondere Kategorie nach Art. 9 DSGVO – in „Ausgewogen“ und „Hoch“ nur angeboten (nicht angehakt) |
 | ALLE Datumsangaben (Vorsicht!) | 15.03.2024 | `[DATUM]` | – (nur von Hand) | Vorsicht: auch Vertrags- und Briefdaten |
 <!-- TABELLE-ENDE -->
@@ -239,8 +242,8 @@ Bitte vor dem Einsatz lesen – das sind die Grenzen des Werkzeugs:
   abgedeckt), gezeichnete Grafiken sowie Fotos, die die Fotoerkennung nicht als Foto erkennt.
 - **Diagnosen, Krankheiten, Medikamente** – erkannt werden nur bekannte Begriffe aus den
   Wortlisten des Programms und ICD-10-Codes, und nur mit Gesundheitsbezug (z. B. hinter
-  „Diagnose:“ oder „leidet an“). In „Ausgewogen“ und „Hoch“ sind sie nur angeboten (⚕, nicht
-  angehakt) und bleiben lesbar, wenn Sie sie nicht anhaken.
+  „Diagnose:“ oder „leidet an“). In „Ausgewogen“ sind sie nur angeboten (⚕, nicht angehakt)
+  und bleiben lesbar, wenn Sie sie nicht anhaken; ab „Hoch“ werden sie geschwärzt.
 - **Beruf und Arbeitgeber** – nur mit Etikett („Beruf:“, „Arbeitgeber:“) oder im Satz
   („arbeitet als …“) und erst ab „Hoch“. **Familienstand und Einkommen** werden nicht erkannt.
 - **Namen hinter Personenwörtern** – „Nachbar Zettl hat den Brand gemeldet.“, „Monteur Grohe kam
@@ -439,6 +442,32 @@ Dokumentinhalte, Original-Dateinamen und Ordner.
 
 Das Programm läuft nur einmal je Benutzer: Ein zweiter Start meldet „PDF-Anonymisierer läuft
 bereits“ und öffnet kein zweites Fenster.
+
+### KI-Zweitprüfung mit LM Studio (freiwillig)
+
+Wer [LM Studio](https://lmstudio.ai) auf demselben Rechner nutzt, kann ein lokales Sprachmodell mitlesen lassen:
+
+1. LM Studio starten, ein Modell laden und den lokalen Server einschalten (Reiter „Developer“ → „Start Server“,
+   Port 1234).
+2. Im Anonymisierer in Schritt 1 „KI-Zweitprüfung mit LM Studio“ anhaken. Daneben steht das geladene Modell: Das
+   Programm nutzt immer das Modell, das gerade in LM Studio geladen ist – ein Modellwechsel braucht keine Einstellung.
+3. Wie gewohnt analysieren und schwärzen.
+
+Was die KI tut:
+
+- **Zweite Erkennung:** Das Modell liest jede Seite und nennt personenbezogene Daten. Was es eindeutig erkennt und
+  was wörtlich im Text steht, wird zusätzlich geschwärzt – nur in angehakten Kategorien. Die Regeln bleiben
+  maßgeblich: Die KI nimmt nie eine Schwärzung weg.
+- **Weniger, aber genauere Meldungen:** Stellen, die die Selbstkontrolle nur vorsichtshalber meldet („Regen“ – Name
+  oder Wetter?), beurteilt das Modell im Zusammenhang. Nur was es sicher als „kein Personenbezug“ einstuft, wird
+  nicht mehr gemeldet; das Protokoll nennt diese Stellen. Ganze Seiten (ungelesen, kaum lesbar) bleiben immer
+  gemeldet.
+
+Datenschutz: Das Programm verbindet sich nur mit dem eigenen Rechner (127.0.0.1), nie über einen Proxy; eine andere
+Adresse lehnt es ab. Kein Text verlässt den Rechner. Dauer: Ein großes Modell braucht je Seite einige Sekunden bis
+Minuten (je nach Grafikkarte); Fortschritt und „Abbrechen“ funktionieren wie gewohnt. Läuft LM Studio nicht oder ist
+kein Modell geladen, arbeitet das Programm wie ohne KI und sagt das im Protokoll. Für Fachleute: andere Adresse auf
+dem eigenen Rechner über die Umgebungsvariable `PDFA_KI_URL`, Einschalten für Werkzeuge mit `PDFA_KI=1`.
 
 ### Welche Dateien gehen?
 
@@ -728,7 +757,7 @@ Tesseract** – nur den entpackten Ordner. Auch die Visual-C++-Laufzeit liegt da
 - Code und Oberfläche sind deutsch. Paketaufbau `anonymisierer/`: `analyse.py`,
   `schwaerzung.py`, `seitenmodell.py`, `detektoren/`, `muster.py` (Kategorien, Muster,
   Schutzstufen), `kennungsformen.py`, `personenkontext.py`, `namen.py` (spaCy), `wissen.py` +
-  `daten/`, `kundenliste.py`,
+  `daten/`, `kundenliste.py`, `ki.py` (KI-Zweitprüfung über LM Studio, nur auf diesem Rechner),
   `restrisiko.py`, `ocr.py`, `kammraster.py` (Kästchenfelder auf Scans), `fotos.py`, `bilder.py`,
   `nebenkanaele.py`, `vorschau.py`,
   `vorschau_fenster.py`, `gui.py`, `gui_attrappen.py`, `auftrag.py` (welche Funde und Stellen

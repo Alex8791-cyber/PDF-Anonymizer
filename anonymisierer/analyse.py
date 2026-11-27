@@ -74,6 +74,7 @@ except ImportError:  # ältere PyMuPDF-Versionen kennen nur den Namen "fitz"
 from . import detektoren
 from .detektoren import kammfelder as _kammfelder
 from . import muster as _muster
+from . import ki as _ki
 from . import nebenkanaele as _nebenkanaele
 from . import ocr as _ocr
 from . import personenkontext
@@ -1479,6 +1480,9 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
         [schl[1] for schl, eintrag in sorted(je_fund.items(), key=lambda x: x[1]["stellen"][0])
          if eintrag["kategorie"] == "namen" and not schl[1].startswith(_TITEL_SCHLUESSEL)])
     angeboten = set()                       # Kategorien nur angebotener Funde (Hinweis-Kategorien)
+    # Schutzstufe „hoch“: Gesundheitsdaten angehakt, nur vermutete Fachbegriffe ohne Personenbezug im Dokument
+    # bleiben angeboten (Option gesundheit_vermutet_anbieten; Entscheidung des Maklers vom 27.11.)
+    vermutet_aktiv = [] if _muster.option(profil, "gesundheit_vermutet_anbieten") else None
     sicher_angeboten = False                # mindestens ein angebotener Gesundheitsfund, der nicht nur vermutet ist
     vermutet_beispiel = None                # (Start, Text) des ersten nur vermuteten angebotenen Gesundheitsfunds
     vermutete = []                          # diese Funde (Hinweis HINWEIS_GESUNDHEIT_VERMUTET)
@@ -1513,6 +1517,20 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
                                  an=not nur_angeboten))
         if vermutet:
             vermutete.append(funde[-1])
+        elif vermutet_aktiv is not None and not nur_angeboten and _ist_gesundheit(kategorie) \
+                and _nur_vermutet(eintrag["eigene"]):
+            vermutet_aktiv.append(funde[-1])
+    if vermutet_aktiv and not any(f["kategorie"] in _PERSONEN_KATEGORIEN and any(st["an"] for st in f["stellen"])
+                                  for f in funde):
+        # kein Personenbezug im Dokument: Leistungsbegriffe einer Tarifübersicht – angeboten statt geschwärzt
+        for f in vermutet_aktiv:
+            for st in f["stellen"]:
+                st["an"] = False
+            f["hinweis"] = _hinweise_verbinden(HINWEIS_GESUNDHEIT_VERMUTET, f.get("hinweis"))
+            angeboten.add(f["kategorie"])
+            st0 = min(f["stellen"], key=lambda st: (st["seite"], st["start"]))
+            if vermutet_beispiel is None:
+                vermutet_beispiel = (st0["start"], f.get("text") or "")
     if vermutete and any(f["kategorie"] in _PERSONEN_KATEGORIEN and any(st["an"] for st in f["stellen"])
                          for f in funde):
         # Personenbezug im Dokument: die Fachbegriffe gelten als sichere Gesundheitsdaten (Hinweis und Meldung)
@@ -1757,7 +1775,7 @@ FEHLER_CODES = {
 # Codes, die das Programm nur als Hinweis meldet – sie ändern den Status nie
 HINWEIS_CODES = frozenset({
     "ABGEBROCHEN", "AUSGABE_PRUEFEN", "BILDER_ABGEDECKT", "BILDER_ENTFERNT", "BILDER_UNGEPRUEFT",
-    "FORMULAR_EINGEBRANNT", "GESUNDHEITSDATEN", "LEERE_SEITEN", "LICHTBILD",
+    "FORMULAR_EINGEBRANNT", "GESUNDHEITSDATEN", "KI_ZWEITPRUEFUNG", "LEERE_SEITEN", "LICHTBILD",
     "NACHBARWORT_BESCHAEDIGT", "NEBENKANAL_ENTFERNT", "NICHTS_GESCHWAERZT", "NIE_FREIGABE", "OCR_GELESEN",
     "OCR_UNPLAUSIBEL", "PLATZHALTER_GEKUERZT", "RELIGION", "SEITE_ALS_BILD", "VEKTORGRAFIK", "WENIG_TEXT",
     "ZUORDNUNG"})
@@ -2599,6 +2617,14 @@ def analysiere_pdf(pdf_pfad: Path, aktive: set[str], whitelist: list[str], immer
                f"besonders sorgfältig prüfen!")
     if abbruch is not None and abbruch.is_set():
         return abgebrochen()
+    # KI-Zweitprüfung (nur eingeschaltet, nur LM Studio auf diesem Rechner): das Modell liest die Seiten hier – mit
+    # Fortschritt und Abbruch –, der Detektor "ki.zweitpruefung" nimmt die Antworten aus dem Zwischenspeicher
+    try:
+        ki_text = _ki.vorab(dok, melde=melde, abbruch=abbruch)
+    except _ki.KiAbbruch:
+        return abgebrochen()
+    if ki_text:
+        _melde(meldungen, hinweise, "hinweis", "KI_ZWEITPRUEFUNG", ki_text)
     if melde:
         melde(f"   Erkennung läuft: {pdf_pfad.name} …")
     ergebnis["funde"] = _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil=profil,

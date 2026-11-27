@@ -184,9 +184,11 @@ def test_gesundheit_ohne_kontext_nichts(text):
     assert wk.diagnosen_stellen(text) == []
 
 
-def test_gesundheit_nur_maximal_aktiv():
+def test_gesundheit_nur_aktiv_wenn_angehakt():
+    """Ohne angehakte Gesundheitsdaten („ausgewogen“) kein Treffer; seit 27.11. sind sie in „hoch“ und „maximal“ aktiv."""
     dok = dokument_aus_text("Diagnose: Asthma bronchiale (J45.9)")
-    assert not any(t.kategorie == "diagnose" for t in alle_treffer(dok, Kontext(muster.PROFILE["hoch"]["aktive"])))
+    assert not any(t.kategorie == "diagnose" for t in alle_treffer(dok, Kontext(muster.PROFILE["ausgewogen"]["aktive"])))
+    assert any(t.kategorie == "diagnose" for t in alle_treffer(dok, Kontext(muster.PROFILE["hoch"]["aktive"], "hoch")))
     assert any(t.kategorie == "diagnose" for t in alle_treffer(dok, Kontext(muster.PROFILE["maximal"]["aktive"],
                                                                             "maximal")))
 

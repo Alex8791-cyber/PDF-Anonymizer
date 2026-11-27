@@ -1249,7 +1249,11 @@ def test_attrappen_profile_aus_den_kategorien():
     standard = {e[0] for e in gui.KATEGORIEN if e[4]}
     for name in ("ausgewogen", "hoch", "maximal"):
         menge = attrappen.profil_kategorien(attrappen.PROFILE, name, alle)
-        assert menge is not None and menge >= standard - {"beruf", "arbeitgeber", "international"}
+        erwartet = standard - {"beruf", "arbeitgeber", "international"}
+        if name == "ausgewogen":
+            # Gesundheitsdaten: in „Ausgewogen“ nur angeboten, ab „Hoch“ geschwärzt (Entscheidung vom 27.11.)
+            erwartet -= {"diagnose", "medikament"}
+        assert menge is not None and menge >= erwartet
         assert "datum" not in menge                     # „alle Datumsangaben“ gehört zu keiner Stufe
     assert attrappen.profil_kategorien({"hoch": ["iban", "unbekannt"]}, "hoch", alle) == {"iban"}
     assert attrappen.profil_kategorien({"hoch": {"aktiv": {"iban": True, "email": False}}}, "hoch", alle) == {"iban"}
@@ -1824,17 +1828,18 @@ def test_religion_mit_echter_engine_abgewaehlt_angeboten(app, umgebung, dialoge)
 
 
 def test_gesundheitsdaten_mit_echter_engine_abgewaehlt_angeboten(app, umgebung, dialoge):
-    """„hoch“: Diagnose und Medikament stehen NICHT angehakt (⚕ – eigenes Zeichen der angebotenen Gesundheitsdaten,
-    Hinweis) in der Fundliste, die Meldung GESUNDHEITSDATEN steht in einfachem Deutsch im Protokoll und im
-    Abschlussdialog; eine angehakte Diagnose wird geschwärzt, das nicht angehakte Medikament bleibt lesbar. „Maximal“:
-    angehakt und geschwärzt, keine Meldung, kein Zeichen."""
+    """„Ausgewogen“: Diagnose und Medikament stehen NICHT angehakt (⚕ – eigenes Zeichen der angebotenen
+    Gesundheitsdaten, Hinweis) in der Fundliste, die Meldung GESUNDHEITSDATEN steht in einfachem Deutsch im Protokoll
+    und im Abschlussdialog; eine angehakte Diagnose wird geschwärzt, das nicht angehakte Medikament bleibt lesbar.
+    „Hoch“ (seit der Entscheidung vom 27.11.) und „Maximal“: angehakt und geschwärzt, keine Meldung, kein Zeichen."""
     tmp = umgebung["tmp"]
     pdf = pdf_schreiben(tmp / "Arztbericht.pdf", ARZTBERICHT)
-    app.kategorie_vars["namen"].set(False)              # kein Sprachmodell nötig; Grundstufe bleibt „hoch“
-    assert app.basis_profil == "hoch"
+    app.profil_knoepfe["ausgewogen"].invoke()
+    app.kategorie_vars["namen"].set(False)              # kein Sprachmodell nötig; Grundstufe bleibt „ausgewogen“
+    assert app.basis_profil == "ausgewogen"
     analysiere(app, [pdf])
     ergebnis = app.analyse_ergebnisse[pdf]
-    assert ergebnis["profil"] == "hoch" and "GESUNDHEITSDATEN" in gui.meldungs_codes(ergebnis)
+    assert ergebnis["profil"] == "ausgewogen" and "GESUNDHEITSDATEN" in gui.meldungs_codes(ergebnis)
     zeilen = {app.baum.item(k, "values")[1]: k for k in app.baum.get_children(str(pdf))}
     dia, med = zeilen["Lumboischialgie links (M54.4)"], zeilen["Ibuprofen 600 mg bei Bedarf"]
     for k in (dia, med):
@@ -1858,18 +1863,19 @@ def test_gesundheitsdaten_mit_echter_engine_abgewaehlt_angeboten(app, umgebung, 
     assert "Lumboischialgie" not in aus and "[DIAGNOSE]" in aus and "DE89" not in aus
     assert "Ibuprofen 600 mg" in aus                     # nicht angehakt: bleibt lesbar
 
-    app.profil_knoepfe["maximal"].invoke()
-    app.kategorie_vars["namen"].set(False)
-    assert app.basis_profil == "maximal"
-    starte_lauf(app, app.analysieren)
-    ergebnis = app.analyse_ergebnisse[pdf]
-    assert ergebnis["profil"] == "maximal" and "GESUNDHEITSDATEN" not in gui.meldungs_codes(ergebnis)
-    kinder = app.baum.get_children(str(pdf))
-    assert kinder and all(app._zustand(k) == "an" for k in kinder)
-    assert not any(app.baum.item(k, "values")[0].startswith(("⚑", "⚕")) for k in kinder)
-    starte_lauf(app, app.schwaerzen, timeout=120)
-    aus = _ausgabe_text(app, pdf)
-    assert "Lumboischialgie" not in aus and "Ibuprofen" not in aus and "[MEDIKAMENT]" in aus
+    for stufe in ("hoch", "maximal"):
+        app.profil_knoepfe[stufe].invoke()
+        app.kategorie_vars["namen"].set(False)
+        assert app.basis_profil == stufe
+        starte_lauf(app, app.analysieren)
+        ergebnis = app.analyse_ergebnisse[pdf]
+        assert ergebnis["profil"] == stufe and "GESUNDHEITSDATEN" not in gui.meldungs_codes(ergebnis)
+        kinder = app.baum.get_children(str(pdf))
+        assert kinder and all(app._zustand(k) == "an" for k in kinder)
+        assert not any(app.baum.item(k, "values")[0].startswith(("⚑", "⚕")) for k in kinder)
+        starte_lauf(app, app.schwaerzen, timeout=120)
+        aus = _ausgabe_text(app, pdf)
+        assert "Lumboischialgie" not in aus and "Ibuprofen" not in aus and "[MEDIKAMENT]" in aus, stufe
 
 
 def test_vorschau_klick_trifft_die_innere_stelle(app, umgebung, dialoge):
@@ -1879,6 +1885,7 @@ def test_vorschau_klick_trifft_die_innere_stelle(app, umgebung, dialoge):
     tmp = umgebung["tmp"]
     pdf = pdf_schreiben(tmp / "Bericht.pdf", "Diagnose: Diabetes mellitus Typ 2 bei Herrn Meier\n"
                                              "IBAN DE89 3704 0044 0532 0130 00\n")
+    app.profil_knoepfe["ausgewogen"].invoke()           # dort ist die Diagnose nur angeboten (in „Hoch“ angehakt)
     app.kategorie_vars["namen"].set(False)
     app.immer_feld.insert("1.0", "Meier")
     analysiere(app, [pdf])
@@ -2076,11 +2083,13 @@ def test_maximal_ohne_gesundheitsdaten_bleibt_maximal(app, umgebung, monkeypatch
     from anonymisierer import muster
     app.profil_knoepfe["maximal"].invoke()
     assert app.profil_var.get() == "maximal" and app.basis_profil == "maximal"
-    _kategorie_knopf(app, "diagnose").invoke()
-    assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "maximal"
-    _kategorie_knopf(app, "medikament").invoke()
-    _kategorie_knopf(app, "religion").invoke()       # seit Runde 5 gehört auch die Konfession (Art. 9) zu „Maximal“
+    # seit Runde 5 gehört die Konfession (Art. 9) zu „Maximal“, seit 27.11. die Gesundheitsdaten schon zu „Hoch“:
+    # „Maximal“ ohne Konfession ist dieselbe Menge wie „Hoch“
+    _kategorie_knopf(app, "religion").invoke()
     assert app._aktive_kategorien() == app.profil_kategorien("hoch")        # dieselbe Menge wie „Hoch“
+    assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "maximal"
+    _kategorie_knopf(app, "diagnose").invoke()
+    _kategorie_knopf(app, "medikament").invoke()
     assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "maximal"
     text = app.profil_beschreibung.cget("text")
     assert "„Maximal“" in text and "Gesundheitsdaten werden gemeldet und abgewählt angeboten" in text, text
@@ -2116,13 +2125,12 @@ def test_maximal_ohne_gesundheitsdaten_bleibt_maximal(app, umgebung, monkeypatch
     assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "maximal"
     # auch „Hoch“ springt beim Abwählen nicht auf das schwächere „Ausgewogen“ …
     app.profil_knoepfe["hoch"].invoke()
-    for schluessel in ("beruf", "arbeitgeber", "international", "ort"):
+    for schluessel in ("beruf", "arbeitgeber", "international", "ort", "diagnose", "medikament"):
         _kategorie_knopf(app, schluessel).invoke()
+    assert app._aktive_kategorien() == app.profil_kategorien("ausgewogen")
     assert app.profil_var.get() == "benutzerdefiniert" and app.basis_profil == "hoch"
-    # … nach oben aber weiter: „Hoch“ + Diagnosen + Medikamente + Konfession = „Maximal“
+    # … nach oben aber weiter: „Hoch“ + Konfession = „Maximal“
     app.profil_knoepfe["hoch"].invoke()
-    _kategorie_knopf(app, "diagnose").invoke()
-    _kategorie_knopf(app, "medikament").invoke()
     _kategorie_knopf(app, "religion").invoke()
     assert app.profil_var.get() == "maximal" and app.basis_profil == "maximal"
 
@@ -2161,7 +2169,8 @@ def test_abschlussdialog_nennt_kein_zeichen_angehakter_zeilen(app, umgebung, mon
                                                         "Konto DE89 3704 0044 0532 0130 01\n"
                                                         "Diagnose: Lumboischialgie links (M54.4)\n"
                                                         "Medikation: Ibuprofen 600 mg bei Bedarf\n")
-    app.kategorie_vars["namen"].set(False)              # kein Sprachmodell nötig; Grundstufe bleibt „hoch“
+    app.profil_knoepfe["ausgewogen"].invoke()           # Gesundheitsdaten nur angeboten (in „Hoch“ seit 27.11. angehakt)
+    app.kategorie_vars["namen"].set(False)              # kein Sprachmodell nötig; Grundstufe bleibt „ausgewogen“
     analysiere(app, [antrag, bericht])
     zeilen = {app.baum.item(k, "values")[1]: k for k in app.baum.get_children(str(bericht))}
     vertrag, iban = zeilen["BU-2025-448811"], zeilen["DE89 3704 0044 0532 0130 01"]
