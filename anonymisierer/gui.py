@@ -244,9 +244,9 @@ def _texte_zur_engine(neue_kategorien: bool) -> tuple[str, str, str]:
                   "erkennt sie. Nicht erkannt: Unterschriften, Handschrift, Freitext; Text in Bildern nur unsicher "
                   "(OCR).")
         grenzen_kopf = "NICHT oder nur teilweise erkannt werden:\n"
-        grenzen_umfang = ("  • Diagnosen, Krankheiten, Medikamente: nur bekannte Begriffe, angehakt erst in der "
-                          "Schutzstufe „Maximal“ (sonst gemeldet und nicht angehakt in der Fundliste angeboten, "
-                          "Zeichen ⚕)\n"
+        grenzen_umfang = ("  • Diagnosen, Krankheiten, Medikamente: nur bekannte Begriffe, angehakt ab der "
+                          "Schutzstufe „Hoch“ (in „Ausgewogen“ – und in „Hoch“ bei allgemeinen Fachbegriffen ohne "
+                          "Personenbezug – gemeldet und nicht angehakt in der Fundliste angeboten, Zeichen ⚕)\n"
                           "  • Konfession (Kirchensteuermerkmal „rk“/„ev“): nur hinter ihrem Etikett oder unter dem "
                           "Spaltenkopf „Konf.“, angehakt erst in „Maximal“ (sonst gemeldet und nicht angehakt "
                           "angeboten, Zeichen ⚑)\n"
@@ -4440,7 +4440,7 @@ class AnonymisiererApp:
                       f"anderen Dateien dieses Laufs ergänzt.", "hinweis")
 
         gesamt = sum(len(e["funde"]) for e in ergebnisse.values())
-        # „nur angeboten“ = alle Stellen abgewählt (Gesundheitsdaten in „Hoch“); angehakt zählt wie der Schwärzen-Knopf
+        # „nur angeboten“ = alle Stellen abgewählt (Gesundheitsdaten in „Ausgewogen“); angehakt zählt wie der Schwärzen-Knopf
         # (Funde und manuelle Markierungen dieser Dateien, auch teilweise angehakt)
         angeboten_funde = [e["funde"][i] for pdf, e in ergebnisse.items() for i in range(len(e["funde"]))
                            if self.fund_zustand(pdf, i) == "aus"]
