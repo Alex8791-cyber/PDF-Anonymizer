@@ -699,7 +699,7 @@ def test_icon_ico_im_projekt_und_generator_ohne_pil(tmp_path):
     modul = _programmsymbol_modul()
     for quelle in (WURZEL / "icon.ico", modul.symbol_erzeugen(tmp_path / "neu.ico")):
         eintraege = modul.ico_lesen(quelle.read_bytes())
-        assert sorted(e["groesse"] for e in eintraege) == [16, 32, 48, 256]
+        assert sorted(e["groesse"] for e in eintraege) == [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
         for e in eintraege:
             assert e["bits"] == 32
             if e["groesse"] == 256:

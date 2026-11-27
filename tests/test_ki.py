@@ -433,3 +433,38 @@ def test_schwaerzung_meldet_entfallene_verdachtsstellen(lmstudio):
     bleibt = schwaerzung._ki_verdacht_filtern(lauf, [_v(0, 10, "Regen"), _v(2, -1, "", "Seite ungelesen")])
     assert [v.text for v in bleibt] == [""]
     assert lauf.meldungen[0]["code"] == "KI_ZWEITPRUEFUNG" and "„Regen“" in lauf.meldungen[0]["text"]
+
+
+# ----------------------------------------------------------------------
+# Prüfwerkzeug werkzeuge/ki_test.py (KI-testen.bat)
+# ----------------------------------------------------------------------
+def _ki_test_modul():
+    import importlib.util
+    from pathlib import Path
+    pfad = Path(__file__).resolve().parent.parent / "werkzeuge" / "ki_test.py"
+    spec = importlib.util.spec_from_file_location("ki_test", pfad)
+    modul = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modul)
+    return modul
+
+
+def test_ki_test_werkzeug_einsatzbereit(lmstudio, capsys):
+    lmstudio.funde = [{"text": "Quirin Sedlbauer", "art": "name", "sicher": True},
+                      {"text": "KV-2024-88812", "art": "kennung", "sicher": True},
+                      {"text": "DE89 3704 0044 0532 0130 00", "art": "iban", "sicher": True}]
+    lmstudio.urteile = [{"nr": 1, "urteil": "nein"}]
+    assert _ki_test_modul().main(["--url", lmstudio.url]) == 0
+    ausgabe = capsys.readouterr().out
+    assert "Geladenes Modell: qwen3-27b" in ausgabe and "einsatzbereit" in ausgabe
+
+
+def test_ki_test_werkzeug_meldet_schwaches_modell(lmstudio, capsys):
+    lmstudio.funde = [{"text": "Quirin Sedlbauer", "art": "name", "sicher": True}]
+    lmstudio.urteile = [{"nr": 1, "urteil": "ja"}]
+    assert _ki_test_modul().main(["--url", lmstudio.url]) == 2
+    assert "Nicht erkannt: KV-2024-88812" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:9", "http://10.1.2.3:1234"])
+def test_ki_test_werkzeug_ohne_lm_studio_oder_fremde_adresse(url, capsys):
+    assert _ki_test_modul().main(["--url", url]) == 1

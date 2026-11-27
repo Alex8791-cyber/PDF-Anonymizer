@@ -6,10 +6,29 @@ Alle nennenswerten Änderungen am PDF-Anonymisierer. Das Format folgt
 
 ## [Unreleased]
 
-Seit 0.2.0 sind Erkennung, Schwärzung, die Prüfung der Ausgabe und die Oberfläche in großen Teilen neu
-gebaut. Zuerst steht, was sich an der gewohnten Arbeit ändert, danach Neues, weitere Änderungen,
+## [0.9.0] – 2026-11-27
+
+Vorabversion für den Pilot mit echten Unterlagen; Version 1.0.0 folgt nach dem Pilot. Seit 0.2.0 sind Erkennung,
+Schwärzung, die Prüfung der Ausgabe und die Oberfläche in großen Teilen neu gebaut. Zuerst steht, was sich an der
+gewohnten Arbeit ändert, danach Neues, weitere Änderungen,
 Fehlerbehebungen und Sicherheit, dann ein kurzer Teil für Entwickler. Am Ende folgen die Änderungen aus dem
 Review „Auslieferung/Doku“ (AD-01 … AD-08).
+
+### Auf dem neuesten Stand (Entscheidung vom 27.11., Nr. 5)
+
+- **Version 0.9.0** (Vorabversion für den Pilot; 1.0.0 nach dem Pilot) – Programm, EXE-Versionsinfo und CHANGELOG.
+- **Programmsymbol:** Blatt mit Schwärzungsbalken, ab 32 Pixeln mit grünem Schutzschild und Haken; icon.ico enthält
+  jetzt alle Größen, die Windows bei 100 % bis 200 % Skalierung wählt (16, 20, 24, 32, 40, 48, 64, 96, 128, 256 Pixel)
+  – scharf in Taskleiste, Explorer und auf dem Desktop.
+- **Code-Signatur vorbereitet:** EXE-bauen.bat signiert die EXE vor dem Packen der ZIP, wenn ein Zertifikat angegeben
+  ist (`PDFA_SIGNATUR_PFX`, `PDFA_SIGNATUR_KENNWORT`; SHA-256 mit Zeitstempel, signtool aus dem Windows SDK). Die
+  GitHub-Action tut dasselbe, sobald das Repository die Geheimnisse `CODESIGN_PFX_BASE64` und
+  `CODESIGN_PFX_KENNWORT` hat, und prüft die Signatur danach. Ohne Zertifikat bleibt alles wie bisher (unsigniert).
+- **KI-testen.bat / werkzeuge/ki_test.py:** prüft mit erfundenen Beispieldaten, ob LM Studio läuft, welches Modell
+  geladen ist, wie schnell es antwortet und ob es Name, Vertragsnummer und IBAN erkennt und „Regen“ im Wettersatz
+  nicht für einen Namen hält.
+- Abhängigkeiten: Die Bereichs-Pins lassen die neuesten Fassungen zu (PyMuPDF 2.2, spaCy 3.8.18, PyInstaller 6.22,
+  pytest 9.2); Python 3.12 für die EXE.
 
 ### Organe in Pflichtangaben lesbar (Entscheidung vom 27.11., Nr. 6)
 

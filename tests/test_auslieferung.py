@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 WURZEL = Path(__file__).resolve().parent.parent
-BATCHES = ("Installieren.bat", "EXE-bauen.bat", "Starten.bat")
+BATCHES = ("Installieren.bat", "EXE-bauen.bat", "Starten.bat", "KI-testen.bat")
 MODELL_URL_MUSTER = r"^de_core_news_md @ (https://\S+/(de_core_news_md-(\d+)\.(\d+)\.\d+-py3-none-any\.whl))$"
 
 

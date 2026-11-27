@@ -157,7 +157,7 @@ START_TEXT = "  Schwärzen starten  "
 VORSCHAU_TEXT = "Vorschau …"
 # Tastenkürzel (Alt + Buchstabe); der Buchstabe ist im Knopf unterstrichen (M-67)
 KUERZEL = {"analyse": "a", "start": "s", "vorschau": "v"}
-SYMBOL_GROESSEN = (16, 32, 48, 64)        # Fenstersymbol (iconphoto); icon.ico enthält 16, 32, 48 und 256
+SYMBOL_GROESSEN = (16, 32, 48, 64)        # Fenstersymbol (iconphoto); icon.ico: werkzeuge/programmsymbol.py
 ERSTSTART_TITEL = "Bitte vor der ersten Nutzung lesen"
 # Unterschrift und Handschrift in „Maximal“: abgedeckt nur als eigenes Rasterbild einer digitalen Seite – auf Scans
 # und Fotos entfernt die Fotoerkennung Striche vorab (fotos.STRICH_MM), gezeichnete Linien (Vektorgrafik) sieht die
@@ -641,9 +641,37 @@ def _nebenkanal_text(nk: dict) -> str:
     return ", ".join(teile) or "Metadaten/Anhänge"
 
 
+SYMBOL_SCHILD_AB = 32            # ab dieser Größe trägt das Symbol das Schutzschild (darunter wäre es ein Fleck)
+
+
+def _schild_zeichnen(form, n: int) -> None:
+    """Schutzschild mit Haken unten rechts auf dem Blatt (geprüft, geschützt): grün mit weißem Rand, damit es sich
+    vom blauen Blatt abhebt – auf hellem wie auf dunklem Hintergrund."""
+    gruen, weiss = (0.09, 0.56, 0.31), (1, 1, 1)
+    breite, hoehe = n * 0.46, n * 0.52
+    links, oben = n - breite - n * 0.02, n - hoehe - n * 0.01
+    mitte = links + breite / 2
+
+    def umriss(einzug: float) -> list:
+        l, r, o = links + einzug, links + breite - einzug, oben + einzug
+        u = oben + hoehe - einzug * 1.4
+        schulter = o + (u - o) * 0.42
+        return [fitz.Point(l, o + (u - o) * 0.08), fitz.Point(mitte, o), fitz.Point(r, o + (u - o) * 0.08),
+                fitz.Point(r, schulter), fitz.Point(mitte, u), fitz.Point(l, schulter), fitz.Point(l, o + (u - o) * 0.08)]
+    form.draw_polyline(umriss(0))
+    form.finish(color=None, fill=weiss, closePath=True)
+    form.draw_polyline(umriss(max(1.0, n / 28)))
+    form.finish(color=None, fill=gruen, closePath=True)
+    haken = [fitz.Point(links + breite * 0.28, oben + hoehe * 0.47), fitz.Point(links + breite * 0.45, oben + hoehe * 0.64),
+             fitz.Point(links + breite * 0.74, oben + hoehe * 0.30)]
+    form.draw_polyline(haken)
+    form.finish(color=weiss, fill=None, width=max(1.5, n / 13), lineCap=1, lineJoin=1, closePath=False)
+
+
 def programm_symbol_png(groesse: int) -> bytes:
     """Programmsymbol als PNG (groesse × groesse Pixel, durchsichtiger Hintergrund), mit PyMuPDF gezeichnet: ein
-    Blatt mit umgeknickter Ecke, schwarzen Balken (geschwärzte Stellen) und grauen Textzeilen. Dieselbe Zeichnung
+    Blatt mit umgeknickter Ecke, schwarzen Balken (geschwärzte Stellen) und grauen Textzeilen, ab SYMBOL_SCHILD_AB
+    Pixeln mit grünem Schutzschild und Haken (geprüft, geschützt). Dieselbe Zeichnung
     schreibt werkzeuge/programmsymbol.py in icon.ico (EXE und Desktop-Verknüpfung). Ganzzahlige Kanten, damit
     das Symbol auch mit 16 Pixeln scharf bleibt."""
     n = int(groesse)
@@ -686,6 +714,8 @@ def programm_symbol_png(groesse: int) -> bytes:
             form.draw_rect(fitz.Rect(innen_x0, y + versatz, ende, y + versatz + zeile_h))
             form.finish(color=None, fill=schwarz if balken else grau)
             y += hoehe + abstand
+        if n >= SYMBOL_SCHILD_AB:
+            _schild_zeichnen(form, n)
         form.commit()
         return seite.get_pixmap(alpha=True).tobytes("png")
     finally:

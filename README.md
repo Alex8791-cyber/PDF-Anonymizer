@@ -460,6 +460,10 @@ Wer [LM Studio](https://lmstudio.ai) auf demselben Rechner nutzt, kann ein lokal
    Programm nutzt immer das Modell, das gerade in LM Studio geladen ist – ein Modellwechsel braucht keine Einstellung.
 3. Wie gewohnt analysieren und schwärzen.
 
+Ob alles bereit ist, zeigt `KI-testen.bat` (Skript-Version, Doppelklick): geladenes Modell, Antwortzeit und ob es
+erfundene Beispielwerte (Name, Vertragsnummer, IBAN) erkennt und „Regen“ im Wettersatz nicht für einen Namen hält.
+In der EXE-Version steht das geladene Modell neben dem Schalter.
+
 Was die KI tut:
 
 - **Zweite Erkennung:** Das Modell liest jede Seite und nennt personenbezogene Daten. Was es eindeutig erkennt und
@@ -671,10 +675,13 @@ Tesseract** – nur den entpackten Ordner. Auch die Visual-C++-Laufzeit liegt da
   Erkennungsmodul oder das Sprachmodell, meldet das Programm das, statt still weniger zu
   erkennen (die Ausgaben heißen dann `_PRUEFEN`) – dann den Ordner vollständig neu entpacken.
 - **SmartScreen:** Beim ersten Start erscheint „Der Computer wurde durch Windows
-  geschützt“ → „Weitere Informationen“ → „Trotzdem ausführen“. Die EXE ist nicht
-  signiert; die Warnung kommt nach jedem neuen Build wieder. Dauerhaft hilft nur eine
-  Code-Signatur (Herausgeberzertifikat oder Azure Trusted Signing, kostenpflichtig;
-  `signtool`-Aufruf steht am Ende von `EXE-bauen.bat`).
+  geschützt“ → „Weitere Informationen“ → „Trotzdem ausführen“. Ohne Code-Signatur kommt die
+  Warnung nach jedem neuen Build wieder. Dauerhaft hilft nur eine Code-Signatur
+  (Code-Signing-Zertifikat eines Herausgebers oder Azure Trusted Signing, kostenpflichtig).
+  Mit Zertifikat signiert `EXE-bauen.bat` selbst: vorher `set PDFA_SIGNATUR_PFX=C:\Pfad\zertifikat.pfx`
+  und `set PDFA_SIGNATUR_KENNWORT=…` setzen (signtool aus dem Windows SDK; SHA-256 mit
+  Zeitstempel). Die GitHub-Action signiert, sobald das Repository die Geheimnisse
+  `CODESIGN_PFX_BASE64` (Zertifikat als Base64) und `CODESIGN_PFX_KENNWORT` hat.
 - **Firmennetze:** Bei AppLocker-/Defender-Richtlinien muss die IT die EXE freigeben.
   Virenscanner melden PyInstaller-Programme gelegentlich fälschlich – dann die Datei
   beim Hersteller als Fehlalarm melden.

@@ -147,6 +147,24 @@ jobs:
         run: |
           python -m pip install --only-binary=:all: -r requirements.txt -r requirements-dev.txt
 
+      # Code-Signatur: nur wenn das Repository die Geheimnisse CODESIGN_PFX_BASE64 (Zertifikat als Base64) und
+      # CODESIGN_PFX_KENNWORT hat. Das Zertifikat landet in einer temporären Datei, EXE-bauen.bat signiert damit vor
+      # dem Packen der ZIP (SHA-256 mit Zeitstempel). Ohne Geheimnisse - auch bei Pull Requests aus Forks - bleibt
+      # die EXE unsigniert wie bisher.
+      - name: Signaturzertifikat bereitstellen (falls hinterlegt)
+        shell: pwsh
+        timeout-minutes: 2
+        env:
+          PFX_B64: ${{ secrets.CODESIGN_PFX_BASE64 }}
+          PFX_KENNWORT: ${{ secrets.CODESIGN_PFX_KENNWORT }}
+        run: |
+          if (-not $env:PFX_B64) { "Kein Signaturzertifikat hinterlegt - die EXE bleibt unsigniert."; exit 0 }
+          $pfad = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          [IO.File]::WriteAllBytes($pfad, [Convert]::FromBase64String($env:PFX_B64))
+          "PDFA_SIGNATUR_PFX=$pfad" >> $env:GITHUB_ENV
+          "PDFA_SIGNATUR_KENNWORT=$env:PFX_KENNWORT" >> $env:GITHUB_ENV
+          "Signaturzertifikat bereitgestellt."
+
       # .python_pfad.txt zeigt - wie nach Installieren.bat - auf das Python dieses Laufs.
       # "< NUL" beantwortet das "pause" am Ende der Batchdatei.
       - name: EXE-bauen.bat
@@ -188,6 +206,9 @@ jobs:
           }
           "{0}: {1:N0} MB, {2} Eintraege; Ordner {3:N0} MB" -f $zip.Name, ($zip.Length / 1MB), $eintraege.Count,
             ((Get-ChildItem $ordner -Recurse -File | Measure-Object Length -Sum).Sum / 1MB)
+          $signatur = Get-AuthenticodeSignature "$ordner\PDF-Anonymisierer.exe"
+          "Code-Signatur: $($signatur.Status) $($signatur.SignerCertificate.Subject)"
+          if ($env:PDFA_SIGNATUR_PFX -and $signatur.Status -ne "Valid") { throw "EXE sollte signiert sein, ist es aber nicht" }
           "zipname=$($zip.BaseName)" >> $env:GITHUB_OUTPUT
 
       - name: Rauchtest - EXE startet, zeigt ihr Fenster und schreibt keine fehler.log

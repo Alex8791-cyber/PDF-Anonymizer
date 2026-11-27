@@ -126,6 +126,24 @@ if not exist "dist\PDF-Anonymisierer\THIRD_PARTY_NOTICES.md" goto fehler_lizenz
 if not exist "dist\PDF-Anonymisierer\README.md" goto fehler_lizenz
 if not exist "dist\PDF-Anonymisierer\licenses\AGPL-3.0.txt" goto fehler_lizenz
 
+REM --- Code-Signatur (nur mit Zertifikat) -------------------------------
+REM PDFA_SIGNATUR_PFX: Pfad zu einem Code-Signing-Zertifikat (.pfx), PDFA_SIGNATUR_KENNWORT: sein
+REM Kennwort. Ohne diese Angaben bleibt die EXE unsigniert (SmartScreen-Hinweis beim ersten Start,
+REM siehe Hinweise am Ende). Signiert wird mit SHA-256 und Zeitstempel - die Signatur bleibt damit
+REM auch nach Ablauf des Zertifikats gueltig. signtool.exe kommt aus dem Windows SDK.
+if not defined PDFA_SIGNATUR_PFX goto signatur_ende
+if not exist "%PDFA_SIGNATUR_PFX%" goto fehler_signatur
+set "SIGNTOOL="
+for /f "delims=" %%s in ('where signtool.exe 2^>nul') do if not defined SIGNTOOL set "SIGNTOOL=%%s"
+set "KITS=%ProgramFiles(x86)%\Windows Kits\10\bin"
+if not defined SIGNTOOL if exist "%KITS%" for /f "delims=" %%s in ('where /r "%KITS%" signtool.exe 2^>nul ^| findstr /i "\\x64\\"') do set "SIGNTOOL=%%s"
+if not defined SIGNTOOL goto fehler_signatur
+echo       Signiere PDF-Anonymisierer.exe ...
+"%SIGNTOOL%" sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "%PDFA_SIGNATUR_PFX%" /p "%PDFA_SIGNATUR_KENNWORT%" "dist\PDF-Anonymisierer\PDF-Anonymisierer.exe"
+if errorlevel 1 goto fehler_signatur
+echo       Signatur gesetzt.
+:signatur_ende
+
 REM --- [4/4] ZIP ---------------------------------------------------
 echo [4/4] Packe dist\PDF-Anonymisierer-%VERSION%-windows-x64.zip ...
 if exist "dist\PDF-Anonymisierer-%VERSION%-windows-x64.zip" del "dist\PDF-Anonymisierer-%VERSION%-windows-x64.zip"
@@ -153,9 +171,10 @@ echo   - Windows SmartScreen meldet beim ersten Start "Der Computer wurde durch
 echo     Windows geschuetzt": "Weitere Informationen" - "Trotzdem ausfuehren".
 echo     Das kommt bei jedem neuen Build wieder, weil die EXE nicht signiert ist.
 echo   - Dauerhaft verschwindet die Warnung nur mit einer Code-Signatur
-echo     ^(Zertifikat eines Herausgebers oder Azure Trusted Signing, kostenpflichtig^):
-echo       signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 ^^
-echo         /a dist\PDF-Anonymisierer\PDF-Anonymisierer.exe
+echo     ^(Zertifikat eines Herausgebers oder Azure Trusted Signing, kostenpflichtig^).
+echo     Mit Zertifikat signiert dieses Skript selbst: vorher setzen
+echo       set PDFA_SIGNATUR_PFX=C:\Pfad\zum\zertifikat.pfx
+echo       set PDFA_SIGNATUR_KENNWORT=...
 echo   - In verwalteten Firmennetzen ^(AppLocker, Defender-Richtlinien^) muss die
 echo     IT die EXE ggf. freigeben; bei Virenscanner-Fehlalarm die Datei beim
 echo     Hersteller als Fehlalarm melden.
@@ -273,6 +292,15 @@ echo bzw. _internal\vcruntime140_1.dll^). Ohne sie startet die EXE nur auf Rechn
 echo denen die "Microsoft Visual C++ 2015-2022 Redistributable (x64)" installiert ist.
 echo PyInstaller packt beide sonst selbst ein - bitte die Meldungen von PyInstaller oben
 echo pruefen und erneut bauen.
+pause
+popd
+exit /b 1
+
+:fehler_signatur
+echo.
+echo FEHLER: Die EXE konnte nicht signiert werden. Zertifikat ^(PDFA_SIGNATUR_PFX^),
+echo Kennwort ^(PDFA_SIGNATUR_KENNWORT^) und signtool.exe ^(Windows SDK^) pruefen - oder
+echo PDFA_SIGNATUR_PFX leeren, dann entsteht eine unsignierte EXE.
 pause
 popd
 exit /b 1

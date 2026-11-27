@@ -1,9 +1,11 @@
 """Programmsymbol icon.ico erzeugen (M-27/M-67) – ohne PIL.
 
-Die Zeichnung (ein Blatt mit umgeknickter Ecke, schwarzen Balken und grauen Textzeilen) macht PyMuPDF:
-anonymisierer.gui.programm_symbol_png – dieselbe Funktion setzt zur Laufzeit das Fenstersymbol. Dieses Skript
-schreibt daraus den ICO-Container selbst:
-  * 16, 32 und 48 Pixel als 32-Bit-Bitmap mit Alphakanal (so lesen es alle Windows-Versionen, Tk und PyInstaller),
+Die Zeichnung (ein Blatt mit umgeknickter Ecke, schwarzen Balken und grauen Textzeilen, ab 32 Pixeln mit grünem
+Schutzschild) macht PyMuPDF: anonymisierer.gui.programm_symbol_png – dieselbe Funktion setzt zur Laufzeit das
+Fenstersymbol. Dieses Skript schreibt daraus den ICO-Container selbst:
+  * 16, 20, 24, 32, 40, 48, 64, 96 und 128 Pixel als 32-Bit-Bitmap mit Alphakanal (so lesen es alle
+    Windows-Versionen, Tk und PyInstaller) – jede Größe, die Windows bei 100 %, 125 %, 150 % und 200 % Skalierung
+    für Taskleiste, Explorer und Desktop wählt, ist gezeichnet statt hochgerechnet: scharf auf jedem Bildschirm,
   * 256 Pixel als PNG (üblich seit Windows Vista).
 
 Aufruf (im Projektordner):   python werkzeuge/programmsymbol.py [Zielpfad]
@@ -16,7 +18,7 @@ import sys
 from pathlib import Path
 
 WURZEL = Path(__file__).resolve().parent.parent
-GROESSEN = (16, 32, 48, 256)
+GROESSEN = (16, 20, 24, 32, 40, 48, 64, 96, 128, 256)
 PNG_AB = 256                      # ab dieser Größe als PNG gespeichert, darunter als Bitmap
 
 
