@@ -7,6 +7,7 @@ arbeitet das Programm wie ohne KI und sagt es; Verdachtsstellen entfallen nur mi
 """
 import json
 import threading
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import fitz
@@ -35,7 +36,9 @@ class _Server(ThreadingHTTPServer):
         self.urteile = []                   # Antwort auf Urteils-Anfragen
         self.schema_ablehnen = False        # alte Fassung: response_format -> 400
         self.inhalt_roh = None              # Antworttext statt JSON (z. B. mit <think>)
+        self.abbrechen = False              # Antwort bricht mitten ab (LM Studio beendet, Modell entladen)
         self.anfragen = []
+        self.modellabfragen = 0
 
     @property
     def url(self):
@@ -56,6 +59,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         s = self.server
+        s.modellabfragen += 1
         antwort = {"/api/v1/models": s.modelle_v1, "/api/v0/models": s.modelle_v0,
                    "/v1/models": s.modelle_openai}.get(self.path)
         if antwort is None:
@@ -70,6 +74,15 @@ class _Handler(BaseHTTPRequestHandler):
         s.anfragen.append(daten)
         if self.path != "/v1/chat/completions":
             self._senden(404, {"error": "unbekannt"})
+            return
+        if s.abbrechen:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "4096")
+            self.end_headers()
+            self.wfile.write(b'{"choices": [{"message": ')
+            self.wfile.flush()
+            self.close_connection = True
             return
         if s.schema_ablehnen and "response_format" in daten:
             self._senden(400, {"error": "response_format nicht unterstützt"})
@@ -177,6 +190,22 @@ def test_lm_studio_laeuft_nicht(monkeypatch):
         assert "nicht erreichbar" in ki.status()
     finally:
         ki.zuruecksetzen()
+
+
+@pytest.mark.parametrize("fehler", [urllib.error.URLError(ConnectionRefusedError(10061, "Verbindung abgelehnt")),
+                                    TimeoutError("timed out"), ConnectionResetError(10054, "zurückgesetzt")])
+def test_ohne_lm_studio_nur_ein_verbindungsversuch(monkeypatch, fehler):
+    """Antwortet unter der Adresse niemand, werden die übrigen Pfade nicht mehr gefragt: Unter Windows dauert jeder
+    abgelehnte Verbindungsversuch rund 2 s (CI: 12 s für zwei Abfragen mit je drei Versuchen)."""
+    versuche = []
+
+    def niemand(url, daten=None, zeit=ki.ZEIT_SUCHE_S):
+        versuche.append(url)
+        raise fehler
+
+    monkeypatch.setattr(ki, "_anfrage", niemand)
+    assert ki.geladenes_modell("http://127.0.0.1:1234") is None
+    assert versuche == ["http://127.0.0.1:1234/api/v1/models"]
 
 
 def test_status_nennt_das_modell(lmstudio):
@@ -350,6 +379,36 @@ def test_pdf_analyse_ohne_lm_studio(monkeypatch, tmp_path):
     assert any(f["text"] == "Thomas Meier" for f in ergebnis["funde"])
     text = next(m["text"] for m in ergebnis["meldungen"] if m["code"] == "KI_ZWEITPRUEFUNG")
     assert "nicht möglich" in text and "nur die Regeln" in text
+
+
+def test_abgebrochene_antwort_faellt_auf_die_regeln_zurueck(lmstudio, tmp_path):
+    """LM Studio bricht die Antwort mitten ab (beendet, Modell entladen): Die Analyse endet ohne Fehler mit den Funden
+    der Regeln, das Protokoll sagt es – kein Ausfall einer Erkennungsregel, keine Ausnahme."""
+    lmstudio.abbrechen = True
+    ergebnis = analysiere_pdf(_pdf(tmp_path, "Versicherungsnehmer: Thomas Meier"),
+                              set(mu.PROFILE["hoch"]["aktive"]), [], [], profil="hoch")
+    assert ergebnis["fehler"] is None
+    assert any(f["text"] == "Thomas Meier" for f in ergebnis["funde"])
+    text = next(m["text"] for m in ergebnis["meldungen"] if m["code"] == "KI_ZWEITPRUEFUNG")
+    assert "unvollständig" in text and "nur die Regeln" in text
+    assert not any(m["code"] == "ERKENNUNG_FEHLER" for m in ergebnis["meldungen"])
+
+
+def test_nach_einem_ausfall_wird_das_geladene_modell_neu_gesucht(lmstudio):
+    """Nach einem Ausfall fragt die nächste Anfrage erst kurz, ob LM Studio noch läuft und welches Modell geladen ist –
+    statt erneut bis zu ZEIT_ANFRAGE_S auf ein hängendes LM Studio zu warten; ein inzwischen gewechseltes Modell gilt
+    sofort (Vorgabe des Maklers: stets das geladene Modell)."""
+    d = ki.dienst()
+    assert d.modell().kennung == "qwen3-27b"
+    abfragen = lmstudio.modellabfragen
+    lmstudio.abbrechen = True
+    with pytest.raises(ki.KiFehler):
+        d.personendaten("Rückfrage von Quirin Sedlbauer zum Schaden.")
+    assert lmstudio.modellabfragen == abfragen               # die Anfrage selbst nutzt die gemerkte Abfrage
+    lmstudio.abbrechen = False
+    lmstudio.modelle_v1 = {"models": [{"type": "llm", "key": "gemma-neu", "loaded_instances": [{"id": "gemma-neu"}]}]}
+    assert d.modell().kennung == "gemma-neu"
+    assert lmstudio.modellabfragen == abfragen + 1
 
 
 def test_abbruch_waehrend_das_modell_antwortet():

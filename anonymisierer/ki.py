@@ -23,6 +23,7 @@ Adresse: PDFA_KI_URL (Vorgabe http://127.0.0.1:1234).
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -77,14 +78,20 @@ _OEFFNER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def _anfrage(url: str, daten=None, zeit: float = ZEIT_SUCHE_S):
+    """JSON-Anfrage an LM Studio. Ein Abbruch mitten in der Antwort (LM Studio beendet, Modell entladen) kommt als
+    http.client.HTTPException – er wird wie jeder Verbindungsfehler zu URLError, damit die Aufrufer ihn wie
+    „nicht erreichbar“ behandeln (die Analyse fällt auf die Regeln zurück, statt abzubrechen)."""
     kopf = {"Accept": "application/json"}
     roh = None
     if daten is not None:
         roh = json.dumps(daten).encode("utf-8")
         kopf["Content-Type"] = "application/json"
     anfrage = urllib.request.Request(url, data=roh, headers=kopf, method="POST" if roh is not None else "GET")
-    with _OEFFNER.open(anfrage, timeout=zeit) as antwort:
-        return json.loads(antwort.read().decode("utf-8") or "null")
+    try:
+        with _OEFFNER.open(anfrage, timeout=zeit) as antwort:
+            return json.loads(antwort.read().decode("utf-8") or "null")
+    except http.client.HTTPException as e:
+        raise urllib.error.URLError(f"Verbindung abgebrochen ({type(e).__name__})") from e
 
 
 def _modelle_aus(antwort, nur_geladene: bool = True) -> list:
@@ -118,20 +125,25 @@ def _modelle_aus(antwort, nur_geladene: bool = True) -> list:
 
 
 def geladenes_modell(url: str | None = None) -> Modell | None:
-    """Das in LM Studio geladene Sprachmodell (erstes geladenes, kein Einbettungsmodell) oder None."""
+    """Das in LM Studio geladene Sprachmodell (erstes geladenes, kein Einbettungsmodell) oder None.
+
+    Antwortet unter der Adresse gar nichts (Verbindung abgelehnt, Zeitüberschreitung, Abbruch), werden die übrigen
+    Pfade nicht mehr gefragt – sie liegen auf demselben Server. Unter Windows dauert jeder abgelehnte
+    Verbindungsversuch rund 2 s; ohne laufendes LM Studio wartet das Programm so einmal statt dreimal."""
     basis = basis_url(url)
-    for pfad in ("/api/v1/models", "/api/v0/models"):
+    # /v1/models: ältere Fassungen, OpenAI-kompatible Liste (ohne Ladezustand – sie nennt geladene Modelle)
+    for pfad, nur_geladene in (("/api/v1/models", True), ("/api/v0/models", True), ("/v1/models", False)):
         try:
-            modelle = _modelle_aus(_anfrage(basis + pfad))
-        except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+            modelle = _modelle_aus(_anfrage(basis + pfad), nur_geladene=nur_geladene)
+        except urllib.error.HTTPError:
+            continue                    # der Server läuft, kennt den Pfad aber nicht (andere Fassung)
+        except (urllib.error.URLError, OSError):
+            return None                 # kein Server unter der Adresse
+        except ValueError:              # auch json.JSONDecodeError: Antwort unlesbar
             continue
         if modelle:
             return modelle[0]
-    try:  # ältere Fassungen: OpenAI-kompatible Liste (ohne Ladezustand – sie nennt geladene Modelle)
-        modelle = _modelle_aus(_anfrage(basis + "/v1/models"), nur_geladene=False)
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
-        return None
-    return modelle[0] if modelle else None
+    return None
 
 
 def _json_aus_text(text: str):
@@ -217,7 +229,9 @@ def vorab(dok, melde=None, abbruch=None) -> str | None:
             melde(f"   KI-Zweitprüfung ({modell.kennung}): Teil {i} von {len(alle)} …")
         try:
             d.personendaten(teil, abbruch=abbruch)
-        except KiFehler as e:
+        except KiAbbruch:
+            raise
+        except Exception as e:  # noqa: BLE001 - die KI ist eine Zugabe: ihr Ausfall darf die Analyse nie verhindern
             d.fehler.append(str(e))
             return f"KI-Zweitprüfung unvollständig ({e}) – für den Rest gelten nur die Regeln."
     return f"KI-Zweitprüfung mit {modell.kennung}: {len(alle)} Textteil(e) gelesen (nur auf diesem Rechner)."
@@ -286,6 +300,13 @@ class Dienst:
                 self._modell_zeit = jetzt
             return self._modell
 
+    def _modell_neu_suchen(self) -> None:
+        """Nach einem Ausfall die gemerkte Modellabfrage verwerfen: Die nächste Anfrage fragt erst kurz (ZEIT_SUCHE_S),
+        ob LM Studio noch läuft und welches Modell geladen ist – statt erneut bis zu ZEIT_ANFRAGE_S auf ein hängendes
+        oder beendetes LM Studio zu warten (und ein inzwischen gewechseltes Modell wird sofort genutzt)."""
+        with self._sperre:
+            self._modell_zeit = -1e9
+
     def _chat_json(self, auftrag: str, schema: dict, max_tokens: int = 4096, abbruch=None):
         modell = self.modell()
         if modell is None:
@@ -301,11 +322,15 @@ class Dienst:
                 antwort = _mit_abbruch(lambda: _anfrage(url, daten, self.zeit_anfrage), abbruch)
             except urllib.error.HTTPError as e:
                 if e.code not in (400, 422):
+                    self._modell_neu_suchen()
                     raise KiFehler(f"LM Studio antwortet mit Fehler {e.code}") from e
                 daten.pop("response_format")            # ältere Fassung ohne JSON-Schema
                 antwort = _mit_abbruch(lambda: _anfrage(url, daten, self.zeit_anfrage), abbruch)
-        except (urllib.error.URLError, OSError, ValueError) as e:
-            raise KiFehler(f"LM Studio nicht erreichbar oder Antwort unlesbar ({e})") from e
+        except (urllib.error.URLError, OSError) as e:
+            self._modell_neu_suchen()
+            raise KiFehler(f"LM Studio nicht erreichbar oder Verbindung abgebrochen ({e})") from e
+        except ValueError as e:
+            raise KiFehler(f"Antwort von LM Studio unlesbar ({e})") from e
         try:
             inhalt = antwort["choices"][0]["message"]["content"]
             return _json_aus_text(inhalt)

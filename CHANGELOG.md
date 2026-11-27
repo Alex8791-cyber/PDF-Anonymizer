@@ -72,8 +72,17 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   lehnt das Programm ab. Läuft LM Studio nicht oder ist kein Modell geladen, arbeitet das Programm wie ohne KI und
   sagt das im Protokoll. Fortschritt („KI-Zweitprüfung (Modell): Teil 2 von 5 …“) und Abbrechen wie gewohnt;
   Antworten werden je Modell und Text zwischengespeichert (eine zweite Analyse fragt nicht erneut).
+- **Ausfälle:**
+  - Läuft LM Studio nicht, fragt das Programm nur einmal kurz nach. Unter Windows dauert ein abgelehnter
+    Verbindungsversuch rund 2 s; vorher waren es drei Versuche, also rund 6 s je Minute Analyse.
+  - Bricht LM Studio eine Antwort mitten ab (beendet, Modell entladen), gelten für den Rest die Regeln, und das
+    Protokoll sagt es. Vorher endete die Analyse des Dokuments mit einem Fehler (`IncompleteRead`).
+  - Nach einem Ausfall prüft die nächste Anfrage erst kurz, ob LM Studio noch läuft und welches Modell geladen ist.
+    So wartet das Programm nicht erneut bis zu 4 Minuten auf ein hängendes LM Studio, und ein gewechseltes Modell
+    gilt sofort.
 - Tests: tests/test_ki.py (nachgebauter LM-Studio-Server: Modellsuche, Schema-Rückfall, Denkteil, Abbruch,
-  Zwischenspeicher, nur wörtliche Werte, nichts wird weggenommen, Verdachtsfilter).
+  Zwischenspeicher, nur wörtliche Werte, nichts wird weggenommen, Verdachtsfilter, Antwortabbruch, ein
+  Verbindungsversuch ohne LM Studio, neue Modellsuche nach einem Ausfall).
 
 ### Gesundheitsdaten in „Hoch“ geschwärzt (Entscheidung vom 27.11.)
 

@@ -477,7 +477,9 @@ Was die KI tut:
 Datenschutz: Das Programm verbindet sich nur mit dem eigenen Rechner (127.0.0.1), nie über einen Proxy; eine andere
 Adresse lehnt es ab. Kein Text verlässt den Rechner. Dauer: Ein großes Modell braucht je Seite einige Sekunden bis
 Minuten (je nach Grafikkarte); Fortschritt und „Abbrechen“ funktionieren wie gewohnt. Läuft LM Studio nicht oder ist
-kein Modell geladen, arbeitet das Programm wie ohne KI und sagt das im Protokoll. Für Fachleute: andere Adresse auf
+kein Modell geladen, arbeitet das Programm wie ohne KI und sagt das im Protokoll. Dasselbe gilt, wenn LM Studio
+während der Analyse beendet wird oder eine Antwort abbricht: Für den Rest gelten die Regeln, das Protokoll nennt den
+Ausfall. Für Fachleute: andere Adresse auf
 dem eigenen Rechner über die Umgebungsvariable `PDFA_KI_URL`, Einschalten für Werkzeuge mit `PDFA_KI=1`.
 
 ### Welche Dateien gehen?
