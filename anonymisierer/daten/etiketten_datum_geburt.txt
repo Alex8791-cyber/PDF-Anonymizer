@@ -1,0 +1,83 @@
+# Feldbezeichner für persönliche Lebensdaten: Geburt (und Sterbe-/Heiratsdatum).
+# Das Geburtszeichen * erkennt die Regel selbst.
+# Teil der Wissensbasis des PDF-Anonymisierers (Lizenz MIT, Herkunft: QUELLEN.md).
+# Ein Eintrag je Zeile, sortiert nach Vergleichsform; Kommentare nur hier im Kopf.
+# Pflege: Einträge ergänzen, dann  python werkzeuge/wissen_pflegen.py --schreiben  ausführen.
+Alter
+Alter bei Beginn
+Birth date
+Date de naissance
+Date of birth
+Datum der Eheschließung
+Datum der Entbindung
+Datum der Geburt
+Datum des Todes
+DOB
+Eheschließung am
+eingetragene Lebenspartnerschaft seit
+Eintrittsalter
+Entbindung
+Entbindung am
+Entbindungsdatum
+geb
+geb.
+geb. am
+Geb.-Dat.
+Geb.-Datum
+Geb.-Jahr
+Geb.-Ort
+Geb.dat
+Geb.Dat.
+Geb.Datum
+Geb_Datum
+GebDat
+Gebdatum
+geboren
+geboren am
+geboren in
+Geburt
+Geburt am
+Geburt des Kindes
+Geburtsdat.
+Geburtsdatum
+Geburtsdatum der versicherten Person
+Geburtsdatum des Ehepartners
+Geburtsdatum des Fahrers
+Geburtsdatum des Kindes
+Geburtsdatum des Versicherten
+Geburtsdatum des Versicherungsnehmers
+Geburtsdatum und -ort
+Geburtsdatum VN
+Geburtsdatum VP
+Geburtsdatum, -ort
+Geburtsdatum/-ort
+Geburtsjahr
+Geburtsjahrgang
+Geburtsort
+Geburtsort und -datum
+Geburtstag
+geschieden seit
+gest.
+gest. am
+gestorben
+gestorben am
+Heiratsdatum
+Jahrgang
+Lebensalter
+nata il
+nato il
+né le
+née le
+Scheidungsdatum
+Sterbedatum
+Sterbeort
+Tag der Eheschließung
+Tag der Entbindung
+Tag der Geburt
+Tag des Todes
+Todesdatum
+Todestag
+verheiratet seit
+verstorben
+verstorben am
+verwitwet seit

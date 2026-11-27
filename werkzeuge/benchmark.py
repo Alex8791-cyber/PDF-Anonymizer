@@ -1,0 +1,128 @@
+"""Entwicklungs-Benchmark des PDF-Anonymisierers: Korpus erzeugen und die Pipeline bewerten.
+
+Aufruf (aus der Projektwurzel):
+    python werkzeuge/benchmark.py --anzahl 60 --seed 1 --ausgabe <ordner> [--repo <pfad>]
+
+Ergebnis in <ordner>:
+    korpus/            erzeugte PDFs + <name>.wahrheit.json (Schema BENCHMARK_SCHEMA.md)
+    anonymisiert/      Ausgaben des Programms (anonym_01.pdf …, _zuordnung.txt)
+    ergebnis.json      alle Kennzahlen und Einzelergebnisse
+    bericht.md         Markdown-Bericht (Gesamt, je Kategorie, je Merkmal, Lecks, Laufzeiten)
+
+Optionen:
+    --repo <pfad>      Programmcode (Paket anonymisierer) aus einem anderen Checkout messen;
+                       der Benchmark selbst stammt immer aus diesem Checkout
+    --korpus <ordner>  vorhandenen Korpus bewerten (statt zu erzeugen), z. B. einen Prüfkorpus
+    --nur-erzeugen     nur den Korpus erzeugen
+    --ohne-cli-ocr     Tesseract-Kommandozeile nicht als zweite OCR-Leseart verwenden
+    --ohne-pixel       Pixelvergleich an Scan-Wortrechtecken abschalten
+    --weg engine|oberflaeche
+                       Weg der Schwärzung (Standard engine, wie alle Messungen bis Runde 3a): engine gibt jeden Fund
+                       der Analyse unverändert an die Schwärzung („alle Funde angehakt“); oberflaeche schickt den
+                       Auftrag, den die Oberfläche ohne Eingriff der Nutzerin abschickt (anonymisierer/auftrag.py:
+                       Häkchen der Fundliste nach der Analyse – ganz abgewählte Funde wie die in „Hoch“ angebotenen
+                       Gesundheitsdaten gehen nicht mit –, Schutzstufe „Hoch“, „Freigabe vor Weitergabe“ an,
+                       Seitenmodell und Nebenkanäle der Analyse). Der Weg steht in ergebnis.json, bericht.md und in
+                       der Zusammenfassung; im Weg oberflaeche zählt eine Ausgabe, die nur wegen der Freigabe _PRUEFEN
+                       heißt, für die Restrisiko-Kennzahlen als nicht _PRUEFEN (die Oberfläche nennt dort keinen Grund)
+    --selbstpruefung   statt des Programms die Bewertung selbst prüfen: Null-Anonymisierer (Ausgabe = Original:
+                       jeder zu schwärzende Eintrag muss ein Leck an seiner Stelle sein, alles zu Behaltende
+                       erhalten), Orakel aus der Wahrheit, ohne und mit Platzhaltertext im grauen Rechteck
+                       (Recall 100 %, Über-Schwärzung 0), und Teilreste: Orakel, dann EIN Exemplar eines
+                       Nebenkanals aus dem Original zurück (XMP, Info-Dict, Anhangname, Anhanginhalt) – jeder
+                       Eintrag, dessen Wert darin steht, muss ein Leck in seinem Kanal sein; Ergebnis in
+                       <ordner>/selbstpruefung.json
+"""
+
+import argparse
+import multiprocessing
+import sys
+import time
+import warnings
+from pathlib import Path
+
+WURZEL = Path(__file__).resolve().parent.parent
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="Entwicklungs-Benchmark: Korpus erzeugen und bewerten")
+    parser.add_argument("--anzahl", type=int, default=60, help="Anzahl der zu erzeugenden Dokumente")
+    parser.add_argument("--seed", type=int, default=1, help="Startwert des Zufallsgenerators")
+    parser.add_argument("--ausgabe", type=Path, required=True, help="Ergebnisordner")
+    parser.add_argument("--repo", type=Path, default=None, help="Checkout, dessen Programmcode gemessen wird")
+    parser.add_argument("--korpus", type=Path, default=None, help="vorhandenen Korpus bewerten")
+    parser.add_argument("--nur-erzeugen", action="store_true", help="nur den Korpus erzeugen")
+    parser.add_argument("--ohne-cli-ocr", action="store_true", help="keine Tesseract-Kommandozeile verwenden")
+    parser.add_argument("--ohne-pixel", action="store_true", help="keinen Pixelvergleich durchführen")
+    parser.add_argument("--weg", choices=("engine", "oberflaeche"), default="engine",
+                        help="engine: jeder Fund an die Schwärzung (Standard); oberflaeche: Auftrag wie die Oberfläche "
+                             "ohne Eingriff der Nutzerin")
+    parser.add_argument("--selbstpruefung", action="store_true",
+                        help="Bewertung selbst prüfen (Null-Anonymisierer, Orakel, Teilreste) statt das Programm zu "
+                             "messen")
+    args = parser.parse_args(argv)
+    if args.selbstpruefung and args.weg != "engine":
+        parser.error("--weg gilt nicht für --selbstpruefung (sie prüft die Bewertung mit Null-Anonymisierer und "
+                     "Orakel)")
+
+    warnings.filterwarnings("ignore", category=FutureWarning)   # "fitz" ist in PyMuPDF 2.x veraltet
+    if str(WURZEL) not in sys.path:
+        sys.path.insert(1, str(WURZEL))
+    from werkzeuge.benchmark.bewertung import bewerte_korpus, selbstpruefung
+    from werkzeuge.benchmark.generator import erzeuge_korpus
+
+    ausgabe = args.ausgabe.resolve()
+    ausgabe.mkdir(parents=True, exist_ok=True)
+    if args.korpus is None:
+        korpus = ausgabe / "korpus"
+        if korpus.exists() and any(korpus.iterdir()):
+            for alt in list(korpus.glob("*.pdf")) + list(korpus.glob("*.wahrheit.json")):
+                alt.unlink()
+        start = time.perf_counter()
+        erzeuge_korpus(korpus, args.anzahl, args.seed)
+        print(f"Korpus erzeugt: {args.anzahl} Dokumente in {korpus} ({time.perf_counter() - start:.1f} s)")
+    else:
+        korpus = args.korpus.resolve()
+    if args.nur_erzeugen:
+        return 0
+    if args.selbstpruefung:
+        ergebnis = selbstpruefung(korpus, ausgabe, cli_ocr=not args.ohne_cli_ocr, pixel=not args.ohne_pixel)
+        print(f"Selbstprüfung: {ausgabe / 'selbstpruefung.json'}")
+        return 0 if all(v["ok"] for v in ergebnis.values()) else 1
+    ergebnis = bewerte_korpus(korpus, ausgabe, repo=args.repo, cli_ocr=not args.ohne_cli_ocr,
+                              pixel=not args.ohne_pixel, weg=args.weg)
+    g = ergebnis["gesamt"]
+    print(f"\nWeg: {ergebnis['weg']}")
+    print(f"recall_kern: {g['recall_kern']:.4f} ({g['kern']['entfernt']}/{g['kern']['n']}), "
+          f"teilweise {g['kern']['teilweise']}, Leck {g['kern']['leck']}")
+    if g["recall_erweitert"] is not None:
+        print(f"recall_erweitert: {g['recall_erweitert']:.4f}")
+    if g["ueberschwaerzung"] is not None:
+        print(f"Über-Schwärzung: {g['ueberschwaerzung']:.4f} ({g['behalten_fehlt']}/{g['behalten_n']})")
+    print(f"Fehlalarme: {g['fehlalarme']} von {g.get('funde_aktiv', g['funde'])} angehakten Funden "
+          f"({g['funde']} Funde)")
+    rr = ergebnis.get("restrisiko") or {}
+    if rr.get("kern_lecks") is not None:
+        abdeckung = rr.get("verdachtsabdeckung")
+        ohne = rr.get("verdachtsabdeckung_ohne_pixelrest")
+        verortet = rr.get("verdachtsabdeckung_verortet")
+        print(f"Restrisiko: stille Lecks {rr.get('stille_lecks')} in {rr.get('dokumente_mit_stillem_leck')} "
+              f"Dokument(en), Verdachtsabdeckung "
+              f"{'-' if abdeckung is None else f'{100 * abdeckung:.1f} %'} "
+              f"({rr.get('kern_lecks_abgedeckt')}/{rr.get('kern_lecks')}), ohne reine Pixelreste "
+              f"{'-' if ohne is None else f'{100 * ohne:.1f} %'} ({rr.get('kern_lecks_ohne_pixelrest_abgedeckt')}/"
+              f"{rr.get('kern_lecks_ohne_pixelrest')}), davon verortet "
+              f"{'-' if verortet is None else f'{100 * verortet:.1f} %'} "
+              f"({rr.get('kern_lecks_ohne_pixelrest_verortet')}/{rr.get('kern_lecks_ohne_pixelrest')}), "
+              f"Fehlverdacht je Seite "
+              f"{rr.get('fehlverdacht_je_seite')}, _PRUEFEN {rr.get('ausgaben_pruefen')} "
+              f"(davon ohne Kern-Leck {rr.get('pruefen_ohne_leck')})"
+              + (f", nur Freigabe ausstehend {rr['ausgaben_nur_freigabe']} (ohne Grund, zählen nicht als _PRUEFEN)"
+                 if "ausgaben_nur_freigabe" in rr else ""))
+    print(f"Bericht: {ausgabe / 'bericht.md'}")
+    return 0
+
+
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    sys.exit(main())

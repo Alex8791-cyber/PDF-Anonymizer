@@ -1,0 +1,11 @@
+# Windows-Batchdateien brauchen CRLF, sonst verschluckt cmd.exe Zeilen (goto/Labels).
+*.bat text eol=crlf
+# Alles andere mit LF
+*.py text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.yml text eol=lf
+# Binärdateien
+*.traineddata binary
+*.ico binary
+*.pdf binary

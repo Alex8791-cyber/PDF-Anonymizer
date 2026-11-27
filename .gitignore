@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+fehler.log
+anonymisiert/
+build/
+dist/
+*.spec
+.pytest_cache/
+.venv/
+venv/
+.claude/
+.python_pfad.txt
