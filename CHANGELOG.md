@@ -917,8 +917,10 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     beste Bezugsstand schwärzt und dieser Stand nur meldet, stehen mit Grund in der Tauschliste. Ende zu Ende sind es
     fünf Fälle (je Text und Scan): Hängeschrank aus dem Katalog, Alarmanlage mit „danach scharf schalten“, „Beruf des
     Architekten gilt“, Möbelcode mit Lieferschein, „Mitarbeiter Hochstelle“. Mehr Meldungen als vorher: Hof-Kandidaten
-    mit Infinitiv-Endung, „!“ oder „?“, ein Wort in Namensgestalt hinter Präposition und Artikel (K12: 162 gemeldet,
-    5efcc0c 43), eine Rolle hinter „ist“ mit Zwischenwörtern, „Zum Beruf des Dachdeckers gehört …“,
+    mit Infinitiv-Endung, „!“ oder „?“ (Hof-Probe der fünften Abnahme auf 3bbc01d: 106 bis 108 von 333 Nomen gemeldet,
+    nach der siebten Nachbesserung 96 bis 98, auf 5efcc0c 131 bis 140; geschwärzt je 24), ein Wort in Namensgestalt
+    hinter Präposition und Artikel (K12: 162 gemeldet, 5efcc0c 43), eine Rolle hinter „ist“ mit Zwischenwörtern,
+    „Zum Beruf des Dachdeckers gehört …“,
     Raumcode-Listenzeilen, Sperrschrift ohne Feldnamen und Kammfelder mit verlesenem eigenen Feldnamen; in der
     Differenzprobe haben 5 213 Texte einen Verdacht (6c0c464 4 465, 5efcc0c 4 068, 0230782 3 003). Bewusst frei
     (sicherer Gegenbeleg, Gegenfälle in `tests/test_abnahme6_r7.py`): Anrede und Titel vor einem Platzhalter,
