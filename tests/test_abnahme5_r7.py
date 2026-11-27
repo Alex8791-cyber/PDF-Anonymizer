@@ -114,13 +114,16 @@ def test_a5_02_geraete_grundwort_als_name_gemeldet(text, name):
     assert _zustand(text, name) in ("weg", "gemeldet")
 
 
-@pytest.mark.parametrize("text, wort", [
-    ("Der Hochdruckreiniger hat die Fassadendämmung beschädigt.", "Hochdruckreiniger"),
-    ("Der Toaster verursachte den Küchenbrand am Morgen.", "Toaster"),
-    ("Der Marder beschädigte die Zündkabel im Motorraum.", "Marder"),
+@pytest.mark.parametrize("text, wort, soll", [
+    ("Der Hochdruckreiniger hat die Fassadendämmung beschädigt.", "Hochdruckreiniger", "frei"),
+    ("Der Toaster verursachte den Küchenbrand am Morgen.", "Toaster", "gemeldet"),       # N9 A7-09
+    ("Der Marder beschädigte die Zündkabel im Motorraum.", "Marder", "gemeldet"),        # N9 A7-09
 ])
-def test_a5_02_geraet_und_tier_frei(text, wort):
-    assert _zustand(text, wort) == "frei", _verdacht(text)
+def test_a5_02_geraet_und_tier_frei(text, wort, soll):
+    """Kompositum frei. Nachbesserung 9 (Abnahme 7 A7-09): ein Geräte- oder Tier-Grundwort allein mit Artikel ist auch
+    mit Geräteschaden im Satz nicht mehr frei, sondern gemeldet – „Der Mixer hat den Kabelbrand verursacht.“ und der
+    Familienname „Mäher“ blieben über dieselbe Ausnahme still."""
+    assert _zustand(text, wort) == soll, _verdacht(text)
 
 
 @pytest.mark.parametrize("text, wort", [
@@ -576,21 +579,25 @@ def test_a5_13_name_mit_artikel_oder_personenwort_gemeldet(text, name):
     assert _zustand(text, name) in ("weg", "gemeldet")
 
 
-@pytest.mark.parametrize("text, wort", [
-    ("Der Hund beschädigte die Couch.", "Hund"),
-    ("Die Katze hat den Vorhang beschädigt.", "Katze"),
-    ("Der Hagel hat den Schaden verursacht.", "Hagel"),
-    ("Den Zaun hat der Sturm beschädigt.", "Sturm"),
-    ("Den Zaun rammte der Wagen.", "Wagen"),
-    ("Der Wagen fuhr zu schnell.", "Wagen"),
-    ("Er übersah den Traktor.", "Traktor"),
-    ("Am Steuer saß der Winter.", "Winter"),
-    ("Sohn Auszubildender, Tochter Studentin", "Studentin"),
-    ("Die Fräse beschädigte das Erdkabel der Telekom.", "Fräse"),            # AB5U-09
-    ("Beim Aushub für die Bodenplatte beschädigte der Bagger eine Wasserleitung.", "Bodenplatte"),
+@pytest.mark.parametrize("text, wort, soll", [
+    ("Der Hund beschädigte die Couch.", "Hund", "frei"),
+    ("Die Katze hat den Vorhang beschädigt.", "Katze", "frei"),
+    ("Der Hagel hat den Schaden verursacht.", "Hagel", "frei"),
+    ("Den Zaun hat der Sturm beschädigt.", "Sturm", "frei"),
+    ("Den Zaun rammte der Wagen.", "Wagen", "frei"),
+    ("Der Wagen fuhr zu schnell.", "Wagen", "frei"),
+    ("Er übersah den Traktor.", "Traktor", "frei"),
+    ("Am Steuer saß der Winter.", "Winter", "frei"),
+    ("Sohn Auszubildender, Tochter Studentin", "Studentin", "frei"),
+    ("Die Fräse beschädigte das Erdkabel der Telekom.", "Fräse", "gemeldet"),   # AB5U-09; N9 A7-09
+    ("Beim Aushub für die Bodenplatte beschädigte der Bagger eine Wasserleitung.", "Bodenplatte", "gemeldet"),  # N9 A7-15
 ])
-def test_a5_13_gegenproben(text, wort):
-    assert _zustand(text, wort) == "frei", _verdacht(text)
+def test_a5_13_gegenproben(text, wort, soll):
+    """Nachbesserung 9 (Abnahme 7 A7-09): „Die Fräse“ (AB5U-09 verlangte frei) wird gemeldet, nie geschwärzt – ein
+    Geräte-Grundwort allein mit Artikel ist auch mit Schaden im Satz kein sicherer Gegenbeleg (Mixer, Mäher blieben
+    über dieselbe Ausnahme still). A7-15: ein unbekanntes Wort hinter Präposition und Artikel („für die Bodenplatte“)
+    wird gemeldet wie „Laut dem Pfanzelt hat …“ – die Wissensbasis kennt keines der beiden."""
+    assert _zustand(text, wort) == soll, _verdacht(text)
 
 
 @pytest.mark.parametrize("text, name", [

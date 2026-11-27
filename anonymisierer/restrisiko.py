@@ -451,16 +451,6 @@ def kammfelder_sach_feldname(text: str) -> bool:
 _GESPERRT_RE = re.compile(r"(?<![^\s\t])(?:[A-ZÄÖÜ] ){3,15}[A-ZÄÖÜ](?![^\s.,;:])|(?<=[a-zäöüß])(?:[A-ZÄÖÜ] ){3,15}[A-ZÄÖÜ]"
                           r"(?![^\s.,;:])")
 _SELBSTLAUTE_GROSS = frozenset("AEIOUÄÖÜY")
-# Nachbesserung 8 (Abnahme 6 AB6U-07): Einrichtungen, Kassen, Behörden, Betriebe, Geräte und Anlagen als Satzgegenstand
-# ("Die Bank hat angerufen", "Die Kasse hat die Kostenübernahme bestätigt", "Der Motor meldete uns den Code P0300.", "Das
-# Rolltor meldete …") – kein Familienname der Wissensbasis: nicht als "Familienname mit Artikel" gemeldet
-_EINRICHTUNG_SUBJEKT_RE = re.compile(
-    r"(?i)[\wäöüß]*(?:bank|kasse|schule|versicherer|versicherung|behörde|behoerde|amt|gericht|polizei|feuerwehr|"
-    r"firma|werkstatt|klinik|praxis|gemeinde|stadt|verwaltung|leitstelle|zentrale|hotline|kanzlei|agentur|motor|"
-    r"gerät|geraet|anlage|tor|app|system|software|heizung|therme|steuerung|pumpe|kessel|router|sensor|melder|kamera|"
-    r"sirene|wallbox|spedition|apotheke|kita|kindergarten|universität|universitaet|hochschule|bibliothek|kirche|"
-    r"pfarrei|verein|bundeswehr|finanzamt|jobcenter|krankenhaus|spital|abteilung|kundendienst|service|portal|"
-    r"genossenschaft|gesellschaft|kammer|innung|stiftung|direktion|redaktion|zeitung|bahn|post)")
 _PERSONEN_TAT_RE = re.compile(
     r"(?i)[ \t]+(?:sagt|sagte|meinte|meint|behauptet|behauptete|erzählt|erzählte|erklärt|erklärte|rief|telefonierte|"
     r"meldete|schrieb|bestätigte|bestaetigte)(?![\wäöüß])"
@@ -4232,6 +4222,13 @@ class _Seitenpruefung:
                 and bool(schadentat) \
                 and self._satz_hat(s, e, _GERAET_SCHADEN_RE)
             sachwort = _sachwort_er(w) or geraet_frei
+            if geraet_frei:
+                # Nachbesserung 9 (Abnahme 7 A7-09): ein Geräte- oder Tier-Grundwort allein mit einem Geräteschaden ist
+                # nicht sicher eine Sache – auch ein Familienname ("Der Mixer hat den Kabelbrand verursacht.", "Der
+                # Zünder verursachte den Kurzschluss.", "Der Mäher hat den Kurzschluss verursacht."): gemeldet, nie
+                # still (P2: Gerät oder Familienname; vorher frei außer den Namen der Wissensbasis)
+                self.neu(s, e, "Familienname mit Artikel (zugleich Gerät oder Tier?)", "name")
+                continue
             familienname = artikel_davor(i) and not (vn or aw or allow) and (
                 nn and not nnm or personenkontext.namensgestalt(w, self.w.modul) and not sachwort)
             # Präposition vor dem Artikel ("für die Bodenplatte beschädigte der Bagger"): das Wort ist nicht der
@@ -4246,10 +4243,19 @@ class _Seitenpruefung:
                 and not self.w.ist_etikett(w) and not personenkontext.PERSONENWORT_DAVOR_RE.search(w + " ") \
                 and not self._kompositum(w)
             unbekannt = unbekannt_wort and not praep
+            # Nachbesserung 9 (Abnahme 7 A7-15): auch ein unbekanntes Wort ohne Namensendung ("Laut dem Pfanzelt hat …",
+            # "Mit dem Kolat war …", "Neben dem Waltig parkte …") – kein Wort der Wissensbasis, kein Kompositum aus
+            # bekannten Teilen, keine Substantiv-Endung, kein Ereigniswort des geschlossenen Wortschatzes ("nach dem
+            # Unwetter"): ein möglicher Familienname (P2: gemeldet; 5efcc0c meldete einen Teil davon). Kehrseite: auch
+            # unbekannte Sachwörter ("für die Bodenplatte") werden gemeldet – nie geschwärzt
+            praep_unbekannt = unbekannt_wort and not nn and not self._wort_harmlos(w) \
+                and w.casefold() not in personenkontext.HOF_EREIGNIS_FREI \
+                and not re.match(r"[ \t]+(?:des|eines)[ \t]+[A-ZÄÖÜ]", text[e:e + 16])   # "für den Beruf des Bäckers"
             if praep and not (vn or aw or allow) and (
                     familienname
                     or (unbekannt_wort and not nn and not self._wort_harmlos(w)
                         and (_MUNDART_NAME_RE.search(w) is not None or self._name_auf_er(w)))
+                    or praep_unbekannt
                     or (w.endswith("erin") and self._name_auf_er(w))):
                 # Nachbesserung 8 (Abnahme 6 A6-04): hinter Präposition + Artikel ist das Wort nicht der Satzgegenstand
                 # ("Neben der Kreuzl saß der Fahrer.", "Laut dem Pfnürl hat …", "Wegen dem Tremml kam …") – ein Wort
@@ -4275,8 +4281,10 @@ class _Seitenpruefung:
                 and not personenkontext.org_gestalt(w) and not personenkontext.PERSONENWORT_DAVOR_RE.search(w + " ") \
                 and not _sachwort_er(w) and not self._rollen_kompositum(w) and not self.w.ist_etikett(w) \
                 and not any(self.w.frage(f, w) for f in ("ist_beruf", "ist_ort", "ist_anrede_titel"))
-            einrichtung = not nn and _EINRICHTUNG_SUBJEKT_RE.fullmatch(w) is not None
-            if not praep and not einrichtung and (
+            # Nachbesserung 9 (Abnahme 7 A7-08): die Ausnahme "Einrichtung als Satzgegenstand" der Nachbesserung 8 (ein
+            # Endungsmuster ohne Wort- und Genusprüfung) gab Familiennamen still frei ("Der Lapp hat angerufen.", "Die
+            # Happ hat den Schaden gemeldet.", "Der Bahn hat angerufen.") – zurückgenommen: gemeldet wie auf 6c0c464
+            if not praep and (
                     sache_in or aw_person
                     or (unbekannt and not nn and (person_tat or (schadentat_wort and not self._wort_harmlos(w))))
                     or (nnm and not aw and (person_tat or (schadentat and self.w.frage("ist_beruf", w))))):
@@ -5835,6 +5843,17 @@ def _kamm_etikett(woerter: list, feld: dict, felder: list, kw: _Wissen | None = 
     # Personenbezug (dieselbe Wahl wie die Erkennung, kammfelder.etikett_text_zum_feld; Abnahme 6 A6-07, A6-08)
     unten = [x for x in frei if x[1] >= y1 - 1.5 and x[1] - y1 <= KAMM_ETIKETT_OBEN * hoehe
              and x0 - 10.0 <= x[0] <= x0 + 0.5 * (x1 - x0)]
+    # Nachbesserung 9 (Abnahme 7 A7-13): Lage der Feldnamen der Seite nach ihrem Rand – dieselbe Wahl wie die Erkennung
+    # (kammfelder.etikett_text_zum_feld)
+    lage = kammraster.feldnamen_lage(felder, [(x[0], x[1], x[2], x[3]) for x in frei])
+    if lage == "unten" and unten:
+        oberkante = min(x[1] for x in unten)
+        unten_text = " ".join(x[4] for x in sorted((x for x in frei if abs(x[1] - oberkante) <= 0.5 * max(x[3] - x[1], 4.0)
+                                                    and x0 - 10.0 <= x[0] <= x1), key=lambda x: x[0]))
+        if not kammfelder_klammer_hinweis(unten_text):
+            return unten_text
+    if lage == "oben" and oben_text:
+        return oben_text
     oben_fremd = False
     if oben:
         unterkante_o = max(x[3] for x in oben)

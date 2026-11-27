@@ -123,7 +123,21 @@ def _parteibuchstaben(text: str, s: int, e: int) -> bool:
     in Spalten – kein Name aus zwei Buchstaben. Ein Name in weit gesetzten Kästchen ("L ⇥⇥ I"; Abnahme 4 AB4-17)
     bleibt ein Wert."""
     teil = text[s:e]
-    return "\t" in teil and re.sub(r"\s+", "", teil) == "AB"
+    if "\t" not in teil or re.sub(r"\s+", "", teil) != "AB":
+        return False
+    # hinter einem Feldnamen, der Buchstaben eines Namens verlangt ("Kürzel der Fahrerin ⇥⇥ A ⇥⇥ B", "Initialen ⇥⇥ A ⇥⇥
+    # B", "Name ⇥⇥ A ⇥⇥ B"), sind es Buchstaben eines Namens – geschwärzt wie auf 6c0c464 (Nachbesserung 9, Abnahme 7
+    # A7-18); geprüft nur die Zeile davor (höchstens 120 Zeichen)
+    za = text.rfind("\n", max(0, s - 120), s) + 1
+    return _NAMENSBUCHSTABEN_FELD_RE.search(text, max(za, s - 120), s) is None
+
+
+# Feldname, der nur Buchstaben eines Namens verlangt (nicht "Länderkürzel", "Kfz-Kürzel"): Initialen, Namenskürzel,
+# Handzeichen, Paraphe, Monogramm (Nachbesserung 9, A7-18)
+_NAMENSBUCHSTABEN_EIGEN_RE = re.compile(r"(?i)initial|namensk(?:ü|ue)rzel|handzeichen|paraphe|monogramm")
+# Feldname, der Buchstaben eines Namens verlangt
+_NAMENSBUCHSTABEN_FELD_RE = re.compile(r"(?i)k(?:ü|ue)rzel|initial|handzeichen|paraphe|monogramm|"
+                                       r"(?<![\wäöüß])(?:vor|nach|familien|ruf|geburts|zu)?name(?:n|ns)?(?![\wäöüß])")
 
 
 def _kurz_passt(kategorie: str, wert: str) -> bool:
@@ -626,6 +640,12 @@ def kammfeld(dok, kontext):
                 kat, sonder = "plzort", True          # "Geburtsort ⇥⇥ A U" (Abnahme 5 A5-08)
             if kurz and kat == "namen" and re.match(r"(?i)initial", et_text) and wert.isalpha():
                 sonder = True                         # "Initialen ⇥⇥ K H"
+            if kurz and kat is None and wert.isalpha() and len(wert) <= 3 \
+                    and _NAMENSBUCHSTABEN_EIGEN_RE.search(text, max(z.start, s - 120), s):
+                # Nachbesserung 9 (Abnahme 7 A7-18, Grenzfälle): Buchstaben hinter einem Feldnamen, der nur Buchstaben
+                # eines Namens verlangt, auch mit der Person dazwischen ("Initialen des Versicherungsnehmers ⇥⇥ A ⇥⇥ B",
+                # "Namenskürzel des Kindes ⇥⇥ A ⇥⇥ B") – ein Name wie "Initialen ⇥⇥ K H" (auf 6c0c464 ebenso lesbar)
+                kat, sonder = "namen", True
             if kurz and not vorfilter_alt and kat == "strasse" and not re.search(r"(?i)haus|nr|nummer", et_text):
                 continue                              # Seite nur mit kurzen Werten: Hausnummer, nicht "Etage ⇥⇥ 1 ⇥⇥ 2"
             if kurz == "neu" and kat == "strasse" and re.fullmatch(r"(?i)(?:nr|no|nummer)\.?:?", et_text.strip()) \
@@ -805,6 +825,19 @@ def etikett_text_zum_feld(seite, feld, felder: list) -> tuple:
         naechstes = max(oben, key=lambda w: w[5])
         oben_zeile = sorted((w for w in woerter if abs(w[5] - naechstes[5]) <= 0.5 * max(w[5] - w[3], 4.0)
                              and x0 - 10.0 <= w[2] <= x1), key=lambda w: w[2])
+    # Nachbesserung 9 (Abnahme 7 A7-13): stehen die Feldnamen der Seite nach ihrem Rand sicher über bzw. unter den
+    # Feldern (kammraster.feldnamen_lage), gilt diese Seite – der Abstand zwischen zwei Feldern entscheidet das nicht
+    # ("Geburtsdatum" unter dem Feld mit engem Folgeabstand bekam sonst den Feldnamen "Kilometerstand" des Felds
+    # darüber; ein hängender Feldname über dem Feld blieb ohne Feld)
+    lage = kammraster.feldnamen_lage(felder, [(w[2], w[3], w[4], w[5]) for w in woerter])
+    if lage == "unten" and unten:
+        naechstes = min(unten, key=lambda w: w[3])
+        zeile = sorted((w for w in woerter if abs(w[3] - naechstes[3]) <= 0.5 * max(w[5] - w[3], 4.0)
+                        and x0 - 10.0 <= w[2] <= x1), key=lambda w: w[2])
+        if _KLAMMER_HINWEIS_RE.fullmatch(seite.text, zeile[0][0], zeile[-1][1]) is None:
+            return zeile[0][0], zeile[-1][1], "unten"
+    if lage == "oben" and oben_zeile:
+        return oben_zeile[0][0], oben_zeile[-1][1], "oben"
     # der Text darüber ist der Feldname unter dem Feld darüber (Feldnamen unter den Kästchen; Kamm-Probe 6 a02): er
     # zählt nicht gegen den Feldnamen darunter
     oben_fremd = bool(oben_zeile) and kammraster.gehoert_zum_feld_darueber(

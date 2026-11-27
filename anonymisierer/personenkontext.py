@@ -837,13 +837,27 @@ def _allerwelt_als_name(text: str, m, wissen) -> bool:
         return verb_einer_person_dahinter(text, m.end(1))
     # Nachbesserung 8 (Abnahme 6 AB6U-03): steht am Ende des Satzteils ein Partizip oder Infinitiv ("Heute Kunde
     # Bescheid gegeben", "danach Kollege Akte übergeben", "Bitte Kollege Bescheid geben"), ist das Wort eher das Objekt
-    # – nicht geschwärzt, die Selbstkontrolle meldet es (personenwort_allerwelt, P2)
-    if _objekt_vor_verb_am_ende(text, m.end(1)):
+    # – nicht geschwärzt, die Selbstkontrolle meldet es (personenwort_allerwelt, P2). Nachbesserung 9 (Abnahme 7 A7-11,
+    # A7U-01, A7U-13 a): nicht, wenn ein anderes Satzglied das Objekt ist ("Den Schlüssel heute Nachbarin Regen
+    # übergeben.", "Gestern hat Nachbar Regen den Schaden gemeldet.") oder das Verb eine Person zum Gegenstand hat
+    # ("Gestern Nachbar Regen angerufen.", "Heute Zeuge Wasser vernommen.") – dann ist das Wort der Name
+    if _objekt_vor_verb_am_ende(text, m.end(1)) and not _PERSON_OBJEKT_VERB_AM_ENDE_RE.search(
+            _SATZTEIL_REST_RE.match(text, m.end(1)).group(0)) \
+            and not _objekt_davor(text, m.start()) \
+            and not _akkusativ_objekt(_SATZTEIL_REST_RE.match(text, m.end(1)).group(0)):
         return False
+    # ein finites Hilfs- oder Modalverb direkt vor dem Personenwort und ein Akkusativobjekt hinter dem Wort ("Danach will
+    # Vermieter Regen die Rechnung einreichen.", "Laut Akte hat Vermieter Wasser das Protokoll gemeldet."): das Wort ist
+    # der Satzgegenstand, auch hinter "Mieter"/"Vermieter" (Einzahl wie Mehrzahl; Nachbesserung 9, Abnahme 7 A7-11)
+    if _FINITES_HILFSVERB_DAVOR_RE.search(text, davor_start, m.start()) \
+            and _akkusativ_objekt(_SATZTEIL_REST_RE.match(text, m.end(1)).group(0)):
+        return True
     return (_PERSONENWORT_EINZAHL_RE.fullmatch(text[m.start():m.start(1)].rstrip()) is not None
             and not _ALS_DAVOR_RE.search(text, davor_start, m.start()))
 
 
+_FINITES_HILFSVERB_DAVOR_RE = re.compile(r"(?i)(?<![\wäöüß])(?:hat|hatte|haben|hatten|ist|war|wird|wurde|will|wollte|"
+                                         r"muss|musste|soll|sollte|kann|konnte|möchte|moechte|darf|durfte)[ \t]+$")
 _SATZTEIL_REST_RE = re.compile(r"[^.,;:!?\n]{0,80}")
 _VERB_AM_ENDE_RE = re.compile(r"(?:[a-zäöüß]{0,8}ge[a-zäöüß]{1,}(?:t|en)|[a-zäöüß]{3,}iert|[a-zäöüß]{2,}(?:en|eln|ern))"
                               r"[ \t]*$")
@@ -1072,15 +1086,9 @@ def personenwort_allerwelt(text: str, wissen=None) -> list:
         davor_start = max(0, m.start() - 20)
         if _BEGLEITER_SATZTEIL_DAVOR_RE.search(text, davor_start, m.start()):
             continue                                     # "dem Nachbarn Wasser abgegraben": ein Satzteil
-        # Nachbesserung 8 (Abnahme 6 AB6U-07): ohne Begleiter vor dem Personenwort ein Genitiv-Begleiter dahinter
-        # ("Wir empfehlen Kunden Abschluss einer Elementarschadenversicherung"; nicht "der", der auch ein Dativ sein
-        # kann: "Wir haben Nachbar Regen der Versicherung gemeldet") – ein Satzteil, kein Name. Die Mehrzahl eines
-        # Allerweltsworts ("Er zeigte Kollegen Fotos.") bleibt gemeldet (Zielkonflikt mit der siebten Nachbesserung,
-        # tests/test_abnahme5_r7.py: gemeldet nach P2)
-        if not _BEGLEITER_DAVOR_RE.search(text, davor_start, m.start()) \
-                and not PERSON_LAUT_DAVOR_RE.search(text, davor_start, m.start()) \
-                and _GENITIV_DAHINTER_RE.match(text, m.end(1)):
-            continue
+        # Nachbesserung 8 (Abnahme 6 AB6U-07) hatte ein Wort vor einem Genitiv-Begleiter frei gegeben ("Wir empfehlen
+        # Kunden Abschluss einer Elementarschadenversicherung") – auch den Namen in "Wir haben Mieter Wasser des
+        # Erdgeschosses informiert." (Abnahme 7 A7U-02). Nachbesserung 9: wieder gemeldet wie auf 6c0c464 (P2)
         try:
             if any(wissen.index(f"etiketten_{art}").eintrag_fuer(w) is not None for art in wissen.ETIKETTEN_ARTEN):
                 continue
@@ -1098,13 +1106,10 @@ def personenwort_allerwelt(text: str, wissen=None) -> list:
         # "-s" ("Nachbars Garten": ein Besitz)
         mitte = not anfang and not text[m.start():m.start(1)].rstrip().endswith("s")
         kontakt = _KONTAKT_DAHINTER_RE.match(text, m.end(1)) is not None
-        # Nachbesserung 8 (Abnahme 6 AB6U-03, AB6U-07): mitten im Satz ohne Begleiter, direkt oder nur über eine
-        # Präpositionalgruppe vor einem Verb des Gebens oder Schickens am Ende des Satzteils ("Danach Kunde Unterlagen
-        # zur Trocknung zugeschickt.", "Bitte Kollege Bescheid geben, …") ist das Wort das Ding, das die Person bekommt –
-        # frei. Nicht mit einem weiteren Hauptwort dazwischen ("Kunde Regen Bescheid gegeben": dann ist "Regen" die
-        # Person) und nicht vor einem Verb, das eine Person zum Gegenstand hat ("Nachbar Regen angerufen").
-        if mitte and not (genitiv or laut or verb or doppelpunkt or kontakt) and _ding_vor_gebeverb(text, m.end(1)):
-            continue
+        # Nachbesserung 8 (Abnahme 6 AB6U-03) hatte ein Wort vor einem Verb des Gebens oder Schickens frei gegeben
+        # ("Heute Kunde Bescheid gegeben") – auch Allerweltswörter, die Familiennamen sind ("Danach Kunde Regen zur
+        # Prüfung übergeben.", "Heute Nachbar Wasser geschickt."; Abnahme 7 A7-05, A7U-01). Nachbesserung 9: gemeldet
+        # wie auf 6c0c464 (P2: Alltagswort oder Familienname)
         if genitiv or laut or verb or mitte or doppelpunkt or kontakt:
             aus.append((m.start(1), m.end(1)))
     return aus
@@ -1120,10 +1125,11 @@ _PRAEPOSITION_ANFANG = frozenset(("zur", "zum", "zu", "für", "fuer", "über", "
                                   "vom", "wegen", "per", "gegen", "um", "aus", "auf", "im", "in", "am", "bis"))
 
 
-def _ding_vor_gebeverb(text: str, ende: int) -> bool:
+def _ding_vor_gebeverb(text: str, ende: int, streng: bool = False) -> bool:
     """Steht hinter dem Wort bis zum Ende des Satzteils nichts oder eine Gruppe, die mit einer Präposition beginnt (auch
     mit "nicht" davor), und am Ende ein Verb des Gebens oder Schickens ("… Unterlagen zur Trocknung zugeschickt.",
-    "… Auskunft zum Stand nicht geben, …", "… Bescheid gegeben, …")?"""
+    "… Auskunft zum Stand nicht geben, …", "… Bescheid gegeben, …")? streng: in der Präpositionalgruppe kein weiteres
+    Objekt mit Begleiter ("Kunde Regen die Akte übergeben": dann ist "Regen" die Person)."""
     rest = _SATZTEIL_REST_RE.match(text, ende).group(0)
     woerter = rest.split()
     if not woerter:
@@ -1133,7 +1139,50 @@ def _ding_vor_gebeverb(text: str, ende: int) -> bool:
     if _GEBEVERB_RE.fullmatch(letztes, p) is None and _GEBEVERB_RE.fullmatch(letztes) is None:
         return False
     zwischen = [w for w in woerter[:-1] if w.casefold() != "nicht"]
+    if streng and _OBJEKT_BEGLEITER_RE.search(" " + " ".join(zwischen)):
+        return False
     return not zwischen or zwischen[0].casefold() in _PRAEPOSITION_ANFANG
+
+
+# Begleiter eines Akkusativobjekts mit seinem Hauptwort ("den Schlüssel", "die Unterlagen", "eine Kopie", "seine
+# Vollmacht") – ist es da, ist das Wort hinter dem Personenwort nicht das Objekt (Nachbesserung 9)
+_OBJEKT_BEGLEITER_RE = re.compile(r"(?i)(?<![\wäöüß])(?:den|die|das|einen|eine|ein|seinen|seine|sein|ihren|ihre|ihr|"
+                                  r"unseren|unsere|unser|meinen|meine|mein|diesen|diese|dieses)[ \t]+(?-i:[A-ZÄÖÜ])")
+
+
+# Verben, die eine Person zum Gegenstand haben, am Ende des Satzteils ("Nachbar Regen angerufen", "Zeuge Wasser
+# vernommen", "Mieterin Regen des Hinterhauses informiert")
+_PERSON_OBJEKT_VERB_AM_ENDE_RE = re.compile(
+    r"(?i)(?<![\wäöüß])(?:angerufen|anrufen|zurückgerufen|zurueckgerufen|vernommen|vernehmen|befragt|befragen|"
+    r"informiert|informieren|benachrichtigt|benachrichtigen|verständigt|verstaendigt|verständigen|verstaendigen|"
+    r"kontaktiert|kontaktieren|besucht|besuchen|getroffen|treffen|gesehen|gesprochen|erreicht|erreichen|gebeten|"
+    r"beauftragt|beauftragen|eingeladen|einladen|gewarnt|warnen|gemahnt|mahnen|beraten|angeschrieben|anschreiben|"
+    r"begrüßt|begruesst|verabschiedet|abgeholt|abholen|begleitet|begleiten|untersucht|behandelt|vertreten)"
+    r"[ \t]*$")
+
+
+_PRAEPOSITION_VOR_BEGLEITER = frozenset(("über", "ueber", "für", "fuer", "durch", "ohne", "gegen", "um", "an", "auf",
+                                         "in", "mit", "nach", "von", "bei", "zu", "aus", "vor", "hinter", "neben",
+                                         "unter", "zwischen", "wegen", "trotz", "seit", "per", "bis", "laut", "gemäß"))
+
+
+def _akkusativ_objekt(teil: str) -> bool:
+    """Steht in teil ein Objekt mit Begleiter, das nicht in einer Präpositionalgruppe steht ("den Schaden", "die
+    Unterlagen"; nicht "über die Regulierung", "mit den Unterlagen")?"""
+    for b in _OBJEKT_BEGLEITER_RE.finditer(" " + teil):
+        vorher = (" " + teil)[:b.start()].split()
+        if not vorher or vorher[-1].casefold() not in _PRAEPOSITION_VOR_BEGLEITER:
+            return True
+    return False
+
+
+def _objekt_davor(text: str, pos: int) -> bool:
+    """Steht im Satzteil vor pos (bis zum letzten Satzzeichen, höchstens 80 Zeichen) ein Akkusativobjekt mit Begleiter
+    ("Den Schlüssel heute Nachbarin Regen übergeben.", "Die Vollmacht wurde Kunde Morgen vorgelegt.")?"""
+    a = max(0, pos - 80)
+    vorn = text[a:pos]
+    k = max(vorn.rfind(c) for c in ".,;:!?\n")
+    return _akkusativ_objekt(vorn[k + 1 if k >= 0 else 0:])
 
 
 # Zustand oder Vorgang einer Person hinter dem Wort ("Kollegin Pfarrer ist seit Montag im Urlaub.", "Kunde Halter wurde
@@ -1929,6 +1978,7 @@ _HOF_EREIGNIS_FREI = frozenset("""unfall einbruch einbruchdiebstahl diebstahl bl
 unwetter hochwasser überschwemmung ueberschwemmung zusammenstoß zusammenstoss aufprall wasserschaden brandschaden
 sturmschaden hagelschaden auffahrunfall verkehrsunfall arbeitsunfall wildunfall rohrbruch kurzschluss erdbeben
 erdrutsch""".split())
+HOF_EREIGNIS_FREI = _HOF_EREIGNIS_FREI                  # auch für die Selbstkontrolle (restrisiko, Nachbesserung 9 A7-15)
 
 
 def _substantiviertes_verb(k: str) -> bool:
@@ -1942,9 +1992,51 @@ def _substantiviertes_verb(k: str) -> bool:
         if k.startswith(v) and k[len(v):] in _TAETIGKEIT_VERBEN:
             return True
     for i in range(max(3, len(k) - 16), len(k) - 4):    # Bestimmungswort + Verb ("radfahren", "rasenmähen")
-        if k[i:] in _TAETIGKEIT_VERBEN:
+        if k[i:] in _TAETIGKEIT_VERBEN and _bestimmungswort_gewoehnlich(k[:i]):
             return True
     return False
+
+
+# gebeugte Vorsätze von Orts- und Hofnamen ("Hohenlinden", "Niederalteich", "Altenmarkt", "Neuenhaus"): als
+# Bestimmungswort vor einem Verb kein gewöhnliches Wort ("Vom Hohenlaufen kam der Anruf." – auf 5efcc0c gemeldet;
+# Nachbesserung 9, Differenzprobe). Führt nur zu "melden", nie zu "frei".
+_ORTSNAME_VORSATZ = frozenset({"hohen", "hohe", "nieder", "ober", "mittel", "alten", "neuen", "großen", "grossen",
+                               "kleinen", "breiten", "sankt"})
+
+
+def _bestimmungswort_gewoehnlich(b: str) -> bool:
+    """Ist das Bestimmungswort b (klein, auch mit Fugen-s/-n) ein gewöhnliches Wort der Wissensbasis ("rad", "rasen",
+    "abend", "ski")? Sonst ist "Bestimmungswort + Verb" kein Gegenbeleg: "Wollesen" (wol+lesen), "Hollesen",
+    "Friessen" (fri+essen) sind Familiennamen (Nachbesserung 9, Abnahme 7 A7-14)."""
+    try:
+        from . import wissen as wissen_modul
+    except Exception:  # pragma: no cover
+        return False
+    if b in _ORTSNAME_VORSATZ:
+        return False                                    # "Hohenlaufen", "Niederlaufen": Ortsname (Differenzprobe n9)
+    kandidaten = {b}
+    for fuge in ("s", "n", "en", "e"):
+        if b.endswith(fuge) and len(b) - len(fuge) >= 3:
+            kandidaten.add(b[:-len(fuge)])
+    for t in kandidaten:
+        if len(t) < 3:
+            continue
+        wort = t[:1].upper() + t[1:]
+        try:
+            if wissen_modul.ist_nachname(wort) or wissen_modul.ist_vorname(wort):
+                return False
+            if wissen_modul.ist_allerweltswort(wort) or t in _TAETIGKEIT_BESTIMMUNG:
+                return True
+        except Exception:  # pragma: no cover - Wissensbasis beschädigt
+            return False
+    return False
+
+
+# Bestimmungswörter alltäglicher Tätigkeiten, die die Wissensbasis nicht als Hauptwort führt ("Skifahren", "Fußball
+# spielen", "Kaffeetrinken" stehen über "kaffee"/"ski"/"fuß" …)
+_TAETIGKEIT_BESTIMMUNG = frozenset("ski rad fuß fuss kaffee tee mittag abend früh frueh rasen auto bus bahn zug boot "
+                                   "schlitten eis roll inline motorrad fahrrad holz schnee laub haus haar wäsche waesche "
+                                   "fenster geschirr staub spazieren fußball fussball tennis handball".split())
 
 
 def _hof_gegenbeleg(text: str, start: int, w: str, wissen) -> bool:
@@ -2020,14 +2112,18 @@ def hofnamen_kandidaten(text: str, wissen) -> list:
         if not (_hofname_wort(w, wissen) or (w.casefold().endswith(_BETRIEB_ENDUNG) and len(w) >= 8
                                                and _hofname_wort(w[:1] + "x" * 8, wissen))):
             continue
-        if _hof_gegenbeleg(text, n.start(), w, wissen) or _rolle_ort_kompositum(w, wissen):
+        # Nachbesserung 9 (Abnahme 7 A7-07, A7U-03): das Rollen-/Orts-Kompositum der Nachbesserung 8 ("vom
+        # Nachbarhof", "vom Lohnunternehmer") ist kein Gegenbeleg mehr – Hofnamen sind genau so gebildet ("Beim
+        # Waldhof", "Vom Seehof", "Vom Schmiedhof", "Beim Jägerhof"): gemeldet wie auf 6c0c464
+        if _hof_gegenbeleg(text, n.start(), w, wissen):
             continue
         if m.start() > ze:
             za = text.rfind("\n", 0, m.start()) + 1
             ze = text.find("\n", m.start())
             ze = len(text) if ze < 0 else ze
             zeile_kontext = bool(_HOF_ORTSKONTEXT_RE.search(text, za, ze) or _HOF_BESUCH_RE.search(text, za, ze)
-                                 or _HOF_ENTFERNUNG_RE.search(text, za, ze))
+                                 or _HOF_ENTFERNUNG_RE.search(text, za, ze)
+                                 or _HOF_SCHADEN_KANDIDAT_RE.search(text, za, ze))
             zeile_weg = bool(_HOF_WEG_RE.search(text, za, ze))
         # auch ein Weg dorthin ("Zum Grebl fahren wir am Montag.") und Besitz ("Die Kühe vom Gsödl", "Das Auto vom
         # Moierl wurde beschädigt."; Abnahme 5 AB5U-02/A5-14: nie still für einen unbekannten Familiennamen)
@@ -2040,6 +2136,11 @@ def hofnamen_kandidaten(text: str, wissen) -> list:
 
 
 _HOF_KAM_DAHINTER_RE = re.compile(r"[ \t]+(?:kam|kamen|rief|riefen|meldete|meldeten)(?![\wäöüß])")
+# Schaden in der Zeile eines Hofnamen-Kandidaten ("Beim Gärtnerhof wurden die Gewächshäuser beschädigt."): nur für die
+# Meldung (hofnamen_kandidaten), nicht für das Schwärzen in hofnamen (Nachbesserung 9, Abnahme 7 A7U-03 – auf allen
+# Bezugsständen still)
+_HOF_SCHADEN_KANDIDAT_RE = re.compile(r"(?i)(?<![\wäöüß])(?:beschädig|beschaedig|zerstör|zerstoer|demolier|verwüst|"
+                                      r"verwuest|überflut|ueberflut)[a-zäöüß]*")
 # Rollen- und Orts-Grundwörter, die mit einem gewöhnlichen Bestimmungswort kein Hausname sind ("vom Lohnunternehmer",
 # "vom Nachbarhof", "zum Bauernhof"; Nachbesserung 8, Abnahme 6 Textproben hof_beruf) – "vom Moarhof" bleibt ein
 # möglicher Hofname (unbekanntes Bestimmungswort)

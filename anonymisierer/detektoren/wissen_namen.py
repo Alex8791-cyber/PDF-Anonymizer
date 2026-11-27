@@ -514,7 +514,9 @@ _ANREDE_NAME_RE = re.compile(
 
 # Partizip oder Infinitiv direkt hinter dem Wort ("Herrn Notar Bescheid gegeben", "Frau Doktor Unterlagen geschickt"):
 # das Wort ist das Objekt, kein Name – die Selbstkontrolle meldet es (restrisiko: Familienname hinter Herr/Frau)
-_OBJEKT_PARTIZIP_DAHINTER_RE = re.compile(r"[ \t]+(?:ge[a-zäöüß]{2,}(?:t|en)|[a-zäöüß]{2,}iert|[a-zäöüß]{3,}en)"
+_OBJEKT_PARTIZIP_DAHINTER_RE = re.compile(r"[ \t]+(?!(?:haben|hatten|waren|werden|wurden|sollen|wollen|können|koennen|"
+                                          r"müssen|muessen|dürfen|duerfen|mögen|moegen|sagten|meinten|kamen|gingen)"
+                                          r"(?![\wäöüß]))(?:ge[a-zäöüß]{2,}(?:t|en)|[a-zäöüß]{2,}iert|[a-zäöüß]{3,}en)"
                                           r"(?![\wäöüß])")
 
 
@@ -529,7 +531,28 @@ def _name_hinter_amt(wort: str, text: str, ende: int) -> bool:
     if _art(w)[5] or personenkontext.ist_personenwort(w) or wissen.ist_anrede_titel(w) or wissen.ist_beruf(w) \
             or wissen.ist_ort(w) or w in ("Sie", "Ihnen", "Ihr", "Ihre"):
         return False
+    if _art(w)[4] and _OBJEKT_KONTEXT_DAHINTER_RE.match(text, ende):
+        # Nachbesserung 9 (Abnahme 7 A7U-05): ein gewöhnliches Wort mit dem Zusammenhang eines Objekts dahinter – ein
+        # weiteres Ding ("Herrn Notar Unterlagen und Vollmacht übersandt"), eine Präposition ("Mit Herrn Notar Termin
+        # zur Beurkundung vereinbart") oder ein Verb des Schickens oder Vereinbarens ("Herrn Rechtsanwalt Unterlagen
+        # übermittelt") – nicht geschwärzt, die Selbstkontrolle meldet es (P2: schwärzen -> melden)
+        return False
     return _OBJEKT_PARTIZIP_DAHINTER_RE.match(text, ende) is None
+
+
+# Zusammenhang eines Objekts hinter dem Wort (Nachbesserung 9, A7U-05): "und/sowie/oder" + Hauptwort, das keine Anrede und
+# kein Personenwort ist; eine Präposition; ein Verb des Schickens, Übergebens oder Vereinbarens (auch hinter bis zu drei
+# Wörtern)
+_OBJEKT_KONTEXT_DAHINTER_RE = re.compile(
+    r"[ \t]+(?:(?:und|sowie|oder|bzw\.?)[ \t]+(?!(?:Herr|Herrn|Frau|Fräulein|Dr|Prof|Familie|Kollege|Kollegin|Nachbar|"
+    r"Nachbarin)(?![\wäöüß]))[A-ZÄÖÜ]|(?:zur|zum|für|fuer|über|ueber|per|wegen|bezüglich|bezueglich)[ \t]+|"
+    r"(?:[^\s.,;:!?]+[ \t]+){0,3}(?:übersandt|uebersandt|übermittelt|uebermittelt|weitergeleitet|zugeschickt|zugesandt|"
+    r"zugestellt|geschickt|gesendet|gesandt|gemailt|gefaxt|übergeben|uebergeben|überreicht|ueberreicht|ausgehändigt|"
+    r"ausgehaendigt|vorgelegt|angefordert|vereinbart|abgestimmt|besprochen)(?![\wäöüß]))")
+
+
+# substantiviertes Partizip als Amt oder Rolle ("Vorsitzender", "Vorsitzende", "Beisitzender")
+_AMT_PARTIZIP_RE = re.compile(r"(?:ender|ende|enden)$")
 
 
 def _anrede_namen(text: str) -> list:
@@ -557,8 +580,16 @@ def _anrede_namen(text: str) -> list:
             aus.append(_treffer(m.start("name") + versatz, ende_wort, text, 0.75))
             continue
 
-        # zweites Wort nur, wenn es ein Name sein kann ("Frau Anna Schmidt", nicht "Frau Schmidt Sie")
-        if len(kern) == 2 and not (_art(kern[1])[2] or (_art(kern[0])[0] and _nachname_moeglich(kern[1], False))):
+        # zweites Wort nur, wenn es ein Name sein kann ("Frau Anna Schmidt", nicht "Frau Schmidt Sie") – auch hinter einem
+        # substantivierten Partizip als Amt ("Laut Herrn Vorsitzender Regen fehlt …", "Frau Vorsitzende Abend hat …"):
+        # das Partizip ist kein Name, das Wort dahinter wie hinter einem Amt (Nachbesserung 9, Differenzprobe: auf
+        # 0230782 und 818990e geschwärzt, auf 6f2d08f nur das Partizip)
+        amt_partizip = len(kern) == 2 and _AMT_PARTIZIP_RE.search(kern[0]) is not None \
+            and not (_art(kern[0])[0] or _art(kern[0])[2]) \
+            and _name_hinter_amt(kern[1], text, m.start("name") + name.index(kern[1], name.index(kern[0]) + len(kern[0]))
+                                 + len(kern[1]))
+        if len(kern) == 2 and not (_art(kern[1])[2] or (_art(kern[0])[0] and _nachname_moeglich(kern[1], False))
+                                   or amt_partizip):
             ende_wort = m.start("name") + name.index(kern[0]) + len(kern[0])
             kern = kern[:1]
         else:

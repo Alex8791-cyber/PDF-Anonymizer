@@ -328,8 +328,10 @@ _BERUF_VOR_RE = re.compile(
     r"|(?<![\wäöüß])(?:übt|übte|üben|übten|ausübt|ausübte)(?:[ \t]+[^\s.,;:!?]+){0,3}?[ \t]+(?:den|einen|seinen|ihren)"
     r"[ \t]+Beruf[ \t]+"
     r"(?:der|des|eines|einer|als)[ \t]+"
-    # "Er hat den Beruf des Bäckers erlernt.", "Sie lernt den Beruf der Floristin." (Abnahme 4 AB4-18)
-    r"|(?<![\wäöüß])(?:den|einen|seinen|ihren)[ \t]+Beruf[ \t]+(?:des|der|eines|einer)[ \t]+"
+    # "Er hat den Beruf des Bäckers erlernt.", "Sie lernt den Beruf der Floristin." (Abnahme 4 AB4-18); auch im Dativ
+    # ("Im Beruf des Schreiners arbeitete Ihre Tochter zwölf Jahre."; Nachbesserung 9, Differenzprobe: auf 6c0c464
+    # geschwärzt) – ohne Person im Satz gemeldet (beruf_des_ohne_person)
+    r"|(?<![\wäöüß])(?:den|einen|seinen|ihren|[Ii]m|[Vv]om|[Zz]um|[Bb]eim|dem)[ \t]+Beruf[ \t]+(?:des|der|eines|einer)[ \t]+"
     r"|(?<![\wäöüß])(?:(?:[Hh]aupt|[Nn]eben)beruflich|[Nn]ebenbei|[Nn]ebenher)(?:[ \t]+als)?[ \t]+"
     # Lebensunterhalt ("Sie verdient ihr Geld als Hebamme"; Abnahme N3)
     r"|(?<![\wäöüß])(?:verdient(?:e)?|verdienen|bestreitet|bestritt)[ \t]+(?:ihr(?:en)?|sein(?:en)?|das|den)[ \t]+"
@@ -442,10 +444,25 @@ def beruf_des_ohne_person(text: str, m, start: int) -> bool:
     a = satz_anfang(text, start)
     hinten = re.search(r"[.!?;\n]", text[start:start + 200])
     ende = start + (hinten.start() if hinten else min(200, len(text) - start))
-    if _BERUF_LERNEN_RE.search(text, a, ende) is not None:
+    lernen = [x.group(0).casefold() for x in _BERUF_LERNEN_RE.finditer(text, a, ende)]
+    # ein Pronomen vor "Beruf des" ist der Satzgegenstand ("Er bereitet sich auf den Beruf des Chirurgen vor."), eines
+    # dahinter kann die Berufsgruppe oder den Tarif meinen ("…, sie wird jährlich überprüft.")
+    stark = any(x.group(0).casefold() not in ("er", "sie", "es") or x.start() < start
+                for x in _BERUF_DES_PERSON_RE.finditer(text, a, ende))
+    # "beginnt/begann/begonnen" (Nachbesserung 8) belegt eine Person nur mit einer bestimmten Person im Satz – "Für den
+    # Beruf des Physiotherapeuten gilt der Grundtarif, er beginnt bei 120 EUR." ist eine Einstufung (Nachbesserung 9,
+    # Abnahme 7 A7U-07: gemeldet statt geschwärzt)
+    if any(v not in ("beginnt", "begann", "begonnen") for v in lernen) or (lernen and stark):
         return False
-    return _BERUF_DES_PERSON_RE.search(text, a, ende) is None and not any(
-        personenkontext.ist_personenwort(w) for w in re.findall(r"[A-ZÄÖÜ][a-zäöüß]+", text[a:ende]))
+    # Nachbesserung 9 (Abnahme 7 A7U-07): ein bloßes Pronomen ("er", "sie") oder ein Personenwort in der Mehrzahl
+    # ("Kunden") kann auch die Berufsgruppe oder den Tarif meinen ("Für den Beruf des Spenglers gilt die Berufsgruppe 4,
+    # sie wird jährlich überprüft.") – dann nicht geschwärzt, sondern gemeldet (restrisiko: "Beruf hinter „Beruf des“";
+    # P2, schwärzen -> melden). Eine bestimmte Person (Herr, Frau, Sohn, sein/ihr …, ein Personenwort in der Einzahl)
+    # bleibt ein Beleg.
+    if stark:
+        return False
+    return not any(personenkontext.ist_personenwort(w) and personenkontext._PERSONENWORT_EINZAHL_RE.fullmatch(w)
+                   for w in re.findall(r"[A-ZÄÖÜ][a-zäöüß]+", text[a:ende]))
 
 
 def rolle_mit_ergaenzung(text: str, start: int, ende: int) -> bool:
@@ -513,7 +530,7 @@ def _beruf_gebeugt_stelle(text: str, p: int, ende_zelle: int):
 _SACH_SUBJEKT_RE = re.compile(r"[ \t]*(?:Der|Die|Das|Dieser|Diese|Dieses|Unser|Unsere|Ihr|Ihre)[ \t]+"
                               r"([A-ZÄÖÜ][\wäöüß\-]{2,40})[ \t]")
 # "bot" nur als Programm ("Chatbot", "Bots") – nicht "-bote" ("Der Eilbote arbeitet als Lagerhilfe."; Abnahme 6 A6-09)
-_SACH_SUBJEKT_GRUNDWORT_RE = re.compile(r"(?i)[\wäöüß\-]*(?:software|programm|app|anwendung|tool|system|modul|"
+_SACH_SUBJEKT_GRUNDWORT_RE = re.compile(r"(?i)(?P<vor>[\wäöüß\-]*?)(?:software|programm|app|anwendung|tool|system|modul|"
                                         r"funktion|plattform|gerät|geraet|maschine|anlage|roboter|automat|sensor|"
                                         r"steuerung|computer|rechner|server|algorithmus|schnittstelle|"
                                         r"technik|lösung|loesung|datenbank|maske|oberfläche|oberflaeche|"
@@ -523,7 +540,21 @@ _SACH_SUBJEKT_GRUNDWORT_RE = re.compile(r"(?i)[\wäöüß\-]*(?:software|program
                                         r"rampe|hebebühne|hebebuehne|bühne|buehne|lift|aufzug|kran|stapler|rollator|"
                                         r"rollstuhl|treppenlift|gerüst|geruest|vorrichtung|halterung|schiene|"
                                         r"hilfsmittel|werkzeug|fahrzeug|pumpe|kamera|drohne)(?:e|en|s|n)?|"
-                                        r"[\wäöüß\-]*bots?")
+                                        # "Bot" nur allein, als "Chatbot" oder hinter Bindestrich ("KI-Bot") – nicht
+                                        # "Talbot" (Nachbesserung 9, Abnahme 7 A7-19)
+                                        r"(?P<vorbot>(?:[\wäöüß]+-)?)(?:chat)?bots?")
+
+
+def _sach_grundwort(w: str) -> bool:
+    """Ist das Wort ein Programm, Gerät, eine Anlage oder ein Hilfsmittel nach seinem Grundwort
+    (_SACH_SUBJEKT_GRUNDWORT_RE) – das Grundwort allein oder mit einem Bestimmungswort von mindestens drei Buchstaben
+    ("Buchungssoftware", "Kunden-App", "Hebebühne")? Ein kürzerer Vorsatz macht aus dem Grundwort keinen Sachbegriff:
+    "Lapp", "Happ" (L+app), "Clift" (C+lift) können Familiennamen sein (Nachbesserung 9, Abnahme 7 A7-08/A7-19)."""
+    m = _SACH_SUBJEKT_GRUNDWORT_RE.fullmatch(w or "")
+    if m is None:
+        return False
+    vor = (m.group("vor") or "").rstrip("-")
+    return not vor or len(vor) >= 3
 
 
 def _sache_als_subjekt(text: str, pos: int) -> bool:
@@ -533,7 +564,7 @@ def _sache_als_subjekt(text: str, pos: int) -> bool:
     if m is None:
         return False
     w = m.group(1)
-    return bool(_SACH_SUBJEKT_GRUNDWORT_RE.fullmatch(w)) and not (
+    return _sach_grundwort(w) and not (
         personenkontext.ist_personenwort(w) or wissen.ist_beruf(w) or wissen.ist_nachname(w) or wissen.ist_vorname(w))
 
 

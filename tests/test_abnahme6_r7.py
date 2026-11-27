@@ -76,6 +76,12 @@ def _zeile(baustein, n):
 #   kamm_klammer (AB6U-02), moebel_beruf (AB6U-10 a, b), hof_beruf (AB6U-10 c), ab6u15 (AB6U-15, A6-15 Textzeilen).
 # Art g (geheim): geschwärzt oder gemeldet, nie still; was die Nachbesserung schwärzt, bleibt geschwärzt.
 # Art b (nicht geheim): frei, wo der beste Bezugsstand frei ist; sonst höchstens gemeldet, nie geschwärzt.
+# Nachbesserung 9 (Abnahme 7): Zeilen mit „# N9 <Befund>“ erwarteten frei über eine Ausnahme, die dieselbe Gestalt mit
+# einem geheimen Wert still ließ (A7-02 Ereigniscode, A7-03 Planbezug, A7-04 Störungswort, A7-05/A7U-01 Gebeverb,
+# A7U-02 Genitiv, A7-07/A7U-03 Hof-/Rollenkompositum, A7-08 Einrichtungs-Endung). Die Ausnahme stuft jetzt nur noch auf
+# „melden“ herab (P0 b, Vorrang kein stilles Leck); der nicht geheime Wert ist gemeldet, nie geschwärzt. „# N9 A7-15“:
+# ein unbekanntes Wort hinter Präposition und Artikel wird gemeldet (zusätzliche Meldung gegen das vorbestehende Leck
+# „Laut dem Pfanzelt hat …“) – ein unbekanntes Sachwort ebenso.
 # ----------------------------------------------------------------------
 FAELLE = [
     ('a612_613', 'Das Bedienteil meldete Code 6624, danach die Haustür entriegeln.', '6624', 'g', 'gemeldet'),
@@ -102,17 +108,17 @@ FAELLE = [
     ('ab6u15', 'Wohnhaft seit 2019 in Traunreut, Am Kirchsteig 4', 'Traunreut', 'g', 'gemeldet'),
     ('ab6u15', 'Geburtsdatum ........ 27.10.1997', '27.10.1997', 'g', 'weg'),
     ('ab6u15', 'Zeuge war Thu Trang Bui', 'Thu Trang Bui', 'g', 'weg'),
-    ('alarm_raum', 'Der Brandalarm-Code 2297 wurde um 14:20 Uhr ausgelöst, die Feuerwehr setzte die Anlage danach zurück.', '2297', 'b', 'frei'),
-    ('alarm_raum', 'Feueralarmcode 3401 ausgelöst; der Hausmeister hat die Anlage anschließend zurückgesetzt.', '3401', 'b', 'frei'),
-    ('alarm_raum', 'Der Probealarmcode 1001 wird jeden ersten Montag im Monat ausgelöst.', '1001', 'b', 'frei'),
-    ('alarm_raum', 'Fehlalarmcode 7310 laut Protokoll der Brandmeldeanlage, Ursache Wasserdampf.', '7310', 'b', 'frei'),
+    ('alarm_raum', 'Der Brandalarm-Code 2297 wurde um 14:20 Uhr ausgelöst, die Feuerwehr setzte die Anlage danach zurück.', '2297', 'b', 'gemeldet'),  # N9 A7-02
+    ('alarm_raum', 'Feueralarmcode 3401 ausgelöst; der Hausmeister hat die Anlage anschließend zurückgesetzt.', '3401', 'b', 'gemeldet'),  # N9 A7-02
+    ('alarm_raum', 'Der Probealarmcode 1001 wird jeden ersten Montag im Monat ausgelöst.', '1001', 'b', 'gemeldet'),  # N9 A7-02
+    ('alarm_raum', 'Fehlalarmcode 7310 laut Protokoll der Brandmeldeanlage, Ursache Wasserdampf.', '7310', 'b', 'gemeldet'),  # N9 A7-02
     ('alarm_raum', 'Brand in der Werkstatt, Code 2210 laut Feuerwehrbericht (Kleinbrand).', '2210', 'b', 'gemeldet'),
-    ('alarm_raum', 'Gebäudecode 1101 (Wohngebäude, Massivbauweise) laut Gebäudeliste.', '1101', 'b', 'frei'),
-    ('alarm_raum', 'Raumcode 2017 laut Raumbuch: Besprechungsraum im 2. OG.', '2017', 'b', 'frei'),
-    ('alarm_raum', 'Lagercode 4410 laut Kostenstellenplan, Lagerort Regal 3.', '4410', 'b', 'frei'),
-    ('alarm_raum', 'Werkstattcode 4420 für die Abrechnung der Arbeitsstunden.', '4420', 'b', 'frei'),
-    ('alarm_raum', 'Hallencode 0302 im Lageplan des Gewerbeparks.', '0302', 'b', 'frei'),
-    ('alarm_raum', 'Kellercode 1120 laut Wohnungsübergabeprotokoll (Kellerabteil Nr. 12).', '1120', 'b', 'frei'),
+    ('alarm_raum', 'Gebäudecode 1101 (Wohngebäude, Massivbauweise) laut Gebäudeliste.', '1101', 'b', 'gemeldet'),  # N9 A7-03
+    ('alarm_raum', 'Raumcode 2017 laut Raumbuch: Besprechungsraum im 2. OG.', '2017', 'b', 'gemeldet'),  # N9 A7-03
+    ('alarm_raum', 'Lagercode 4410 laut Kostenstellenplan, Lagerort Regal 3.', '4410', 'b', 'gemeldet'),  # N9 A7-03
+    ('alarm_raum', 'Werkstattcode 4420 für die Abrechnung der Arbeitsstunden.', '4420', 'b', 'gemeldet'),  # N9 A7-03
+    ('alarm_raum', 'Hallencode 0302 im Lageplan des Gewerbeparks.', '0302', 'b', 'gemeldet'),  # N9 A7-03
+    ('alarm_raum', 'Kellercode 1120 laut Wohnungsübergabeprotokoll (Kellerabteil Nr. 12).', '1120', 'b', 'gemeldet'),  # N9 A7-03
     ('alarm_raum', 'Feueralarmcode 3401', '3401', 'g', 'gemeldet'),
     ('alarm_raum', 'Der Feueralarmcode lautet 7781.', '7781', 'g', 'gemeldet'),
     ('alarm_raum', 'Feueralarmcode 3437 (nur für den Hausmeister)', '3437', 'g', 'weg'),
@@ -134,19 +140,19 @@ FAELLE = [
     ('allerwelt', 'Nachbar Wasser hat den Rauch gesehen.', 'Wasser', 'g', 'weg'),
     ('allerwelt', 'Laut Nachbarin Regen war die Tür offen.', 'Regen', 'g', 'weg'),
     ('allerwelt', 'Wir haben Nachbar Wasser den Schlüssel gegeben.', 'Wasser', 'g', 'gemeldet'),
-    ('allerwelt', 'Heute Kunde Bescheid gegeben, Unterlagen folgen per Post.', 'Bescheid', 'b', 'frei'),
-    ('allerwelt', 'Am Montag Nachbar Schlüssel übergeben, damit der Handwerker in die Wohnung kann.', 'Schlüssel', 'b', 'frei'),
-    ('allerwelt', 'Rücksprache mit Kunde Montag, danach Kollege Akte übergeben.', 'Akte', 'b', 'frei'),
-    ('allerwelt', '14.03.: Telefonat, anschließend Kunde Unterlagen zugeschickt.', 'Unterlagen', 'b', 'frei'),
+    ('allerwelt', 'Heute Kunde Bescheid gegeben, Unterlagen folgen per Post.', 'Bescheid', 'b', 'gemeldet'),  # N9 A7-05/A7U-01
+    ('allerwelt', 'Am Montag Nachbar Schlüssel übergeben, damit der Handwerker in die Wohnung kann.', 'Schlüssel', 'b', 'gemeldet'),  # N9 A7-05/A7U-01
+    ('allerwelt', 'Rücksprache mit Kunde Montag, danach Kollege Akte übergeben.', 'Akte', 'b', 'gemeldet'),  # N9 A7-05/A7U-01
+    ('allerwelt', '14.03.: Telefonat, anschließend Kunde Unterlagen zugeschickt.', 'Unterlagen', 'b', 'gemeldet'),  # N9 A7-05/A7U-01
     ('allerwelt', 'Wir haben Kunde Kopie der Police geschickt.', 'Kopie', 'b', 'gemeldet'),
-    ('allerwelt', 'Bitte Kollege Bescheid geben, sobald die Liste eingegangen ist.', 'Bescheid', 'b', 'frei'),
-    ('allerwelt', 'Danach Kundin Formular zur Stehlgutliste gemailt.', 'Formular', 'b', 'frei'),
-    ('allerwelt', 'Nach dem Gespräch Kunde Angebot für die Elementarversicherung geschickt.', 'Angebot', 'b', 'frei'),
-    ('allerwelt', 'Ich habe Mandant Vollmacht zur Kündigung vorgelegt.', 'Vollmacht', 'b', 'frei'),
+    ('allerwelt', 'Bitte Kollege Bescheid geben, sobald die Liste eingegangen ist.', 'Bescheid', 'b', 'gemeldet'),  # N9 A7-05/A7U-01
+    ('allerwelt', 'Danach Kundin Formular zur Stehlgutliste gemailt.', 'Formular', 'b', 'gemeldet'),  # N9 A7-05/A7U-01
+    ('allerwelt', 'Nach dem Gespräch Kunde Angebot für die Elementarversicherung geschickt.', 'Angebot', 'b', 'gemeldet'),  # N9 A7-05/A7U-01
+    ('allerwelt', 'Ich habe Mandant Vollmacht zur Kündigung vorgelegt.', 'Vollmacht', 'b', 'gemeldet'),  # N9 A7-05/A7U-01
     ('allerwelt', 'Mieter Wohnung: EG links', 'Wohnung', 'b', 'frei'),
     ('allerwelt', 'Ehefrau Mitversichert: ja', 'Mitversichert', 'b', 'frei'),
     ('aw_meldung', 'Er zeigte Kollegen Fotos vom Hagelschaden am Wintergarten.', 'Fotos', 'b', 'gemeldet'),
-    ('aw_meldung', 'Wir empfehlen Kunden Abschluss einer Elementarschadenversicherung.', 'Abschluss', 'b', 'frei'),
+    ('aw_meldung', 'Wir empfehlen Kunden Abschluss einer Elementarschadenversicherung.', 'Abschluss', 'b', 'gemeldet'),  # N9 A7U-02
     ('aw_meldung', 'Wir haben Kunde Kopie der Police geschickt.', 'Kopie', 'b', 'gemeldet'),
     ('aw_meldung', 'Die Kosten trägt Mieter Anteil laut Nebenkostenabrechnung selbst.', 'Anteil', 'b', 'gemeldet'),
     ('aw_meldung', 'Die Kosten trägt Mieter Wasser selbst.', 'Wasser', 'g', 'gemeldet'),
@@ -177,13 +183,13 @@ FAELLE = [
     ('beruf', 'Die Software arbeitet als Eingabehilfe für die Sachbearbeitung.', 'Eingabehilfe', 'b', 'frei'),
     ('beruf', 'Der Chatbot arbeitet als Auskunftshilfe.', 'Auskunftshilfe', 'b', 'frei'),
     ('beruf', 'Als Landwirt profitieren Sie von unserem Tarif.', 'Landwirt', 'b', 'frei'),
-    ('einrichtung', 'Die Bank hat angerufen und um die Unterlagen gebeten.', 'Bank', 'b', 'frei'),
-    ('einrichtung', 'Der Versicherer hat den Schaden gemeldet und einen Gutachter beauftragt.', 'Versicherer', 'b', 'frei'),
-    ('einrichtung', 'Die Schule hat angerufen, das Kind hat sich beim Sport verletzt.', 'Schule', 'b', 'frei'),
-    ('einrichtung', 'Die Kasse hat die Kostenübernahme bestätigt.', 'Kasse', 'b', 'frei'),
-    ('einrichtung', 'Der Motor meldete uns den Code P0300.', 'Motor', 'b', 'frei'),
-    ('einrichtung', 'Das Rolltor meldete uns per App den Code 2210 als Störung.', 'Rolltor', 'b', 'frei'),
-    ('einrichtung', 'Die Alarmanlage meldete uns am Morgen den Code 4021, Ursache war ein offenes Fenster.', 'Alarmanlage', 'b', 'frei'),
+    ('einrichtung', 'Die Bank hat angerufen und um die Unterlagen gebeten.', 'Bank', 'b', 'gemeldet'),  # N9 A7-08
+    ('einrichtung', 'Der Versicherer hat den Schaden gemeldet und einen Gutachter beauftragt.', 'Versicherer', 'b', 'gemeldet'),  # N9 A7-08
+    ('einrichtung', 'Die Schule hat angerufen, das Kind hat sich beim Sport verletzt.', 'Schule', 'b', 'gemeldet'),  # N9 A7-08
+    ('einrichtung', 'Die Kasse hat die Kostenübernahme bestätigt.', 'Kasse', 'b', 'gemeldet'),  # N9 A7-08
+    ('einrichtung', 'Der Motor meldete uns den Code P0300.', 'Motor', 'b', 'gemeldet'),  # N9 A7-08
+    ('einrichtung', 'Das Rolltor meldete uns per App den Code 2210 als Störung.', 'Rolltor', 'b', 'gemeldet'),  # N9 A7-08
+    ('einrichtung', 'Die Alarmanlage meldete uns am Morgen den Code 4021, Ursache war ein offenes Fenster.', 'Alarmanlage', 'b', 'gemeldet'),  # N9 A7-08
     ('einrichtung', 'Die Hausverwaltung hat angerufen.', 'Hausverwaltung', 'b', 'frei'),
     ('einrichtung', 'Der Wasser hat den Schaden gemeldet.', 'Wasser', 'g', 'gemeldet'),
     ('einrichtung', 'Die Hinterstoißer hat angerufen.', 'Hinterstoißer', 'g', 'gemeldet'),
@@ -230,7 +236,7 @@ FAELLE = [
     ('geraetecode', 'Feuerwehralarm, Code 3947', '3947', 'g', 'gemeldet'),
     ('geraetecode', 'Der Motor meldet den Code P0300, Zündaussetzer.', 'P0300', 'b', 'frei'),
     ('geraetecode', 'Die Türsprechanlage zeigt den Code E-04.', 'E-04', 'b', 'frei'),
-    ('geraetecode', 'Code E-04 an der Türsprechanlage, Elektriker beauftragt.', 'E-04', 'b', 'frei'),
+    ('geraetecode', 'Code E-04 an der Türsprechanlage, Elektriker beauftragt.', 'E-04', 'b', 'gemeldet'),  # N9 A7-04
     ('geraetecode', 'Die Alarmanlage meldete den Code E125 (Sabotagekontakt Fenster).', 'E125', 'b', 'frei'),
     ('geraetecode', 'Das Garagentor zeigte den Code 3017, laut Hersteller verschmutzte Lichtschranke.', '3017', 'b', 'frei'),
     ('geraetecode', 'Am Tor blinkt Code 3017, laut Hersteller eine Störung der Lichtschranke.', '3017', 'b', 'gemeldet'),
@@ -274,15 +280,15 @@ FAELLE = [
     ('hof', 'Ich war gestern beim Rasenmähen und habe den Schaden gemeldet.', 'Rasenmähen', 'b', 'frei'),
     ('hof_beruf', 'Wir gehen nachher zum Fischer, frischen Fisch für das Fest kaufen.', 'Fischer', 'b', 'gemeldet'),
     ('hof_beruf', 'Den Anhänger fahren wir am Samstag zum Wagner zur Reparatur.', 'Wagner', 'b', 'gemeldet'),
-    ('hof_beruf', 'Der Traktor vom Lohnunternehmer stand quer auf dem Feldweg.', 'Lohnunternehmer', 'b', 'frei'),
-    ('hof_beruf', 'Die Kühe vom Nachbarhof standen auf der Straße.', 'Nachbarhof', 'b', 'frei'),
+    ('hof_beruf', 'Der Traktor vom Lohnunternehmer stand quer auf dem Feldweg.', 'Lohnunternehmer', 'b', 'gemeldet'),  # N9 A7-07/A7U-03
+    ('hof_beruf', 'Die Kühe vom Nachbarhof standen auf der Straße.', 'Nachbarhof', 'b', 'gemeldet'),  # N9 A7-07/A7U-03
     ('hof_beruf', 'Der Unfall geschah beim Fischer in Inzell.', 'Fischer', 'g', 'weg'),
     ('hof_beruf', 'Wir waren gestern beim Wagner zum Essen.', 'Wagner', 'g', 'weg'),
     ('hof_beruf', 'Zum Gruber fahren wir am Montag.', 'Gruber', 'g', 'weg'),
     ('hof_beruf', 'Der Traktor vom Wimmer stand quer auf der Fahrbahn.', 'Wimmer', 'g', 'weg'),
     ('hof_beruf', 'Die Kühe vom Moarhof standen auf der Straße.', 'Moarhof', 'g', 'gemeldet'),
     ('hof_beruf', 'Der Traktor vom Kaltl stand quer auf dem Feldweg.', 'Kaltl', 'g', 'gemeldet'),
-    ('hof_beruf', 'Die Kühe vom Bauernhof standen auf der Straße.', 'Bauernhof', 'b', 'frei'),
+    ('hof_beruf', 'Die Kühe vom Bauernhof standen auf der Straße.', 'Bauernhof', 'b', 'gemeldet'),  # N9 A7-07/A7U-03
     ('jahr', 'Die Kellertür mit 1990 öffnen Sie bitte nur tagsüber.', '1990', 'g', 'weg'),
     ('jahr', 'Das Garagentor mit 1966 öffnen Mieter selbst.', '1966', 'g', 'weg'),
     ('jahr', 'Den Tresor mit 1958 öffnen Mitarbeiter der Filiale.', '1958', 'g', 'weg'),
@@ -356,7 +362,7 @@ FAELLE = [
     ('praep', 'Gegen die Kreidlmayr hat der Vermieter Klage erhoben.', 'Kreidlmayr', 'g', 'gemeldet'),
     ('praep', 'Laut der Pointnerin war das Fenster offen.', 'Pointnerin', 'g', 'gemeldet'),
     ('praep', 'Hinter dem Zachl fuhr der Lieferwagen.', 'Zachl', 'g', 'gemeldet'),
-    ('praep', 'Beim Aushub für die Bodenplatte beschädigte der Bagger die Leitung.', 'Bodenplatte', 'b', 'frei'),
+    ('praep', 'Beim Aushub für die Bodenplatte beschädigte der Bagger die Leitung.', 'Bodenplatte', 'b', 'gemeldet'),  # N9 A7-15
     ('praep', 'Beim Aushub für die Bodenplatte beschädigte der Bagger die Leitung.', 'Bagger', 'b', 'frei'),
     ('praep', 'Mit dem Bagger hat der Fahrer die Leitung beschädigt.', 'Bagger', 'b', 'frei'),
     ('praep', 'Nach dem Sturm hat der Nachbar den Schaden gemeldet.', 'Sturm', 'b', 'gemeldet'),
@@ -380,12 +386,12 @@ FAELLE = [
     ('raumcode', 'Schadenort: Heizungsraum, Code 5207', '5207', 'g', 'gemeldet'),
     ('raumcode', 'Code für den Wintergarten: 8841', '8841', 'g', 'weg'),
     ('raumcode', 'Die Hintertür hat den Code ZT77.', 'ZT77', 'g', 'weg'),
-    ('raumcode', 'Gebäudecode 1101 (Wohngebäude, Massivbauweise) laut Gebäudeliste.', '1101', 'b', 'frei'),
-    ('raumcode', 'Raumcode 2017 laut Raumbuch: Besprechungsraum im 2. OG.', '2017', 'b', 'frei'),
-    ('raumcode', 'Lagercode 4410 laut Kostenstellenplan, Lagerort Regal 3.', '4410', 'b', 'frei'),
-    ('raumcode', 'Werkstattcode 4420 für die Abrechnung der Arbeitsstunden.', '4420', 'b', 'frei'),
-    ('raumcode', 'Hallencode 0302 im Lageplan des Gewerbeparks.', '0302', 'b', 'frei'),
-    ('raumcode', 'Kellercode 1120 laut Wohnungsübergabeprotokoll (Kellerabteil Nr. 12).', '1120', 'b', 'frei'),
+    ('raumcode', 'Gebäudecode 1101 (Wohngebäude, Massivbauweise) laut Gebäudeliste.', '1101', 'b', 'gemeldet'),  # N9 A7-03
+    ('raumcode', 'Raumcode 2017 laut Raumbuch: Besprechungsraum im 2. OG.', '2017', 'b', 'gemeldet'),  # N9 A7-03
+    ('raumcode', 'Lagercode 4410 laut Kostenstellenplan, Lagerort Regal 3.', '4410', 'b', 'gemeldet'),  # N9 A7-03
+    ('raumcode', 'Werkstattcode 4420 für die Abrechnung der Arbeitsstunden.', '4420', 'b', 'gemeldet'),  # N9 A7-03
+    ('raumcode', 'Hallencode 0302 im Lageplan des Gewerbeparks.', '0302', 'b', 'gemeldet'),  # N9 A7-03
+    ('raumcode', 'Kellercode 1120 laut Wohnungsübergabeprotokoll (Kellerabteil Nr. 12).', '1120', 'b', 'gemeldet'),  # N9 A7-03
     ('raumcode', 'Lagerhallecode: 9444', '9444', 'g', 'weg'),
     ('regen', 'Wie Herr Notar Regen sagte, ist der Antrag vollständig.', 'Regen', 'g', 'weg'),
     ('regen', 'Wie Herr Pfarrer Regen sagte, ist der Antrag vollständig.', 'Regen', 'g', 'weg'),
@@ -667,32 +673,38 @@ def test_ab6u_07_anrede_vor_platzhalter_in_der_ausgabe_kein_verdacht(tmp_path):
     ("Gestern Kollegin Wasser Unterlagen zugeschickt.", "Wasser", "gemeldet"),
     ("Danach Nachbar Wasser zur Rücksprache angerufen.", "Wasser", "gemeldet"),
     ("Wir haben Nachbar Wasser den Schlüssel gegeben.", "Wasser", "gemeldet"),
-    ("Leider konnte Mitarbeiter Auskunft zum Stand nicht geben, Rückruf folgt.", "Auskunft", "frei"),
-    ("Heute Vermieterin Nachweis über den Austausch der Zylinder angefordert.", "Nachweis", "frei"),
-    ("Danach Kunde Fragebogen zur Invalidität zugeschickt.", "Fragebogen", "frei"),
+    ("Leider konnte Mitarbeiter Auskunft zum Stand nicht geben, Rückruf folgt.", "Auskunft", "melden"),   # N9
+    ("Heute Vermieterin Nachweis über den Austausch der Zylinder angefordert.", "Nachweis", "melden"),       # N9
+    ("Danach Kunde Fragebogen zur Invalidität zugeschickt.", "Fragebogen", "melden"),                        # N9
     ("Heute Kunde Kopie der Polizeianzeige erhalten und Stehlgutliste angefordert.", "Kopie", "gemeldet"),
 ])
 def test_ab6u_03_telegrammstil_geben_frei_person_gemeldet(text, wert, soll):
-    """Vor einem Verb des Gebens oder Schickens ist das Wort hinter dem Personenwort das Ding (frei); mit einem weiteren
-    Hauptwort dazwischen oder vor einem Verb, das eine Person zum Gegenstand hat, bleibt es gemeldet (Regen, Wasser)."""
+    """Mit einem weiteren Hauptwort dazwischen oder vor einem Verb, das eine Person zum Gegenstand hat, bleibt das Wort
+    hinter dem Personenwort gemeldet (Regen, Wasser). Nachbesserung 9 (Abnahme 7 A7-05, A7U-01): vor einem Verb des
+    Gebens oder Schickens ist es nicht mehr frei – dieselbe Gestalt ließ „Danach Kunde Regen zur Prüfung übergeben.“
+    still –, sondern gemeldet („melden“: nicht geheim, gemeldet, nie geschwärzt)."""
     ist = _zustand(text, wert)
     if soll == "frei":
         assert ist == "frei", (text, ist)
+    elif soll == "melden":
+        assert ist == "gemeldet", (text, ist)
     else:
         assert ist in ("weg", "gemeldet"), (text, ist)
 
 
 @pytest.mark.parametrize("text, wert, soll", [
-    ("Raumcode 2017 laut Raumbuch: Besprechungsraum im 2. OG.", "2017", "frei"),
-    ("Hallencode 0302 im Lageplan des Gewerbeparks.", "0302", "frei"),
+    ("Raumcode 2017 laut Raumbuch: Besprechungsraum im 2. OG.", "2017", "gemeldet"),     # N9 A7-03
+    ("Hallencode 0302 im Lageplan des Gewerbeparks.", "0302", "gemeldet"),                # N9 A7-03
     ("Der Kellercode lautet 1120.", "1120", "weg"),
     ("Der Kellercode ist 1120, siehe Übergabeprotokoll.", "1120", "weg"),
     ("Lagerhallecode: 9444 (laut Schlüsselliste)", "9444", "weg"),
     ("Werkraumcode 2045 bitte nicht weitergeben.", "2045", "weg"),
 ])
 def test_ab6u_04_raumcode_mit_planbezug_frei(text, wert, soll):
+    """Nachbesserung 9 (Abnahme 7 A7-03): der Planbezug („laut Raumbuch“, „im Lageplan“) stuft nur noch auf „melden“
+    herab – „Kellercode 1127 laut Schlüsselliste“ blieb über dieselbe Ausnahme still."""
     ist = _zustand(text, wert)
-    assert ist == soll if soll == "frei" else ist in ("weg",), (text, ist)
+    assert ist == soll if soll in ("frei", "gemeldet") else ist in ("weg",), (text, ist)
 
 
 def _feld(y0, hoehe=18.0, x0=57.0, n=6):
@@ -888,7 +900,7 @@ def test_ab5u_03_lage_im_haus_keine_strasse(text, wert, soll):
     ("Brandmeldeanlagencode 6881 nur für den Hausmeister", "6881", "weg"),
     ("Brandmeldeanlagecode: 6881", "6881", "gemeldet"),
     ("Brandmeldeanlage, Code 6881", "6881", "gemeldet"),
-    ("Brandmeldeanlage-Code 6881 wurde um 14:20 Uhr ausgelöst.", "6881", "frei"),
+    ("Brandmeldeanlage-Code 6881 wurde um 14:20 Uhr ausgelöst.", "6881", "gemeldet"),   # N9 A7-02 (wie 6c0c464)
     ("Die Brandmeldeanlage wurde 2019 erneuert.", "2019", "frei"),
     ("Code für den Spiegelschrank (Artikel 7731): 3074", "3074", "gemeldet"),
     ("Code für den Spiegelschrank (Art. 7731) 3074", "3074", "gemeldet"),
@@ -911,7 +923,7 @@ def test_a6_13_brandmeldeanlage_und_schrank_mit_artikel(text, wert, soll):
     ("Die Wallbox zeigt den Code 3017 an.", "3017", "frei"),
     ("Er ist seit 2016 Treuhänder der Seniorengruppe.", "Treuhänder", "gemeldet"),
     ("Er ist seit 2016 Mitglied im Verein.", "Mitglied", "frei"),
-    ("Ihr Neffe träumt vom Beruf des Soldaten.", "Soldaten", "gemeldet"),
+    ("Ihr Neffe träumt vom Beruf des Soldaten.", "Soldaten", "weg"),          # N9: "vom Beruf des" mit Person
 ])
 def test_n8_reste_aller_staende_gemeldet(text, wert, soll):
     assert _zustand(text, wert) == soll

@@ -71,6 +71,14 @@ _REGISTER_DAVOR_RE = re.compile(r"(?i)(?:HRB|HRA|GnR|VR|PR|Nr\.?|Reg\.?|Register
 _SEGMENT_RE = re.compile(r"[ ]*(?:[·•|,;:\t]|[ ][-–][ ])[ ]*")
 
 
+# Sparte bzw. Produkt einer Versicherung als ein Wort ("Wohngebäudeversicherung", "Hausratversicherung",
+# "Kfz-Versicherung", "Teilkasko", "Privathaftpflicht"): steht zwar in der Erlaubnisliste (Produktbegriffe), ist aber
+# keine Organisation – eine Titelzeile "Wohngebäudeversicherung – Eigentümerwechsel" macht die Privat- oder
+# Objektanschrift darunter nicht zur Firmenanschrift (Nachbesserung 9, Abnahme 7 A7U-04: dort ohne Meldung verworfen)
+_SPARTE_RE = re.compile(r"(?i)(?:[\wäöüß]+-)?[\wäöüß]*(?:versicherung|versicherungen|kasko|haftpflicht|rechtsschutz|"
+                        r"schutzbrief|police)")
+
+
 @functools.lru_cache(maxsize=8192)
 def _allowlist_in(zeile: str) -> bool:
     """Ist ein Abschnitt der Zeile (zwischen "·", ",", "|" …) ganz eine Organisation der Erlaubnisliste
@@ -90,6 +98,8 @@ def _allowlist_in(zeile: str) -> bool:
             kandidat = ohne_form or teil
             if not _wissen.ist_allowlist(kandidat):
                 continue
+            if kandidat == teil and _SPARTE_RE.fullmatch(kandidat):
+                continue                              # Sparte, keine Organisation (Abnahme 7 A7U-04)
             woerter = kandidat.split()
             if len(woerter) == 1:
                 w = woerter[0]
@@ -106,11 +116,35 @@ def _allowlist_in(zeile: str) -> bool:
     return False
 
 
+# Bestimmungswörter einer Versicherungssparte ("Hausratversicherung", "Kfz-Versicherung", "Wohngebäudeversicherung"):
+# das Wort ist eine Sparte, keine Organisation (Nachbesserung 9, Abnahme 7 A7U-04) – nicht "Rentenversicherung" (die
+# Deutsche Rentenversicherung ist eine Behörde) und kein Name ("Bayernversicherung", "Provinzial")
+_SPARTE_STAMM_RE = re.compile(
+    r"(?i)(?:hausrat|wohngebäude|wohngebaeude|gebäude|gebaeude|unfall|kinderunfall|seniorenunfall|haftpflicht|"
+    r"privathaftpflicht|betriebshaftpflicht|berufshaftpflicht|tierhalterhaftpflicht|hundehalterhaftpflicht|"
+    r"pferdehalterhaftpflicht|jagdhaftpflicht|haus-und-grundbesitzerhaftpflicht|kfz|kraftfahrt|kraftfahrzeug|auto|"
+    r"motorrad|wohnmobil|oldtimer|fahrrad|e-bike|ebike|boots|rechtsschutz|verkehrsrechtsschutz|lebens|risikolebens|"
+    r"kapitallebens|kranken|krankenzusatz|zahnzusatz|pflege|pflegezusatz|berufsunfähigkeits|berufsunfaehigkeits|"
+    r"erwerbsunfähigkeits|erwerbsunfaehigkeits|reise|reiserücktritts|reiseruecktritts|reisekranken|auslandskranken|"
+    r"tier|tierkranken|hunde|pferde|glas|elementar|elementarschaden|photovoltaik|bauherren|bauherrenhaftpflicht|"
+    r"bauleistungs|gewässerschaden|gewaesserschaden|inhalts|geschäftsinhalts|geschaeftsinhalts|"
+    r"betriebsunterbrechungs|cyber|handy|smartphone|elektronik|garantie|sach|vermögensschaden|vermoegensschaden|"
+    r"d&o|wohnungs|mietausfall|leitungswasser|sturm|feuer)-?$")
+
+
+def _nur_sparte(wort: str) -> bool:
+    """Ist das Organisationswort eine Versicherungssparte ("Hausratversicherung", "Kfz-Versicherung")?"""
+    m = re.fullmatch(r"(?i)([\wäöüß\-]+?)(?:versicherung|versicherungen)", wort)
+    return m is not None and _SPARTE_STAMM_RE.fullmatch(m.group(1)) is not None
+
+
 def firmen_beleg(zeile: str) -> str | None:
-    """Art des Firmenbelegs einer Zeile: "rechtsform", "organisation", "allowlist" oder None."""
+    """Art des Firmenbelegs einer Zeile: "rechtsform", "organisation", "allowlist" oder None. Eine Versicherungssparte
+    allein ("Wohngebäudeversicherung – Eigentümerwechsel") ist kein Beleg (Nachbesserung 9, Abnahme 7 A7U-04: die
+    Privat- oder Objektanschrift darunter blieb sonst still)."""
     if _RECHTSFORM_RE.search(zeile):
         return "rechtsform"
-    if _ORGANISATION_RE.search(zeile):
+    if any(not _nur_sparte(m.group(0)) for m in _ORGANISATION_RE.finditer(zeile)):
         return "organisation"
     if _allowlist_in(zeile):
         return "allowlist"

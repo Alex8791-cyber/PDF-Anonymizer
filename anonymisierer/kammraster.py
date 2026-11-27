@@ -977,6 +977,62 @@ def gehoert_zum_feld_darueber(feld, felder: list, oberkante: float, unterkante: 
     return beste is not None and not gehoert_zum_feld_darunter(beste, felder, oberkante, unterkante)
 
 
+# die zuletzt bestimmte Lage der Feldnamen einer Seite (feldnamen_lage): (erstes Feld, letztes Feld, Zahl der Felder, Zahl
+# der Wörter, Lage) – die Aufrufer fragen je Feld derselben Seite (auch mit einer Kopie der Feldliste)
+_FELDNAMEN_LAGE = None
+
+
+def feldnamen_lage(felder: list, boxen: list):
+    """Stehen die Feldnamen der Seite über ("oben") oder unter ("unten") ihren Kammfeldern – oder ist das nicht sicher
+    (None)? Zwischen zwei Feldern ist ein Text nach dem Abstand allein nicht zuzuordnen: ein Feldname unter dem Feld mit
+    engem Folgeabstand und ein hängender Feldname über dem Feld stehen gleich (Abnahme 7 A7-13: Verhältnis 1,3–2,3
+    bzw. 2,7–4,0 auf beiden Seiten). Belege gibt es nur am Rand: ein Feld, über dem kein anderes Feld steht, mit Text
+    direkt darüber spricht für "oben"; ein Feld, unter dem kein anderes steht, mit Text direkt darunter für "unten".
+    Nur ein Beleg einer Seite entscheidet (Nachbesserung 9). boxen: (x0, y0, x1, y1) der Wörter außerhalb der Felder.
+    Je Seite einmal bestimmt; Felder darüber bzw. darunter und Wörter per bisect über die sortierten Kanten (je Feld
+    alle Felder bzw. Wörter zu prüfen wüchse quadratisch)."""
+    global _FELDNAMEN_LAGE
+    if not felder:
+        return None
+    zw = _FELDNAMEN_LAGE
+    if zw is not None and zw[0] is felder[0] and zw[1] is felder[-1] and zw[2] == len(felder) and zw[3] == len(boxen):
+        return zw[4]
+    kopf = [kopfkasten(f) + (f["rahmen"][2],) for f in felder if f.get("kaesten")]
+    nach_ok = sorted(kopf, key=lambda k: k[1])
+    ok = [k[1] for k in nach_ok]
+    nach_uk = sorted(kopf, key=lambda k: k[3])
+    uk = [k[3] for k in nach_uk]
+    nach_oben = sorted(((b[1], b) for b in boxen), key=lambda t: t[0])
+    oben_y = [t[0] for t in nach_oben]
+    nach_unten = sorted(((b[3], b) for b in boxen), key=lambda t: t[0])
+    unten_y = [t[0] for t in nach_unten]
+    oben_beleg = unten_beleg = 0
+    for x0, y0, _, y1, x1 in kopf:
+        hoehe = max(y1 - y0, 4.0)
+        reich = 1.2 * hoehe
+
+        def ueberlappt(a0, a1):
+            return min(x1, a1) - max(x0, a0) > -10.0
+
+        feld_oben = any(ueberlappt(k[0], k[4])
+                        for k in nach_uk[bisect.bisect_left(uk, y0 - 3.0 * hoehe):bisect.bisect_right(uk, y0 - 0.5)])
+        feld_unten = any(ueberlappt(k[0], k[4])
+                         for k in nach_ok[bisect.bisect_left(ok, y1 + 0.5):bisect.bisect_right(ok, y1 + 3.0 * hoehe)])
+        if not feld_oben:
+            for _, b in nach_unten[bisect.bisect_left(unten_y, y0 - reich):bisect.bisect_right(unten_y, y0 + 1.5)]:
+                if x0 - 10.0 <= b[0] <= x0 + 0.5 * (x1 - x0):
+                    oben_beleg += 1
+                    break
+        if not feld_unten:
+            for _, b in nach_oben[bisect.bisect_left(oben_y, y1 - 1.5):bisect.bisect_right(oben_y, y1 + reich)]:
+                if x0 - 10.0 <= b[0] <= x0 + 0.5 * (x1 - x0):
+                    unten_beleg += 1
+                    break
+    lage = "oben" if oben_beleg and not unten_beleg else "unten" if unten_beleg and not oben_beleg else None
+    _FELDNAMEN_LAGE = (felder[0], felder[-1], len(felder), len(boxen), lage)
+    return lage
+
+
 def gehoert_zum_feld_darunter(feld, felder: list, oberkante: float, unterkante: float) -> bool:
     """Steht der Text unter einem Feld (oberkante/unterkante) näher am nächsten Feld darunter als am Feld selbst – dann
     ist er dessen Feldname ("Antragsdatum" über dem nächsten Feld), nicht der Feldname unter diesem (Abnahme 5 A5-07).

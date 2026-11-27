@@ -692,7 +692,8 @@ def test_ab4_15_ocr_ausrufezeichen_gegenprobe(tmp_path):
     # Nachbesserung als möglichen Hausnamen (Abnahme 6 A6-03/AB6U-01: das Ausrufezeichen ist kein Gegenbeleg)
     v_text = _verdacht("Vom Kalt! kam der Anruf wegen des Hagelschadens.")
     assert not any("Kaltl" in t for t, _ in v_text), v_text
-    assert all("Hausname" in g for t, g in v_text if "Kalt" in t), v_text
+    # Nachbesserung 9 (Abnahme 7 A7U-13 c): die Meldung selbst prüfen – all() wäre ohne Treffer leer erfüllt
+    assert any("Kalt" in t and "Hausname" in g for t, g in v_text), v_text
 
 
 # ----------------------------------------------------------------------
@@ -758,17 +759,20 @@ def test_n6_objekt_gegenproben(text, name):
 # ----------------------------------------------------------------------
 # AB4U-04: Geräte, Tiere und Rollen in Schadensätzen
 # ----------------------------------------------------------------------
-@pytest.mark.parametrize("text, wort", [
-    ("Der Marder beschädigte die Zündkabel im Motorraum.", "Marder"),
-    ("Der Toaster verursachte den Küchenbrand am Morgen.", "Toaster"),
-    ("Der Heizlüfter hat den Brand im Bad verursacht.", "Heizlüfter"),
-    ("Der Kondenstrockner verursachte den Wasserschaden im Keller.", "Kondenstrockner"),
-    ("Der Gabelstapler beschädigte das Hochregal.", "Gabelstapler"),
-    ("Der Hochdruckreiniger hat die Fassadendämmung beschädigt.", "Hochdruckreiniger"),
-    ("Der Spaziergänger bemerkte den Rauch zuerst.", "Spaziergänger"),
+@pytest.mark.parametrize("text, wort, gemeldet", [
+    ("Der Marder beschädigte die Zündkabel im Motorraum.", "Marder", True),        # N9 A7-09
+    ("Der Toaster verursachte den Küchenbrand am Morgen.", "Toaster", True),       # N9 A7-09
+    ("Der Heizlüfter hat den Brand im Bad verursacht.", "Heizlüfter", False),
+    ("Der Kondenstrockner verursachte den Wasserschaden im Keller.", "Kondenstrockner", False),
+    ("Der Gabelstapler beschädigte das Hochregal.", "Gabelstapler", False),
+    ("Der Hochdruckreiniger hat die Fassadendämmung beschädigt.", "Hochdruckreiniger", False),
+    ("Der Spaziergänger bemerkte den Rauch zuerst.", "Spaziergänger", False),
 ])
-def test_ab4u_04_geraete_und_rollen_ohne_meldung(text, wort):
-    assert not any(wort in t for t, _ in _verdacht(text)), _verdacht(text)
+def test_ab4u_04_geraete_und_rollen_ohne_meldung(text, wort, gemeldet):
+    """Komposita und Rollen ohne Meldung. Nachbesserung 9 (Abnahme 7 A7-09): ein Geräte- oder Tier-Grundwort allein
+    mit Artikel („Der Marder“, „Der Toaster“) wird gemeldet, nie geschwärzt – dieselbe Gestalt ließ Familiennamen still."""
+    assert any(wort in t for t, _ in _verdacht(text)) == gemeldet, _verdacht(text)
+    assert wort in _ausgabe(text)[0]
 
 
 # ----------------------------------------------------------------------

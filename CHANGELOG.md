@@ -11,6 +11,59 @@ gebaut. Zuerst steht, was sich an der gewohnten Arbeit ändert, danach Neues, we
 Fehlerbehebungen und Sicherheit, dann ein kurzer Teil für Entwickler. Am Ende folgen die Änderungen aus dem
 Review „Auslieferung/Doku“ (AD-01 … AD-08).
 
+### Nachbesserung 9 (Abschlussrunde nach der siebten Abnahme) – nur Verschärfungen
+Grundsatz dieser Runde: für jeden möglichen geheimen Wert ist das Ergebnis mindestens so schützend wie auf 6f2d08f
+(geschwärzt > gemeldet > frei). Ausnahmen der Nachbesserungen 7 und 8, die einen geheimen Wert still frei ließen,
+stufen jetzt nur noch auf „melden“ herab; gegen Über-Schwärzung wurde nur von „schwärzen“ auf „melden“ umgestellt.
+
+- **Stille Lecks behoben (Abnahme 7):** Alarmcode mit Person, Rolle oder Name als Satzgegenstand der Bedienung wird
+  geschwärzt („Den Feueralarm schaltete der Hausmeister mit dem Code 3407 ab.“, A7-01); Alarmcodes mit Protokoll,
+  Bericht oder Uhrzeit werden wieder gemeldet, mit Übergabe, Empfänger oder Geheimhaltung im Satz geschwärzt (A7-02);
+  Schlüssel-, Mieter-, Dienstplan-Listen und „Baustelle“ sind kein Planbezug mehr, ein Planbezug stuft nur noch auf
+  „melden“ herab, eine PIN für einen Raum wird immer geschwärzt (A7-03); ein Störungswort nimmt einen Code nur noch
+  vom Schwärzen aus, wenn der Satz ihn nicht als Zugang nutzt, neu vergibt oder ändert – sonst gemeldet (A7-04);
+  Allerweltswort hinter Personenwort vor einem Verb des Gebens oder vor einem Genitiv wird gemeldet (A7-05, A7U-01,
+  A7U-02); Hofnamen aus gewöhnlichen Wörtern oder Berufen („Waldhof“, „Schmiedhof“) werden gemeldet (A7-07, A7U-03);
+  ein Endungsmuster („-app“, „-tor“, „-bahn“) belegt keine Einrichtung mehr (A7-08); Geräte- und Tier-Grundwort mit
+  Artikel wird auch mit Geräteschaden gemeldet (A7-09); „Zugangscode 3309“ ohne Doppelpunkt (A7-16); Buchstaben hinter
+  Kürzel, Initialen, Namenskürzel, Handzeichen sind ein Name, Parteibuchstaben nur ohne solchen Feldnamen (A7-18);
+  Sach-Grundwort nur mit vollständigem Bestimmungswort („Talbot“ ist kein Bot, A7-19).
+- **Sichtbare Regressionen:** finites Bedienverb vor „mit <Jahreszahl>“ und Beiwortgruppen hinter Präposition oder
+  Konjunktion („mit 1990 bitte nur bei geschlossener Haustür“) schwärzen wieder (A7-10); Personenverb bzw. finites Hilfs-
+  oder Modalverb vor dem Personenwort machen das Allerweltswort zum Namen („Gestern hat Nachbar Regen den Schaden
+  gemeldet.“, „Danach will Vermieter Regen die Rechnung einreichen.“; A7-11, A7U-13 a); ein Gerät, das „uns“ den Code
+  zeigt, mit Bedienung im Satz (A7-12); Lage der Feldnamen einer Kammfeld-Seite nach ihrem Rand (A7-13).
+- **Vorbestehende Lecks:** „Bestimmungswort + Verb“ nur mit gewöhnlichem Bestimmungswort („Wollesen“, „Hohenlaufen“
+  gemeldet, A7-14); unbekanntes Wort hinter Präposition und Artikel gemeldet (A7-15); eine Versicherungssparte
+  („Hausratversicherung“) ist keine Organisation, die Privatanschrift darunter wird erkannt (A7U-04); ein Hofname mit
+  einem Schadenswort in der Zeile („Beim Gärtnerhof wurden die Gewächshäuser beschädigt.“, auf allen Bezugsständen
+  still) wird gemeldet (A7U-03); „Herr Vorsitzender Regen“, „Im Beruf des Schreiners arbeitete Ihre Tochter …“, „mit
+  1968 vereinbartem Zahlenschlüssel“ werden geschwärzt.
+- **Über-Schwärzung (nur schwärzen -> melden):** Allerweltswort hinter Anrede + Amt mit Objektzusammenhang („Herrn Notar
+  Unterlagen und Vollmacht übersandt“, A7U-05), Bedienung + Zahl ohne Alarm-, Schloss- oder Raumgegenstand („Zum
+  Abschalten der Heizung 2024 …“, A7U-06), „Beruf des X“ nur mit Pronomen hinter der Einstufung (A7U-07).
+- **Tausch weg -> gemeldet** (gegenüber dem besten Bezugsstand; je Wert in n9_arbeit/diff/tausch.txt): Raumcode mit
+  Plan-/Listenbezug (wie Über-Probe „Raumcode 2017 laut Raumbuch“), Allerweltswort vor Verb des Gebens (wie „Heute Kunde
+  Bescheid gegeben“), Alarmcode ohne Bedienung/Übergabe (fbd755b schwärzte auch Ereigniscodes), Möbelcode mit
+  Produktbezug, „Beruf des X“ ohne Person, Beruf-Familienname mit Geschäft („zum Müller zur Reparatur“), „Herrn Notar
+  Regen übergeben“ (gleiche Gestalt wie „Herrn Rechtsanwalt Unterlagen übermittelt“, A7-17), „Mieter Wasser des
+  Erdgeschosses“. Gegenüber 6f2d08f ist kein Wert schlechter.
+- **Kehrseiten (mehr Meldungen, nie mehr Schwärzungen):** gemeldet werden jetzt auch nicht geheime Wörter derselben
+  Gestalt: „Heute Kunde Bescheid gegeben“, „Die Bank hat angerufen“, „Der Toaster verursachte …“, „vom Nachbarhof“,
+  „Fehlalarmcode 7310 laut Protokoll“, „Raumcode 2017 laut Raumbuch“, „Das Rolltor hat den Code E125, … Überlast“,
+  „Beim Transport wurden die Gewächshäuser beschädigt.“ und unbekannte Sachwörter hinter Präposition und Artikel („für
+  die Bodenplatte“). Die Meldungen hinter Präposition und
+  Artikel (A7U-08) bleiben offen: weniger Meldungen wären eine Lockerung.
+- **Laufzeit:** _code_form sucht nur im Umkreis des Codes, die Produkt-Prüfung der Möbelcodes je Zeile einmal
+  (A7U-11), die Lage der Feldnamen per bisect; Wachstumstests für F5/F7/F8 der Abnahme und die neuen Schleifen
+  (tests/test_abnahme7_r7.py, gegen eingebaute Regressionen rot). CPU je Scan-Seite einschließlich Texterkennung (gepaart, zwei Runden): ohne Kammfeld 2,07 s gegen 2,06 s auf 6f2d08f und 1,81 s auf 818990e (+14 %), mit Kammfeld 3,47 s gegen 3,50 s und 2,12 s (+64 %).
+- **Berichtigungen früherer Einträge (A7U-13, A7U-14):** „frei wie auf 5efcc0c, 0230782 und 818990e“ (Nachbesserung 8,
+  Telegrammstil) galt nicht für Allerwelts-Nachnamen – jetzt gemeldet; „vor einem Partizip … nicht mehr geschwärzt“ galt
+  nur für Partizipien mit „ge-“; „Lage der Wohnung ⇥ Etage [3]“ wurde auf Scans (k04, 200 dpi gedreht) weiter
+  entfernt; README Zeile „Zugangsdaten“ zu Ereigniscodes berichtigt; AB6U-15 „Traunreut gemeldet“ gilt für die
+  Textzeile, im Dokument p01 blieb „Traunreut“ ohne Verdacht lesbar; test_abnahme4_r7 prüft die Meldung von „Kalt!“
+  jetzt mit any() statt einer leer erfüllten all()-Zusicherung.
+
 ### Geändert – bitte beachten
 - **Jede Ausgabe heißt zuerst `_PRUEFEN`.** Neue Einstellung „Freigabe vor Weitergabe erforderlich“
   (Standard: an): Die Ausgabe heißt `anonym_NN_PRUEFEN.pdf`, bis sie in der Vorschau mit „Freigeben“ zu
