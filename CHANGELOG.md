@@ -11,6 +11,24 @@ gebaut. Zuerst steht, was sich an der gewohnten Arbeit ändert, danach Neues, we
 Fehlerbehebungen und Sicherheit, dann ein kurzer Teil für Entwickler. Am Ende folgen die Änderungen aus dem
 Review „Auslieferung/Doku“ (AD-01 … AD-08).
 
+### Organe in Pflichtangaben lesbar (Entscheidung vom 27.11., Nr. 6)
+
+- **Vorstand, Aufsichtsrat und Geschäftsführung** in den Pflichtangaben eines Unternehmens (Fuß- oder Kopfzeile
+  eines Geschäftsbriefs) werden nicht mehr geschwärzt und nicht gemeldet: abgewählt angebotener Fund mit Hinweis
+  „Organ eines Unternehmens …“ (Quelle `struktur.organ`), die Selbstkontrolle meldet sie nicht. Eine Regel für
+  Analyse und Selbstkontrolle: `personenkontext.organ_spannen` – Organ-Etikett mit Doppelpunkt, eine weitere
+  Pflichtangabe (Registergericht, HRB, USt-IdNr., BaFin …) oder ein weiteres Organ-Etikett im Umfeld, keine
+  Personenmerkmale (geb., wohnhaft, Anschrift, Telefon); die Liste endet an Spaltentrenner, Etikett, Pflichtangabe,
+  Leerzeile oder nach zwei Folgezeilen.
+- Vorsichtig bleibt: dieselbe Person auch anderswo im Dokument (Kunde, Ansprechpartner) → überall geschwärzt; eine
+  Firma mit dem Familiennamen des Organs („Maklerbüro Sonnleitner GmbH“) → geschwärzt; Formularfeld
+  „Geschäftsführer:“ ohne Pflichtangabe → geschwärzt; Inhaber, Prokura, Ansprechpartner, Datenschutzbeauftragte
+  sind keine Organe.
+- Nebenbefund behoben: Die Namensliste hinter „Geschäftsführer:“ lief in eine folgende Etikettzeile – „Ansprechpartner“
+  galt als Name (wissen.namen R5: eine Etikettzeile beendet die Liste).
+- Tests: tests/test_organe_lesbar.py (neu); der Test der Versicherer-Fußzeile in tests/test_restrisiko.py erwartet
+  die Vorstandsnamen nicht mehr als Verdacht.
+
 ### KI-Zweitprüfung mit LM Studio (Entscheidung vom 27.11.)
 
 - **Neuer Schalter „KI-Zweitprüfung mit LM Studio“ (Schritt 1, aus als Vorgabe):** Das Programm nutzt immer das

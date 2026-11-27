@@ -28,6 +28,8 @@ bzw. kennungsformen.einzelkaufmann_block – eine Regel für Erkennung und Selbs
     fachwort_medizin(wort, wissen) -> bool, diagnose(wort, wissen) -> bool
     MODELLCODE_DANACH_RE, modellcode_danach(text, ende, wortgestalt) -> bool,
     sachnamen_stellen(zeile, wissen) -> [(start, ende)]
+    ORGAN_ETIKETT_RE, organ_spannen(text) -> [(start, ende)]   Namenslisten von Vorstand, Aufsichtsrat und
+                                            Geschäftsführung in Pflichtangaben (Entscheidung vom 27.11., Nr. 6)
     zb1_seite(text) -> bool, zb1_personenfelder(text) -> [(start, ende)], zb1_anschrift_etiketten(text),
     zb1_anschriftfelder(text) -> [(start, ende)], ZB1_FELDCODE_RE
     gemeinschaft_namen(text, sachwort) -> [(start, ende)], personengruppe(wort) -> bool
@@ -2338,3 +2340,71 @@ def gemeinschaft_namen(text: str, sachwort) -> list:
                 continue
             aus.append((m.start("name"), m.end("name")))
     return aus
+
+
+# ----------------------------------------------------------------------
+# Organe in den Pflichtangaben eines Unternehmens (Entscheidung des Maklers vom 27.11., Nr. 6) – eine Regel für
+# die Analyse (abgewählt angeboten) und die Selbstkontrolle (kein Verdacht)
+# ----------------------------------------------------------------------
+_SPALTENTRENNER = "\t\t"                # wie seitenmodell.SPALTENTRENNER (kein Import: Seitenmodell braucht fitz)
+# Etikett eines Organs mit Doppelpunkt („Vorstand:“, „Vorsitzender des Aufsichtsrats:“, „Geschäftsführer:“) – nicht
+# Inhaber, Prokura, Ansprechpartner oder Datenschutzbeauftragte (keine Organe; Inhaber ist die Person selbst)
+ORGAN_ETIKETT_RE = re.compile(
+    r"(?<![^\W\d_])(?:Vorstand|Vorstände|Vorstandes|Vorstands|Vorstandsvorsitzende[r]?|Vorstandsvorsitz|"
+    r"Vorsitzende[r]?[ \t]+des[ \t]+(?:Vorstands|Vorstandes|Aufsichtsrats|Aufsichtsrates|AR)|"
+    r"Vorsitz[ \t]+(?:des[ \t]+)?(?:Aufsichtsrats?|Aufsichtsrates|Vorstands?)|Aufsichtsrat|Aufsichtsrats|"
+    r"Aufsichtsratsvorsitzende[r]?|Aufsichtsratsvorsitz|Geschäftsführer(?:in|innen)?|Geschäftsführende[rn]?|"
+    r"Geschäftsführung|Geschäftsleitung|Verwaltungsrat|Verwaltungsratspräsident(?:in)?)[ \t]*(?:\([^)\n]{0,20}\))?"
+    r"[ \t]*:", re.IGNORECASE)
+# weitere Pflichtangaben im Umfeld (ohne das Organ-Etikett selbst): erst damit ist die Zeile die Pflichtangabe eines
+# Unternehmens und kein Formularfeld („Geschäftsführer: …“ in einem Antrag)
+_PFLICHTANGABE_RE = re.compile(
+    r"(?i)(?<![\w])(?:Registergericht|Handelsregister|Amtsgericht|Sitz[ \t]+(?:der[ \t]+Gesellschaft|und[ \t]+"
+    r"Registergericht)|HR[ \t]?[AB](?![a-zäöüß])[ \t.:]{0,2}\d|U[ \t]?St[ \t.-]{0,2}[I1l][dD]|Umsatzsteuer[ \t-]?Id|"
+    r"BaFin|Vermittlerregister|Vereinsregister|Genossenschaftsregister)")
+# Personenmerkmale: dann ist es eine Angabe ÜBER die Person (Antrag, Gesellschafterliste), keine Pflichtangabe
+_ORGAN_PERSONENMERKMAL_RE = re.compile(
+    r"(?i)(?<![\w])(?:geb\.|geboren|Geburtsdatum|Geburtsort|wohnhaft|Wohnort|Privatanschrift|privat|Anschrift|"
+    r"Staatsangehörigkeit|Steuer-?ID|Ausweis|Tel\.|Telefon|Mobil|E-Mail)")
+_ORGAN_UMFELD = 400                     # Zeichen vor und hinter dem Etikett für die weitere Pflichtangabe
+_ORGAN_LAENGE = 300                     # höchstens so lang ist eine Namensliste
+_ORGAN_FOLGEZEILEN = 2                  # so viele umbrochene Folgezeilen gehören noch dazu
+_ZEILEN_ETIKETT_RE = re.compile(r"\n[ \t]*[^\W\d_][^\n:]{0,40}:")
+
+
+def organ_spannen(text: str) -> list:
+    """[(start, ende)] der Namenslisten hinter Organ-Etiketten in den Pflichtangaben eines Unternehmens: das Etikett
+    hat eine weitere Pflichtangabe (Registergericht, HRB, USt-IdNr., BaFin …) oder ein weiteres Organ-Etikett im Umfeld
+    und die Liste kein Personenmerkmal (geb., wohnhaft, Anschrift, Telefon …). Die Liste endet an einem
+    Spaltentrenner, einem weiteren Etikett oder einer Pflichtangabe, einer Leerzeile oder nach _ORGAN_FOLGEZEILEN
+    umbrochenen Zeilen."""
+    aus = []
+    etiketten = list(ORGAN_ETIKETT_RE.finditer(text))
+    for i, m in enumerate(etiketten):
+        a, b = max(0, m.start() - _ORGAN_UMFELD), min(len(text), m.end() + _ORGAN_UMFELD)
+        umfeld = text[a:m.start()] + "\n" + text[m.end():b]
+        if not (_PFLICHTANGABE_RE.search(umfeld) or any(n is not m and a <= n.start() < b for n in etiketten)):
+            continue
+        ende = min(len(text), m.end() + _ORGAN_LAENGE)
+        for grenze in (text.find(_SPALTENTRENNER, m.end(), ende),
+                       etiketten[i + 1].start() if i + 1 < len(etiketten) else -1):
+            if 0 <= grenze < ende:
+                ende = grenze
+        p = _PFLICHTANGABE_RE.search(text, m.end(), ende)
+        if p:
+            ende = p.start()
+        leer = re.search(r"\n[ \t]*\n", text[m.end():ende])
+        if leer:
+            ende = m.end() + leer.start()
+        z = _ZEILEN_ETIKETT_RE.search(text, m.end(), ende)
+        if z:
+            ende = z.start()
+        zeilen = [i for i, ch in enumerate(text[m.end():ende]) if ch in "\n\f"]
+        if len(zeilen) > _ORGAN_FOLGEZEILEN:
+            ende = m.end() + zeilen[_ORGAN_FOLGEZEILEN]
+        if ende <= m.end() or _ORGAN_PERSONENMERKMAL_RE.search(text, m.end(), ende):
+            continue
+        aus.append((m.end(), ende))
+    return aus
+
+

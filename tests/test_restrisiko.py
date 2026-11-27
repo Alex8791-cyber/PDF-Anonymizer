@@ -1138,8 +1138,9 @@ FUSSZEILE = [(60, 790, "Alpenland Krankenversicherung a.G.", 7), (60, 799, "Prin
 
 def test_briefkopf_und_fusszeile_eines_versicherers_sind_kein_verdacht(tmp_path):
     """Briefkopf (Name groß, darunter Anschrift, Telefon, Internet) und Fußzeile mit Pflichtangaben (Sitz,
-    Registergericht, Vorstand, USt-IdNr., Bankverbindung) gehören dem Versicherer: kein Verdacht – außer den Namen
-    des Vorstands. Die neue Anschrift des Kunden im Brieftext bleibt Verdacht."""
+    Registergericht, Vorstand, USt-IdNr., Bankverbindung) gehören dem Versicherer: kein Verdacht – seit der
+    Entscheidung des Maklers vom 27.11. (Nr. 6) auch nicht die Namen des Vorstands (Organe in Pflichtangaben bleiben
+    lesbar). Die neue Anschrift des Kunden im Brieftext bleibt Verdacht."""
     pdf = pdf_mit_bloecken(tmp_path / "b.pdf", [
         (60, 50, "Alpenland Krankenversicherung a.G.", 18), (60, 68, "Prinzregentenplatz 21 · 81675 München", 9),
         (60, 79, "Telefon 089 2160-0 · Telefax 089 2160-1999 · www.alpenland-versicherung.de", 9),
@@ -1148,8 +1149,8 @@ def test_briefkopf_und_fusszeile_eines_versicherers_sind_kein_verdacht(tmp_path)
         (60, 332, "Mit freundlichen Grüßen", 11)] + FUSSZEILE)
     texte_pdf = [v.text for v in restrisiko_pruefen(pdf)]
     assert any("Hauptstr. 5" in t for t in texte_pdf) and any("12345 Berlin" in t for t in texte_pdf), texte_pdf
-    assert any("Schulze" in t for t in texte_pdf) and any("Strauß" in t for t in texte_pdf), texte_pdf
-    assert all(any(w in t for w in ("Hauptstr", "12345", "Schulze", "Strauß")) for t in texte_pdf), texte_pdf
+    assert not any("Schulze" in t or "Strauß" in t for t in texte_pdf), texte_pdf
+    assert all(any(w in t for w in ("Hauptstr", "12345")) for t in texte_pdf), texte_pdf
 
 
 def test_kundennummer_in_einer_laufenden_fusszeile_bleibt_verdacht(tmp_path):

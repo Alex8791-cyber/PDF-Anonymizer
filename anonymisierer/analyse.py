@@ -1152,6 +1152,41 @@ def _firmenanschriften(dok, funde: list, aktive: set) -> list:
 
 
 # ----------------------------------------------------------------------
+# Organe in den Pflichtangaben eines Unternehmens: lesbar (Entscheidung des Maklers vom 27.11., Nr. 6)
+# ----------------------------------------------------------------------
+HINWEIS_ORGAN = ("Organ eines Unternehmens (Vorstand, Aufsichtsrat, Geschäftsführung) in dessen Pflichtangaben – "
+                 "öffentliche Angabe, lesbar gelassen; bei Bedarf anhaken")
+QUELLE_ORGAN = "struktur.organ"
+def _organe_lesbar(dok, funde: list) -> None:
+    """Entscheidung Nr. 6: Namen von Vorstand, Aufsichtsrat und Geschäftsführung in den Pflichtangaben eines
+    Unternehmens bleiben lesbar – als abgewählt angebotene Funde (HINWEIS_ORGAN, Quelle struktur.organ; die Nutzerin
+    kann sie anhaken), ohne Meldung. Nur Personen, deren Stellen ALLE in solchen Listen stehen: steht derselbe Mensch
+    auch anderswo (Kunde, Ansprechpartner im Brieftext), bleibt er überall geschwärzt."""
+    spannen = {nr: personenkontext.organ_spannen(s.text) for nr, s in enumerate(dok.seiten)
+               if personenkontext.ORGAN_ETIKETT_RE.search(s.text or "")}
+    spannen = {nr: sp for nr, sp in spannen.items() if sp}
+    if not spannen:
+        return
+
+    def im_organ(st) -> bool:
+        return any(a <= st["start"] and st["ende"] <= b for a, b in spannen.get(st["seite"], ()))
+
+    personen: dict = {}
+    for f in funde:
+        if f.get("kategorie") == "namen" and f.get("stellen"):
+            personen.setdefault(f.get("ersatz") or f.get("text"), []).append(f)
+    for gruppe in personen.values():
+        stellen = [st for f in gruppe for st in f["stellen"]]
+        if not stellen or not all(im_organ(st) for st in stellen):
+            continue
+        for f in gruppe:
+            for st in f["stellen"]:
+                st["an"] = False
+            f["hinweis"] = _hinweise_verbinden(HINWEIS_ORGAN, f.get("hinweis"))
+            f["quellen"] = sorted(set(f.get("quellen") or ()) | {QUELLE_ORGAN})
+
+
+# ----------------------------------------------------------------------
 # Weitere Vorkommen auf OCR-Seiten: leicht verlesene Werte
 # ----------------------------------------------------------------------
 AEHNLICH_MIN_ZEICHEN = 8         # nur Werte ab 8 Zeichen
@@ -1539,6 +1574,7 @@ def _analysiere_dokument(dok, aktive, whitelist, immer_schwaerzen, profil="hoch"
                                                  for h in f["hinweis"].split("; ")))
         sicher_angeboten = True
     if angebote:
+        _organe_lesbar(dok, funde)                   # Entscheidung Nr. 6: Organe in Pflichtangaben lesbar
         funde += _firmenanschriften(dok, funde, aktive)
 
     def erste_stelle(f):

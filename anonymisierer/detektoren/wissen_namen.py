@@ -68,7 +68,10 @@ _BOARD_RE = re.compile(
     r"Datenschutzbeauftragte[r]?|Ombudsmann|Ombudsfrau|Vertreten[ \t]+durch)[ \t]*:[ \t]*")
 _BOARD_ENDE_RE = re.compile(r"(?i:\n[ \t]*(?:USt|Ust|Umsatzsteuer|Bank|IBAN|BIC|Sitz|Registergericht|Amtsgericht|HRB|"
                             r"HRA|Handelsregister|Steuer|Telefon|Tel\.|Fax|E-Mail|www|Internet|Vorsitz|Aufsichtsrat|"
-                            r"Vorstand|Geschäftsführ|Gläubiger|Seite)|\n\s*\n)")
+                            r"Vorstand|Geschäftsführ|Gläubiger|Seite)|\n\s*\n"
+                            # eine neue Etikettzeile („Ansprechpartner: …“) beendet die Liste – sonst galt das
+                            # Etikett der Folgezeile als Name hinter dem umbrochenen letzten Namen
+                            r"|\n[ \t]*[^\W\d_][^\W\d_.-]*(?:[ \t]+[^\W\d_][^\W\d_.-]*){0,3}[ \t]*:)")
 _FIRMA_KOPF = (r"Werkstatt|Kfz-Werkstatt|Autowerkstatt|Autohaus|Kanzlei|Rechtsanwaltskanzlei|Anwaltskanzlei|Praxis|"
                r"Zahnarztpraxis|Arztpraxis|Tierarztpraxis|Physiotherapie|Ergotherapie|Logopädie|Bäckerei|Metzgerei|"
                r"Fleischerei|Malerbetrieb|Malermeister|Elektro|Elektrotechnik|Sanitär|Heizung|Dachdeckerei|"

@@ -4893,6 +4893,13 @@ def _seite_pruefen(m, wissen: _Wissen, platzhalter=(), nie=(), abgewaehlt=(), pr
     pruefung.pruefen()
     _felder_pruefen(pruefung, felder)
     aus = [Verdacht(m.nr, s, e, m.text[s:e], grund, _rechtecke(m, s, e)) for s, e, grund in _zusammenfassen(pruefung)]
+    organe = personenkontext.organ_spannen(m.text) if personenkontext.ORGAN_ETIKETT_RE.search(m.text) else []
+    if organe:
+        # Entscheidung des Maklers vom 27.11. (Nr. 6): Namen von Vorstand, Aufsichtsrat und Geschäftsführung in den
+        # Pflichtangaben eines Unternehmens bleiben lesbar – kein Verdacht (die Analyse bietet sie abgewählt an). Nur
+        # Stellen ohne Ziffern ganz in einer solchen Namensliste.
+        aus = [v for v in aus if not (v.start >= 0 and not any(ch.isdigit() for ch in v.text)
+                                      and any(a <= v.start and v.ende <= b for a, b in organe))]
     if scan_seite is not None:
         aus = _unterschrift_pruefen(scan_seite, m, schwaerzungen, pruefung, aus, ausrichtung) + aus
         frei: list = []

@@ -181,6 +181,13 @@ Weitere Regeln:
   Name und Anschrift steht). Sonst steht auch sie nicht angehakt als „vermutlich
   Firmenanschrift“ in der Liste. Bei Selbständigen deshalb jeden solchen Fund prüfen und
   anhaken, wenn es ihre Anschrift ist – auch wenn ihr Name davorsteht.
+- **Vorstand, Aufsichtsrat und Geschäftsführung** in den Pflichtangaben eines Unternehmens (Fuß- oder
+  Kopfzeile mit Registergericht, HRB, USt-IdNr. o. Ä.) bleiben lesbar und werden nicht gemeldet: Sie stehen
+  als nicht angehakter Fund „Organ eines Unternehmens … lesbar gelassen“ in der Liste und lassen sich
+  anhaken. Geschwärzt bleibt ein solcher Name, wenn dieselbe Person auch anderswo im Dokument steht (z. B.
+  als Kunde oder Ansprechpartner), wenn das Etikett ohne weitere Pflichtangabe steht (Formularfeld
+  „Geschäftsführer:“ in einem Antrag) oder wenn die Zeile Personenmerkmale nennt (geb., wohnhaft, Telefon).
+  Inhaber, Prokura, Ansprechpartner und Datenschutzbeauftragte sind keine Organe und werden geschwärzt.
 - **Versteckte Teile** der Datei – Dateieigenschaften, Lesezeichen, Anhänge, Formulardaten,
   Skripte – prüft die Analyse mit denselben Regeln. Die Ausgabe enthält sie nicht mehr.
 - **Scans und Fotos** liest die eingebaute Texterkennung (OCR); schräge Scans werden gerade
