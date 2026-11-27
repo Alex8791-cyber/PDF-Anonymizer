@@ -1809,3 +1809,30 @@ def test_schwaerzung_ohne_rest_bleibt_fertig(tmp_path):
     a = analysiere_pdf(pdf, {"iban"}, [], [], ocr=OcrAttrappe())
     e = schwaerze_pdf(pdf, a["funde"], modell=a["modell"], ocr=OcrAttrappe(), ziel_ordner=tmp_path / "aus")
     assert e["status"] == "fertig" and e["verdacht"] == [], e["verdacht"]
+
+
+# ----------------------------------------------------------------------
+# Namenswörter: gleiche Treffer, konstanter Speicher (wie wissen._TOKEN_RE)
+# ----------------------------------------------------------------------
+def test_namenswort_gleich_der_alten_form_und_konstanter_speicher():
+    """Die neue Form erkennt dieselben Namenswörter (Apostroph und Bindestrich nur zwischen Buchstaben), legt aber
+    nicht mehr je Buchstabe einen Rücksprungpunkt ab: Ein Wort aus 16 000 Buchstaben brauchte 2 MB."""
+    import tracemalloc
+    alt = re.compile(r"[^\W\d_](?:[^\W\d_]|['’](?=[^\W\d_]))*(?:-[^\W\d_](?:[^\W\d_]|['’](?=[^\W\d_]))*)*")
+    zeichen = list("aAzZäÖßéŁ09_-'’ .,/\t") + ["́", "­", "‑", "-", "'", "’", "日", "٣"]
+    rng = random.Random(815)
+    for _ in range(20000):
+        text = "".join(rng.choice(zeichen) for _ in range(rng.randint(0, 20)))
+        assert [m.span() for m in restrisiko._NAMENSWORT_RE.finditer(text)] == \
+            [m.span() for m in alt.finditer(text)], repr(text)
+    assert [m.group(0) for m in restrisiko._NAMENSWORT_RE.finditer("O’Neill-Müller d'Artagnan x-'y")] == \
+        ["O’Neill-Müller", "d'Artagnan", "x", "y"]
+    tracemalloc.start()
+    try:
+        tracemalloc.reset_peak()
+        treffer = [m.span() for m in restrisiko._NAMENSWORT_RE.finditer("A" + "b" * 16000)]
+        _, spitze = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert treffer == [(0, 16001)]
+    assert spitze < 64 * 1024, f"Speicherspitze {spitze / 1024:.0f} KB"

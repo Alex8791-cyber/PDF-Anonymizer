@@ -841,7 +841,10 @@ _URL_RE = re.compile(r"(?i)(?<![\w@])((?:https?://|www\.)[\w\-.~/%?#=&+]+|[\w\-]
 _EMAIL_RE = re.compile(r"(?<![\w.+\-])([\w.+\-ÄÖÜäöüß]+)\s?(?:@|\(at\)|\[at\])\s?"
                        r"([\w\-ÄÖÜäöüß]+(?:\s?\.\s?[\w\-]+)+)", re.IGNORECASE)
 _PLUS_CC_RE = re.compile(r"(?<![\w+])\+\s?\d{1,3}[\s(/\-]{0,3}\d")
-_NAMENSWORT_RE = re.compile(r"[^\W\d_](?:[^\W\d_]|['’](?=[^\W\d_]))*(?:-[^\W\d_](?:[^\W\d_]|['’](?=[^\W\d_]))*)*")
+# Gleiche Sprache wie L(?:L|['’](?=L))*(?:-L(?:L|['’](?=L))*)*, aber ohne Gruppe je Buchstabe: die Regex-Engine legte
+# dort je Zeichen einen Rücksprungpunkt ab (2 MB für ein Wort aus 16 000 Buchstaben; unter Windows je Suche frisch
+# vom System geholt). So bleibt der Speicher konstant (wie wissen._TOKEN_RE).
+_NAMENSWORT_RE = re.compile(r"[^\W\d_]+(?:['’][^\W\d_]+|-[^\W\d_]+)*")
 _PLATZHALTER_RE = re.compile(r"\[[A-ZÄÖÜẞ0-9][A-ZÄÖÜẞ0-9 .,/&+\-]{0,38}\]")
 _PERSONEN_PLATZHALTER_RE = re.compile(r"\[(?:PERSON|P|FAMILIE|F|NAME)\b")
 # Personen-Platzhalter, wie die Kontroll-OCR ihn im grauen Rechteck verliest (Klammern als I, | oder l, P als R, ohne

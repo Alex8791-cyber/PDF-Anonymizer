@@ -29,6 +29,15 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
   nicht für einen Namen hält.
 - Abhängigkeiten: Die Bereichs-Pins lassen die neuesten Fassungen zu (PyMuPDF 2.2, spaCy 3.8.18, PyInstaller 6.22,
   pytest 9.2); Python 3.12 für die EXE.
+- **Wortzerlegung mit konstantem Speicher** (`wissen._TOKEN_RE`, `restrisiko._NAMENSWORT_RE`):
+  - Die alten Muster legten je Buchstabe einen Rücksprungpunkt der Regex-Engine ab, bei einem Wort aus
+    16 000 Zeichen 2 MB. Unter Windows holt der Heap so große Blöcke bei jeder Suche frisch vom System, mit
+    Seitenfehlern. Lange Wörter kosteten dort deshalb überlinear: Der Laufzeittest `test_ab6u_11` maß auf der
+    Windows-CI zweimal hintereinander Wachstum 2,30 und 2,47 bei Schranke 2,0, unter Linux 0,9.
+  - Die neuen Muster erkennen dieselben Wörter (Gegenprobe mit 300 000 Zufallstexten) und brauchen konstant 2 bis
+    31 KB.
+  - Die Wortzerlegung ist 4- bis 5-mal schneller; `_hof_gegenbeleg` mit einem Wort aus 16 000 Zeichen braucht 11 bis
+    15 statt 30 ms.
 
 ### Organe in Pflichtangaben lesbar (Entscheidung vom 27.11., Nr. 6)
 

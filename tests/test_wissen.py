@@ -585,3 +585,50 @@ def test_quellen_md_beschreibt_herkunft_und_alle_listen():
         assert pflicht in text, pflicht
     for datei in w.LISTEN.values():
         assert f"`{datei}`" in text, f"{datei} fehlt in QUELLEN.md"
+
+
+# ----------------------------------------------------------------------
+# Wortzerlegung: gleiche Wörter, konstanter Speicher (CI Windows, test_ab6u_11)
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize("text, erwartet", [
+    ("Müller-Lüdenscheidt", ["Müller", "Lüdenscheidt"]),
+    ("Versicherungs­nehmer", ["Versicherungs­nehmer"]),
+    ("Haft​pflicht Kfz‍⁠Tarif", ["Haft​pflicht", "Kfz‍⁠Tarif"]),
+    ("́Anna _Berta_ ć̂d", ["Anna", "Berta", "ć̂d"]),
+    ("R+V 2024/11 Groß", ["R", "V", "2024", "11", "Groß"]),
+    ("", []),
+])
+def test_wortzerlegung_mit_akzenten_und_unsichtbaren_zeichen(text, erwartet):
+    assert w.woerter(text) == erwartet
+
+
+def test_wortzerlegung_braucht_konstanten_speicher():
+    """Ein Wort aus 16 000 Zeichen: Die alte Form [^\\W_](?:[^\\W_]|[…])* legte je Zeichen einen Rücksprungpunkt ab
+    (2 MB). Unter Windows holte der Heap diese Blöcke bei jeder Suche frisch vom System – lange Wörter kosteten
+    überlinear (CI Windows: _hof_gegenbeleg wuchs 2,3- statt 0,9-fach)."""
+    import tracemalloc
+    wort = "A" + "b" * 16000
+    tracemalloc.start()
+    try:
+        tracemalloc.reset_peak()
+        treffer = [m.span() for m in w._TOKEN_RE.finditer(wort)]
+        _, spitze = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert treffer == [(0, 16001)]
+    assert spitze < 64 * 1024, f"Speicherspitze {spitze / 1024:.0f} KB"
+
+
+def test_wortzerlegung_gleich_der_alten_form():
+    """Die neue Form erkennt dieselbe Sprache wie die alte (Zufallstexte mit Akzenten, weichen Trennstrichen,
+    Null-Breiten-Zeichen, Unterstrichen, Satzzeichen und Schriften anderer Sprachen)."""
+    import re
+    zusatz = "̀-ͯ­​-‍⁠"
+    alt = re.compile(r"[^\W_](?:[^\W_]|[" + zusatz + "])*")
+    assert w._TOKEN_RE.pattern == r"[^\W_]+(?:[" + zusatz + r"]+[^\W_]*)*"
+    zeichen = list("aAzZ09äÖßéçŁ_ -.,'’/\t\n") + ["́", "̈", "ͯ", "­", "​", "‌",
+                                                 "‍", "⁠", "‑", " ", "٣", "日", "𝔄"]
+    rng = random.Random(4711)
+    for _ in range(20000):
+        text = "".join(rng.choice(zeichen) for _ in range(rng.randint(0, 24)))
+        assert [m.span() for m in w._TOKEN_RE.finditer(text)] == [m.span() for m in alt.finditer(text)], repr(text)

@@ -236,7 +236,11 @@ def sortierschluessel(eintrag: str) -> tuple[str, str]:
 # ----------------------------------------------------------------------
 # Wort = Buchstaben/Ziffern; kombinierende Akzente, weiche Trennstriche und
 # Null-Breiten-Zeichen gehören zum Wort (beim Normalisieren entfernt).
-_TOKEN_RE = re.compile(r"[^\W_](?:[^\W_]|[̀-ͯ­​-‍⁠])*")
+# Gleiche Sprache wie [^\W_](?:[^\W_]|[Zusatz])*, aber ohne Gruppe je Zeichen: Die Regex-Engine legte dort je
+# Zeichen einen Rücksprungpunkt ab (2 MB für ein Wort aus 16 000 Zeichen). Unter Windows holt der Heap so große
+# Blöcke bei jeder Suche frisch vom System (Seitenfehler) – lange Wörter kosteten überlinear (CI: Wachstum 2,3
+# statt 0,9 in test_ab6u_11). So bleibt der Speicher konstant, und die Zerlegung ist 4- bis 5-mal schneller.
+_TOKEN_RE = re.compile(r"[^\W_]+(?:[̀-ͯ­​-‍⁠]+[^\W_]*)*")
 _WEICHE_TRENNER = str.maketrans({**{z: None for z in " \t\r\n\f\v    -."},
                                  **{z: None for z in _STRICHE + _UNSICHTBAR},
                                  **{z: "'" for z in _APOSTROPHE}})
