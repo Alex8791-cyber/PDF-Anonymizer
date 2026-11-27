@@ -937,7 +937,10 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
     der sechsten Abnahme: nicht geheime Wörter entfernt 22 (6c0c464 106, 5efcc0c 30, 0230782 28), der fünften 20
     (0230782 26). Kammfelder: Kamm-Probe 6 nicht geheim entfernt 6 (0230782 22), eigen606 geheim weg 166 von 216
     (6c0c464 103, 5efcc0c 159), c023 Wohnort und PLZ geschwärzt; Kamm-Probe 5 k01–k05 nicht geheim entfernt 2 (0230782
-    2, 5efcc0c 7).
+    2, 5efcc0c 7). Endmessung von 3bbc01d (vier Entwicklungskorpora, je Dokument gegen 5efcc0c, 0230782 und 98a3957):
+    kein Wert schlechter; gegenüber 98a3957 entfallen die Meldungen „Dipl“, „Frau“ und „Herr“ vor geschwärzten Namen
+    (s1 046, 055, 063, s7 041, s3x 005) und der Fehlalarm „A ⇥⇥ B“ (s3x 037). Domänen-Probe: 2 261 Werte, weg 2 223,
+    sichtbar 36, STILL 2 – kein Wert anders als auf fd73eac.
 - Bilder, Webseiten und andere Dateien, die keine PDF sind, aber die Endung `.pdf` tragen, konnten das ganze
   Programm zum Absturz bringen; sie werden jetzt vor dem Öffnen erkannt.
 - Gedrehte Scans (90°, 180°, 270°) werden zuverlässiger in der richtigen Lage gelesen; bleibt der gelesene
@@ -1162,7 +1165,7 @@ Review „Auslieferung/Doku“ (AD-01 … AD-08).
 - Domänen-Probe als Werkzeug im Repository (`werkzeuge/domaenenprobe/`): die 41 Falldateien der
   Domänen-Durchsicht (691 Fälle mit 2261 frei erfundenen geheimen Werten aus Kfz, Personenversicherungen, Sach,
   Finanzen/Digitales und Briefverkehr/Listen/Scans), der Harness `e2e.py` und die Messung `messen.py` (je Wert weg,
-  sichtbar mit `_PRUEFEN` oder STILL; Vergleich mit `referenz.json`, gemessen auf 98a3957). Die Messlogik ist
+  sichtbar mit `_PRUEFEN` oder STILL; Vergleich mit `referenz.json`, gemessen auf 3bbc01d). Die Messlogik ist
   unverändert übernommen, nur Pfade und Plattform angepasst (relative Pfade, UTF-8, Windows ohne `nice`,
   Tesseract- und Schriftsuche); eine fehlschlagende Tesseract-Kommandozeile bricht ab, statt Werte still als „weg“ zu
   zählen. Eine Regressionsprobe für die Entwicklung, keine Blindprüfung – die Regeln wurden an diesen Fällen
